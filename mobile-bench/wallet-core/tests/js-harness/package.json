@@ -20,6 +20,7 @@
     "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider",
     "@midnight-ntwrk/midnight-did-credentials-digital-passport": "file:../../../../../midnight-verifiable-credentials/packages/prototypes/credential-families/digital-passport",
     "@midnight-ntwrk/midnight-did-credentials-openid": "file:../../../../../midnight-verifiable-credentials/packages/protocols/openid",
-    "@midnight-ntwrk/midnight-did-credentials": "file:../../../../../midnight-verifiable-credentials/packages/core/primitives/credentials"
+    "@midnight-ntwrk/midnight-did-credentials": "file:../../../../../midnight-verifiable-credentials/packages/core/primitives/credentials",
+    "@input-output-hk/passport-vault-contract": "file:../../../../../midnight-identity-solution-examples/passport-vault-demo/packages/passport-vault-contract"
   }
 }

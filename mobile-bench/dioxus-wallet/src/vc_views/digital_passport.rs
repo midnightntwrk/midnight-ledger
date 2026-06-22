@@ -71,6 +71,9 @@ pub fn is_digital_passport(vc: &StoredVc) -> bool {
 pub const CLAIM_FIRST_NAME: &str = "/credentialSubject/firstName";
 pub const CLAIM_LAST_NAME: &str = "/credentialSubject/lastName";
 pub const CLAIM_DATE_OF_BIRTH: &str = "/credentialSubject/dateOfBirth";
+/// Optional disclosed claims the passport-vault policy can gate on.
+pub const CLAIM_DOCUMENT_NUMBER: &str = "/credentialSubject/documentNumber";
+pub const CLAIM_ISSUING_STATE: &str = "/credentialSubject/issuingState";
 
 /// Decode a `Bytes<64>` text-padded claim opening into its UTF-8
 /// payload. The upstream encoder right-pads with NUL bytes; we

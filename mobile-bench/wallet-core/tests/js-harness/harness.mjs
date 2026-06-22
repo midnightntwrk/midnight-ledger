@@ -47,6 +47,22 @@ const DID_ZK_ASSETS_PATH = path.resolve(
 );
 
 /**
+ * Path to the bundled passport-vault circuit artifacts (prover keys,
+ * verifier keys, IR). Same `<contract>/dist/managed/passport-vault/`
+ * layout the upstream `NodeZkConfigProvider` expects. Used by
+ * `prepareVaultCallTx`.
+ */
+const PV_ZK_ASSETS_PATH = path.resolve(
+  __dirname,
+  "node_modules",
+  "@midnight-ntwrk",
+  "passport-vault-contract",
+  "dist",
+  "managed",
+  "passport-vault",
+);
+
+/**
  * Walk a JSON value, replacing objects of shape `{ "$bigint": "123" }`
  * with the equivalent JS `BigInt`. JSON has no native bigint type;
  * the Compact runtime's `Field` / `Uint<N>` args need BigInt. The
@@ -402,6 +418,99 @@ const methods = {
     // `UnsubmittedCallTxData = CallResult & { private: UnsubmittedTxData }`
     // where the `unprovenTx` lives under `.private`. CallResultPublic
     // has the post-state + transcript; we don't need those here.
+    const unprovenBytes = callTxData.private.unprovenTx.serialize();
+    return {
+      circuit: params.circuit,
+      unprovenTxHex: bytesToHex(unprovenBytes),
+      unprovenTxBytes: unprovenBytes.length,
+      elapsedMs: Date.now() - t0,
+    };
+  },
+
+  /**
+   * Passport-vault analogue of `prepareUnprovenCallTx`. Builds an
+   * unproven multi-lock call tx (`createLock` / `depositToLock` /
+   * `withdrawFromLock`) for the passport-vault contract; the Rust side
+   * balances/proves/submits via the identical downstream pipeline. The
+   * circuit args are passed in `circuitArgs` ({ $bigint } / { $bytes }
+   * markers). `privateState` carries the holder date-of-birth witness
+   * for claim paths; create/deposit omit it (empty private state).
+   * (`claimFromLock` is composed by the WebView's higher-level
+   * `prepareVaultClaim`, not this generic path.)
+   */
+  prepareVaultCallTx: async (params) => {
+    const t0 = Date.now();
+    const [
+      pvContract,
+      pvWitnesses,
+      cr,
+      jsContracts,
+      ledgerV8,
+      compactJs,
+      networkIdMod,
+      zkProvMod,
+    ] = await Promise.all([
+      import(
+        "@input-output-hk/passport-vault-contract/managed/passport-vault/contract/index.js"
+      ),
+      import("@input-output-hk/passport-vault-contract/witnesses.js"),
+      import("@midnight-ntwrk/compact-runtime"),
+      import("@midnight-ntwrk/midnight-js-contracts"),
+      import("@midnight-ntwrk/ledger-v8"),
+      import("@midnight-ntwrk/compact-js"),
+      import("@midnight-ntwrk/midnight-js-network-id"),
+      import("@midnight-ntwrk/midnight-js-node-zk-config-provider"),
+    ]);
+    networkIdMod.setNetworkId(params.networkId ?? "undeployed");
+
+    const compiledContract = compactJs.CompiledContract.make(
+      "passport-vault",
+      pvContract.Contract,
+    ).pipe(
+      compactJs.CompiledContract.withWitnesses(pvWitnesses.witnesses),
+      compactJs.CompiledContract.withCompiledFileAssets(PV_ZK_ASSETS_PATH),
+    );
+    const zkConfigProvider = new zkProvMod.NodeZkConfigProvider(
+      PV_ZK_ASSETS_PATH,
+    );
+
+    const contractState = cr.ContractState.deserialize(
+      hexToBytes(params.contractStateHex),
+    );
+    const zswapChainState = params.zswapChainStateHex
+      ? ledgerV8.ZswapChainState.deserialize(
+          hexToBytes(params.zswapChainStateHex),
+        )
+      : new ledgerV8.ZswapChainState();
+    const ledgerParameters = params.ledgerParametersHex
+      ? ledgerV8.LedgerParameters.deserialize(
+          hexToBytes(params.ledgerParametersHex),
+        )
+      : ledgerV8.LedgerParameters.initialParameters();
+
+    const args = Array.isArray(params.circuitArgs)
+      ? params.circuitArgs.map(reviveBigints)
+      : [];
+    const initialPrivateState =
+      params.privateState != null
+        ? reviveBigints(params.privateState)
+        : pvWitnesses.emptyPassportVaultPrivateState();
+
+    const callTxData = await jsContracts.createUnprovenCallTxFromInitialStates(
+      zkConfigProvider,
+      {
+        compiledContract,
+        circuitId: params.circuit,
+        contractAddress: params.contractAddressHex,
+        args,
+        coinPublicKey: params.coinPublicKeyHex,
+        initialContractState: contractState,
+        initialZswapChainState: zswapChainState,
+        ledgerParameters,
+        initialPrivateState,
+      },
+      params.encryptionPublicKeyHex,
+    );
     const unprovenBytes = callTxData.private.unprovenTx.serialize();
     return {
       circuit: params.circuit,

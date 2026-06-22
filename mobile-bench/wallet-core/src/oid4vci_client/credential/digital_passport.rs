@@ -49,8 +49,16 @@ use crate::DidId;
 #[derive(Debug, Clone, Deserialize)]
 pub struct DigitalPassportResponse {
     pub credential: DigitalPassportCredential,
-    #[serde(rename = "credentialPrivateParts")]
+    /// Current passport-issuer contract (OID4VCI spec-compliant §8.3-7):
+    /// the raw claim values and commitment openings nested under
+    /// `credentialPrivateParts`. This is what the live issuer emits.
+    #[serde(rename = "credentialPrivateParts", default)]
     pub credential_private_parts: Option<CredentialPrivateParts>,
+    /// Legacy flat shape — a top-level array of per-field openings.
+    /// Retained as a fallback for older issuers / test fixtures; the
+    /// modern issuer omits it in favour of `credentialPrivateParts`.
+    #[serde(default)]
+    pub openings: Vec<DigitalPassportOpening>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -316,8 +324,16 @@ pub async fn request_credential(
 
     let holder_did_str = response.credential.holder_binding.holder_did_method.did;
 
-    // 7. Extract issuer_did via JS bridge
-    let issuer_did = decode_issuer_did(js_bridge, &response.credential.credential.payload).await?;
+    // 7. Extract issuer_did via JS bridge. The issuer DID shares the holder's
+    //    network tag (same chain), so derive it from the holder DID string.
+    let issuer_network = holder_did_str
+        .split(':')
+        .nth(2)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("undeployed");
+    let issuer_did =
+        decode_issuer_did(js_bridge, &response.credential.credential.payload, issuer_network)
+            .await?;
     let issuer_did = issuer_did.issuer_did;
 
     // 8. Generate client-side vc_uri with a digital-passport
@@ -353,6 +369,12 @@ pub async fn request_credential(
     //     Openings come in base64url 32-byte form straight from
     //     `<field>Opening` siblings under
     //     `credentialPrivateParts.openings`.
+    //
+    //     If the issuer omits `credentialPrivateParts` (older issuers /
+    //     test fixtures), fall back to the legacy flat `openings` array.
+    //     Without openings the credential lands with body + proof but no
+    //     openings, and any later vault claim fails with
+    //     "no dateOfBirth opening; cannot prove age".
     let openings: Vec<VcOpening> = match response.credential_private_parts {
         Some(parts) => {
             let cv = &parts.claim_values;
@@ -396,7 +418,18 @@ pub async fn request_credential(
             )?);
             out
         }
-        None => Vec::new(),
+        None => response
+            .openings
+            .into_iter()
+            .map(|o| {
+                Ok(VcOpening {
+                    vc_uri: vc.vc_uri.clone(),
+                    claim_path: format!("/credentialSubject/{}", o.field_name),
+                    plaintext: URL_SAFE_NO_PAD.decode(&o.plaintext_b64)?,
+                    opening: URL_SAFE_NO_PAD.decode(&o.opening_b64)?,
+                })
+            })
+            .collect::<Result<_, base64::DecodeError>>()?,
     };
 
     vc_store
@@ -407,10 +440,14 @@ pub async fn request_credential(
 }
 
 /// Call the JS bridge to decode the compact credential payload and
-/// extract the `issuerDid`.
+/// extract the `issuerDid`. Passes the canonical `EncodedCompactValue`
+/// shape (`{ encoding, payload }`) the bundle's
+/// `decodeDigitalPassportCredential` expects, plus the `network` tag so
+/// the bundle can render the issuer DID string for the VC store.
 async fn decode_issuer_did(
     js_bridge: &dyn JsBridge,
     credential_payload_b64url: &str,
+    network: &str,
 ) -> Result<DecodedCredential, CredentialFlowError> {
     use crate::js_bridge::JsBridgeExt;
     let params = serde_json::json!({
@@ -418,6 +455,7 @@ async fn decode_issuer_did(
             "encoding": "compact-value-v1.base64url",
             "payload": credential_payload_b64url,
         },
+        "network": network,
     });
     js_bridge
         .call::<_, DecodedCredential>("decodeDigitalPassportCredential", &params)

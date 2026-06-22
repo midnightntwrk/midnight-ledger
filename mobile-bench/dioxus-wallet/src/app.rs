@@ -122,6 +122,11 @@ pub(crate) enum Tab {
     /// the pragmatic linear page that exposes the same end-to-end
     /// contract against the running issuer-mock.
     Identity,
+    /// Embedded passport-vault dApp. Renders the dApp (loaded from
+    /// `MIDNIGHT_DAPP_URL`, see [`dapp_url`]) in an iframe; the dApp talks
+    /// to the wallet via the postMessage relay + its `window.midnight`
+    /// host shim (lock / claim).
+    Dapp,
 }
 
 // `Tab::Bootstrap` was a separate top-level tab between the C1
@@ -152,6 +157,7 @@ impl Tab {
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
             Tab::Identity => "Credentials",
+            Tab::Dapp => "Vault dApp",
         }
     }
 
@@ -174,6 +180,7 @@ impl Tab {
             // discriminant stays reserved so older session rows
             // decode to `Tab::Settings` via `from_persist` below
             // (Bootstrap content lives inside Settings now).
+            Tab::Dapp => 11,
         }
     }
 
@@ -198,6 +205,7 @@ impl Tab {
             // Legacy `Tab::Bootstrap` was u8=10. The content moved
             // into Settings, so older sessions resume there.
             10 => Tab::Settings,
+            11 => Tab::Dapp,
             _ => Tab::Wallet,
         }
     }
@@ -782,30 +790,80 @@ pub(crate) fn metered_app_wallet_for(
 /// One place to centralise the swap so the rest of the App
 /// doesn't need to know which build it's running under.
 pub(crate) fn app_wallet_for(net: Network) -> Wallet {
-    let base = {
-        #[cfg(feature = "preprod-live")]
-        {
-            if matches!(net, Network::PreProd) {
-                let bytes = hex::decode(preprod_live::SEED_HEX)
-                    .expect("preprod_live::SEED_HEX is hex");
-                let seed: [u8; 32] = bytes
-                    .as_slice()
-                    .try_into()
-                    .expect("preprod_live::SEED_HEX is 32 bytes");
-                Wallet::from_seed(seed, Network::PreProd)
-            } else {
-                wallet_core::Wallet::demo(net)
-            }
+    attach_app_providers(base_app_wallet(net), net)
+}
+
+/// Like [`app_wallet_for`], but uses the configured **passport-vault
+/// admin seed** when one is set (via the `MIDNIGHT_VAULT_ADMIN_SEED_HEX`
+/// env var or [`set_vault_admin_seed`]). The vault's `depositFunds`
+/// circuit is admin-only, so lock (and the admin-side of claim) must run
+/// from the seed whose coin public key matches the deployed vault's
+/// `admin` field. Falls back to the normal app wallet seed when no
+/// override is set, so non-vault flows are unaffected.
+pub(crate) fn app_vault_wallet_for(net: Network) -> Wallet {
+    let base = match vault_admin_seed_override() {
+        Some(seed) => {
+            tracing::info!(
+                target: "dioxuswalletmain",
+                "app_vault_wallet_for: using configured vault admin seed override",
+            );
+            Wallet::from_seed(seed, net)
         }
-        #[cfg(not(feature = "preprod-live"))]
-        {
-            wallet_core::Wallet::demo(net)
+        None => {
+            tracing::info!(
+                target: "dioxuswalletmain",
+                "app_vault_wallet_for: no admin seed override — using default app wallet seed (deposit is admin-only and will fail unless this matches the vault admin)",
+            );
+            base_app_wallet(net)
         }
     };
+    attach_app_providers(base, net)
+}
+
+/// Pick the base seed for the App wallet on `net`, in precedence order:
+///   1. `MIDNIGHT_WALLET_SEED_HEX` env (64-char hex, optional `0x`) — run
+///      as any identity at launch without recompiling or flipping
+///      features;
+///   2. `preprod-live` builds: the operator's manager-profile seed on
+///      PreProd;
+///   3. `Wallet::demo` (the shared dev seed).
+fn base_app_wallet(net: Network) -> Wallet {
+    if let Some(seed) = parse_seed_hex_env("MIDNIGHT_WALLET_SEED_HEX") {
+        tracing::info!(
+            target: "dioxuswalletmain",
+            "base_app_wallet: using MIDNIGHT_WALLET_SEED_HEX override",
+        );
+        return Wallet::from_seed(seed, net);
+    }
+    #[cfg(feature = "preprod-live")]
+    {
+        if matches!(net, Network::PreProd) {
+            let bytes = hex::decode(preprod_live::SEED_HEX)
+                .expect("preprod_live::SEED_HEX is hex");
+            let seed: [u8; 32] = bytes
+                .as_slice()
+                .try_into()
+                .expect("preprod_live::SEED_HEX is 32 bytes");
+            Wallet::from_seed(seed, Network::PreProd)
+        } else {
+            wallet_core::Wallet::demo(net)
+        }
+    }
+    #[cfg(not(feature = "preprod-live"))]
+    {
+        wallet_core::Wallet::demo(net)
+    }
+}
+
+/// Attach the process-wide providers (proof-server URL, DUST syncer,
+/// WebView JS bridge) every App wallet needs, regardless of which seed
+/// it was built from. Shared by [`app_wallet_for`] and
+/// [`app_vault_wallet_for`].
+fn attach_app_providers(base: Wallet, net: Network) -> Wallet {
     // If the App has booted an embedded proof-server (see
     // `BridgeState::spawn_proof_server`), thread the URL into the
-    // wallet so `Wallet::call_did_circuit` / `create_did` /
-    // `load_did_circuit` route per-preimage proving through the
+    // wallet so `Wallet::call_did_circuit` / `call_contract_circuit` /
+    // `create_did` route per-preimage proving through the
     // release-built proof-server's `/prove` endpoint instead of
     // running the in-process zkir prover (slow on debug builds).
     // The static below is set by `set_proof_server_url` once at App
@@ -838,39 +896,124 @@ pub(crate) fn app_wallet_for(net: Network) -> Wallet {
     // Layer 2 / Phase 3: attach the persisted DUST syncer if the
     // store has been opened. `Wallet::sync_dust` will then resume
     // from `last_id + 1` instead of replaying ~534k events on
-    // every call. The static is populated by
-    // `set_dust_syncer_for(network, syncer)` once per network
-    // after the store opens; we look up the matching one here.
+    // every call.
     let with_dust = if let Some(syncer) = dust_syncer_for(net) {
         with_url.with_dust_syncer(syncer)
     } else {
         with_url
     };
+    // Attach the persisted SHIELDED (zswap) syncer if registered, so
+    // `Wallet::vault_deposit` can spend from the wallet's synced coins.
+    // Same store-open lifecycle as the DUST syncer.
+    let with_shielded = if let Some(syncer) = shielded_syncer_for(net) {
+        with_dust.with_shielded_syncer(syncer)
+    } else {
+        with_dust
+    };
     // Phase D: under `--features js-bridge`, attach the
-    // process-wide `DioxusEvalBridge` so `Wallet::call_did_circuit`
-    // can drive `window.midnightDidBundle.prepareUnprovenCallTx` in
-    // the embedded WebView instead of trying to spawn a Node child
-    // (which fails fast on Android per `NodeChildBridge::spawn`).
-    // The bridge handle is `None` until the App's `use_future`
-    // driver runs `install_global` on first render; if a wallet is
-    // constructed before that point it just falls back to the
-    // legacy path. In practice the driver mounts on the first
-    // frame, well before any UI button can fire a DID write.
+    // process-wide `DioxusEvalBridge` so the wallet can drive
+    // `window.midnightDidBundle.*` (prepareUnprovenCallTx /
+    // prepareVaultCallTx / readVaultLedger) in the embedded WebView
+    // instead of spawning a Node child.
     #[cfg(feature = "js-bridge")]
     {
         if let Some(bridge) = crate::eval_bridge::global_bridge() {
-            with_dust.with_js_bridge(bridge)
+            with_shielded.with_js_bridge(bridge)
         } else {
             tracing::info!(
                 target: "dioxuswalletmain",
                 "app_wallet_for: DioxusEvalBridge not yet installed — will fall back to NodeChildBridge",
             );
-            with_dust
+            with_shielded
         }
     }
     #[cfg(not(feature = "js-bridge"))]
     {
-        with_dust
+        with_shielded
+    }
+}
+
+/// Process-wide override for the passport-vault admin seed. Read by
+/// [`app_vault_wallet_for`] so lock/claim run from the vault's
+/// configured admin identity. Sourced from (in order):
+///   1. [`set_vault_admin_seed`] (e.g. a future Settings field), then
+///   2. the `MIDNIGHT_VAULT_ADMIN_SEED_HEX` env var (64-char hex).
+static VAULT_ADMIN_SEED: std::sync::OnceLock<[u8; 32]> =
+    std::sync::OnceLock::new();
+
+/// Install the passport-vault admin seed for this session. First write
+/// wins. Reserved for a Settings-tab field; the env var works today.
+#[allow(dead_code)]
+pub(crate) fn set_vault_admin_seed(seed: [u8; 32]) {
+    let _ = VAULT_ADMIN_SEED.set(seed);
+}
+
+fn vault_admin_seed_override() -> Option<[u8; 32]> {
+    if let Some(seed) = VAULT_ADMIN_SEED.get() {
+        return Some(*seed);
+    }
+    parse_seed_hex_env("MIDNIGHT_VAULT_ADMIN_SEED_HEX")
+}
+
+/// Parse a 32-byte seed from a hex env var (with or without a `0x`
+/// prefix). Returns `None` when the var is unset/empty; logs and returns
+/// `None` on malformed input so a bad value degrades to the default
+/// rather than panicking at launch.
+fn parse_seed_hex_env(var: &str) -> Option<[u8; 32]> {
+    let raw = std::env::var(var).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let hexs = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    match hex::decode(hexs) {
+        Ok(bytes) => match <[u8; 32]>::try_from(bytes.as_slice()) {
+            Ok(seed) => Some(seed),
+            Err(_) => {
+                tracing::warn!(target: "dioxuswalletmain", env = %var, "seed env is not 32 bytes — ignoring");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(target: "dioxuswalletmain", env = %var, error = %e, "seed env is not valid hex — ignoring");
+            None
+        }
+    }
+}
+
+/// Initial network for the App, from `MIDNIGHT_WALLET_NETWORK`
+/// (`mainnet` | `preprod` | `preview` | `qanet` | `devnet` |
+/// `undeployed`), defaulting to PreProd. Read once when the network
+/// signal is created; the in-app network switcher can change it
+/// afterwards. Also the default network for vault verbs (see
+/// `bridge::vault_network`).
+pub(crate) fn startup_network() -> Network {
+    match std::env::var("MIDNIGHT_WALLET_NETWORK") {
+        Ok(s) if !s.trim().is_empty() => match crate::bridge::parse_network(s.trim()) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(target: "dioxuswalletmain", error = %e, "MIDNIGHT_WALLET_NETWORK unrecognised — defaulting to PreProd");
+                Network::PreProd
+            }
+        },
+        _ => Network::PreProd,
+    }
+}
+
+/// Default Vault-dApp URL when `MIDNIGHT_DAPP_URL` is unset — the
+/// Next.js dev server's default origin.
+const DEFAULT_DAPP_URL: &str = "http://localhost:3000";
+
+/// URL the embedded Vault-dApp iframe loads.
+///
+/// The dApp is always loaded from a URL (there is no bundled export).
+/// Set `MIDNIGHT_DAPP_URL` to point the iframe at the dApp — e.g.
+/// `http://localhost:3000` for a `next dev` server, or a deployed URL.
+/// Defaults to [`DEFAULT_DAPP_URL`] when unset or blank.
+pub(crate) fn dapp_url() -> String {
+    match std::env::var("MIDNIGHT_DAPP_URL") {
+        Ok(u) if !u.trim().is_empty() => u.trim().to_string(),
+        _ => DEFAULT_DAPP_URL.to_string(),
     }
 }
 
@@ -915,6 +1058,48 @@ pub fn set_dust_syncer_for(
     syncer: std::sync::Arc<wallet_core::DustSyncer>,
 ) {
     if let Ok(mut m) = dust_syncers_map().lock() {
+        m.insert(network, syncer);
+    }
+}
+
+/// Process-wide map of `Network → Arc<ShieldedSyncer>`. Mirrors
+/// `DUST_SYNCERS`; populated at store-open, read by
+/// `attach_app_providers` so vault deposits can spend synced coins.
+static SHIELDED_SYNCERS: std::sync::OnceLock<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            wallet_core::Network,
+            std::sync::Arc<wallet_core::ShieldedSyncer>,
+        >,
+    >,
+> = std::sync::OnceLock::new();
+
+fn shielded_syncers_map() -> &'static std::sync::Mutex<
+    std::collections::HashMap<
+        wallet_core::Network,
+        std::sync::Arc<wallet_core::ShieldedSyncer>,
+    >,
+> {
+    SHIELDED_SYNCERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Look up the SHIELDED syncer for `network`, if registered.
+pub fn shielded_syncer_for(
+    network: wallet_core::Network,
+) -> Option<std::sync::Arc<wallet_core::ShieldedSyncer>> {
+    shielded_syncers_map()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&network).cloned())
+}
+
+/// Register a `ShieldedSyncer` for `network`. Called at store-open;
+/// idempotent (later registrations replace the previous entry).
+pub fn set_shielded_syncer_for(
+    network: wallet_core::Network,
+    syncer: std::sync::Arc<wallet_core::ShieldedSyncer>,
+) {
+    if let Ok(mut m) = shielded_syncers_map().lock() {
         m.insert(network, syncer);
     }
 }
@@ -1167,9 +1352,14 @@ pub fn App() -> Element {
         };
     }
 
-    let mut network = use_signal(|| Network::PreProd);
-    let mut wallet = use_signal::<Option<WalletInfo>>(|| {
-        Some(WalletInfo::from_wallet(&app_wallet_for(Network::PreProd)))
+    // Initial network honours `MIDNIGHT_WALLET_NETWORK` (defaults to
+    // PreProd); the in-app switcher can change it afterwards. The initial
+    // WalletInfo is derived from the same network so its seed (incl. a
+    // `MIDNIGHT_WALLET_SEED_HEX` override) drives the bridge loop too.
+    let initial_network = startup_network();
+    let mut network = use_signal(move || initial_network);
+    let mut wallet = use_signal::<Option<WalletInfo>>(move || {
+        Some(WalletInfo::from_wallet(&app_wallet_for(initial_network)))
     });
     let mut phase = use_signal(|| SyncPhase::Idle);
     let mut chain = use_signal::<ChainSnapshot>(ChainSnapshot::default);
@@ -1505,6 +1695,33 @@ pub fn App() -> Element {
                                 tracing::warn!(
                                     error = %e,
                                     "dust secret key derivation failed; DustSyncer not registered"
+                                );
+                            }
+                        }
+                        // Register a ShieldedSyncer for this network so
+                        // `Wallet::vault_deposit` can spend from synced
+                        // zswap coins (resumes from the persisted
+                        // checkpoint, same as DUST).
+                        match hex::decode(tmp.seed_hex()) {
+                            Ok(bytes) if bytes.len() == 32 => {
+                                let mut seed = [0u8; 32];
+                                seed.copy_from_slice(&bytes);
+                                let syncer = std::sync::Arc::new(
+                                    wallet_core::ShieldedSyncer::new(
+                                        net,
+                                        std::sync::Arc::new(store.clone()),
+                                        seed,
+                                    ),
+                                );
+                                set_shielded_syncer_for(net, syncer);
+                                tracing::info!(
+                                    network=?net,
+                                    "shielded syncer registered"
+                                );
+                            }
+                            _ => {
+                                tracing::warn!(
+                                    "wallet seed decode failed; ShieldedSyncer not registered"
                                 );
                             }
                         }
@@ -1880,7 +2097,7 @@ pub fn App() -> Element {
                 // Metrics / Benchmark / Test / Logs were collapsed
                 // into a carousel under Diagnostics — the top-level
                 // tab bar no longer lists them.
-                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
+                for t in [Tab::Wallet, Tab::Dapp, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1908,7 +2125,7 @@ pub fn App() -> Element {
         // below is a single match on the current value. CSS hides
         // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dapp, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -1918,6 +2135,17 @@ pub fn App() -> Element {
         }
 
         match *active_tab.read() {
+            Tab::Dapp => rsx! {
+                div { class: "dapp-host",
+                    iframe {
+                        style: "width:100%; height:calc(100vh - 150px); min-height:520px; border:0; border-radius:12px; background:#0b0e1a;",
+                        // The dApp is loaded from `MIDNIGHT_DAPP_URL`
+                        // (default `http://localhost:3000`); see `dapp_url`.
+                        src: dapp_url(),
+                        title: "Passport Vault dApp",
+                    }
+                }
+            },
             Tab::Wallet => rsx! {
                 if let Some(w) = wallet.read().as_ref() {
                     AddressCard {
@@ -5008,6 +5236,8 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
                 }
             }
         }
+
+        IssuerKeysCard { bridge_state: bridge_state.clone() }
     }
 }
 
@@ -5080,6 +5310,141 @@ fn list_stored_jubjub_keys_for_sign(bridge_state: &BridgeState) -> Vec<StoredJub
             })
         })
         .collect()
+}
+
+/// A Jubjub key + its raw 32-byte secret as bare hex (no `0x`) — the
+/// exact form `.env.passport-issuer`'s `ISSUER_JUBJUB_SECRET_KEY` wants
+/// when you point the passport-issuer at a DID this wallet controls
+/// (e.g. using the admin DID's `#key-assert` key as the issuer signing
+/// key). Built via `WalletStore::key_private_bytes`, the same path the
+/// Sign tab uses.
+#[derive(Clone, PartialEq, Eq)]
+struct JubjubSecretEntry {
+    label: String,
+    did: String,
+    purpose: String,
+    secret_hex: String,
+}
+
+fn list_jubjub_signing_secrets(bridge_state: &BridgeState) -> Vec<JubjubSecretEntry> {
+    use wallet_core::secret_storage::MidnightCurve;
+
+    let Some(store) = bridge_state.store() else {
+        return Vec::new();
+    };
+    let Some(wallet_id) = bridge_state.active_wallet_id().or_else(|| {
+        store
+            .list_wallet_ids()
+            .ok()
+            .and_then(|ids| ids.into_iter().next())
+    }) else {
+        return Vec::new();
+    };
+    let rows = match store.list_keys(wallet_id, None) {
+        Ok(rs) => rs,
+        Err(e) => {
+            tracing::warn!(error=%e, "list keys for issuer secrets");
+            return Vec::new();
+        }
+    };
+    rows.into_iter()
+        .filter(|(_, row)| row.crv == MidnightCurve::Jubjub)
+        .filter_map(|(key_ref, row)| {
+            let bytes = store.key_private_bytes(wallet_id, &key_ref).ok()?;
+            if bytes.len() != 32 {
+                return None;
+            }
+            Some(JubjubSecretEntry {
+                label: row.label,
+                did: row.did.unwrap_or_default(),
+                purpose: row.purpose.unwrap_or_default(),
+                secret_hex: hex::encode(&*bytes),
+            })
+        })
+        .collect()
+}
+
+/// Card listing this wallet's Jubjub assertion (`#key-assert`) secrets,
+/// each with a reveal toggle + copy. Lets the operator export the
+/// secret of a DID this wallet controls so the passport-issuer can sign
+/// credentials AS that DID (`ISSUER_JUBJUB_SECRET_KEY` +
+/// `ISSUER_KEY_ID`). Hidden behind a per-row Reveal; renders nothing
+/// when the wallet has no Jubjub keys.
+#[component]
+fn IssuerKeysCard(bridge_state: BridgeState) -> Element {
+    let entries = list_jubjub_signing_secrets(&bridge_state);
+    if entries.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Jubjub signing secrets (issuer setup)" }
+            p { class: "secret-card__note",
+                "Assertion (#key-assert) secrets for DIDs this wallet controls. "
+                "To run the passport-issuer AS one of these DIDs, copy the secret "
+                "into ISSUER_JUBJUB_SECRET_KEY (bare hex) and the key id into "
+                "ISSUER_KEY_ID in scripts/.env.passport-issuer."
+            }
+            for entry in entries.iter() {
+                JubjubSecretRow {
+                    label: entry.label.clone(),
+                    did: entry.did.clone(),
+                    purpose: entry.purpose.clone(),
+                    secret_hex: entry.secret_hex.clone(),
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn JubjubSecretRow(
+    label: String,
+    did: String,
+    purpose: String,
+    secret_hex: String,
+) -> Element {
+    let mut revealed = use_signal(|| false);
+    let is_revealed = *revealed.read();
+    let did_display = if did.is_empty() {
+        "(unbound)".to_string()
+    } else {
+        did.clone()
+    };
+    let assert_kid = if did.is_empty() {
+        String::new()
+    } else {
+        format!("{did}#key-assert")
+    };
+    rsx! {
+        div {
+            class: "secret-card__row",
+            style: "flex-direction: column; align-items: stretch; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px;",
+            div { style: "display: flex; justify-content: space-between; gap: 8px;",
+                span { class: "mono", style: "font-size: 11px; word-break: break-all;", "{did_display}" }
+                span { class: "muted", style: "font-size: 11px; white-space: nowrap;", "{label} · {purpose}" }
+            }
+            if !assert_kid.is_empty() {
+                div { style: "display: flex; align-items: center; gap: 6px;",
+                    span { class: "muted", style: "font-size: 11px;", "ISSUER_KEY_ID" }
+                    {copy_btn(assert_kid.clone(), "Copy #key-assert DID URL")}
+                }
+            }
+            div { class: "secret-card__row",
+                div { class: "secret-card__value mono",
+                    if is_revealed { "{secret_hex}" } else { "•••••••••• (ISSUER_JUBJUB_SECRET_KEY)" }
+                }
+                div { class: "secret-card__actions",
+                    button {
+                        class: "btn-secondary",
+                        onclick: move |_| revealed.set(!is_revealed),
+                        {if is_revealed { "Hide" } else { "Reveal" }}
+                    }
+                    {copy_btn(secret_hex.clone(), "Copy Jubjub secret (hex)")}
+                }
+            }
+        }
+    }
 }
 
 /// One stored key in the shape the Operation Builder's
@@ -8548,6 +8913,7 @@ fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<Strin
     let did_short = truncate_did(&entry.did);
     let did_full = entry.did.clone();
     let did_for_click = did_full.clone();
+    let did_for_copy = did_full.clone();
 
     // Map inventory status → unified `.chip` tone variant.
     let (tone_class, status_label) = match entry.status {
@@ -8580,6 +8946,18 @@ fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<Strin
                         "{did_short}"
                     }
                     span { class: "{tone_class}", "{status_label}" }
+                    // Copy the full DID string. A `<span>` (not a nested
+                    // `<button>`) with `stop_propagation` so the click
+                    // copies without also opening the DID detail view.
+                    span {
+                        class: "copy-btn inline",
+                        title: "Copy DID",
+                        onclick: move |evt| {
+                            evt.stop_propagation();
+                            let _ = copy_to_clipboard(&did_for_copy);
+                        },
+                        "⧉"
+                    }
                 }
                 div { class: "did-card__meta",
                     span { class: "did-card__meta-item",
@@ -9159,6 +9537,29 @@ async fn rehydrate_for_network(
                     network=?new_net,
                     error=%e,
                     "dust secret key derivation failed; DustSyncer not re-registered"
+                );
+            }
+        }
+        // Re-register the ShieldedSyncer for the new network too.
+        match hex::decode(tmp.seed_hex()) {
+            Ok(bytes) if bytes.len() == 32 => {
+                let mut seed = [0u8; 32];
+                seed.copy_from_slice(&bytes);
+                let syncer = std::sync::Arc::new(wallet_core::ShieldedSyncer::new(
+                    new_net,
+                    std::sync::Arc::new(store.clone()),
+                    seed,
+                ));
+                set_shielded_syncer_for(new_net, syncer);
+                tracing::info!(
+                    network=?new_net,
+                    "shielded syncer registered (network switch)"
+                );
+            }
+            _ => {
+                tracing::warn!(
+                    network=?new_net,
+                    "wallet seed decode failed; ShieldedSyncer not re-registered"
                 );
             }
         }

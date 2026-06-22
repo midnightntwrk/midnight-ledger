@@ -15,7 +15,7 @@ use redb::ReadableTable;
 use crate::store::error::StoreError;
 use crate::store::schema::{
     CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DUST_SYNC, KEYS, KEYS_BY_WALLET, LOGS, META,
-    META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, SESSIONS, WALLETS,
+    META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, SESSIONS, SHIELDED_SYNC, WALLETS,
 };
 use crate::store::WalletStore;
 
@@ -42,6 +42,8 @@ pub(crate) fn run(store: &WalletStore) -> Result<(), StoreError> {
             (3, 4) => migrate_v3_to_v4(store)?,
             (4, 5) => migrate_v4_to_v5(store)?,
             (5, 6) => migrate_v5_to_v6(store)?,
+            (6, 7) => migrate_v6_to_v7(store)?,
+            (7, 8) => migrate_v7_to_v8(store)?,
             (from, to) => {
                 return Err(StoreError::Migration(format!(
                     "no migration registered for {from} → {to}",
@@ -150,6 +152,50 @@ fn migrate_v5_to_v6(store: &WalletStore) -> Result<(), StoreError> {
     write_version(store, 6)
 }
 
+fn migrate_v6_to_v7(store: &WalletStore) -> Result<(), StoreError> {
+    // v6 → v7 adds the `shielded_sync` table — persisted zswap
+    // local state keyed by network tag. Empty on creation; the
+    // `ShieldedSyncer` populates it as it folds `zswapLedgerEvents`.
+    // Materialise it so read txns (cached_state) don't fault before
+    // the first write. No existing rows to walk.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .open_table(SHIELDED_SYNC)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 7)
+}
+
+fn migrate_v7_to_v8(store: &WalletStore) -> Result<(), StoreError> {
+    // v7 → v8: the v7 `shielded_sync` snapshots were built with the
+    // WRONG zswap key derivation (raw seed instead of the HD `Zswap`
+    // child), so they hold zero owned coins and would never
+    // re-decrypt on incremental resume. Drop + recreate the table so
+    // the next sync does a full replay with the corrected keys.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .delete_table(SHIELDED_SYNC)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        // Recreate empty so read txns don't fault before the re-sync.
+        let _ = txn
+            .open_table(SHIELDED_SYNC)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 8)
+}
+
 fn migrate_v4_to_v5(store: &WalletStore) -> Result<(), StoreError> {
     // v4 → v5 adds the `logs` table — chronological archive
     // of the dioxus-wallet's `tracing` events. Empty on
@@ -241,5 +287,18 @@ mod tests {
     fn fresh_in_memory_store_lands_at_v1() {
         let store = WalletStore::open_in_memory("pw").unwrap();
         assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+    }
+
+    /// Regression: the `shielded_sync` table must be materialised by
+    /// the v6→v7 migration so a read before the first write returns
+    /// `Ok(None)` instead of faulting with "Table does not exist"
+    /// (the bug that broke the first vault deposit).
+    #[test]
+    fn fresh_store_can_read_shielded_sync() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let got = store
+            .get_shielded_sync(crate::Network::PreProd)
+            .expect("read shielded_sync should not fault on a fresh store");
+        assert!(got.is_none());
     }
 }

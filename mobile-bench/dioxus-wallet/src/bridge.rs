@@ -51,15 +51,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use wallet_core::store::{WalletId, WalletStore};
 use wallet_core::{
-    CompositeMetrics, InMemoryMetrics, Metrics, Network, RusageProbe, TracingMetrics,
-    unshielded_bech32m,
+    CompositeMetrics, InMemoryMetrics, Metrics, Network, RedbVcStore, RusageProbe,
+    TracingMetrics, VaultLockPolicy, VcOpening, Wallet, unshielded_bech32m,
 };
 
+use crate::identity_centre::vc_store_path;
 use crate::logs::LogCapture;
+use crate::vc_views::digital_passport::{
+    CLAIM_DATE_OF_BIRTH, CLAIM_DOCUMENT_NUMBER, CLAIM_FIRST_NAME, CLAIM_ISSUING_STATE,
+    CLAIM_LAST_NAME, decode_text_padded, is_digital_passport,
+};
 
 /// Per-DID random controller secret store. Populated by
 /// `CreateDidWizard.on_done` and read by the
@@ -510,7 +517,7 @@ struct SignParams {
 
 // ─── Method implementations ────────────────────────────────────────
 
-fn parse_network(s: &str) -> Result<Network, String> {
+pub(crate) fn parse_network(s: &str) -> Result<Network, String> {
     match s {
         "mainnet" => Ok(Network::Mainnet),
         "preprod" => Ok(Network::PreProd),
@@ -521,6 +528,325 @@ fn parse_network(s: &str) -> Result<Network, String> {
         "undeployedyurii" => Ok(Network::UndeployedYurii),
         other => Err(format!("unknown network: {other}")),
     }
+}
+
+/// Default passport-vault contract address (the preprod demo vault).
+/// Mirrors the dApp's `VAULT_CONTRACT_ADDRESS` default so the embedded
+/// dApp's argument-less `vaultTotalLocked()` / `vaultDeposit()` verbs
+/// resolve to the same contract without the dApp having to pass it.
+const DEFAULT_VAULT_CONTRACT_ADDRESS: &str =
+    "bdec50fe2f43959767a9bbc3b0626d5d9e9e08e06a723d3d2d0faca2e6c1dc25";
+
+/// Resolve the vault contract address for a vault verb: explicit
+/// `contractAddress` param first, then the
+/// `MIDNIGHT_VAULT_CONTRACT_ADDRESS` env var, then the preprod default.
+fn vault_contract_address(params: &serde_json::Value) -> String {
+    if let Some(addr) = params.get("contractAddress").and_then(|v| v.as_str()) {
+        let addr = addr.trim();
+        if !addr.is_empty() {
+            return addr.to_string();
+        }
+    }
+    if let Ok(addr) = std::env::var("MIDNIGHT_VAULT_CONTRACT_ADDRESS") {
+        let addr = addr.trim().to_string();
+        if !addr.is_empty() {
+            return addr;
+        }
+    }
+    DEFAULT_VAULT_CONTRACT_ADDRESS.to_string()
+}
+
+/// Resolve the network for a vault verb: explicit `network` param first,
+/// then the `MIDNIGHT_VAULT_NETWORK` env var, then PreProd (the demo
+/// vault's network; matches `getConfiguration`'s default).
+fn vault_network(params: &serde_json::Value) -> Network {
+    if let Some(net) = params.get("network").and_then(|v| v.as_str()) {
+        if let Ok(n) = parse_network(net.trim()) {
+            return n;
+        }
+    }
+    if let Ok(net) = std::env::var("MIDNIGHT_VAULT_NETWORK") {
+        if let Ok(n) = parse_network(net.trim()) {
+            return n;
+        }
+    }
+    // Default to the wallet's launch network (PreProd unless
+    // MIDNIGHT_WALLET_NETWORK overrides), so vault ops follow the wallet
+    // unless explicitly pinned via MIDNIGHT_VAULT_NETWORK.
+    crate::app::startup_network()
+}
+
+/// Resolve the network for a STANDARD connector method (addresses /
+/// connection status): explicit `network` param first, else the
+/// wallet's launch network. Address encodings are network-scoped
+/// (HRP), so this must match the network the dApp connected to.
+fn connected_network(params: &serde_json::Value) -> Network {
+    if let Some(net) = params.get("network").and_then(|v| v.as_str()) {
+        if let Ok(n) = parse_network(net.trim()) {
+            return n;
+        }
+    }
+    crate::app::startup_network()
+}
+
+/// Resolve the holder credential bundle (v3 JSON) for a claim: a
+/// selected stored credential (`vcUri`, assembled from the wallet's
+/// `vcs.redb`) or an explicit `bundle` object the dApp passes directly.
+/// The env-fixture path is gone — claims now use the phone's real
+/// stored credentials.
+fn resolve_credential_bundle(params: &serde_json::Value) -> Result<serde_json::Value, String> {
+    if let Some(b) = params.get("bundle") {
+        if b.is_object() {
+            return Ok(b.clone());
+        }
+    }
+    if let Some(vc_uri) = params.get("vcUri").and_then(|v| v.as_str()) {
+        let vc_uri = vc_uri.trim();
+        if !vc_uri.is_empty() {
+            return assemble_credential_bundle(vc_uri);
+        }
+    }
+    Err("vaultClaim: select a credential — pass `vcUri` (a stored \
+         digital-passport credential) or an explicit `bundle`"
+        .to_string())
+}
+
+/// Build the v3 credential bundle `prepareVaultClaim` consumes from a
+/// stored digital-passport VC. Re-encodes the credential body + proof
+/// as `compact-value-v1.base64url`, and maps each per-claim opening
+/// (`/credentialSubject/<field>`) into the `privateParts` the WebView
+/// presentation builder + age predicate need. The holder presentation
+/// key is NOT recovered here: digital-passport uses explicit-DID holder
+/// binding (no committed holder key), so the WebView signs the
+/// presentation with a deterministic keypair and pulls the holder
+/// verification-method ref from the credential itself.
+fn assemble_credential_bundle(vc_uri: &str) -> Result<serde_json::Value, String> {
+    let store =
+        RedbVcStore::open(vc_store_path()).map_err(|e| format!("open vc store: {e}"))?;
+    let vc = store
+        .get_vc(vc_uri)
+        .map_err(|e| format!("read credential {vc_uri}: {e}"))?
+        .ok_or_else(|| format!("no stored credential with uri {vc_uri}"))?;
+    if vc.body.is_empty() || vc.proof.is_empty() {
+        return Err(format!(
+            "stored credential {vc_uri} is missing the compact body/proof needed to claim"
+        ));
+    }
+
+    let opening = |path: &str| store.get_opening(vc_uri, path).ok().flatten();
+
+    // dateOfBirth is mandatory for the age predicate (4-byte LE days,
+    // matching the digital-passport opening encoding).
+    let dob = opening(CLAIM_DATE_OF_BIRTH).ok_or_else(|| {
+        format!("stored credential {vc_uri} has no dateOfBirth opening; cannot prove age")
+    })?;
+    if dob.plaintext.len() != 4 {
+        return Err(format!(
+            "dateOfBirth opening for {vc_uri} is {} bytes; expected 4 (LE days)",
+            dob.plaintext.len()
+        ));
+    }
+    let dob_days = u32::from_le_bytes([
+        dob.plaintext[0],
+        dob.plaintext[1],
+        dob.plaintext[2],
+        dob.plaintext[3],
+    ]);
+
+    // Optional disclosed claims; absent ones become zero-padding (only
+    // consulted by the WebView when the lock policy requires them).
+    let first = opening(CLAIM_FIRST_NAME);
+    let last = opening(CLAIM_LAST_NAME);
+    let doc = opening(CLAIM_DOCUMENT_NUMBER);
+    let state = opening(CLAIM_ISSUING_STATE);
+
+    let value_hex = |o: &Option<VcOpening>, len: usize| -> String {
+        match o {
+            Some(v) => hex::encode(&v.plaintext),
+            None => hex::encode(vec![0u8; len]),
+        }
+    };
+    let opening_hex = |o: &Option<VcOpening>| -> String {
+        match o {
+            Some(v) => hex::encode(&v.opening),
+            None => hex::encode([0u8; 32]),
+        }
+    };
+
+    Ok(serde_json::json!({
+        "version": 3,
+        "credential": {
+            "encoding": "compact-value-v1.base64url",
+            "payload": URL_SAFE_NO_PAD.encode(&vc.body),
+        },
+        "credentialProof": {
+            "encoding": "compact-value-v1.base64url",
+            "payload": URL_SAFE_NO_PAD.encode(&vc.proof),
+        },
+        "privateParts": {
+            "claimValues": {
+                "firstNameValuePaddedHex": value_hex(&first, 64),
+                "lastNameValuePaddedHex": value_hex(&last, 64),
+                "dateOfBirthDays": dob_days.to_string(),
+                "documentNumberValueHex": value_hex(&doc, 32),
+                "issuingStateValueHex": value_hex(&state, 32),
+            },
+            "openings": {
+                "firstNameOpeningHex": opening_hex(&first),
+                "lastNameOpeningHex": opening_hex(&last),
+                "dateOfBirthOpeningHex": hex::encode(&dob.opening),
+                "documentNumberOpeningHex": opening_hex(&doc),
+                "issuingStateOpeningHex": opening_hex(&state),
+            }
+        }
+    }))
+}
+
+/// Enumerate the wallet's stored digital-passport credentials as
+/// display metadata (NO secrets) for the dApp's claim selector. Each
+/// entry carries the `vcUri` the claim verb feeds back, plus a
+/// best-effort display name and a `claimable` flag (has body/proof +
+/// dateOfBirth opening).
+fn list_credentials_json() -> Result<serde_json::Value, String> {
+    let store =
+        RedbVcStore::open(vc_store_path()).map_err(|e| format!("open vc store: {e}"))?;
+    let vcs = store
+        .list_ordered()
+        .map_err(|e| format!("list credentials: {e}"))?;
+    let mut out = Vec::new();
+    for vc in vcs {
+        if !is_digital_passport(&vc) {
+            continue;
+        }
+        let fname = store
+            .get_opening(&vc.vc_uri, CLAIM_FIRST_NAME)
+            .ok()
+            .flatten()
+            .map(|o| decode_text_padded(&o.plaintext))
+            .unwrap_or_default();
+        let lname = store
+            .get_opening(&vc.vc_uri, CLAIM_LAST_NAME)
+            .ok()
+            .flatten()
+            .map(|o| decode_text_padded(&o.plaintext))
+            .unwrap_or_default();
+        let display_name = format!("{fname} {lname}").trim().to_string();
+        let has_dob = store
+            .get_opening(&vc.vc_uri, CLAIM_DATE_OF_BIRTH)
+            .ok()
+            .flatten()
+            .is_some();
+        let claimable = !vc.body.is_empty() && !vc.proof.is_empty() && has_dob;
+        out.push(serde_json::json!({
+            "vcUri": vc.vc_uri,
+            "issuerDid": vc.issuer_did,
+            "holderDid": vc.holder_did,
+            "format": vc.format,
+            "issuedAtMs": vc.issued_at_ms,
+            "displayName": if display_name.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(display_name) },
+            "claimable": claimable,
+        }));
+    }
+    Ok(serde_json::json!({ "credentials": out }))
+}
+
+/// Parse a `lockId` verb param (decimal string or number).
+fn parse_lock_id(params: &serde_json::Value) -> Result<u64, String> {
+    params
+        .get("lockId")
+        .and_then(|v| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()).or_else(|| v.as_u64()))
+        .ok_or_else(|| "missing/invalid lockId (decimal string)".to_string())
+}
+
+/// Parse an `amountBaseUnits` verb param (decimal string).
+fn parse_amount(params: &serde_json::Value, verb: &str) -> Result<u128, String> {
+    params
+        .get("amountBaseUnits")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.trim().parse::<u128>().ok())
+        .ok_or_else(|| format!("{verb}: missing/invalid amountBaseUnits (decimal string)"))
+}
+
+/// Default verifier-challenge preimage when the dApp doesn't pin one.
+/// Any deterministic 32-byte value works: the lock stores it and the
+/// claim presentation reads it back, so create/claim always agree.
+const DEFAULT_CHALLENGE_LABEL: &[u8] = b"passport-vault:lock-challenge";
+
+/// Build a 32-byte padded value from an optional verb string param,
+/// returning `(present, padded)`. Empty / missing ⇒ `(false, zeros)`.
+fn parse_optional_padded(params: &serde_json::Value, key: &str) -> (bool, [u8; 32]) {
+    if let Some(s) = params.get(key).and_then(|v| v.as_str()) {
+        let s = s.trim();
+        if !s.is_empty() {
+            let mut out = [0u8; 32];
+            let b = s.as_bytes();
+            let n = b.len().min(32);
+            out[..n].copy_from_slice(&b[..n]);
+            return (true, out);
+        }
+    }
+    (false, [0u8; 32])
+}
+
+/// Resolve the lock's verifier challenge hash from an optional
+/// `verifierChallengeHex` (32-byte hex) param, else the default label.
+fn parse_challenge(params: &serde_json::Value) -> [u8; 32] {
+    if let Some(h) = params.get("verifierChallengeHex").and_then(|v| v.as_str()) {
+        if let Ok(bytes) = hex::decode(h.trim()) {
+            if bytes.len() == 32 {
+                let mut out = [0u8; 32];
+                out.copy_from_slice(&bytes);
+                return out;
+            }
+        }
+    }
+    let mut out = [0u8; 32];
+    let n = DEFAULT_CHALLENGE_LABEL.len().min(32);
+    out[..n].copy_from_slice(&DEFAULT_CHALLENGE_LABEL[..n]);
+    out
+}
+
+/// Build a `VaultLockPolicy` from the `vaultCreateLock` verb params.
+/// `minAge` is required; `maxClaimBaseUnits` defaults to
+/// `fallback_max_claim` (the initial deposit) so a single redeemer can
+/// draw the seeded pool. Issuing-state / document-number gates are
+/// optional (disabled unless a value is supplied).
+fn parse_lock_policy(
+    params: &serde_json::Value,
+    fallback_max_claim: u128,
+) -> Result<VaultLockPolicy, String> {
+    let min_age_raw = params
+        .get("minAge")
+        .and_then(|v| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()).or_else(|| v.as_u64()))
+        .ok_or_else(|| "vaultCreateLock: missing/invalid minAge".to_string())?;
+    let min_age: u8 = min_age_raw
+        .try_into()
+        .map_err(|_| "vaultCreateLock: minAge out of range (0-255)".to_string())?;
+    let max_claim = params
+        .get("maxClaimBaseUnits")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.trim().parse::<u128>().ok())
+        .filter(|m| *m > 0)
+        .unwrap_or(fallback_max_claim);
+    if max_claim == 0 {
+        return Err(
+            "vaultCreateLock: maxClaimBaseUnits (or a positive initial amount) is required"
+                .to_string(),
+        );
+    }
+    let (require_issuing_state, required_issuing_state) =
+        parse_optional_padded(params, "issuingState");
+    let (require_document_number, required_document_number) =
+        parse_optional_padded(params, "documentNumber");
+    Ok(VaultLockPolicy {
+        min_age,
+        require_issuing_state,
+        required_issuing_state,
+        require_document_number,
+        required_document_number,
+        max_claim,
+        verifier_challenge_hash: parse_challenge(params),
+    })
 }
 
 /// JS calls these methods through `window.midnightWallet.*`. The
@@ -669,6 +995,160 @@ async fn run_method(
             // Returns: { tx_hash, block_hash, did }
             Err("didOp.submit: not implemented yet (Compact runtime bridge)".to_string())
         }
+        // ──────────────────────────────────────────────────────
+        // DApp Connector surface for an embedded dApp (the
+        // passport-vault dApp hosted in this WebView). The dApp's
+        // `window.midnight` host shim proxies these over postMessage
+        // to the relay (see `lib.rs`), which forwards to
+        // `window.midnightWallet.call(method, args)` → here.
+        // ──────────────────────────────────────────────────────
+        "getConfiguration" => {
+            // Indexer / node / proof-server URIs + network id for the
+            // requested network. Mirrors the DApp Connector
+            // `getConfiguration()` shape so the embedded dApp can point
+            // its own indexer/proof clients at the same services.
+            #[derive(serde::Deserialize)]
+            struct Params {
+                network: Option<String>,
+            }
+            let p: Params =
+                serde_json::from_value(params).unwrap_or(Params { network: None });
+            let net = parse_network(p.network.as_deref().unwrap_or("preprod"))?;
+            let cfg = net.config();
+            Ok(serde_json::json!({
+                "indexerUri": cfg.indexer_http_url,
+                "indexerWsUri": cfg.indexer_ws_url,
+                "proverServerUri": cfg.proving_server_url,
+                "substrateNodeUri": cfg.node_ws_url,
+                "networkId": cfg.network_id,
+            }))
+        }
+        // ──────────────────────────────────────────────────────
+        // STANDARD DApp Connector API — identity / status reads.
+        // Backed by the active wallet's deps-free key derivation
+        // (`Wallet::from_seed_hex`), so the embedded dApp's standard
+        // `connect()` flow (getConnectionStatus + getShieldedAddresses)
+        // resolves with real data instead of silently failing. These
+        // mirror the `@midnight-ntwrk/dapp-connector-api` shapes.
+        // (Balances + `getDustAddress` are deferred — they need sync
+        // orchestration / a dust-address derivation not yet exposed by
+        // wallet-core.)
+        // ──────────────────────────────────────────────────────
+        "getConnectionStatus" => {
+            let net = connected_network(&params);
+            Ok(serde_json::json!({
+                "status": "connected",
+                "networkId": net.config().network_id,
+            }))
+        }
+        "getUnshieldedAddress" => {
+            let net = connected_network(&params);
+            let wallet = Wallet::from_seed_hex(active_seed_hex, net)
+                .map_err(|e| format!("wallet: {e}"))?;
+            let addr = wallet
+                .unshielded_address()
+                .map_err(|e| format!("unshielded address: {e}"))?;
+            Ok(serde_json::json!({ "unshieldedAddress": addr }))
+        }
+        "getShieldedAddresses" => {
+            let net = connected_network(&params);
+            let wallet = Wallet::from_seed_hex(active_seed_hex, net)
+                .map_err(|e| format!("wallet: {e}"))?;
+            let shielded_address = wallet
+                .shielded_address()
+                .map_err(|e| format!("shielded address: {e}"))?;
+            let coin = wallet
+                .coin_public_key_hex()
+                .map_err(|e| format!("coin public key: {e}"))?;
+            let enc = wallet
+                .encryption_public_key_hex()
+                .map_err(|e| format!("encryption public key: {e}"))?;
+            Ok(serde_json::json!({
+                "shieldedAddress": shielded_address,
+                "shieldedCoinPublicKey": coin,
+                "shieldedEncryptionPublicKey": enc,
+            }))
+        }
+        // Passport-vault lock / claim / total — the embedded dApp's
+        // `vaultDeposit` / `vaultClaim` / `vaultTotalLocked` land here.
+        // These build an app-owned `Wallet` (via `app_vault_wallet_for`,
+        // which carries the network deps + the eval bridge + the
+        // configurable vault-admin seed) and route to the native
+        // pipeline. `vaultTotalLocked` is fully wired (indexer read +
+        // in-WebView ledger decode); `vaultDeposit` / `vaultClaim` are
+        // wired to the wallet but report the one remaining piece
+        // (shielded-coin selection / holder presentation — scoped
+        // follow-ups).
+        "vaultTotalLocked" => {
+            let net = vault_network(&params);
+            let addr = vault_contract_address(&params);
+            let total = crate::app::app_vault_wallet_for(net)
+                .vault_total_locked(addr)
+                .await?;
+            Ok(serde_json::json!({ "totalLockedBaseUnits": total.to_string() }))
+        }
+        "vaultListLocks" => {
+            // Enumerate the vault's locks (id, policy, per-lock pool) +
+            // lockCount, for the dApp's lock list + claim selector.
+            let net = vault_network(&params);
+            let addr = vault_contract_address(&params);
+            crate::app::app_vault_wallet_for(net).list_locks(addr).await
+        }
+        "vaultListCredentials" => {
+            // Enumerate the phone's stored digital-passport credentials
+            // (display metadata only) so the claimer can pick one.
+            list_credentials_json()
+        }
+        "vaultCreateLock" => {
+            // Create a lock with the locker-defined policy (min age, etc.)
+            // and an optional initial deposit (`amountBaseUnits`). The
+            // running wallet becomes the lock's creator. Funds the
+            // `receiveUnshielded` with the wallet's unshielded NIGHT.
+            let net = vault_network(&params);
+            let addr = vault_contract_address(&params);
+            let initial_amount: u128 = params
+                .get("amountBaseUnits")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0);
+            let policy = parse_lock_policy(&params, initial_amount)?;
+            let outcome = crate::app::app_vault_wallet_for(net)
+                .create_lock(addr, policy, initial_amount)
+                .await?;
+            Ok(serde_json::json!({
+                "txHash": outcome.tx_hash,
+                "lockId": outcome.lock_id.to_string(),
+            }))
+        }
+        "vaultDeposit" => {
+            // Top up an existing lock's pool: compose depositToLock(lockId,
+            // amount), add the wallet's unshielded NIGHT spend + change +
+            // DUST fees, prove, submit. Lock-creator-only on-chain.
+            let net = vault_network(&params);
+            let addr = vault_contract_address(&params);
+            let lock_id = parse_lock_id(&params)?;
+            let amount = parse_amount(&params, "vaultDeposit")?;
+            let tx_hash = crate::app::app_vault_wallet_for(net)
+                .deposit_to_lock(addr, lock_id, amount)
+                .await?;
+            Ok(serde_json::json!({ "txHash": tx_hash }))
+        }
+        "vaultClaim" => {
+            // Unlock funds from a chosen lock with a chosen stored
+            // credential: assemble the v3 bundle from `vcUri`, compose
+            // claimFromLock(lockId, ...) (selective-disclosure presentation
+            // + age proof), DUST-balance + prove + submit. The released
+            // NIGHT goes to this wallet's unshielded address.
+            let net = vault_network(&params);
+            let addr = vault_contract_address(&params);
+            let lock_id = parse_lock_id(&params)?;
+            let amount = parse_amount(&params, "vaultClaim")?;
+            let bundle = resolve_credential_bundle(&params)?;
+            let tx_hash = crate::app::app_vault_wallet_for(net)
+                .claim_from_lock(addr, lock_id, amount, bundle, None)
+                .await?;
+            Ok(serde_json::json!({ "txHash": tx_hash }))
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -709,6 +1189,23 @@ window.midnightWallet = window.midnightWallet || {};
     // leave the WebView. Errors out if no sk is known for that DID
     // (e.g. created in a previous session — in-memory store).
     window.midnightWallet.getControllerSecretKey = (did) => call("getControllerSecretKey", { did });
+    // Generic passthrough so the embedded-dApp relay (see lib.rs) can
+    // invoke any bridge verb by name (getConfiguration / vaultDeposit /
+    // vaultClaim / vaultTotalLocked / ...). Keeps the relay decoupled
+    // from the per-method wrapper list above.
+    window.midnightWallet.call = call;
+    window.midnightWallet.getConfiguration  = (network) => call("getConfiguration", { network });
+    // Multi-lock passport-vault surface. `createLock` defines a policy
+    // (min age, optional country/doc) + seeds a pool; `deposit`/`claim`
+    // target a specific `lockId`; `claim` also selects a stored
+    // credential by `vcUri`. `listLocks` / `listCredentials` drive the
+    // dApp's lock list + credential selector.
+    window.midnightWallet.vaultCreateLock     = (params) => call("vaultCreateLock", params || {});
+    window.midnightWallet.vaultDeposit        = (params) => call("vaultDeposit", params || {});
+    window.midnightWallet.vaultClaim          = (params) => call("vaultClaim", params || {});
+    window.midnightWallet.vaultListLocks      = ()       => call("vaultListLocks");
+    window.midnightWallet.vaultListCredentials = ()      => call("vaultListCredentials");
+    window.midnightWallet.vaultTotalLocked    = ()       => call("vaultTotalLocked");
 
     // Drain responses forever.
     (async () => {

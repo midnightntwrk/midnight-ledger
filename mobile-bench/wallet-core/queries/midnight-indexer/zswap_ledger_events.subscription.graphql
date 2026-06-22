@@ -1,0 +1,8 @@
+subscription ZswapLedgerEvents($id: Int) {
+  zswapLedgerEvents(id: $id) {
+    __typename
+    id
+    maxId
+    raw
+  }
+}

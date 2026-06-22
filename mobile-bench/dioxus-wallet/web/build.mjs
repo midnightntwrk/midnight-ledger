@@ -40,6 +40,10 @@ const outdir = resolve(__dirname, "..", "assets", "web");
 // the dep graph and inline everything.
 const VENDORED_EXTERNALS = [
   "@midnight-ntwrk/midnight-did-contract",
+  // Passport-vault contract is vendored (not bundled) so its
+  // managed/passport-vault/{keys,zkir} blobs are served over mn-pkg://
+  // for the WebView ZK config provider used by deposit/claim compose.
+  "@input-output-hk/passport-vault-contract",
   "@midnight-ntwrk/compact-runtime",
   "@midnight-ntwrk/onchain-runtime-v3",
   "@midnight-ntwrk/ledger-v8",

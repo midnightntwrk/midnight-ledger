@@ -129,7 +129,10 @@ impl SubxtNodeClient {
         let mut progress = unsigned
             .submit_and_watch()
             .await
-            .map_err(|e| NodeError::Submit(e.to_string()))?;
+            // `{e:?}` (Debug) surfaces the nested JSON-RPC `data` field, which
+            // for a `1010` carries Substrate's inner `Custom error: N` (the
+            // actual ledger `LedgerApiError` variant). `to_string()` drops it.
+            .map_err(|e| NodeError::Submit(format!("{e} | detail: {e:?}")))?;
 
         // subxt 0.44 doesn't have a one-shot wait_for_in_block —
         // we drive the status stream and break on the first

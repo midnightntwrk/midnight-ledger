@@ -62,6 +62,90 @@ async fn call_prepare_unproven(
     Ok(r.unproven_tx_hex)
 }
 
+/// Drive the bridge's `prepareVaultCallTx` (the passport-vault analogue
+/// of `prepareUnprovenCallTx`) and return the unproven tx hex. Used by
+/// [`Wallet::call_contract_circuit`]. Unlike the DID shim there is no
+/// `controllerSecretHex` — the circuit's witnesses (e.g. the holder
+/// date-of-birth for `claimFunds`) are supplied via `private_state`;
+/// `depositFunds` omits it (empty private state).
+#[allow(clippy::too_many_arguments)]
+async fn call_prepare_vault_unproven(
+    bridge: &dyn JsBridge,
+    circuit: String,
+    circuit_args: serde_json::Value,
+    private_state: Option<serde_json::Value>,
+    contract_state_hex: String,
+    contract_address_hex: String,
+    zswap_chain_state_hex: Option<String>,
+    ledger_parameters_hex: Option<String>,
+    coin_public_key_hex: String,
+    encryption_public_key_hex: String,
+    network_id: String,
+) -> Result<String, crate::js_bridge::JsBridgeError> {
+    let r: PrepareUnprovenCallTxResult = bridge
+        .call(
+            "prepareVaultCallTx",
+            serde_json::json!({
+                "circuit": circuit,
+                "circuitArgs": circuit_args,
+                "privateState": private_state,
+                "contractStateHex": contract_state_hex,
+                "contractAddressHex": contract_address_hex,
+                "zswapChainStateHex": zswap_chain_state_hex,
+                "ledgerParametersHex": ledger_parameters_hex,
+                "coinPublicKeyHex": coin_public_key_hex,
+                "encryptionPublicKeyHex": encryption_public_key_hex,
+                "networkId": network_id,
+            }),
+        )
+        .await?;
+    Ok(r.unproven_tx_hex)
+}
+
+/// Drive the bridge's `prepareVaultClaim` (the high-level claim compose
+/// that deserialises the holder credential bundle, reads the on-chain
+/// policy, builds the selective-disclosure presentation + age proof,
+/// and composes `claimFunds`). Returns the unproven tx hex. Unlike the
+/// deposit, the shielded input is the contract's escrow coin (built by
+/// the compose); the holder only pays DUST.
+#[allow(clippy::too_many_arguments)]
+async fn call_prepare_vault_claim(
+    bridge: &dyn JsBridge,
+    lock_id: u64,
+    bundle: serde_json::Value,
+    amount_base_units: String,
+    current_day: Option<String>,
+    contract_state_hex: String,
+    contract_address_hex: String,
+    zswap_chain_state_hex: Option<String>,
+    ledger_parameters_hex: Option<String>,
+    coin_public_key_hex: String,
+    encryption_public_key_hex: String,
+    recipient_user_address_hex: String,
+    network_id: String,
+) -> Result<String, crate::js_bridge::JsBridgeError> {
+    let r: PrepareUnprovenCallTxResult = bridge
+        .call(
+            "prepareVaultClaim",
+            serde_json::json!({
+                "lockId": lock_id.to_string(),
+                "bundle": bundle,
+                "amountBaseUnits": amount_base_units,
+                "currentDay": current_day,
+                "contractStateHex": contract_state_hex,
+                "contractAddressHex": contract_address_hex,
+                "zswapChainStateHex": zswap_chain_state_hex,
+                "ledgerParametersHex": ledger_parameters_hex,
+                "coinPublicKeyHex": coin_public_key_hex,
+                "encryptionPublicKeyHex": encryption_public_key_hex,
+                "recipientUserAddressHex": recipient_user_address_hex,
+                "networkId": network_id,
+            }),
+        )
+        .await?;
+    Ok(r.unproven_tx_hex)
+}
+
 /// Stable hardcoded seed used by [`Wallet::demo`] for non-Undeployed
 /// networks so the dev UI shows the *same* coin/encryption public
 /// keys across launches. **Not a real wallet**: the bytes are
@@ -130,6 +214,31 @@ pub struct BalanceSnapshot {
     pub night_atomic: u128,
 }
 
+/// Claim policy a locker pins when calling `createLock` on the
+/// multi-lock passport vault. Mirrors the `createLock` circuit's
+/// policy arguments (`passport-vault.compact`). For the initial UI
+/// only `min_age` + `max_claim` are surfaced; the issuing-state /
+/// document-number gates default to disabled.
+#[derive(Clone, Debug)]
+pub struct VaultLockPolicy {
+    pub min_age: u8,
+    pub require_issuing_state: bool,
+    pub required_issuing_state: [u8; 32],
+    pub require_document_number: bool,
+    pub required_document_number: [u8; 32],
+    pub max_claim: u128,
+    pub verifier_challenge_hash: [u8; 32],
+}
+
+/// Result of a successful `createLock`: the submitted tx hash plus the
+/// lock id the contract assigned (read from `lockCount` immediately
+/// before the call — `createLock` returns the pre-increment counter).
+#[derive(Clone, Debug)]
+pub struct VaultCreateLockOutcome {
+    pub tx_hash: String,
+    pub lock_id: u64,
+}
+
 /// A bare wallet — seed + derived keys + which network it talks to.
 /// Iter-1 step-1 has no balance, no UTXOs, no sync; that's iter-2.
 pub struct Wallet {
@@ -155,6 +264,12 @@ pub struct Wallet {
     /// PreProd repeat operations. See `BACKLOG.md` Path B for
     /// the design.
     dust_syncer: Option<std::sync::Arc<crate::dust::syncer::DustSyncer>>,
+    /// Optional persisted SHIELDED (zswap) syncer. When present,
+    /// `sync_shielded()` delta-syncs + caches the wallet's spendable
+    /// coins (the deposit balancer spends from these). Same lifecycle
+    /// as `dust_syncer`: the App constructs it (it has the store) and
+    /// attaches it via `with_shielded_syncer`.
+    shielded_syncer: Option<std::sync::Arc<crate::shielded::ShieldedSyncer>>,
     /// Optional WebView-side JS bridge handle. When present,
     /// `call_did_circuit` routes `prepareUnprovenCallTx` through
     /// this bridge instead of spawning a `NodeChildBridge` child
@@ -292,13 +407,23 @@ impl Wallet {
     /// Build from a raw 32-byte seed. Mirrors gsd-wallet's seed semantics
     /// (the seed *is* the wallet identity; no BIP39 yet).
     pub fn from_seed(seed: [u8; 32], network: Network) -> Self {
-        let keys = SecretKeys::from(Seed::from(seed));
+        // Shielded (zswap) keys derive from the HD `Zswap` child
+        // (`m/44'/2400'/0'/3/0`), matching the Midnight wallet SDK —
+        // NOT the raw seed. Deriving from the raw seed produces a
+        // different coin/encryption key, so coins the SDK encrypted
+        // on-chain never decrypt (the deposit's `coins=0` bug). Fall
+        // back to the raw seed only if HD derivation fails, which never
+        // happens for a valid 32-byte seed.
+        let zswap_seed =
+            crate::hd::derive_child_priv(&seed, 0, crate::hd::Role::Zswap, 0).unwrap_or(seed);
+        let keys = SecretKeys::from(Seed::from(zswap_seed));
         Self {
             network,
             keys,
             seed_bytes: seed,
             proof_server_url: None,
             dust_syncer: None,
+            shielded_syncer: None,
             js_bridge: None,
             indexer: None,
             node: None,
@@ -533,6 +658,41 @@ impl Wallet {
         self.dust_syncer.as_ref()
     }
 
+    /// Builder: attach a persisted SHIELDED (zswap) syncer. The deposit
+    /// path calls `sync_shielded()` to get the wallet's spendable coins
+    /// + commitment Merkle tree. Same lifecycle as `with_dust_syncer`.
+    pub fn with_shielded_syncer(
+        mut self,
+        syncer: std::sync::Arc<crate::shielded::ShieldedSyncer>,
+    ) -> Self {
+        self.shielded_syncer = Some(syncer);
+        self
+    }
+
+    /// Currently-configured SHIELDED syncer, if any.
+    pub fn shielded_syncer(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::shielded::ShieldedSyncer>> {
+        self.shielded_syncer.as_ref()
+    }
+
+    /// Sync the wallet's SHIELDED (zswap) note state. Requires a
+    /// `ShieldedSyncer` to have been attached (the App does this from
+    /// the store); without one this errors, since a full from-scratch
+    /// shielded replay needs the redb checkpoint to be tractable on
+    /// PreProd. Returns the synced `zswap::local::State` — spendable
+    /// coins + the commitment Merkle tree the deposit spends against.
+    pub async fn sync_shielded(
+        &self,
+    ) -> Result<zswap::local::State<storage::DefaultDB>, crate::shielded::ShieldedError> {
+        match self.shielded_syncer.clone() {
+            Some(syncer) => syncer.sync().await,
+            None => Err(crate::shielded::ShieldedError::Store(
+                "no shielded syncer attached (the App wires one from the wallet store)".into(),
+            )),
+        }
+    }
+
     /// Demo wallet — uses [`UNDEPLOYED_GENESIS_SEED_HEX`] when the
     /// network targets the standalone chain (either
     /// [`Network::Undeployed`] or [`Network::UndeployedYurii`], both
@@ -609,6 +769,16 @@ impl Wallet {
     pub fn unshielded_address(&self) -> Result<String, WalletError> {
         crate::address::unshielded_bech32m(&self.seed_bytes, self.network)
             .map_err(|e| WalletError::Address(e.to_string()))
+    }
+
+    /// The wallet's unshielded `UserAddress` as raw 32-byte payload hex
+    /// (SHA-256 of the night verifying key). This is the byte form the
+    /// contract's `UserAddress` type expects as an unshielded `sendUnshielded`
+    /// recipient — the holder receives the released NIGHT at this address.
+    pub fn unshielded_user_address_hex(&self) -> Result<String, WalletError> {
+        let sk = self.did_controller_signing_key()?;
+        let ua = coin_structure::coin::UserAddress::from(sk.verifying_key());
+        Ok(hex::encode(ua.0.0))
     }
 
     /// Bech32m-encoded shielded NIGHT receive address for this
@@ -1566,6 +1736,722 @@ impl Wallet {
                 controller_sk: [0u8; 32],
             });
         }
+    }
+
+    /// Invoke a circuit on a deployed **non-DID** Compact contract —
+    /// today the passport-vault `depositFunds` (lock) / `claimFunds`
+    /// (unlock) / `adminWithdraw` circuits. This is the generic sibling
+    /// of [`Wallet::call_did_circuit`]: the Compact circuit body is
+    /// composed in JS via `prepareVaultCallTx` (WebView on
+    /// mobile/desktop, the Node harness in `cargo test`), and the
+    /// resulting `UnprovenTransaction` is balanced, proven, and
+    /// submitted natively through the identical Rust pipeline.
+    ///
+    /// Unlike the DID path there is no per-DID controller secret. The
+    /// circuit's private witnesses are supplied via `private_state`:
+    /// `claimFunds` needs the holder date-of-birth witness
+    /// (`{ holderDateOfBirthDays, holderDateOfBirthOpening }`),
+    /// `depositFunds` passes `None` (empty private state).
+    ///
+    /// `circuit_args` is the JSON arg array (the deposit shielded coin,
+    /// or the claim credential + presentation + age proof), encoded
+    /// with `{ "$bigint": "n" }` / `{ "$bytes": "0x.." }` markers that
+    /// `prepareVaultCallTx`'s `reviveVaultValue` turns back into
+    /// `bigint` / `Uint8Array`. Returns the submitted transaction hash
+    /// on success.
+    ///
+    /// NOTE: the caller is responsible for building the args — in
+    /// particular the deposit shielded coin (selected from the wallet's
+    /// shielded state) and the claim selective-disclosure presentation.
+    pub async fn call_contract_circuit(
+        &self,
+        contract_address_hex: String,
+        circuit: String,
+        circuit_args: serde_json::Value,
+        private_state: Option<serde_json::Value>,
+    ) -> Result<String, String> {
+        let network = self.network;
+        let mut wallet = Wallet::from_seed(self.seed_bytes, network);
+        if let Some(url) = self.proof_server_url.clone() {
+            wallet = wallet.with_proof_server_url(url);
+        }
+        if let Some(s) = self.dust_syncer.clone() {
+            wallet = wallet.with_dust_syncer(s);
+        }
+        if let Some(b) = self.js_bridge.clone() {
+            wallet = wallet.with_js_bridge(b);
+        }
+        if let Some(i) = self.indexer.clone() {
+            wallet = wallet.with_indexer(i);
+        }
+        if let Some(n) = self.node.clone() {
+            wallet = wallet.with_node(n);
+        }
+        if let Some(p) = self.prover.clone() {
+            wallet = wallet.with_prover(p);
+        }
+
+        // 1. Sync DUST (fees are paid in DUST).
+        tracing::info!(target: "wallet_core", %circuit, "vault call: syncing dust");
+        let mut dust_state = wallet
+            .sync_dust()
+            .await
+            .map_err(|e| format!("sync dust: {e}"))?;
+        let dust_key = wallet
+            .dust_secret_key()
+            .map_err(|e| format!("dust key: {e}"))?;
+
+        // 2. Composing — JS builds the UnprovenTransaction; Rust pulls
+        //    current contract + Zswap state from the indexer first.
+        tracing::info!(target: "wallet_core", %circuit, "vault call: composing");
+        let coin_pk_hex = wallet
+            .coin_public_key_hex()
+            .map_err(|e| format!("coin pk: {e}"))?;
+        let enc_pk_hex = wallet
+            .encryption_public_key_hex()
+            .map_err(|e| format!("encryption pk: {e}"))?;
+        let indexer = wallet
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let info = match indexer.contract_state(&contract_address_hex).await {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                return Err(format!(
+                    "no on-chain state for {contract_address_hex} — is the vault deployed?",
+                ));
+            }
+            Err(e) => return Err(format!("indexer: {e}")),
+        };
+
+        // Prefer the in-process WebView bridge; fall back to a spawned
+        // Node harness for desktop `cargo test`. `owned_node_bridge`
+        // keeps the spawned child alive for the duration of the call.
+        let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+            if wallet.js_bridge.is_some() {
+                None
+            } else {
+                Some(
+                    crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    )
+                    .map_err(|e| format!("spawn harness: {e}"))?,
+                )
+            };
+        let bridge: &dyn JsBridge =
+            match (wallet.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => return Err("no JS bridge available".to_string()),
+            };
+
+        // Use chain-tip LedgerParameters (PreProd retunes them over
+        // time; stale params land the transcript in the fallible slot
+        // and the chain rejects with 1010). Same rationale as
+        // `call_did_circuit`.
+        let tip_params_hex = match indexer.chain_tip().await {
+            Ok(Some(t)) => t.ledger_parameters_hex,
+            _ => None,
+        };
+        let ledger_params_hex = tip_params_hex.or(info.ledger_parameters_hex);
+        let unproven_hex = call_prepare_vault_unproven(
+            bridge,
+            circuit.clone(),
+            circuit_args,
+            private_state,
+            info.state_hex,
+            contract_address_hex.clone(),
+            info.zswap_state_hex,
+            ledger_params_hex.clone(),
+            coin_pk_hex,
+            enc_pk_hex,
+            network.config().network_id.to_string(),
+        )
+        .await
+        .map_err(|e| format!("prepare vault call tx: {e}"))?;
+        let unproven_bytes =
+            hex::decode(&unproven_hex).map_err(|e| format!("hex decode: {e}"))?;
+        let unproven: crate::tx::build::UnprovenTx =
+            serialize::tagged_deserialize(&unproven_bytes[..])
+                .map_err(|e| format!("deserialise unproven tx: {e}"))?;
+
+        // 3. Balancing — identical DUST pipeline to deploy / DID calls.
+        tracing::info!(target: "wallet_core", %circuit, "vault call: balancing");
+        let parsed_tip_params: Option<ledger::structure::LedgerParameters> =
+            ledger_params_hex.as_ref().and_then(|h| {
+                let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                serialize::tagged_deserialize(&bytes[..]).ok()
+            });
+        let initial_params_fallback = ledger::structure::INITIAL_PARAMETERS;
+        let params: &ledger::structure::LedgerParameters =
+            parsed_tip_params.as_ref().unwrap_or(&initial_params_fallback);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
+        let chain_tip_secs: u64 = match indexer.chain_tip().await {
+            Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+            _ => 0,
+        };
+        let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+            base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+        } else {
+            dust_state.sync_time
+        };
+        let mut ctx = crate::tx::balance::BalanceCtx {
+            dust_state: &mut dust_state,
+            dust_key: &dust_key,
+            params: &params,
+            time: ctime,
+            ttl,
+            network_id: network.config().network_id,
+        };
+        let balanced = crate::tx::balance::balance(unproven, &mut ctx)
+            .map_err(|e| format!("balance: {e}"))?;
+
+        // 4. Proving — trait-routed LocalProver / HttpProver.
+        tracing::info!(target: "wallet_core", %circuit, "vault call: proving");
+        let proven = wallet
+            .resolve_prover()
+            .prove(balanced)
+            .await
+            .map_err(|e| format!("prove: {e}"))?;
+
+        // 5. Submitting.
+        tracing::info!(target: "wallet_core", %circuit, "vault call: submitting");
+        let scale_bytes = crate::tx::scale::scale_encode(&proven)
+            .map_err(|e| format!("encode: {e}"))?;
+        let signer = wallet
+            .midnight_signer()
+            .map_err(|e| format!("signer: {e}"))?;
+        let node = wallet
+            .resolve_node()
+            .await
+            .map_err(|e| format!("node connect: {e}"))?;
+        let submit = node
+            .submit_deploy(scale_bytes, &signer)
+            .await
+            .map_err(|e| format!("submit: {e}"))?;
+
+        Ok(hex::encode(submit.tx_hash))
+    }
+
+    /// Read the passport-vault contract's currently-locked total.
+    ///
+    /// Pulls the contract's serialised `ContractState` from the indexer,
+    /// then asks the JS bundle's `readVaultLedger` to decode it (the
+    /// Compact ledger layout lives in the vendored contract module, not
+    /// Rust). Returns the escrow value in base units (1 NIGHT = 1e6):
+    /// `escrowVault.value` when the vault `hasDeposit`, else 0. The
+    /// embedded dApp surfaces this via the `vaultTotalLocked` connector
+    /// verb. This is a read-only call — no seed, dust, proving, or
+    /// submission involved.
+    pub async fn vault_total_locked(
+        &self,
+        contract_address_hex: String,
+    ) -> Result<u128, String> {
+        let indexer = self
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let info = match indexer.contract_state(&contract_address_hex).await {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                return Err(format!(
+                    "no on-chain state for {contract_address_hex} — is the vault deployed on this network?",
+                ));
+            }
+            Err(e) => return Err(format!("indexer: {e}")),
+        };
+
+        // Prefer the in-process WebView bridge; fall back to a spawned
+        // Node harness for desktop `cargo test`. Mirrors the transport
+        // resolution in `call_contract_circuit`.
+        let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+            if self.js_bridge.is_some() {
+                None
+            } else {
+                Some(
+                    crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    )
+                    .map_err(|e| format!("spawn harness: {e}"))?,
+                )
+            };
+        let bridge: &dyn JsBridge =
+            match (self.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => return Err("no JS bridge available".to_string()),
+            };
+
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct VaultLedgerRead {
+            total_locked_base_units: String,
+        }
+        let read: VaultLedgerRead = bridge
+            .call(
+                "readVaultLedger",
+                serde_json::json!({ "contractStateHex": info.state_hex }),
+            )
+            .await
+            .map_err(|e| format!("readVaultLedger: {e}"))?;
+        read
+            .total_locked_base_units
+            .parse::<u128>()
+            .map_err(|e| format!("parse total locked '{}': {e}", read.total_locked_base_units))
+    }
+
+    /// Run an UNSHIELDED-funded passport-vault circuit (`createLock` with an
+    /// initial deposit, or `depositToLock`): compose the call in the
+    /// WebView/Node bridge (whose `receiveUnshielded(nativeToken(), amount)`
+    /// pulls native UNSHIELDED NIGHT into the contract), add the matching
+    /// wallet-owned NIGHT spend + change **signed with the night key** + DUST
+    /// fees, prove, and submit. Returns the submitted tx hash.
+    ///
+    /// The deposit spends the wallet's unshielded NIGHT directly (the faucet
+    /// output) — no shielding step. Signing the funding spend in Rust is what
+    /// avoids the node's `1010 Custom error 192 (InputsSignaturesLengthMismatch)`
+    /// that the JS SDK hits on unshielded contract funding. `circuit_args` is
+    /// the `{ $bigint } / { $bytes }`-tagged arg array for the circuit.
+    async fn run_unshielded_funded_vault_circuit(
+        &self,
+        contract_address_hex: String,
+        circuit: &str,
+        circuit_args: serde_json::Value,
+    ) -> Result<String, String> {
+        let network = self.network;
+        let network_id = network.config().network_id.to_string();
+
+        // 1. Sync the wallet's unshielded NIGHT UTXOs (the funding source) and
+        //    derive the night key that owns + signs them.
+        tracing::info!(target: "wallet_core", "vault deposit: syncing unshielded NIGHT");
+        let utxos = self
+            .sync_unshielded()
+            .await
+            .map_err(|e| format!("sync unshielded: {e}"))?;
+        let night_sk = self
+            .did_controller_signing_key()
+            .map_err(|e| format!("night key: {e}"))?;
+
+        // 2. Sync DUST (fees).
+        tracing::info!(target: "wallet_core", "vault deposit: syncing dust");
+        let mut dust_state = self
+            .sync_dust()
+            .await
+            .map_err(|e| format!("sync dust: {e}"))?;
+        let dust_key = self
+            .dust_secret_key()
+            .map_err(|e| format!("dust key: {e}"))?;
+
+        // 3. Compose depositFunds(coin) via the bridge.
+        tracing::info!(target: "wallet_core", "vault deposit: composing");
+        let coin_pk_hex = self
+            .coin_public_key_hex()
+            .map_err(|e| format!("coin pk: {e}"))?;
+        let enc_pk_hex = self
+            .encryption_public_key_hex()
+            .map_err(|e| format!("encryption pk: {e}"))?;
+        let indexer = self
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let info = match indexer.contract_state(&contract_address_hex).await {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                return Err(format!(
+                    "no on-chain state for {contract_address_hex} — is the vault deployed?",
+                ));
+            }
+            Err(e) => return Err(format!("indexer: {e}")),
+        };
+        let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+            if self.js_bridge.is_some() {
+                None
+            } else {
+                Some(
+                    crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    )
+                    .map_err(|e| format!("spawn harness: {e}"))?,
+                )
+            };
+        let bridge: &dyn JsBridge =
+            match (self.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => return Err("no JS bridge available".to_string()),
+            };
+        let tip_params_hex = match indexer.chain_tip().await {
+            Ok(Some(t)) => t.ledger_parameters_hex,
+            _ => None,
+        };
+        let ledger_params_hex = tip_params_hex.or(info.ledger_parameters_hex);
+
+        // The circuit's `receiveUnshielded(nativeToken(), amount)` pulls
+        // native unshielded NIGHT into the contract; the unshielded balancer
+        // below adds the matching wallet spend + change + signature.
+        let unproven_hex = call_prepare_vault_unproven(
+            bridge,
+            circuit.to_string(),
+            circuit_args,
+            None,
+            info.state_hex,
+            contract_address_hex.clone(),
+            info.zswap_state_hex,
+            ledger_params_hex.clone(),
+            coin_pk_hex,
+            enc_pk_hex,
+            network_id.clone(),
+        )
+        .await
+        .map_err(|e| format!("prepare vault {circuit} tx: {e}"))?;
+        let unproven_bytes =
+            hex::decode(&unproven_hex).map_err(|e| format!("hex decode: {e}"))?;
+        let unproven: crate::tx::build::UnprovenTx =
+            serialize::tagged_deserialize(&unproven_bytes[..])
+                .map_err(|e| format!("deserialise unproven tx: {e}"))?;
+
+        // 4. Parse tip LedgerParameters for balancing (same rationale
+        //    as call_contract_circuit / call_did_circuit).
+        let parsed_tip_params: Option<ledger::structure::LedgerParameters> =
+            ledger_params_hex.as_ref().and_then(|h| {
+                let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                serialize::tagged_deserialize(&bytes[..]).ok()
+            });
+        let initial_params_fallback = ledger::structure::INITIAL_PARAMETERS;
+        let params: &ledger::structure::LedgerParameters =
+            parsed_tip_params.as_ref().unwrap_or(&initial_params_fallback);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
+
+        // 5. Unshielded balance: add the wallet's NIGHT spend + change to fund
+        //    the contract's `receiveUnshielded`, SIGNED with the night key so
+        //    input-count == signature-count (avoids 1010 Custom error 192).
+        tracing::info!(target: "wallet_core", "vault deposit: unshielded balancing");
+        let unshielded_balanced = crate::tx::balance::balance_unshielded(
+            unproven,
+            &utxos,
+            &night_sk,
+            ttl,
+            &network_id,
+        )
+        .map_err(|e| format!("unshielded balance: {e}"))?;
+
+        // 6. DUST balance.
+        tracing::info!(target: "wallet_core", "vault deposit: dust balancing");
+        let chain_tip_secs: u64 = match indexer.chain_tip().await {
+            Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+            _ => 0,
+        };
+        let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+            base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+        } else {
+            dust_state.sync_time
+        };
+        let mut ctx = crate::tx::balance::BalanceCtx {
+            dust_state: &mut dust_state,
+            dust_key: &dust_key,
+            params,
+            time: ctime,
+            ttl,
+            network_id: &network_id,
+        };
+        let balanced = crate::tx::balance::balance(unshielded_balanced, &mut ctx)
+            .map_err(|e| format!("dust balance: {e}"))?;
+
+        // 7. Prove + submit.
+        tracing::info!(target: "wallet_core", "vault deposit: proving");
+        let proven = self
+            .resolve_prover()
+            .prove(balanced)
+            .await
+            .map_err(|e| format!("prove: {e}"))?;
+        tracing::info!(target: "wallet_core", "vault deposit: submitting");
+        let scale_bytes =
+            crate::tx::scale::scale_encode(&proven).map_err(|e| format!("encode: {e}"))?;
+        let signer = self.midnight_signer().map_err(|e| format!("signer: {e}"))?;
+        let node = self
+            .resolve_node()
+            .await
+            .map_err(|e| format!("node connect: {e}"))?;
+        let submit = node
+            .submit_deploy(scale_bytes, &signer)
+            .await
+            .map_err(|e| format!("submit: {e}"))?;
+        Ok(hex::encode(submit.tx_hash))
+    }
+
+    /// Read-only bridge call against a vault contract's on-chain state.
+    /// Fetches the serialised `ContractState` from the indexer and asks
+    /// the JS bundle's `verb` (e.g. `readVaultLocks`) to decode it. Owns
+    /// any spawned Node harness internally so the returned JSON outlives
+    /// the bridge. No seed / dust / proving / submission.
+    async fn vault_bridge_read(
+        &self,
+        contract_address_hex: &str,
+        verb: &str,
+    ) -> Result<serde_json::Value, String> {
+        let indexer = self
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let info = match indexer.contract_state(contract_address_hex).await {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                return Err(format!(
+                    "no on-chain state for {contract_address_hex} — is the vault deployed on this network?",
+                ));
+            }
+            Err(e) => return Err(format!("indexer: {e}")),
+        };
+        let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+            if self.js_bridge.is_some() {
+                None
+            } else {
+                Some(
+                    crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    )
+                    .map_err(|e| format!("spawn harness: {e}"))?,
+                )
+            };
+        let bridge: &dyn JsBridge =
+            match (self.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => return Err("no JS bridge available".to_string()),
+            };
+        bridge
+            .call(verb, serde_json::json!({ "contractStateHex": info.state_hex }))
+            .await
+            .map_err(|e| format!("{verb}: {e}"))
+    }
+
+    /// Enumerate the vault's locks (id, policy, per-lock pool) plus the
+    /// global `lockCount`. Returns the raw `readVaultLocks` JSON for the
+    /// dApp's lock list + claim selector.
+    pub async fn list_locks(
+        &self,
+        contract_address_hex: String,
+    ) -> Result<serde_json::Value, String> {
+        self.vault_bridge_read(&contract_address_hex, "readVaultLocks")
+            .await
+    }
+
+    /// Read the vault's current `lockCount` — the id the *next*
+    /// `createLock` will assign. Used to report the new lock id after a
+    /// create (the circuit returns the pre-increment counter).
+    async fn vault_lock_count(&self, contract_address_hex: &str) -> Result<u64, String> {
+        let v = self
+            .vault_bridge_read(contract_address_hex, "readVaultLocks")
+            .await?;
+        v.get("lockCount")
+            .and_then(|x| x.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| x.as_u64()))
+            .ok_or_else(|| "readVaultLocks: missing lockCount".to_string())
+    }
+
+    /// Create a new lock with `policy` and an optional initial deposit of
+    /// `initial_amount` base units. The caller becomes the lock's creator
+    /// (only they may later deposit / withdraw). Returns the submitted tx
+    /// hash plus the assigned lock id.
+    pub async fn create_lock(
+        &self,
+        contract_address_hex: String,
+        policy: VaultLockPolicy,
+        initial_amount: u128,
+    ) -> Result<VaultCreateLockOutcome, String> {
+        // The circuit returns the pre-increment `lockCount`, which is the
+        // id of the lock it creates — read it before submitting.
+        let lock_id = self.vault_lock_count(&contract_address_hex).await?;
+        let args = serde_json::json!([
+            { "$bigint": policy.min_age.to_string() },
+            policy.require_issuing_state,
+            { "$bytes": hex::encode(policy.required_issuing_state) },
+            policy.require_document_number,
+            { "$bytes": hex::encode(policy.required_document_number) },
+            { "$bigint": policy.max_claim.to_string() },
+            { "$bytes": hex::encode(policy.verifier_challenge_hash) },
+            { "$bigint": initial_amount.to_string() },
+        ]);
+        let tx_hash = self
+            .run_unshielded_funded_vault_circuit(contract_address_hex, "createLock", args)
+            .await?;
+        Ok(VaultCreateLockOutcome { tx_hash, lock_id })
+    }
+
+    /// Top up an existing lock's pool with `amount_base_units` of native
+    /// UNSHIELDED NIGHT. Only the lock's creator may deposit (enforced
+    /// on-chain).
+    pub async fn deposit_to_lock(
+        &self,
+        contract_address_hex: String,
+        lock_id: u64,
+        amount_base_units: u128,
+    ) -> Result<String, String> {
+        let args = serde_json::json!([
+            { "$bigint": lock_id.to_string() },
+            { "$bigint": amount_base_units.to_string() },
+        ]);
+        self.run_unshielded_funded_vault_circuit(contract_address_hex, "depositToLock", args)
+            .await
+    }
+
+    /// Claim (unlock) funds from a specific lock. Composes
+    /// `claimFromLock(lockId, ...)` from the holder's credential `bundle`
+    /// via the bridge's `prepareVaultClaim` (which reads the lock's
+    /// on-chain policy, builds the selective-disclosure presentation +
+    /// age proof, and supplies the date-of-birth witness), then balances
+    /// DUST fees, proves, and submits. The released NIGHT goes to this
+    /// wallet's unshielded address.
+    ///
+    /// No shielded sync needed: the payout is drawn from the contract's
+    /// own unshielded balance; the holder only covers DUST fees.
+    pub async fn claim_from_lock(
+        &self,
+        contract_address_hex: String,
+        lock_id: u64,
+        amount_base_units: u128,
+        bundle: serde_json::Value,
+        current_day: Option<u64>,
+    ) -> Result<String, String> {
+        let network = self.network;
+        let network_id = network.config().network_id.to_string();
+
+        tracing::info!(target: "wallet_core", "vault claim: syncing dust");
+        let mut dust_state = self
+            .sync_dust()
+            .await
+            .map_err(|e| format!("sync dust: {e}"))?;
+        let dust_key = self
+            .dust_secret_key()
+            .map_err(|e| format!("dust key: {e}"))?;
+
+        tracing::info!(target: "wallet_core", "vault claim: composing");
+        let coin_pk_hex = self
+            .coin_public_key_hex()
+            .map_err(|e| format!("coin pk: {e}"))?;
+        let enc_pk_hex = self
+            .encryption_public_key_hex()
+            .map_err(|e| format!("encryption pk: {e}"))?;
+        // The released NIGHT is UNSHIELDED, so the contract pays out to the
+        // holder's unshielded `UserAddress` (not the zswap coin key).
+        let recipient_user_address_hex = self
+            .unshielded_user_address_hex()
+            .map_err(|e| format!("recipient user address: {e}"))?;
+        let indexer = self
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let info = match indexer.contract_state(&contract_address_hex).await {
+            Ok(Some(i)) => i,
+            Ok(None) => {
+                return Err(format!(
+                    "no on-chain state for {contract_address_hex} — is the vault deployed?",
+                ));
+            }
+            Err(e) => return Err(format!("indexer: {e}")),
+        };
+        let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+            if self.js_bridge.is_some() {
+                None
+            } else {
+                Some(
+                    crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    )
+                    .map_err(|e| format!("spawn harness: {e}"))?,
+                )
+            };
+        let bridge: &dyn JsBridge =
+            match (self.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => return Err("no JS bridge available".to_string()),
+            };
+        let tip_params_hex = match indexer.chain_tip().await {
+            Ok(Some(t)) => t.ledger_parameters_hex,
+            _ => None,
+        };
+        let ledger_params_hex = tip_params_hex.or(info.ledger_parameters_hex);
+
+        let unproven_hex = call_prepare_vault_claim(
+            bridge,
+            lock_id,
+            bundle,
+            amount_base_units.to_string(),
+            current_day.map(|d| d.to_string()),
+            info.state_hex,
+            contract_address_hex.clone(),
+            info.zswap_state_hex,
+            ledger_params_hex.clone(),
+            coin_pk_hex,
+            enc_pk_hex,
+            recipient_user_address_hex,
+            network_id.clone(),
+        )
+        .await
+        .map_err(|e| format!("prepare vault claim tx: {e}"))?;
+        let unproven_bytes =
+            hex::decode(&unproven_hex).map_err(|e| format!("hex decode: {e}"))?;
+        let unproven: crate::tx::build::UnprovenTx =
+            serialize::tagged_deserialize(&unproven_bytes[..])
+                .map_err(|e| format!("deserialise unproven tx: {e}"))?;
+
+        // DUST balance (no shielded pre-pass — contract-owned input).
+        tracing::info!(target: "wallet_core", "vault claim: dust balancing");
+        let parsed_tip_params: Option<ledger::structure::LedgerParameters> =
+            ledger_params_hex.as_ref().and_then(|h| {
+                let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                serialize::tagged_deserialize(&bytes[..]).ok()
+            });
+        let initial_params_fallback = ledger::structure::INITIAL_PARAMETERS;
+        let params: &ledger::structure::LedgerParameters =
+            parsed_tip_params.as_ref().unwrap_or(&initial_params_fallback);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
+        let chain_tip_secs: u64 = match indexer.chain_tip().await {
+            Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+            _ => 0,
+        };
+        let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+            base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+        } else {
+            dust_state.sync_time
+        };
+        let mut ctx = crate::tx::balance::BalanceCtx {
+            dust_state: &mut dust_state,
+            dust_key: &dust_key,
+            params,
+            time: ctime,
+            ttl,
+            network_id: &network_id,
+        };
+        let balanced = crate::tx::balance::balance(unproven, &mut ctx)
+            .map_err(|e| format!("dust balance: {e}"))?;
+
+        tracing::info!(target: "wallet_core", "vault claim: proving");
+        let proven = self
+            .resolve_prover()
+            .prove(balanced)
+            .await
+            .map_err(|e| format!("prove: {e}"))?;
+        tracing::info!(target: "wallet_core", "vault claim: submitting");
+        let scale_bytes =
+            crate::tx::scale::scale_encode(&proven).map_err(|e| format!("encode: {e}"))?;
+        let signer = self.midnight_signer().map_err(|e| format!("signer: {e}"))?;
+        let node = self
+            .resolve_node()
+            .await
+            .map_err(|e| format!("node connect: {e}"))?;
+        let submit = node
+            .submit_deploy(scale_bytes, &signer)
+            .await
+            .map_err(|e| format!("submit: {e}"))?;
+        Ok(hex::encode(submit.tx_hash))
     }
 
     /// Drain a `WizardStage` stream until it terminates and convert
