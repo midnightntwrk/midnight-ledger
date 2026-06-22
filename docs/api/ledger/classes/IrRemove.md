@@ -2,19 +2,18 @@
 
 ***
 
-[@midnight/ledger](../globals.md) / VerifierKeyInsert
+[@midnight/ledger](../globals.md) / IrRemove
 
-# Class: VerifierKeyInsert
+# Class: IrRemove
 
-An update instruction to insert a verifier key at a specific operation and
-version.
+An update instruction to remove IR metadata of a specific operation.
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new VerifierKeyInsert(operation, vk): VerifierKeyInsert;
+new IrRemove(operation): IrRemove;
 ```
 
 #### Parameters
@@ -23,13 +22,9 @@ new VerifierKeyInsert(operation, vk): VerifierKeyInsert;
 
 `string` | `Uint8Array`\<`ArrayBufferLike`\>
 
-##### vk
-
-[`ContractOperationVersionedVerifierKey`](ContractOperationVersionedVerifierKey.md)
-
 #### Returns
 
-`VerifierKeyInsert`
+`IrRemove`
 
 ## Properties
 
@@ -37,14 +32,6 @@ new VerifierKeyInsert(operation, vk): VerifierKeyInsert;
 
 ```ts
 readonly operation: string | Uint8Array<ArrayBufferLike>;
-```
-
-***
-
-### vk
-
-```ts
-readonly vk: ContractOperationVersionedVerifierKey;
 ```
 
 ## Methods
