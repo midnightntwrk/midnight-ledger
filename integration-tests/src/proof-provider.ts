@@ -19,6 +19,7 @@ import {
   type PreBinding,
   type Proof,
   type SignatureEnabled,
+  type ProvingKeyMaterial,
   createProvingPayload,
   createCheckPayload,
   parseCheckResult,
@@ -347,7 +348,8 @@ const serverProver = {
   ): Promise<Uint8Array> => {
     const payload = createProvingPayload(serializedPreimage, overwriteBindingInput);
     return proofServerRequest('prove', payload);
-  }
+  },
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined,
 };
 
 const callProverWorker = (op: 'check' | 'prove', args: any[]): Promise<any> => {
@@ -378,7 +380,8 @@ const wasmProverWorker = {
     const tn = Date.now();
     console.log(`finished individual proof in ${(tn - t0) / 1000}s`);
     return result;
-  }
+  },
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined,
 };
 
 /**
