@@ -38,7 +38,10 @@ const REFRESH_HINT: &str =
 struct TestParams;
 
 impl transient_crypto_old::proofs::ParamsProverProvider for TestParams {
-    async fn get_params(&self, k: u8) -> std::io::Result<transient_crypto_old::proofs::ParamsProver> {
+    async fn get_params(
+        &self,
+        k: u8,
+    ) -> std::io::Result<transient_crypto_old::proofs::ParamsProver> {
         const DIR: &str = env!("MIDNIGHT_PP");
         transient_crypto_old::proofs::ParamsProver::read(BufReader::new(File::open(format!(
             "{DIR}/bls_midnight_2p{k}"

@@ -37,11 +37,11 @@ pub struct LocalProvingProvider<'a, R: Rng + CryptoRng + SplittableRng, S, P> {
 }
 
 impl<
-        'a,
-        R: Rng + CryptoRng + SplittableRng,
-        S: transient_crypto::proofs::Resolver,
-        P: transient_crypto::proofs::ParamsProverProvider,
-    > transient_crypto::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
+    'a,
+    R: Rng + CryptoRng + SplittableRng,
+    S: transient_crypto::proofs::Resolver,
+    P: transient_crypto::proofs::ParamsProverProvider,
+> transient_crypto::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
 {
     async fn check(
         &self,
@@ -83,26 +83,30 @@ impl<
                     preimage.key_location.0
                 )
             })?;
-        let ir = IrSource::load_from_tagged(std::io::Cursor::new(
-            &proving_data.ir_source[..],
-        ))?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
 
         match ir.version {
             IrMinorVersion::V0 | IrMinorVersion::V1 => {
                 // V0/V1: use old Zkir pipeline directly.
                 // Load PK via IrSource's multi-tag loader, then convert to old ProverKey.
                 use transient_crypto::proofs::Zkir as _;
-                let current_pk = IrSource::load_prover_key_from_tagged(
-                    std::io::Cursor::new(&proving_data.prover_key[..]),
-                )?;
+                let current_pk = IrSource::load_prover_key_from_tagged(std::io::Cursor::new(
+                    &proving_data.prover_key[..],
+                ))?;
                 let mut pk_buf = Vec::new();
                 serialize::Serializable::serialize(&current_pk, &mut pk_buf)?;
                 let pk: transient_crypto_old::proofs::ProverKey<IrSource> =
                     serialize::Deserializable::deserialize(&mut &pk_buf[..], 0)?;
                 let old_preimage = ir_v1::preimage_to_v1(&preimage);
                 let v1_params = ir_v1::V1Params(self.params);
-                let (proof, _, _) =
-                    transient_crypto_old::proofs::Zkir::prove(&ir, self.rng, &v1_params, pk, &old_preimage).await?;
+                let (proof, _, _) = transient_crypto_old::proofs::Zkir::prove(
+                    &ir,
+                    self.rng,
+                    &v1_params,
+                    pk,
+                    &old_preimage,
+                )
+                .await?;
                 Ok(Proof(proof.0))
             }
             _ => {
@@ -125,11 +129,11 @@ impl<
 }
 
 impl<
-        'a,
-        R: Rng + CryptoRng + SplittableRng,
-        S: transient_crypto_old::proofs::Resolver,
-        P: transient_crypto_old::proofs::ParamsProverProvider,
-    > transient_crypto_old::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
+    'a,
+    R: Rng + CryptoRng + SplittableRng,
+    S: transient_crypto_old::proofs::Resolver,
+    P: transient_crypto_old::proofs::ParamsProverProvider,
+> transient_crypto_old::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
 {
     async fn check(
         &self,

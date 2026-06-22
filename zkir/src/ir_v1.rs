@@ -18,32 +18,30 @@
 //! with it without depending on `zkir-old`. The v1 circuit types (from
 //! `midnight-circuits` v6, `midnight-proofs` v0.7) differ from the v2 types
 //! at the Rust type level even though the underlying field elements are
-//! identical, so scalar conversions go through `ff::PrimeField::to_repr()`.
+//! identical, so scalar conversions go through `to_bytes_le()` / `from_bytes_le()`.
 //!
 //! This module also provides adapter types and helper functions for bridging
 //! the current (v2) proving/verification types to the v1 pipeline.
 
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use ff::PrimeField;
 use group::Group;
 use midnight_circuits_v1::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
     EqualityInstructions, PublicInputInstructions, ZeroInstructions,
 };
-use midnight_circuits_v1::types::{
-    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint,
-};
+use midnight_circuits_v1::types::{AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint};
 use midnight_proofs_v1::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
 use midnight_zk_stdlib_v1::{Relation, ZkStdLib, ZkStdLibArch};
-use serialize::VecExt;
+use serialize::{Deserializable, Serializable, Tagged, VecExt, peek_tag};
+use std::io::{self, Read, Seek};
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED};
 use transient_crypto::fab::AlignmentExt;
 
-use super::ir::{IrSource, Instruction as I};
+use super::ir::{Instruction as I, IrSource};
 
 /// The old outer scalar type, from midnight-curves v0.2 (via transient-crypto-old).
 type OldScalar = transient_crypto_old::curve::outer::Scalar;
@@ -57,7 +55,7 @@ type OldEmbeddedAffine = transient_crypto_old::curve::embedded::Affine;
 /// Converts a current outer scalar to the old (v1) outer scalar.
 /// Both are BLS12-381 Fq with identical byte representations.
 fn cvt(s: transient_crypto::curve::outer::Scalar) -> OldScalar {
-    OldScalar::from_repr(s.to_repr()).expect("BLS12-381 Fq round-trip")
+    OldScalar::from_bytes_le(&s.to_bytes_le()).expect("BLS12-381 Fq round-trip")
 }
 
 /// The v1 preprocessed witness data, using old scalar types.
@@ -153,9 +151,7 @@ fn v1_fab_decode_to_bytes_atom(
             let chunks = *length as usize / FR_BYTES_STORED;
             let expected_size = chunks + (stray != 0) as usize;
             let mut bytes_from =
-                |slice: &mut Vec<AssignedByte<OldScalar>>,
-                 k,
-                 f: AssignedNative<OldScalar>| {
+                |slice: &mut Vec<AssignedByte<OldScalar>>, k, f: AssignedNative<OldScalar>| {
                     let repr = std.assigned_to_le_bytes(layouter, &f, Some(k))?;
                     slice.extend(repr[..k].iter().cloned());
                     Ok::<_, Error>(())
@@ -193,10 +189,9 @@ fn v1_assemble_bytes(
     powers.push(std.convert(layouter, &bytes[0])?);
     for (i, byte) in bytes.iter().enumerate().skip(1) {
         let power = (0..i * BITS)
-            .fold(
-                transient_crypto_old::curve::Fr::from(1),
-                |acc, _| acc * transient_crypto_old::curve::Fr::from(2),
-            )
+            .fold(transient_crypto_old::curve::Fr::from(1), |acc, _| {
+                acc * transient_crypto_old::curve::Fr::from(2)
+            })
             .0;
         let byte = std.convert(layouter, byte)?;
         powers.push(std.mul_by_constant(layouter, &byte, power)?);
@@ -214,15 +209,12 @@ fn v1_ecc_from_parts(
     x: &AssignedNative<OldScalar>,
     y: &AssignedNative<OldScalar>,
 ) -> Result<AssignedNativePoint<OldEmbeddedAffineExt>, Error> {
-    let point = x
-        .value()
-        .zip(y.value())
-        .map(|(x, y)| {
-            transient_crypto_old::curve::EmbeddedGroupAffine::new(
-                transient_crypto_old::curve::Fr(*x),
-                transient_crypto_old::curve::Fr(*y),
-            )
-        });
+    let point = x.value().zip(y.value()).map(|(x, y)| {
+        transient_crypto_old::curve::EmbeddedGroupAffine::new(
+            transient_crypto_old::curve::Fr(*x),
+            transient_crypto_old::curve::Fr(*y),
+        )
+    });
     point.as_ref().error_if_known_and(|p| p.is_none())?;
     let point = point.map(|p| p.expect("After is_none check, point should exist").0);
     let point_var: AssignedNativePoint<OldEmbeddedAffineExt> =
@@ -390,12 +382,8 @@ impl Relation for IrSource {
                     std.mul(layouter, idx(&memory, *a)?, idx(&memory, *b)?, None)?,
                     &mut memory,
                 )?,
-                I::Neg { a } => {
-                    mem_push(std.neg(layouter, idx(&memory, *a)?)?, &mut memory)?
-                }
-                I::Not { a } => {
-                    mem_push(v1_lnot(std, layouter, idx(&memory, *a)?)?, &mut memory)?
-                }
+                I::Neg { a } => mem_push(std.neg(layouter, idx(&memory, *a)?)?, &mut memory)?,
+                I::Not { a } => mem_push(v1_lnot(std, layouter, idx(&memory, *a)?)?, &mut memory)?,
                 I::LessThan { a, b, bits } => {
                     let bit = std.lower_than(
                         layouter,
@@ -451,29 +439,17 @@ impl Relation for IrSource {
                     mem_push(reconstituted, &mut memory)?;
                 }
                 I::EcAdd { a_x, a_y, b_x, b_y } => {
-                    let a = v1_ecc_from_parts(
-                        std,
-                        layouter,
-                        idx(&memory, *a_x)?,
-                        idx(&memory, *a_y)?,
-                    )?;
-                    let b = v1_ecc_from_parts(
-                        std,
-                        layouter,
-                        idx(&memory, *b_x)?,
-                        idx(&memory, *b_y)?,
-                    )?;
+                    let a =
+                        v1_ecc_from_parts(std, layouter, idx(&memory, *a_x)?, idx(&memory, *a_y)?)?;
+                    let b =
+                        v1_ecc_from_parts(std, layouter, idx(&memory, *b_x)?, idx(&memory, *b_y)?)?;
                     let c = std.jubjub().add(layouter, &a, &b)?;
                     mem_push(std.jubjub().x_coordinate(&c), &mut memory)?;
                     mem_push(std.jubjub().y_coordinate(&c), &mut memory)?;
                 }
                 I::EcMul { a_x, a_y, scalar } => {
-                    let a = v1_ecc_from_parts(
-                        std,
-                        layouter,
-                        idx(&memory, *a_x)?,
-                        idx(&memory, *a_y)?,
-                    )?;
+                    let a =
+                        v1_ecc_from_parts(std, layouter, idx(&memory, *a_x)?, idx(&memory, *a_y)?)?;
                     let scalar = std.jubjub().convert(layouter, idx(&memory, *scalar)?)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
                     mem_push(std.jubjub().x_coordinate(&b), &mut memory)?;
@@ -586,17 +562,27 @@ fn preimage_from_v1(
     p: &transient_crypto_old::proofs::ProofPreimage,
 ) -> transient_crypto::proofs::ProofPreimage {
     let cvt_fr = |f: transient_crypto_old::curve::Fr| -> transient_crypto::curve::Fr {
-        transient_crypto::curve::Fr(
-            PrimeField::from_repr(f.0.to_repr()).expect("Fq round-trip"),
-        )
+        transient_crypto::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     };
     transient_crypto::proofs::ProofPreimage {
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
         private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
-        public_transcript_inputs: p.public_transcript_inputs.iter().copied().map(cvt_fr).collect(),
-        public_transcript_outputs: p.public_transcript_outputs.iter().copied().map(cvt_fr).collect(),
+        public_transcript_inputs: p
+            .public_transcript_inputs
+            .iter()
+            .copied()
+            .map(cvt_fr)
+            .collect(),
+        public_transcript_outputs: p
+            .public_transcript_outputs
+            .iter()
+            .copied()
+            .map(cvt_fr)
+            .collect(),
         binding_input: cvt_fr(p.binding_input),
-        communications_commitment: p.communications_commitment.map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
+        communications_commitment: p
+            .communications_commitment
+            .map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
         key_location: transient_crypto::proofs::KeyLocation(std::borrow::Cow::Owned(
             p.key_location.0.to_string(),
         )),
@@ -604,6 +590,10 @@ fn preimage_from_v1(
 }
 
 // --- Old Zkir impl (v1 pipeline) ---
+
+#[derive(Serializable)]
+#[tag = "prover-key[v7](ir-source[v2])"]
+struct FacadeProverKey(Vec<u8>);
 
 impl transient_crypto_old::proofs::Zkir for IrSource {
     fn check(
@@ -639,22 +629,58 @@ impl transient_crypto_old::proofs::Zkir for IrSource {
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
 
         let params_k = params.get_params(pk.k()).await?;
-        let proof = midnight_zk_stdlib_v1::prove::<_, transient_crypto_old::proofs::TranscriptHash>(
-            params_k.as_ref(),
-            &pk,
-            self,
-            &v1_pis,
-            v1_preproc,
-            rng,
-        )
-        .map_err(|e| anyhow::anyhow!("v1 prove: {e}"))?;
+        let proof =
+            midnight_zk_stdlib_v1::prove::<_, transient_crypto_old::proofs::TranscriptHash>(
+                params_k.as_ref(),
+                &pk,
+                self,
+                &v1_pis,
+                v1_preproc,
+                rng,
+            )
+            .map_err(|e| anyhow::anyhow!("v1 prove: {e}"))?;
 
         let old_pis = v1_pis
             .into_iter()
             .map(transient_crypto_old::curve::Fr)
             .collect();
 
-        Ok((transient_crypto_old::proofs::Proof(proof), old_pis, pi_skips))
+        Ok((
+            transient_crypto_old::proofs::Proof(proof),
+            old_pis,
+            pi_skips,
+        ))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
+        Self::load_from_tagged(reader)
+    }
+
+    fn load_prover_key_from_tagged(
+        mut reader: impl Read + Seek,
+    ) -> io::Result<transient_crypto_old::proofs::ProverKey<Self>> {
+        use transient_crypto_old::proofs::ProverKey;
+        let tag = peek_tag(&mut reader)?;
+        let expected_tag_new = <ProverKey<IrSource>>::tag();
+        let expected_tag_old = FacadeProverKey::tag();
+        if tag == expected_tag_new {
+            serialize::tagged_deserialize(&mut reader)
+        } else if tag == expected_tag_old {
+            let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
+            let mut header = Vec::new();
+            Serializable::serialize(&(data.len() as u32), &mut header)?;
+            let mut header_cursor = &header[..];
+            let mut data_cursor = &data[..];
+            let mut reader = Read::chain(&mut header_cursor, &mut data_cursor);
+            Deserializable::deserialize(&mut reader, 0)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected one of '{expected_tag_new}' or '{expected_tag_old}', got '{tag}'."
+                ),
+            ))
+        }
     }
 }
 
@@ -670,10 +696,22 @@ pub fn preimage_to_v1(
     transient_crypto_old::proofs::ProofPreimage {
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
         private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
-        public_transcript_inputs: p.public_transcript_inputs.iter().copied().map(cvt_fr).collect(),
-        public_transcript_outputs: p.public_transcript_outputs.iter().copied().map(cvt_fr).collect(),
+        public_transcript_inputs: p
+            .public_transcript_inputs
+            .iter()
+            .copied()
+            .map(cvt_fr)
+            .collect(),
+        public_transcript_outputs: p
+            .public_transcript_outputs
+            .iter()
+            .copied()
+            .map(cvt_fr)
+            .collect(),
         binding_input: cvt_fr(p.binding_input),
-        communications_commitment: p.communications_commitment.map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
+        communications_commitment: p
+            .communications_commitment
+            .map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
         key_location: transient_crypto_old::proofs::KeyLocation(std::borrow::Cow::Owned(
             p.key_location.0.to_string(),
         )),
@@ -700,4 +738,3 @@ impl<P: transient_crypto::proofs::ParamsProverProvider>
         transient_crypto_old::proofs::ParamsProver::read(&buf[..])
     }
 }
-

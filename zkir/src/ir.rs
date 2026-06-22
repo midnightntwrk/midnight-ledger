@@ -168,14 +168,8 @@ impl Zkir for IrSource {
                 let preproc = self.preprocess(preimage)?;
                 let pis = preproc.pis.clone();
                 let pi_skips = preproc.pi_skips.clone();
-                let proof = prove::<_, TranscriptHash>(
-                    params_k.as_ref(),
-                    v2_pk,
-                    self,
-                    &pis,
-                    preproc,
-                    rng,
-                )?;
+                let proof =
+                    prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
                 Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
             }
         }
@@ -634,6 +628,24 @@ impl IrSource {
     pub fn serialize_prover_key_to_tagged<W: Write>(
         version: IrMinorVersion,
         pk: &ProverKey<Self>,
+        writer: W,
+    ) -> io::Result<()> {
+        match version {
+            IrMinorVersion::V0 => {
+                let mut raw = Vec::new();
+                Serializable::serialize(pk, &mut raw)?;
+                let container = <Vec<u8> as Deserializable>::deserialize(&mut &raw[..], 0)?;
+                let facade = FacadeProverKey(container);
+                tagged_serialize(&facade, writer)
+            }
+            IrMinorVersion::V1 | IrMinorVersion::V2 => tagged_serialize(pk, writer),
+        }
+    }
+
+    /// Writes out a stdlib-v1 prover key with tag, preserving v0's old tag structure.
+    pub fn serialize_stdlib_v1_prover_key_to_tagged<W: Write>(
+        version: IrMinorVersion,
+        pk: &transient_crypto_old::proofs::ProverKey<Self>,
         writer: W,
     ) -> io::Result<()> {
         match version {
