@@ -49,9 +49,7 @@ mod proof_tests {
 
     /// Converts a current `Fr` to old `Fr` for building preimages.
     fn to_old(f: transient_crypto::curve::Fr) -> transient_crypto_old::curve::Fr {
-        transient_crypto_old::curve::Fr(
-            ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0)).expect("Fr round-trip"),
-        )
+        transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     }
 
     #[actix_rt::test]

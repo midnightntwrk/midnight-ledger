@@ -18,13 +18,12 @@
 //! with it without depending on `zkir-old`. The v1 circuit types (from
 //! `midnight-circuits` v6, `midnight-proofs` v0.7) differ from the v2 types
 //! at the Rust type level even though the underlying field elements are
-//! identical, so scalar conversions go through `ff::PrimeField::to_repr()`.
+//! identical, so scalar conversions go through `to_bytes_le()` / `from_bytes_le()`.
 //!
 //! This module also provides adapter types and helper functions for bridging
 //! the current (v2) proving/verification types to the v1 pipeline.
 
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use ff::PrimeField;
 use group::Group;
 use midnight_circuits_v1::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
@@ -56,7 +55,7 @@ type OldEmbeddedAffine = transient_crypto_old::curve::embedded::Affine;
 /// Converts a current outer scalar to the old (v1) outer scalar.
 /// Both are BLS12-381 Fq with identical byte representations.
 fn cvt(s: transient_crypto::curve::outer::Scalar) -> OldScalar {
-    OldScalar::from_repr(s.to_repr()).expect("BLS12-381 Fq round-trip")
+    OldScalar::from_bytes_le(&s.to_bytes_le()).expect("BLS12-381 Fq round-trip")
 }
 
 /// The v1 preprocessed witness data, using old scalar types.
@@ -563,7 +562,7 @@ fn preimage_from_v1(
     p: &transient_crypto_old::proofs::ProofPreimage,
 ) -> transient_crypto::proofs::ProofPreimage {
     let cvt_fr = |f: transient_crypto_old::curve::Fr| -> transient_crypto::curve::Fr {
-        transient_crypto::curve::Fr(PrimeField::from_repr(f.0.to_repr()).expect("Fq round-trip"))
+        transient_crypto::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     };
     transient_crypto::proofs::ProofPreimage {
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
