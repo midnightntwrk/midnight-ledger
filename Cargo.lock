@@ -3789,6 +3789,7 @@ dependencies = [
  "hex",
  "js-sys",
  "midnight-serialize",
+ "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir",
  "rand 0.8.6",
