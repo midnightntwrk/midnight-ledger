@@ -39,21 +39,6 @@ type V1MidnightPK = midnight_zk_stdlib_v1::MidnightPK<IrSource>;
 
 const PK_COMPRESSION_LEVEL: u32 = 6;
 
-#[derive(Debug)]
-pub enum VersionedInnerPK {
-    V1(V1MidnightPK),
-    V2(MidnightPK<IrSource>),
-}
-
-impl VersionedInnerPK {
-    pub fn k(&self) -> u8 {
-        match self {
-            VersionedInnerPK::V1(pk) => pk.k(),
-            VersionedInnerPK::V2(pk) => pk.k(),
-        }
-    }
-}
-
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
@@ -131,7 +116,7 @@ pub enum IrMinorVersion {
 struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
-    type ProverKey = VersionedInnerPK;
+    type ProverKey = MidnightPK<IrSource>;
 
     fn check(
         &self,
@@ -156,20 +141,14 @@ impl Zkir for IrSource {
             IrMinorVersion::V2 => {
                 let inner_pk = pk
                     .init()
-                    .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
-                let v2_pk = match &*inner_pk {
-                    VersionedInnerPK::V2(pk) => pk,
-                    VersionedInnerPK::V1(_) => {
-                        anyhow::bail!("Zkir::prove called with a v1 prover key on a V2 circuit")
-                    }
-                };
+                    .map_err(|e| anyhow::anyhow!("Could not init pk: {e:?}"))?;
                 use midnight_zk_stdlib::prove;
-                let params_k = params.get_params(v2_pk.k()).await?;
+                let params_k = params.get_params(inner_pk.k()).await?;
                 let preproc = self.preprocess(preimage)?;
                 let pis = preproc.pis.clone();
                 let pi_skips = preproc.pi_skips.clone();
                 let proof =
-                    prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
+                    prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
                 Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
             }
         }
@@ -220,25 +199,17 @@ impl Zkir for IrSource {
 
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
         let mut reader = flate2::read::GzDecoder::new(reader);
-        let v1_pk = V1MidnightPK::read(
+        let pk = MidnightPK::read(
             &mut { &mut reader },
-            midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
         )?;
-        Ok(VersionedInnerPK::V1(v1_pk))
+        Ok(pk)
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
         let mut writer =
             flate2::write::GzEncoder::new(writer, flate2::Compression::new(PK_COMPRESSION_LEVEL));
-        match pk {
-            VersionedInnerPK::V1(v1_pk) => v1_pk.write(
-                &mut { &mut writer },
-                midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
-            ),
-            VersionedInnerPK::V2(v2_pk) => {
-                v2_pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
-            }
-        }
+        pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
     }
 
     fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
@@ -582,7 +553,7 @@ impl IrSource {
         let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
         Ok((
-            ProverKey::from_raw(VersionedInnerPK::V2(pk)),
+            ProverKey::from_raw(pk),
             VerifierKey::from(vk),
         ))
     }
@@ -712,17 +683,10 @@ impl IrSource {
             .init()
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
 
-        let v2_pk = match &*inner_pk {
-            VersionedInnerPK::V2(pk) => pk,
-            VersionedInnerPK::V1(_) => {
-                anyhow::bail!("prove_unchecked requires a v2 prover key")
-            }
-        };
-
-        let params_k = params.get_params(v2_pk.k()).await?;
+        let params_k = params.get_params(inner_pk.k()).await?;
         let pis = preproc.pis.clone();
 
-        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
+        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
 
         Ok(Proof(proof))
     }

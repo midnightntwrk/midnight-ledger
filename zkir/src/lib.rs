@@ -22,7 +22,7 @@ mod ir;
 pub mod ir_v1;
 mod ir_vm;
 
-pub use ir::{Instruction, IrMinorVersion, IrSource, VersionedInnerPK};
+pub use ir::{Instruction, IrMinorVersion, IrSource};
 pub use ir_vm::Preprocessed;
 
 /// Implements `ProvingProvider` locally, dispatching V0/V1 circuits through
@@ -125,6 +125,10 @@ impl<
             resolver: self.resolver,
             params: self.params,
         }
+    }
+
+    fn resolver(&self) -> &impl transient_crypto::proofs::Resolver {
+        self.resolver
     }
 }
 

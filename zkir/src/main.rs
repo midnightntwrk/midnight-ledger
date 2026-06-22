@@ -18,7 +18,7 @@ use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use midnight_zkir::{IrMinorVersion, IrSource};
-use serialize::tagged_serialize;
+use serialize::{tagged_deserialize, tagged_serialize};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
