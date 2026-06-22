@@ -108,18 +108,12 @@ async fn test_unshielded_contract_deposit() {
     let user_address = UserAddress::from(user_verifying_key.clone());
 
     // Load contract operations
-    let deposit_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await, None);
-    let withdraw_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawShielded").await, None);
-    let deposit_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await, None);
-    let withdraw_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await, None);
-    let get_shielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await, None);
-    let get_unshielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getUnshieldedBalance").await, None);
+    let deposit_shielded_op = contract_operation(&RESOLVER, "depositShielded").await;
+    let withdraw_shielded_op = contract_operation(&RESOLVER, "withdrawShielded").await;
+    let deposit_unshielded_op = contract_operation(&RESOLVER, "depositUnshielded").await;
+    let withdraw_unshielded_op = contract_operation(&RESOLVER, "withdrawUnshielded").await;
+    let get_shielded_balance_op = contract_operation(&RESOLVER, "getShieldedBalance").await;
+    let get_unshielded_balance_op = contract_operation(&RESOLVER, "getUnshieldedBalance").await;
 
     // Deploy contract
     let owner_sk: HashOutput = rng.r#gen();
@@ -402,18 +396,12 @@ async fn test_unshielded_contract_withdraw() {
     let user_address = UserAddress::from(user_verifying_key.clone());
 
     // Load contract operations
-    let deposit_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await, None);
-    let withdraw_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawShielded").await, None);
-    let deposit_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await, None);
-    let withdraw_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await, None);
-    let get_shielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await, None);
-    let get_unshielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getUnshieldedBalance").await, None);
+    let deposit_shielded_op = contract_operation(&RESOLVER, "depositShielded").await;
+    let withdraw_shielded_op = contract_operation(&RESOLVER, "withdrawShielded").await;
+    let deposit_unshielded_op = contract_operation(&RESOLVER, "depositUnshielded").await;
+    let withdraw_unshielded_op = contract_operation(&RESOLVER, "withdrawUnshielded").await;
+    let get_shielded_balance_op = contract_operation(&RESOLVER, "getShieldedBalance").await;
+    let get_unshielded_balance_op = contract_operation(&RESOLVER, "getUnshieldedBalance").await;
 
     // Deploy contract with initial balance
     let owner_sk: HashOutput = rng.r#gen();

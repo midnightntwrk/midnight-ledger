@@ -1278,6 +1278,7 @@ pub enum TransactionProvingError<D: DB> {
         entry_point: EntryPointBuf,
     },
     MissingKeyset(KeyLocation),
+    UnknownVerifierKeyVersion(String),
     Proving(ProvingError),
     Tokio(std::io::Error),
 }
@@ -1306,6 +1307,10 @@ impl<D: DB> Display for TransactionProvingError<D> {
             MissingKeyset(keyloc) => write!(
                 formatter,
                 "attempted proof, but couldn't find keys with ID {keyloc:?}"
+            ),
+            UnknownVerifierKeyVersion(tag) => write!(
+                formatter,
+                "attempted proof, but verifier key had unrecognized version tag {tag:?}"
             ),
             Proving(e) => e.fmt(formatter),
             Tokio(e) => e.fmt(formatter),

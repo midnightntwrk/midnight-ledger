@@ -45,7 +45,9 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
+use transient_crypto::proofs::{
+    KeyLocation, ProofPreimage, ProvingKeyMaterial, ProvingProvider, Resolver,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use zswap::Offer;
@@ -360,11 +362,68 @@ impl Transaction {
             .map_err(|_| {
                 JsError::new("expected proving provider property 'prove' to be a function")
             })?;
+        let lookup_key = js_sys::Reflect::get(&provider, &"lookupKey".into())
+            .map_err(|_| JsError::new("failed to get property 'lookupKey' on ProvingProvider"))?
+            .dyn_into::<Function>()
+            .map_err(|_| {
+                JsError::new("expected proving provider property 'lookupKey' to be a function")
+            })?;
         #[derive(Clone)]
         struct JsProvingProvider {
             this: JsValue,
             check: Function,
             prove: Function,
+            lookup_key: Function,
+        }
+        impl Resolver for JsProvingProvider {
+            async fn resolve_key(
+                &self,
+                key: KeyLocation,
+            ) -> std::io::Result<Option<ProvingKeyMaterial>> {
+                let arg_key_location = JsValue::from(JsString::from(key.0.as_ref()));
+                let promise = self
+                    .lookup_key
+                    .call1(&self.this, &arg_key_location)
+                    .map_err(|e| {
+                        std::io::Error::other(format!(
+                            "failed to call 'lookupKey': {}",
+                            try_to_string(e)
+                        ))
+                    })?
+                    .dyn_into::<Promise>()
+                    .map_err(|_| std::io::Error::other("result of 'lookupKey' was not a promise"))?;
+                let result = JsFuture::from(promise).await.map_err(|e| {
+                    std::io::Error::other(format!(
+                        "'lookupKey' returned an error: {}",
+                        try_to_string(e)
+                    ))
+                })?;
+                if result.is_undefined() || result.is_null() {
+                    return Ok(None);
+                }
+                let getprop = |prop: &str| {
+                    Ok::<_, std::io::Error>(
+                        js_sys::Reflect::get(&result, &prop.into())
+                            .map_err(|_| {
+                                std::io::Error::other(format!(
+                                    "could not get property '{prop}' on ProvingKeyMaterial"
+                                ))
+                            })?
+                            .dyn_into::<Uint8Array>()
+                            .map_err(|_| {
+                                std::io::Error::other(format!(
+                                    "property '{prop}' on ProvingKeyMaterial is not a Uint8Array"
+                                ))
+                            })?
+                            .to_vec(),
+                    )
+                };
+                Ok(Some(ProvingKeyMaterial {
+                    prover_key: getprop("proverKey")?,
+                    verifier_key: getprop("verifierKey")?,
+                    ir_source: getprop("ir")?,
+                }))
+            }
         }
         impl ProvingProvider for JsProvingProvider {
             async fn check(
@@ -453,11 +512,15 @@ impl Transaction {
             fn split(&mut self) -> Self {
                 self.clone()
             }
+            fn resolver(&self) -> &impl Resolver {
+                self
+            }
         }
         let provider = JsProvingProvider {
             this: provider,
             check,
             prove,
+            lookup_key,
         };
         use TransactionTypes::*;
         match &self.0 {

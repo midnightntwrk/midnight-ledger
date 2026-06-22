@@ -46,8 +46,6 @@ use onchain_runtime::{
 };
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "proof-verifying")]
-use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -65,8 +63,6 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
-#[cfg(feature = "proof-verifying")]
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
@@ -84,9 +80,9 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
-            .expect("Zswap Output VK should be valid");
+    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+            .expect("Dust Spend VK should be valid");
 }
 
 pub struct DustResolver(pub MidnightDataProvider);
@@ -639,8 +635,8 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                let dust_op =
-                    onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
+                dust_op.v2 = Some(SPEND_VK.clone());
                 let dust_call = crate::structure::ContractCall {
                     address: coin_structure::contract::ContractAddress::default(),
                     entry_point: onchain_runtime::state::EntryPointBuf(vec![]),

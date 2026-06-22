@@ -27,7 +27,7 @@ use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Signature, Transaction,
 };
 use midnight_ledger::test_utilities::PUBLIC_PARAMS;
-use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
+use midnight_ledger::test_utilities::{Resolver, TestState, contract_operation, test_resolver};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v9 as midnight_ledger;
@@ -36,7 +36,7 @@ use onchain_runtime::error::TranscriptRejected;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-use onchain_runtime::state::{ChargedState, ContractOperation, ContractState, StateValue, stval};
+use onchain_runtime::state::{ChargedState, ContractState, StateValue, stval};
 use onchain_runtime::vm_error::OnchainProgramError;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -113,8 +113,8 @@ async fn composable() {
 
     // Part 1: Deploy inner
     println!(":: Part 1: Deploy inner");
-    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await, None);
-    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await, None);
+    let get_op = contract_operation(&RESOLVER, "get").await;
+    let set_op = contract_operation(&RESOLVER, "set").await;
     let auth_sk: HashOutput = rng.r#gen();
     let auth_pk = persistent_commit(b"mdn:ex:ci", auth_sk);
     let contract = ContractState::new(
@@ -155,7 +155,7 @@ async fn composable() {
         b"get",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await, None);
+    let update_op = contract_operation(&RESOLVER, "update").await;
     let contract = ContractState::new(
         stval!([(b"".to_vec()), (addr_inner), (ep_hash)]),
         HashMap::new().insert(b"update"[..].into(), update_op.clone()),
@@ -648,8 +648,8 @@ async fn guaranteed_in_fallible() {
 
     // Part 1: Deploy inner
     println!(":: Part 1: Deploy inner");
-    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await, None);
-    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await, None);
+    let get_op = contract_operation(&RESOLVER, "get").await;
+    let set_op = contract_operation(&RESOLVER, "set").await;
     let auth_sk: HashOutput = rng.r#gen();
     let auth_pk = persistent_commit(b"mdn:ex:ci", auth_sk);
     let contract = ContractState::new(
@@ -690,7 +690,7 @@ async fn guaranteed_in_fallible() {
         b"get",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await, None);
+    let update_op = contract_operation(&RESOLVER, "update").await;
     let contract = ContractState::new(
         stval!([(b"".to_vec()), (addr_inner), (ep_hash)]),
         HashMap::new().insert(b"update"[..].into(), update_op.clone()),
@@ -1183,7 +1183,7 @@ async fn composable_funded() {
 
     // Part 1: Deploy burn
     println!(":: Part 1: Deploy burn");
-    let burn_op = ContractOperation::new(verifier_key(&RESOLVER, "burn").await, None);
+    let burn_op = contract_operation(&RESOLVER, "burn").await;
     let contract = ContractState::new(
         stval!([]),
         HashMap::new().insert(b"burn"[..].into(), burn_op.clone()),
@@ -1214,8 +1214,7 @@ async fn composable_funded() {
         b"burn",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let send_to_burn_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "send_to_burn").await, None);
+    let send_to_burn_op = contract_operation(&RESOLVER, "send_to_burn").await;
     let contract = ContractState::new(
         stval!([(addr_burn), (ep_hash)]),
         HashMap::new().insert(b"send_to_burn"[..].into(), send_to_burn_op.clone()),

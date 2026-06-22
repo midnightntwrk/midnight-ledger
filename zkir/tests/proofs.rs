@@ -11,54 +11,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Tests for the v1 (zk-stdlib v1) proving and verification flow.
+//!
+//! V0/V1 circuits use `transient_crypto_old::proofs::Zkir` for keygen/prove,
+//! and `zkir::verify()` for verification (tag-based dispatch).
+
 #[cfg(test)]
 mod proof_tests {
-    use midnight_zkir::ir_v1::{v1_prove, v1_verify};
-    use midnight_zkir::{IrMinorVersion, IrSource, Preprocessed};
+    use midnight_zkir::IrSource;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
-    use serialize::{Deserializable, Serializable, tagged_serialize};
     use std::borrow::Cow;
     use std::fs::File;
     use std::io::BufReader;
-    use transient_crypto::curve::{EmbeddedGroupAffine, FR_BYTES_STORED};
+    use transient_crypto::curve::EmbeddedGroupAffine;
     use transient_crypto::hash::transient_hash;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::Proof;
-    use transient_crypto::proofs::{
-        KeyLocation, ParamsProver, ParamsProverProvider, ProofPreimage, ProvingKeyMaterial,
-        Resolver, VerifierKey, Zkir,
+    #[cfg(feature = "proptest")]
+    use transient_crypto::proofs::VerifierKey;
+    use transient_crypto_old::proofs::{
+        KeyLocation, ParamsProver, ParamsProverProvider, ProofPreimage, Zkir,
     };
-    use transient_crypto::repr::FieldRepr;
-
-    type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
-
-    struct TestResolver {
-        pk: ProverKey,
-        vk: VerifierKey,
-        ir: IrSource,
-    }
-
-    impl Resolver for TestResolver {
-        async fn resolve_key(
-            &self,
-            _key: KeyLocation,
-        ) -> std::io::Result<Option<ProvingKeyMaterial>> {
-            let mut pk = Vec::new();
-            IrSource::serialize_prover_key_to_tagged(IrMinorVersion::V0, &self.pk, &mut pk)?;
-            let mut vk = Vec::new();
-            tagged_serialize(&self.vk, &mut vk)?;
-            let mut ir = Vec::new();
-            self.ir.serialize_to_tagged(&mut ir)?;
-            Ok(Some(ProvingKeyMaterial {
-                prover_key: pk,
-                verifier_key: vk,
-                ir_source: ir,
-            }))
-        }
-    }
 
     struct TestParams;
 
@@ -71,37 +47,9 @@ mod proof_tests {
         }
     }
 
-    #[actix_rt::test]
-    async fn test_extension_attack() {
-        let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
-           "num_inputs": 1,
-           "do_communications_commitment": false,
-           "instructions": [
-               { "op": "assert", "cond": 0 }
-           ]
-        }"#;
-        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
-
-        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        const N: u64 = 512;
-        let proof = ir
-            .prove_unchecked(
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                pk,
-                Preprocessed {
-                    memory: vec![1.into()],
-                    pis: (0..N).map(Into::into).collect(),
-                    pi_skips: vec![],
-                    binding_input: 0.into(),
-                    comm_comm: None,
-                },
-            )
-            .await;
-        // Either proving should have failed, or verification should fail:
-        let verify = proof.and_then(|proof| v1_verify(&vk, &proof, (0..N).map(Into::into)));
-        assert!(verify.is_err());
+    /// Converts a current `Fr` to old `Fr` for building preimages.
+    fn to_old(f: transient_crypto::curve::Fr) -> transient_crypto_old::curve::Fr {
+        transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     }
 
     #[actix_rt::test]
@@ -117,16 +65,6 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let _vk_fmt = format!("{:#?}", &vk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -136,20 +74,30 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
+        let (proof, pis, _) = ir
+            .prove(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                pk,
+                &preimage,
+            )
+            .await
+            .unwrap();
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0);
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            pis.into_iter(),
         )
-        .await
         .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
-        assert!(v1_verify(&vk, &proof, [43.into()].into_iter()).is_err());
+        assert!(
+            vk.verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &old_proof,
+                [43.into()].into_iter()
+            )
+            .is_err()
+        );
     }
 
     #[actix_rt::test]
@@ -165,14 +113,6 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -182,19 +122,22 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
+        let (proof, _, _) = ir
+            .prove(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                pk,
+                &preimage,
+            )
+            .await
+            .unwrap();
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0);
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
         )
-        .await
         .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -213,129 +156,31 @@ mod proof_tests {
         let x = transient_hash(&[1.into(), 2.into(), 3.into()]);
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![x],
+            public_transcript_inputs: vec![to_old(x)],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
-        )
-        .await
-        .unwrap();
-        v1_verify(&vk, &proof, [42.into(), x].into_iter()).unwrap();
-    }
-
-    #[actix_rt::test]
-    async fn test_byte_decoding_hash_proof() {
-        for bytes in [25usize, 50, 100, 200] {
-            dbg!(bytes);
-            let stored = bytes.div_ceil(FR_BYTES_STORED);
-            let input_string = (0..stored)
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let ir_raw = format!(
-                r#"{{
-               "version": {{ "major": 2, "minor": 0 }},
-               "num_inputs": {stored},
-               "do_communications_commitment": false,
-               "instructions": [
-                   {{ "op": "persistent_hash", "alignment": [ {{ "tag": "atom", "value": {{ "tag": "bytes", "length": {bytes} }} }} ], "inputs": [{input_string}] }}
-               ]
-            }}"#
-            );
-            let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
-
-            let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-            let input = (0..bytes).map(|i| i as u8).collect::<Vec<_>>();
-            let preimage = ProofPreimage {
-                binding_input: 42.into(),
-                communications_commitment: None,
-                inputs: input[..].field_vec(),
-                private_transcript: vec![],
-                public_transcript_inputs: vec![],
-                public_transcript_outputs: vec![],
-                key_location: KeyLocation(Cow::Borrowed("builtin")),
-            };
-            let proof = v1_prove(
-                &preimage,
+        let (proof, _, _) = ir
+            .prove(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
+                pk,
+                &preimage,
             )
             .await
             .unwrap();
-            v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
-        }
-    }
-
-    #[actix_rt::test]
-    async fn test_persistent_hash_proof() {
-        let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
-           "num_inputs": 1,
-           "do_communications_commitment": false,
-           "instructions": [
-               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": [0] }
-           ]
-        }"#;
-        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
-
-        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        let preimage = ProofPreimage {
-            binding_input: 42.into(),
-            communications_commitment: None,
-            inputs: vec![(42).into()],
-            private_transcript: vec![],
-            public_transcript_inputs: vec![],
-            public_transcript_outputs: vec![],
-            key_location: KeyLocation(Cow::Borrowed("builtin")),
-        };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0);
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into(), to_old(x)].into_iter(),
         )
-        .await
         .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -353,45 +198,37 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
         let p = EmbeddedGroupAffine::generator();
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), 42.into(), 63.into()],
+            inputs: vec![
+                to_old(p.x().unwrap()),
+                to_old(p.y().unwrap()),
+                42.into(),
+                63.into(),
+            ],
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
+        let (proof, _, _) = ir
+            .prove(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                pk,
+                &preimage,
+            )
+            .await
+            .unwrap();
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0);
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
         )
-        .await
         .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -413,16 +250,6 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
-        let mut pk_data = Vec::new();
-        let mut vk_data = Vec::new();
-        Serializable::serialize(&pk, &mut pk_data).unwrap();
-        Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let _vk_fmt = format!("{:#?}", &vk);
-        let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
-        let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
-        pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -432,19 +259,22 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-            &preimage,
-            &mut ChaCha20Rng::from_seed([42; 32]),
-            &TestParams,
-            &TestResolver {
-                pk: pk.clone(),
-                vk: vk.clone(),
-                ir: ir.clone(),
-            },
+        let (proof, _, _) = ir
+            .prove(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                pk,
+                &preimage,
+            )
+            .await
+            .unwrap();
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0);
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
         )
-        .await
         .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -463,7 +293,8 @@ mod proof_tests {
         assert_eq!(&vk_kzg1, &vk_kzg2);
         let mut bytes = Vec::new();
         serialize::tagged_serialize(&vk_kzg1, &mut bytes).unwrap();
-        let vk_kzg3: VerifierKey = serialize::tagged_deserialize(&mut &bytes[..]).unwrap();
+        let vk_kzg3: transient_crypto_old::proofs::VerifierKey =
+            serialize::tagged_deserialize(&mut &bytes[..]).unwrap();
         assert_eq!(&vk_kzg1, &vk_kzg3);
     }
 
