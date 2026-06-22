@@ -349,7 +349,7 @@ const serverProver = {
     const payload = createProvingPayload(serializedPreimage, overwriteBindingInput);
     return proofServerRequest('prove', payload);
   },
-  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined,
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined
 };
 
 const callProverWorker = (op: 'check' | 'prove', args: any[]): Promise<any> => {
@@ -381,7 +381,7 @@ const wasmProverWorker = {
     console.log(`finished individual proof in ${(tn - t0) / 1000}s`);
     return result;
   },
-  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined,
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined
 };
 
 /**
