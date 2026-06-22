@@ -1336,6 +1336,84 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
+    async fn test_bytes32_low_high_proof() {
+        // Exercises bytes32_into_low_high / bytes32_from_low_high:
+        //   1. Splits a Bytes32 into its low (first 31 bytes) and high (byte 31) native
+        //      field elements and checks each against the off-circuit reference.
+        //   2. Reconstructs the original Bytes32 via bytes32_from_low_high and checks
+        //      equality with the original value, exercising the full roundtrip.
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%b", "type": "Bytes<32>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "bytes32_into_low_high", "bytes": "%b", "outputs": ["%lo", "%hi"] },
+               { "op": "bytes32_from_low_high", "inputs": ["%lo", "%hi"], "output": "%b_back" },
+               { "op": "constrain_eq", "a": "%b_back", "b": "%b" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%lo_exp" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%hi_exp" },
+               { "op": "constrain_eq", "a": "%lo", "b": "%lo_exp" },
+               { "op": "constrain_eq", "a": "%hi", "b": "%hi_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        // bytes with a non-zero MSB (byte 31 == 32) to exercise the high part.
+        let bytes: [u8; 32] = std::array::from_fn(|i| (i + 1) as u8);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes32(bytes));
+
+        // Compute expected lo and hi using the same logic as the off-circuit VM.
+        let mut lo_bytes = bytes;
+        lo_bytes[31] = 0;
+        let lo_exp = from_bytes32_offcircuit(&IrType::Native, &lo_bytes).unwrap();
+        let mut hi_bytes = [0u8; 32];
+        hi_bytes[0] = bytes[31];
+        let hi_exp = from_bytes32_offcircuit(&IrType::Native, &hi_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(lo_exp), encode(hi_exp)].concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
     async fn test_native_inv_proof() {
         // Verifies native field inversion: v0 * inv(v0) == 1.
         let ir_raw = r#"{

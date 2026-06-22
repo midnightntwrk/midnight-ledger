@@ -622,6 +622,29 @@ impl IrSource {
                     let x = from_bytes32_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
+                I::Bytes32IntoLowHigh { bytes, outputs } => {
+                    let bytes = resolve_operand(&memory, bytes)?;
+                    let mut bytes: [u8; 32] = bytes.try_into()?;
+                    let high = IrValue::Native(Fr::from(bytes[31]));
+                    bytes[31] = 0;
+                    let low = from_bytes32_offcircuit(&IrType::Native, &bytes)?;
+                    memory.insert(outputs.0.clone(), low);
+                    memory.insert(outputs.1.clone(), high);
+                }
+                I::Bytes32FromLowHigh { inputs, output } => {
+                    let low = resolve_operand(&memory, &inputs.0)?;
+                    let high = resolve_operand(&memory, &inputs.1)?;
+                    let bytes_low: [u8; 32] = into_bytes32_offcircuit(&low)?.try_into()?;
+                    let bytes_high: [u8; 32] = into_bytes32_offcircuit(&high)?.try_into()?;
+                    if bytes_low[31] != 0 || bytes_high[1..].iter().any(|b| *b != 0) {
+                        bail!(
+                            "Bytes32FromLowHigh: low operand must fit in 31 bytes (be less than 2^248) and high operand must fit in a single byte (be less than 256)"
+                        );
+                    }
+                    let mut out_bytes = bytes_low;
+                    out_bytes[31] = bytes_high[0];
+                    memory.insert(output.clone(), IrValue::Bytes32(out_bytes));
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1131,6 +1154,26 @@ impl Relation for IrSource {
                     let bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
                     let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
+                }
+                I::Bytes32IntoLowHigh { bytes, outputs } => {
+                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
+                    let mut bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
+                    let high = CircuitValue::Native(std.convert(layouter, &bytes[31])?);
+                    bytes[31] = std.assign_fixed(layouter, 0u8)?;
+                    let low = from_bytes32_incircuit(std, layouter, &IrType::Native, &bytes)?;
+                    memory.insert(outputs.0.clone(), low);
+                    memory.insert(outputs.1.clone(), high);
+                }
+                I::Bytes32FromLowHigh { inputs, output } => {
+                    let low = resolve_operand(std, layouter, &memory, &inputs.0)?;
+                    let high: AssignedNative<_> =
+                        resolve_operand(std, layouter, &memory, &inputs.1)?.try_into()?;
+                    let bytes_low: [AssignedByte<outer::Scalar>; 32] =
+                        into_bytes32_incircuit(std, layouter, &low)?.try_into()?;
+                    std.assert_equal_to_fixed(layouter, &bytes_low[31], 0u8)?;
+                    let mut out_bytes = bytes_low;
+                    out_bytes[31] = std.convert(layouter, &high)?;
+                    memory.insert(output.clone(), CircuitValue::Bytes32(out_bytes));
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
