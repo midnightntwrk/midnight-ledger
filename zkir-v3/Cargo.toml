@@ -38,10 +38,10 @@ transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = 
   "cli",
 ] }
 
-midnight-curves = { version = "^0.3.0" }
-midnight-proofs = { version = "^0.8.0" }
-midnight-circuits = { version = "^7.0.0" }
-midnight-zk-stdlib = { version = "^2.0.0" }
+midnight-curves = { version = "^0.3.1" }
+midnight-proofs = { version = "^0.8.1" }
+midnight-circuits = { version = "^7.2.1" }
+midnight-zk-stdlib = { version = "^2.3.1" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"
