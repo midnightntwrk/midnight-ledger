@@ -534,6 +534,21 @@ pub(crate) fn parse_network(s: &str) -> Result<Network, String> {
 /// Mirrors the dApp's `VAULT_CONTRACT_ADDRESS` default so the embedded
 /// dApp's argument-less `vaultTotalLocked()` / `vaultDeposit()` verbs
 /// resolve to the same contract without the dApp having to pass it.
+// Vault contract default. Was hardcoded to the preprod-deployed vault;
+// for Android (phone-over-tailnet demo shape) the dApp + CLI deploy
+// to the standalone chain and the wallet's connector RPCs need to
+// route claims at THAT contract. The dApp's `vaultClaim` call doesn't
+// thread `contractAddress` in params today, so this constant is the
+// fallback. Per-shape override via `MIDNIGHT_VAULT_CONTRACT_ADDRESS`
+// env still wins; this just sets a sane platform default.
+//
+// TODO once the dApp wires `contractAddress` through to the connector
+// call this constant becomes vestigial — keep only as a last-ditch
+// safety net.
+#[cfg(target_os = "android")]
+const DEFAULT_VAULT_CONTRACT_ADDRESS: &str =
+    "07665aa4a994ecc035d637c4251701552db7c188eacdd9fcada7b38531789c55";
+#[cfg(not(target_os = "android"))]
 const DEFAULT_VAULT_CONTRACT_ADDRESS: &str =
     "bdec50fe2f43959767a9bbc3b0626d5d9e9e08e06a723d3d2d0faca2e6c1dc25";
 
@@ -713,8 +728,20 @@ fn list_credentials_json() -> Result<serde_json::Value, String> {
     let vcs = store
         .list_ordered()
         .map_err(|e| format!("list credentials: {e}"))?;
+    tracing::info!(
+        target: "dioxuswalletmain::bridge",
+        total = vcs.len(),
+        "vault.list_credentials: loaded VCs from store",
+    );
     let mut out = Vec::new();
     for vc in vcs {
+        tracing::info!(
+            target: "dioxuswalletmain::bridge",
+            vc_uri = %vc.vc_uri,
+            format = %vc.format,
+            is_dp = is_digital_passport(&vc),
+            "vault.list_credentials: visiting vc",
+        );
         if !is_digital_passport(&vc) {
             continue;
         }
@@ -747,7 +774,14 @@ fn list_credentials_json() -> Result<serde_json::Value, String> {
             "claimable": claimable,
         }));
     }
-    Ok(serde_json::json!({ "credentials": out }))
+    let response = serde_json::json!({ "credentials": out });
+    tracing::info!(
+        target: "dioxuswalletmain::bridge",
+        returned = out.len(),
+        payload = %response,
+        "vault.list_credentials: returning",
+    );
+    Ok(response)
 }
 
 /// Parse a `lockId` verb param (decimal string or number).
@@ -1085,14 +1119,17 @@ async fn run_method(
             let total = crate::app::app_vault_wallet_for(net)
                 .vault_total_locked(addr)
                 .await?;
-            Ok(serde_json::json!({ "totalLockedBaseUnits": total.to_string() }))
+            Ok(serde_json::json!({
+                "totalLockedBaseUnits": total.to_string(),
+            }))
         }
         "vaultListLocks" => {
-            // Enumerate the vault's locks (id, policy, per-lock pool) +
-            // lockCount, for the dApp's lock list + claim selector.
             let net = vault_network(&params);
             let addr = vault_contract_address(&params);
-            crate::app::app_vault_wallet_for(net).list_locks(addr).await
+            let locks_json = crate::app::app_vault_wallet_for(net)
+                .list_locks(addr)
+                .await?;
+            Ok(locks_json)
         }
         "vaultListCredentials" => {
             // Enumerate the phone's stored digital-passport credentials

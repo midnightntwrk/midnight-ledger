@@ -146,27 +146,72 @@ async fn run_one(req: EvalRequest) {
             return {{ error: _msg }};
         }}"#,
     );
-    let outcome = match tokio::time::timeout(EVAL_TIMEOUT, document::eval(&snippet)).await {
-        Ok(Ok(v)) => {
-            if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-                Err(JsBridgeError::JsError(err.to_string()))
-            } else {
-                Ok(v)
+    // Dioxus 0.6.3's `document::eval` returns an `Eval` whose underlying
+    // evaluator is a `GenerationalBox` scoped to whatever scope was
+    // current when `eval()` was called. Empirically, on Android, a
+    // chained-call workflow (DID bootstrap kicks off 3+ circuit calls
+    // back-to-back) sometimes hits an `EvalError::Finished` on the third
+    // or later call — the box's owning scope went away (a re-render,
+    // most likely). The Dioxus fix is non-trivial; the pragmatic fix
+    // here is to retry the eval, which spins up a fresh `Eval` against
+    // the current scope. Three attempts with a small backoff is enough
+    // to ride out a one-shot scope flip.
+    const EVAL_MAX_ATTEMPTS: u32 = 4;
+    let mut last_err = None::<String>;
+    let mut outcome = Err(JsBridgeError::Transport("eval not attempted".into()));
+    for attempt in 1..=EVAL_MAX_ATTEMPTS {
+        match tokio::time::timeout(EVAL_TIMEOUT, document::eval(&snippet)).await {
+            Ok(Ok(v)) => {
+                outcome = if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
+                    Err(JsBridgeError::JsError(err.to_string()))
+                } else {
+                    Ok(v)
+                };
+                break;
+            }
+            Ok(Err(e)) => {
+                let s = format!("{e}");
+                // EvalError::Finished — the eval's GenerationalBox lost
+                // its scope mid-flight. Retry against a fresh scope.
+                if s.contains("Finished") && attempt < EVAL_MAX_ATTEMPTS {
+                    tracing::warn!(
+                        target: "eval-bridge",
+                        method = %req.method,
+                        attempt,
+                        "EvalError::Finished — retrying after backoff",
+                    );
+                    last_err = Some(s);
+                    // Tiny backoff lets the next render settle.
+                    tokio::time::sleep(std::time::Duration::from_millis(150 * attempt as u64)).await;
+                    continue;
+                }
+                outcome = Err(JsBridgeError::Transport(format!("eval failed: {e}")));
+                break;
+            }
+            Err(_) => {
+                tracing::warn!(
+                    target: "eval-bridge",
+                    method = %req.method,
+                    "eval timed out after {:?}", EVAL_TIMEOUT,
+                );
+                outcome = Err(JsBridgeError::Transport(format!(
+                    "eval timeout after {}s — JS bundle did not reply",
+                    EVAL_TIMEOUT.as_secs(),
+                )));
+                break;
             }
         }
-        Ok(Err(e)) => Err(JsBridgeError::Transport(format!("eval failed: {e}"))),
-        Err(_) => {
+    }
+    if let Some(last) = last_err.as_deref() {
+        if matches!(&outcome, Err(_)) {
             tracing::warn!(
                 target: "eval-bridge",
                 method = %req.method,
-                "eval timed out after {:?}", EVAL_TIMEOUT,
+                "exhausted all retries; last error: {}",
+                last,
             );
-            Err(JsBridgeError::Transport(format!(
-                "eval timeout after {}s — JS bundle did not reply",
-                EVAL_TIMEOUT.as_secs(),
-            )))
         }
-    };
+    }
     // Receiver may have been dropped if the caller timed out / was
     // cancelled. Best-effort: a dropped reply isn't an error here.
     let _ = req.reply.send(outcome);

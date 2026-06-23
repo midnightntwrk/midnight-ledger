@@ -883,16 +883,41 @@ fn attach_app_providers(base: Wallet, net: Network) -> Wallet {
     //      etc.). This is the Android path: switching the
     //      in-app network picker is enough to retarget the
     //      proof-server; no APK rebuild required.
-    let resolved_url: String = PROOF_SERVER_URL
-        .get()
-        .cloned()
-        .unwrap_or_else(|| net.config().proving_server_url.to_string());
-    tracing::info!(
-        target: "dioxuswalletmain",
-        proof_server_url = %resolved_url,
-        "app_wallet_for: attaching proof-server URL",
-    );
-    let with_url = base.with_proof_server_url(resolved_url);
+    //
+    // ANDROID: skip both resolution paths. Mobile builds prove
+    // in-process via wallet-core's `LocalProver` (per the
+    // `chain::default_prover(None)` fallback) — the wallet's
+    // build.rs syncs the per-circuit prover keys + zkir from
+    // upstream midnight-did + passport-vault into
+    // `wallet-core/contracts/`, and the LocalProver loads them
+    // by circuit name. This keeps the phone from depending on a
+    // remote proof-server (battery, latency, version-skew with
+    // the laptop-side docker proof-server). Desktop/iOS keep
+    // the URL path so `--features proof-server-http` (which
+    // spawns a host-local proof-server) still wins, and
+    // `Undeployed*` configs still drive a sensible default for
+    // dev workflows without proof-server-http enabled.
+    #[cfg(target_os = "android")]
+    let with_url = {
+        tracing::info!(
+            target: "dioxuswalletmain",
+            "app_wallet_for: Android — using in-process LocalProver (no proof-server URL attached)",
+        );
+        base
+    };
+    #[cfg(not(target_os = "android"))]
+    let with_url = {
+        let resolved_url: String = PROOF_SERVER_URL
+            .get()
+            .cloned()
+            .unwrap_or_else(|| net.config().proving_server_url.to_string());
+        tracing::info!(
+            target: "dioxuswalletmain",
+            proof_server_url = %resolved_url,
+            "app_wallet_for: attaching proof-server URL",
+        );
+        base.with_proof_server_url(resolved_url)
+    };
     // Layer 2 / Phase 3: attach the persisted DUST syncer if the
     // store has been opened. `Wallet::sync_dust` will then resume
     // from `last_id + 1` instead of replaying ~534k events on
@@ -988,20 +1013,40 @@ fn parse_seed_hex_env(var: &str) -> Option<[u8; 32]> {
 /// afterwards. Also the default network for vault verbs (see
 /// `bridge::vault_network`).
 pub(crate) fn startup_network() -> Network {
+    // ANDROID: default to `UndeployedYurii` so dApp methods (vault claim,
+    // address derivation, dust syncer) align with the laptop-hosted
+    // standalone chain on Yurii's tailnet. Without this, `vaultClaim`
+    // would route to PreProd, where the vault contract doesn't exist.
+    // The Wallet-tab network picker is the source of truth for UI state;
+    // this constant only governs the implicit network used by connector
+    // RPC methods when the dApp doesn't pin one in `params`.
+    #[cfg(target_os = "android")]
+    let fallback = Network::UndeployedYurii;
+    #[cfg(not(target_os = "android"))]
+    let fallback = Network::PreProd;
     match std::env::var("MIDNIGHT_WALLET_NETWORK") {
         Ok(s) if !s.trim().is_empty() => match crate::bridge::parse_network(s.trim()) {
             Ok(n) => n,
             Err(e) => {
-                tracing::warn!(target: "dioxuswalletmain", error = %e, "MIDNIGHT_WALLET_NETWORK unrecognised — defaulting to PreProd");
-                Network::PreProd
+                tracing::warn!(target: "dioxuswalletmain", error = %e, "MIDNIGHT_WALLET_NETWORK unrecognised — using platform default");
+                fallback
             }
         },
-        _ => Network::PreProd,
+        _ => fallback,
     }
 }
 
 /// Default Vault-dApp URL when `MIDNIGHT_DAPP_URL` is unset — the
 /// Next.js dev server's default origin.
+// Android can't reach `localhost:3000` — that's the phone's own
+// loopback. The dApp runs on the laptop and is reachable from the
+// phone over Yurii's tailnet at the laptop's `100.110.241.102` IP.
+// Keep `localhost` for desktop / iOS-sim where the dApp is on the
+// same host. `MIDNIGHT_DAPP_URL` env override (see `dapp_url()`)
+// trumps both on any target.
+#[cfg(target_os = "android")]
+const DEFAULT_DAPP_URL: &str = "http://100.110.241.102:3000";
+#[cfg(not(target_os = "android"))]
 const DEFAULT_DAPP_URL: &str = "http://localhost:3000";
 
 /// URL the embedded Vault-dApp iframe loads.
@@ -1114,6 +1159,10 @@ pub fn set_proof_server_url(url: String) {
     let _ = PROOF_SERVER_URL.set(url);
 }
 
+// Unused on Android — that target proves in-process via wallet-core's
+// `LocalProver` and never reads this slot. Suppress the dead-code
+// warning so the strict `#![deny(warnings)]` build still passes.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 static PROOF_SERVER_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// `preprod-live` only: stamp the operator's three DIDs into

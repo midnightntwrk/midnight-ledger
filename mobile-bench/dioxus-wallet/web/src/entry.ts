@@ -1347,37 +1347,38 @@ async function readVaultLocks(params: {
   );
   const led = (contractMod as any).ledger(contractState.data);
   const locks: any[] = [];
-  // Reading `locks` / `lockCount` against a contract whose on-chain ledger
-  // layout isn't the multi-lock one (e.g. an OLD single-lock passport-vault
-  // address) throws a cryptic `asMap()` error. Surface a clear, actionable
-  // message instead so the dApp can tell the user to redeploy / repoint.
+  // The Compact runtime's Map type does NOT implement the JS iterator
+  // protocol in this WebView build — `for (const [k, v] of map)` throws
+  // a cryptic `"asMap is not a function"` deep inside the runtime.
+  // The same value DOES support the explicit Map API (`.member(k)` /
+  // `.lookup(k)` / `.size()`), which is what `prepareVaultClaim` uses
+  // successfully. So enumerate by id range derived from `led.lockCount`
+  // (a `u8` counter the contract maintains as a monotonic upper bound).
+  const lockCountBig =
+    led.lockCount != null ? BigInt(led.lockCount) : 0n;
   try {
-  for (const [lockId, rec] of led.locks) {
-    const dep = BigInt(rec.totalDeposited ?? 0n);
-    const rel = BigInt(rec.totalReleased ?? 0n);
-    const remaining = dep > rel ? dep - rel : 0n;
-    locks.push({
-      lockId: lockId.toString(),
-      lockerHex: bytesToHex(rec.locker),
-      minimumAgeYears: BigInt(rec.minimumAgeYears).toString(),
-      requireIssuingState: !!rec.requireIssuingState,
-      requiredIssuingStateHex: bytesToHex(rec.requiredIssuingState),
-      requireDocumentNumber: !!rec.requireDocumentNumber,
-      requiredDocumentNumberHex: bytesToHex(rec.requiredDocumentNumber),
-      maxClaimAmount: BigInt(rec.maxClaimAmount).toString(),
-      verifierChallengeHashHex: bytesToHex(rec.verifierChallengeHash),
-      totalDeposited: dep.toString(),
-      totalReleased: rel.toString(),
-      lockedRemaining: remaining.toString(),
-    });
-  }
-  // Sort by lock id ascending for a stable UI order.
-  locks.sort((a, b) =>
-    BigInt(a.lockId) < BigInt(b.lockId) ? -1 : BigInt(a.lockId) > BigInt(b.lockId) ? 1 : 0,
-  );
-  const lockCount =
-    led.lockCount != null ? BigInt(led.lockCount).toString() : locks.length.toString();
-  return { lockCount, locks };
+    for (let i = 0n; i < lockCountBig; i++) {
+      if (!led.locks.member(i)) continue;
+      const rec = led.locks.lookup(i);
+      const dep = BigInt(rec.totalDeposited ?? 0n);
+      const rel = BigInt(rec.totalReleased ?? 0n);
+      const remaining = dep > rel ? dep - rel : 0n;
+      locks.push({
+        lockId: i.toString(),
+        lockerHex: bytesToHex(rec.locker),
+        minimumAgeYears: BigInt(rec.minimumAgeYears).toString(),
+        requireIssuingState: !!rec.requireIssuingState,
+        requiredIssuingStateHex: bytesToHex(rec.requiredIssuingState),
+        requireDocumentNumber: !!rec.requireDocumentNumber,
+        requiredDocumentNumberHex: bytesToHex(rec.requiredDocumentNumber),
+        maxClaimAmount: BigInt(rec.maxClaimAmount).toString(),
+        verifierChallengeHashHex: bytesToHex(rec.verifierChallengeHash),
+        totalDeposited: dep.toString(),
+        totalReleased: rel.toString(),
+        lockedRemaining: remaining.toString(),
+      });
+    }
+    return { lockCount: lockCountBig.toString(), locks };
   } catch (e) {
     throw new Error(
       "not a multi-lock passport vault at this address (on-chain ledger layout " +

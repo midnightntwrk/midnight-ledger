@@ -357,8 +357,10 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
         throw new Error("wallet bridge unavailable");
       }
       const result = await window.midnightWallet.call(d.method, d.args || {});
+      try { console.log("[dapp-relay] reply", d.method, JSON.stringify(result)); } catch (_) {}
       reply({ __type: "mn-host-res", id: d.id, result });
     } catch (e) {
+      try { console.log("[dapp-relay] error", d.method, (e && e.message) || String(e)); } catch (_) {}
       reply({ __type: "mn-host-res", id: d.id, error: (e && e.message) || String(e) });
     }
   });
