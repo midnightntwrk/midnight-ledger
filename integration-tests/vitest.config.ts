@@ -11,8 +11,8 @@ export default defineConfig({
     dir: './src/test',
     include: ['**/*.test.ts'],
     setupFiles: ['src/vitest.setup.ts'],
-    testTimeout: 15 * 60_000,
-    hookTimeout: 15 * 60_000,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
     reporters: [
       'default',
       ['junit', { outputFile: './reports/test-report.xml' }],

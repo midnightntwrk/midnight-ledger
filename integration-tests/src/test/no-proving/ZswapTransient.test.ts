@@ -129,7 +129,7 @@ describe('Ledger API - ZswapTransient', () => {
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
 
-    expect(unprovenTransient.outputProof.instance).toEqual('pre-proof');
-    expect(unprovenTransient.inputProof.instance).toEqual('pre-proof');
+    expect(unprovenTransient.outputProof.instance).toEqual(ProofMarker.preProof);
+    expect(unprovenTransient.inputProof.instance).toEqual(ProofMarker.preProof);
   });
 });

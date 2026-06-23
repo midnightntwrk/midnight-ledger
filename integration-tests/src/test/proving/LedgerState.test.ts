@@ -20,7 +20,7 @@ import {
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess } from '@/test-utils';
 
@@ -34,14 +34,14 @@ describe.concurrent('Ledger API - LedgerStateX [@slow][@proving]', () => {
    */
   test('should leave ledger state unchanged when apply fails with faerie-gold', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );
     const transaction = await prove(unprovenTransaction);
     const proofErasedTransaction = transaction.eraseProofs();
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const transactionContext = new TransactionContext(ledgerState, {
       secondsSinceEpoch: Static.blockTime(new Date()),
       secondsSinceEpochErr: 1_000_000,
@@ -68,11 +68,11 @@ describe.concurrent('Ledger API - LedgerStateX [@slow][@proving]', () => {
    * @then Should succeed and update ledger state with new zswap first free value
    */
   test('should update ledger state when transaction has guaranteed offer only', async () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
     const transaction = await prove(unprovenTransaction);
     const proofErasedTransaction = transaction.eraseProofs();
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const transactionContext = new TransactionContext(ledgerState, {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 1_000_000,

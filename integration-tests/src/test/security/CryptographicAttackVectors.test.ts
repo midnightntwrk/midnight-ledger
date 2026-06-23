@@ -209,12 +209,12 @@ describe('Cryptographic Attack Vector Tests', () => {
         sampleEncryptionPublicKey()
       );
 
-      expect(output1.toString()).not.toEqual(output2.toString());
+      expect(output1.serialize()).not.toEqual(output2.serialize());
 
       const offer1 = ZswapOffer.fromOutput(output1, tokenType.raw, 1000n);
       const offer2 = ZswapOffer.fromOutput(output2, tokenType.raw, 1000n);
 
-      expect(offer1.toString()).not.toEqual(offer2.toString());
+      expect(offer1.serialize()).not.toEqual(offer2.serialize());
     });
 
     test('should ensure encryption key privacy', () => {
@@ -258,7 +258,6 @@ describe('Cryptographic Attack Vector Tests', () => {
     });
 
     test('should validate offer decryption authorization', () => {
-      const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
       const wrongSecretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(2));
 
       const output = ZswapOutput.new(
@@ -270,13 +269,7 @@ describe('Cryptographic Attack Vector Tests', () => {
 
       const offer = ZswapOffer.fromOutput(output, Random.shieldedTokenType().raw, 1000n);
 
-      const canDecrypt = secretKeys.encryptionSecretKey.test(offer);
-      expect(typeof canDecrypt).toBe('boolean');
-
-      const cannotDecrypt = wrongSecretKeys.encryptionSecretKey.test(offer);
-      expect(typeof cannotDecrypt).toBe('boolean');
-
-      expect(cannotDecrypt).toBe(false);
+      expect(wrongSecretKeys.encryptionSecretKey.test(offer)).toBe(false);
     });
   });
 
@@ -484,33 +477,6 @@ describe('Cryptographic Attack Vector Tests', () => {
   });
 
   describe('Side Channel Attack Protection', () => {
-    // Skipped because this fails in CI, probably because of variance in task
-    // scheduling rather than runtime.
-    test.skip('should ensure constant-time operations for sensitive data', () => {
-      const secretKeys1 = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
-      const secretKeys2 = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(6));
-
-      const coin = createShieldedCoinInfo(Random.shieldedTokenType().raw, 100n);
-
-      // Measure timing for nullifier generation (should be consistent)
-      const startTime1 = performance.now();
-      const nullifier1 = coinNullifier(coin, secretKeys1.coinSecretKey);
-      const endTime1 = performance.now();
-
-      const startTime2 = performance.now();
-      const nullifier2 = coinNullifier(coin, secretKeys2.coinSecretKey);
-      const endTime2 = performance.now();
-
-      const duration1 = endTime1 - startTime1;
-      const duration2 = endTime2 - startTime2;
-
-      // Times should be roughly similar (within 300% variance)
-      const timingRatio = Math.max(duration1, duration2) / Math.min(duration1, duration2);
-      expect(timingRatio).toBeLessThan(3);
-
-      expect(nullifier1).not.toEqual(nullifier2);
-    });
-
     test('should not leak information through string representations', () => {
       const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(42));
 
@@ -537,13 +503,8 @@ describe('Cryptographic Attack Vector Tests', () => {
       expect(randomness2).not.toEqual(randomness3);
       expect(randomness1).not.toEqual(randomness3);
 
-      // Should have reasonable bit distribution
-      const randomnessArray = [randomness1, randomness2, randomness3];
-      randomnessArray.forEach((r) => {
-        // Should not be all zeros or all ones (basic entropy check)
+      [randomness1, randomness2, randomness3].forEach((r) => {
         expect(r).not.toEqual(0n);
-        expect(r.toString().match(/0/g)?.length).not.toEqual(r.toString().length); // Contains at least one 1 bit
-        expect(r.toString().match(/[fF]/g)?.length).not.toEqual(r.toString().length); // Contains at least one 0 bit
       });
     });
 

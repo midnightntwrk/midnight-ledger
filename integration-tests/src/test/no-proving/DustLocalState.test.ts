@@ -107,6 +107,58 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
+   * Test tree-collapse operations.
+   *
+   * @given A new DustLocalState
+   * @when Collapsing an empty range of the generation and commitment trees
+   * @then The operations should be deterministic and produce serializable states
+   */
+  test('collapseGenerationTree and collapseCommitmentTree are deterministic and serializable', () => {
+    const localState = new DustLocalState(initialParameters);
+
+    const generation = localState.collapseGenerationTree(0n, 0n).serialize();
+    expect(localState.collapseGenerationTree(0n, 0n).serialize()).toEqual(generation);
+    expect(generation.length).toBeGreaterThan(0);
+
+    const commitment = localState.collapseCommitmentTree(0n, 0n).serialize();
+    expect(localState.collapseCommitmentTree(0n, 0n).serialize()).toEqual(commitment);
+    expect(commitment.length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Test the syncTime accessor.
+   *
+   * @given A new DustLocalState
+   * @when Reading and reassigning syncTime
+   * @then The reassigned value should be readable back
+   */
+  test('syncTime can be read and updated', () => {
+    const localState = new DustLocalState(initialParameters);
+
+    expect(localState.syncTime).toBeInstanceOf(Date);
+
+    localState.syncTime = new Date(7000);
+
+    expect(localState.syncTime.getTime()).toEqual(7000);
+  });
+
+  /**
+   * Test replaying a raw (serialized) event stream.
+   *
+   * @given An empty raw event stream
+   * @when Replaying it with replayRawEvents
+   * @then The resulting state should match replaying an empty event list
+   */
+  test('replayRawEvents with no raw events matches replaying an empty event list', () => {
+    const secretKey = sampleDustSecretKey();
+
+    const fromRaw = new DustLocalState(initialParameters).replayRawEvents(secretKey, new Uint8Array(0));
+    const fromList = new DustLocalState(initialParameters).replayEvents(secretKey, []);
+
+    expect(fromRaw.state.serialize()).toEqual(fromList.serialize());
+  });
+
+  /**
    * Test generatingTreeFirstFree getter on a new DustLocalState.
    *
    * @given A new DustLocalState instance

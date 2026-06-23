@@ -11,13 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-describe('Ledger API - IntoUnderlyingByteSource', () => {
+import { SignatureEnabled, signData, sampleSigningKey } from '@midnight-ntwrk/ledger';
+
+describe('Ledger API - SignatureEnabled', () => {
   /**
-   * Placeholder test for IntoUnderlyingByteSource functionality.
+   * Test serialization round-trip of a wrapped signature.
    *
-   * @given IntoUnderlyingByteSource API requirements
-   * @when Implementation is ready
-   * @then Should test underlying byte source operations
+   * @given A SignatureEnabled wrapping a real signature
+   * @when Serializing and deserializing it
+   * @then The deserialized value should re-serialize to identical bytes
    */
-  test('should implement underlying byte source functionality', async () => {});
+  test('serializes and deserializes a wrapped signature', () => {
+    const signature = new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)));
+    const serialized = signature.serialize();
+
+    expect(SignatureEnabled.deserialize(serialized).serialize()).toEqual(serialized);
+  });
 });

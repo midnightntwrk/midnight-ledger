@@ -58,6 +58,8 @@ describe('Ledger API - ZswapStateChanges', () => {
     const [firstChange] = withChanges.changes;
     const { source } = firstChange;
 
+    expect(firstChange.toString().length).toBeGreaterThan(0);
+
     const changes = new ZswapStateChanges(source, [], []);
 
     expect(changes.source).toEqual(source);

@@ -13,7 +13,7 @@
 
 import { ZswapTransient, ZswapOffer, ZswapOutput, Transaction } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
@@ -35,7 +35,7 @@ describe.concurrent('Ledger API - Transient [@slow][@proving]', () => {
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
     const unprovenOffer = ZswapOffer.fromTransient(unprovenTransient);
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transaction = await prove(unprovenTransaction);
     const transient = transaction.guaranteedOffer?.transients[0];
     const output2 = ZswapTransient.deserialize('proof', transient!.serialize());
@@ -59,7 +59,7 @@ describe.concurrent('Ledger API - Transient [@slow][@proving]', () => {
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
     const unprovenOffer = ZswapOffer.fromTransient(unprovenTransient);
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transaction = await prove(unprovenTransaction);
     const transient = transaction.guaranteedOffer?.transients[0];
 

@@ -20,6 +20,7 @@ import {
   type EncodedStateValue,
   type LogEventType,
   type Op,
+  shieldedToken,
   signatureVerifyingKey,
   StateBoundedMerkleTree,
   StateValue
@@ -47,6 +48,21 @@ describe('Ledger API - ContractState', () => {
     expect(operation?.verifierKey).toEqual(contractOperation.verifierKey);
     expect(contractState.operations()).toEqual([OPERATION_NAME]);
     expect(contractState.toString()).toMatch(/ContractState.*/);
+  });
+
+  /**
+   * Test the balance accessor.
+   *
+   * @given A new contract state
+   * @when Assigning a token balance map
+   * @then The balance should be readable back
+   */
+  test('balance can be set and read', () => {
+    const contractState = new ContractState();
+
+    contractState.balance = new Map([[shieldedToken(), 5n]]);
+
+    expect(contractState.balance.size).toEqual(1);
   });
 
   /**

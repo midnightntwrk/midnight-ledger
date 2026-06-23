@@ -22,8 +22,10 @@ import {
   DustState,
   feeToken,
   Intent,
+  LedgerParameters,
   LedgerState,
   nativeToken,
+  sampleUserAddress,
   shieldedToken,
   StateMap,
   StateValue,
@@ -57,6 +59,41 @@ describe('Ledger API - LedgerState', () => {
     const deserialized = LedgerState.deserialize(serialized);
 
     expect(deserialized.toString()).toEqual(ledgerState.toString());
+  });
+
+  /**
+   * Test reward distribution and bridged-night accounting.
+   *
+   * @given A blank ledger state and a recipient
+   * @when Distributing Night to the recipient
+   * @then The state should change, while bridged-night owed stays zero (reward and bridge are separate pools)
+   */
+  test('testingDistributeNight changes state but leaves bridge-receiving at zero', () => {
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
+    const recipient = sampleUserAddress();
+
+    expect(ledgerState.bridgeReceiving(recipient)).toEqual(0n);
+
+    const distributed = ledgerState.testingDistributeNight(recipient, 999n, new Date(0));
+
+    expect(distributed.serialize()).not.toEqual(ledgerState.serialize());
+    expect(distributed.bridgeReceiving(recipient)).toEqual(0n);
+  });
+
+  /**
+   * Test the parameters accessor.
+   *
+   * @given A ledger state
+   * @when Assigning new ledger parameters
+   * @then The parameters should be updated and serialization should reflect the change
+   */
+  test('parameters can be read and updated', () => {
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
+
+    ledgerState.parameters = LedgerParameters.initialParameters();
+
+    expect(ledgerState.parameters).toBeDefined();
+    expect(ledgerState.serialize().length).toBeGreaterThan(0);
   });
 
   /**
@@ -321,6 +358,7 @@ describe('Ledger API - LedgerState', () => {
     strictness.enforceBalancing = false;
     strictness.verifyContractProofs = false;
     const verifiedTransaction = proofErasedTransaction.wellFormed(ledgerState, strictness, new Date(0));
+    expect(verifiedTransaction.transaction).toBeDefined();
     const [ledgerStateAfter, txResult] = ledgerState.apply(
       verifiedTransaction,
       new TransactionContext(ledgerState, blockContext, new Set([contractDeploy.address]))
@@ -328,6 +366,7 @@ describe('Ledger API - LedgerState', () => {
 
     expect(txResult.error).toBeUndefined();
     expect(txResult.type).toEqual('success');
+    expect(txResult.successfulSegments).toBeUndefined();
     expect(ledgerStateAfter.zswap.firstFree.toString()).toEqual('1');
 
     const contractCallPrototype = new ContractCallPrototype(

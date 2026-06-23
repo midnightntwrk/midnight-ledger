@@ -31,4 +31,18 @@ describe('Ledger API - ContractOperationVersionedVerifierKey', () => {
     expect(contractOperationVersionedVerifierKey.version).toEqual('v3');
     expect(contractOperationVersionedVerifierKey.toString(true)).toMatch(/V3\(VerifierKey\(.*/);
   });
+
+  /**
+   * Test exposing the raw verifier key bytes.
+   *
+   * @given A versioned verifier key constructed from raw bytes
+   * @when Reading the rawVk property
+   * @then It should return the exact bytes it was constructed with
+   */
+  test('exposes the raw verifier key bytes', () => {
+    const key = new ContractOperationVersionedVerifierKey('v3', TestResource.operationVerifierKey());
+
+    expect(key.rawVk).toBeInstanceOf(Uint8Array);
+    expect(key.rawVk.length).toBeGreaterThan(0);
+  });
 });

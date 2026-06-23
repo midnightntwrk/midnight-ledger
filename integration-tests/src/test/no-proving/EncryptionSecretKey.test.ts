@@ -40,6 +40,27 @@ describe('Ledger API - EncryptionSecretKey', () => {
   });
 
   /**
+   * Test tagged serialization.
+   *
+   * @given An encryption secret key from seed
+   * @when Serializing with the tagged format
+   * @then Should round-trip via taggedDeserialize and reject untagged input
+   */
+  test('tagged serialization round-trips and rejects untagged input', () => {
+    const { encryptionSecretKey } = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    const tagged = encryptionSecretKey.yesIKnowTheSecurityImplicationsOfThis_taggedSerialize();
+    const plain = encryptionSecretKey.yesIKnowTheSecurityImplicationsOfThis_serialize();
+
+    expect(tagged).not.toEqual(plain);
+    expect(
+      EncryptionSecretKey.taggedDeserialize(tagged).yesIKnowTheSecurityImplicationsOfThis_taggedSerialize()
+    ).toEqual(tagged);
+    expect(() => EncryptionSecretKey.taggedDeserialize(plain)).toThrow(
+      "expected header tag 'midnight:encryption-secret-key[v1]:'"
+    );
+  });
+
+  /**
    * Test offer testing functionality.
    *
    * @given An encryption secret key and a ZswapOffer

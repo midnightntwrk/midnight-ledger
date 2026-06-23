@@ -13,7 +13,7 @@
 
 import { LedgerState, TransactionContext, ZswapChainState } from '@midnight-ntwrk/ledger';
 
-import { Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 
 describe('Ledger API - TransactionContext', () => {
   /**
@@ -25,7 +25,7 @@ describe('Ledger API - TransactionContext', () => {
    */
   test('should create context', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const blockContext = Static.blockContext(new Date());
 
     expect(() => new TransactionContext(ledgerState, blockContext).toString()).not.toThrow();
@@ -40,7 +40,7 @@ describe('Ledger API - TransactionContext', () => {
    */
   test('should create context with whitelist', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const blockContext = Static.blockContext(new Date());
 
     expect(() =>
@@ -57,7 +57,7 @@ describe('Ledger API - TransactionContext', () => {
    */
   test('should throw error with invalid block context', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const invalidBlockContext = {
       secondsSinceEpoch: -1n,
       secondsSinceEpochErr: 0,
@@ -79,7 +79,7 @@ describe('Ledger API - TransactionContext', () => {
    */
   test('should return string representation', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const blockContext = Static.blockContext(new Date());
     const transactionContext = new TransactionContext(ledgerState, blockContext);
 
@@ -95,7 +95,7 @@ describe('Ledger API - TransactionContext', () => {
    */
   test('should create context with multiple whitelist addresses', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const blockContext = Static.blockContext(new Date());
 
     expect(() =>

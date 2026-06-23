@@ -14,6 +14,7 @@
 import '@/setup-proving';
 import { ContractDeploy, ContractState, Intent, Transaction } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
+import { LOCAL_TEST_NETWORK_ID } from '@/test-objects';
 
 describe.concurrent('Ledger API - Intent [@slow][@proving]', () => {
   /**
@@ -30,7 +31,7 @@ describe.concurrent('Ledger API - Intent [@slow][@proving]', () => {
     const intent = Intent.new(new Date());
     const updated = intent.addDeploy(contractDeploy);
 
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, updated);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, updated);
 
     const transaction = await prove(unprovenTransaction);
 

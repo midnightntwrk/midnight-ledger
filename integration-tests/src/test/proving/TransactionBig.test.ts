@@ -25,7 +25,7 @@ import {
   ContractOperationVersion
 } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { Static, type ShieldedTokenType } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Static, type ShieldedTokenType } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess, createValidZSwapInput } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -101,7 +101,7 @@ describe.concurrent('Ledger API - TransactionBig [@slow][@proving]', () => {
 
       // TODO: Add contract calls (require to update prover to pass configuration to proving)
 
-      const unprovenTransaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer, intent);
+      const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer, intent);
 
       const transaction = await prove(unprovenTransaction);
 

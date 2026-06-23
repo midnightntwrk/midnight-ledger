@@ -35,6 +35,19 @@ describe('Ledger API - ZSwapInput', () => {
   });
 
   /**
+   * Test exposing the input proof.
+   *
+   * @given A valid ZswapInput created via the wallet spend flow
+   * @when Reading its proof property
+   * @then A proof should be present
+   */
+  test('exposes the input proof', () => {
+    const { zswapInput } = createValidZSwapInput(100n);
+
+    expect(zswapInput.proof).toBeDefined();
+  });
+
+  /**
    * Test error handling for negative value in shielded coin.
    *
    * @given A qualified shielded coin info with negative value

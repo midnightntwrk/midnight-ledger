@@ -20,7 +20,7 @@ import {
   ZswapChainState
 } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { type ShieldedTokenType, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -35,7 +35,7 @@ describe.concurrent('Ledger API - ProofErasedTransaction [@slow][@proving]', () 
    */
   test('should erase proofs correctly', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );
@@ -70,7 +70,7 @@ describe.concurrent('Ledger API - ProofErasedTransaction [@slow][@proving]', () 
   test('should have symmetric merge operation', async () => {
     const transaction = await prove(Static.unprovenTransactionGuaranteedAndFallibleAndContractCalls());
     const unprovenTransaction2 = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );
@@ -130,7 +130,7 @@ describe.concurrent('Ledger API - ProofErasedTransaction [@slow][@proving]', () 
     const proofErasedTransaction = transaction.eraseProofs();
 
     const zSwapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zSwapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zSwapChainState);
     const strictness = new WellFormedStrictness();
     strictness.verifyContractProofs = true;
     strictness.enforceBalancing = false;
@@ -164,7 +164,7 @@ describe.concurrent('Ledger API - ProofErasedTransaction [@slow][@proving]', () 
     const proofErasedTransaction = transaction.eraseProofs();
 
     const zSwapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zSwapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zSwapChainState);
     const strictness = new WellFormedStrictness();
     strictness.verifyContractProofs = true;
     strictness.enforceBalancing = true;

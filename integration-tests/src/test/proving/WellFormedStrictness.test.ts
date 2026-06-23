@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { prove } from '@/proof-provider';
-import { Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { LedgerState, WellFormedStrictness, ZswapChainState } from '@midnight-ntwrk/ledger';
 import '@/setup-proving';
@@ -23,7 +23,7 @@ describe.concurrent('Ledger API - WellFormedStrictness [@proving][@slow]', () =>
     const date = new Date();
     const transaction = await prove(Static.unprovenTransactionGuaranteedAndFallibleAndContractCalls());
     const zSwapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zSwapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zSwapChainState);
     const strictness = new WellFormedStrictness();
     strictness.verifyContractProofs = true;
     strictness.enforceBalancing = false;
@@ -38,7 +38,7 @@ describe.concurrent('Ledger API - WellFormedStrictness [@proving][@slow]', () =>
     const date = new Date();
     const transaction = await prove(Static.unprovenTransactionGuaranteedAndFallibleAndContractCalls());
     const zSwapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zSwapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zSwapChainState);
     const strictness = new WellFormedStrictness();
     strictness.verifyContractProofs = true;
     strictness.enforceBalancing = true;

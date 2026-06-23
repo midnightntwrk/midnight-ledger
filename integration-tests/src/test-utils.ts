@@ -16,7 +16,6 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import {
-  type Bindingish,
   type ContractCallPrototype,
   type ContractDeploy,
   createShieldedCoinInfo,
@@ -24,11 +23,9 @@ import {
   type MaintenanceUpdate,
   type PreBinding,
   type PreProof,
-  type Proofish,
   type RawTokenType,
-  type SignatureEnabled,
-  type Signaturish,
   type Signature,
+  type SignatureEnabled,
   type ZswapInput,
   ZswapLocalState,
   ZswapOffer,
@@ -38,6 +35,15 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+export const TEST_SEED = Number(process.env.MN_TEST_SEED) || 0x42;
+
+// Seedable PRNG (Park-Miller) so randomized fixtures are reproducible.
+let prngState = TEST_SEED % 2147483647 || 1;
+export const seededRandom = (): number => {
+  prngState = (prngState * 48271) % 2147483647;
+  return prngState / 2147483647;
+};
 
 export const delay = (ms: number) => {
   return new Promise((resolve) => {
@@ -56,31 +62,14 @@ interface Serializable {
   serialize: () => Uint8Array;
 }
 
-export function assertSerializationSuccess<
-  T extends Serializable,
-  S extends Signaturish,
-  P extends Proofish,
-  B extends Bindingish
->(serializable: T, markerS?: S['instance'], markerP?: P['instance'], markerB?: B['instance']) {
+type Deserializer<T> = { deserialize: (...args: unknown[]) => T };
+
+export function assertSerializationSuccess<T extends Serializable>(serializable: T, ...markers: unknown[]) {
   const serialized = serializable.serialize();
-  let deserialized;
-  if (markerS && markerP && markerB) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deserialized = (serializable.constructor as any).deserialize(markerS, markerP, markerB, serialized);
-  } else if (markerS && markerP) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deserialized = (serializable.constructor as any).deserialize(markerS, markerP, serialized);
-  } else if (markerP) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deserialized = (serializable.constructor as any).deserialize(markerP, serialized);
-  } else if (markerS) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deserialized = (serializable.constructor as any).deserialize(markerS, serialized);
-  } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    deserialized = (serializable.constructor as any).deserialize(serialized);
-  }
+  const ctor = serializable.constructor as unknown as Deserializer<T>;
+  const deserialized = ctor.deserialize(...markers.filter(Boolean), serialized);
   expect(deserialized.toString()).toEqual(serializable.toString());
+  expect(deserialized.serialize()).toEqual(serialized);
 }
 
 export function mapFindByKey<K, V>(map: Map<K, V>, key: K): V | undefined {
@@ -106,8 +95,8 @@ export const sortBigIntArray = (arr: bigint[]): bigint[] => {
 
 export const corruptSignature = (signature: Signature): Signature => {
   const bytes = Buffer.from(signature.value, 'hex');
-  const randomIndex = Math.floor(Math.random() * (bytes.length - 4));
-  const randomBit = Math.floor(Math.random() * 8);
+  const randomIndex = Math.floor(seededRandom() * (bytes.length - 4));
+  const randomBit = Math.floor(seededRandom() * 8);
 
   const bitMask = 2 ** randomBit;
   // eslint-disable-next-line no-bitwise
@@ -116,7 +105,7 @@ export const corruptSignature = (signature: Signature): Signature => {
 };
 
 export const generateHex = (len: number) =>
-  [...Array(len)].map(() => Math.floor(Math.random() * 16).toString(16)).join('');
+  [...Array(len)].map(() => Math.floor(seededRandom() * 16).toString(16)).join('');
 
 /**
  * Creates a valid ZSwapInput using wallet spend method

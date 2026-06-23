@@ -128,6 +128,8 @@ describe('Ledger API - Event - ContractLog', () => {
     const { result } = emitLog(versionedTuple(5n, 1n, payload));
 
     const original = result.events.find((e) => (e.content as { tag: string }).tag === 'contractLog')!;
+    expect(original.toString().length).toBeGreaterThan(0);
+
     const EventClass = original.constructor as unknown as { deserialize(raw: Uint8Array): Event };
     const roundTripped = EventClass.deserialize(original.serialize());
 

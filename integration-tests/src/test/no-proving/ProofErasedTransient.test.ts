@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { ZswapOffer, ZswapOutput, Transaction, ZswapTransient } from '@midnight-ntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
 
@@ -33,7 +33,7 @@ describe('Ledger API - ZswapTransient [@slow][@proving]', () => {
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
     const unprovenOffer = ZswapOffer.fromTransient(unprovenTransient);
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const transient = proofErasedTransaction.guaranteedOffer?.transients[0];
     const transient2 = ZswapTransient.deserialize('no-proof', transient!.serialize());
@@ -57,7 +57,7 @@ describe('Ledger API - ZswapTransient [@slow][@proving]', () => {
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
     const unprovenOffer = ZswapOffer.fromTransient(unprovenTransient);
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const output = proofErasedTransaction.guaranteedOffer?.transients[0];
 

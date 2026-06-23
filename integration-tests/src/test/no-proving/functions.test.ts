@@ -23,6 +23,8 @@ import {
   communicationCommitment,
   communicationCommitmentRandomness,
   CostModel,
+  createCheckPayload,
+  createProvingTransactionPayload,
   createShieldedCoinInfo,
   decodeCoinPublicKey,
   decodeContractAddress,
@@ -43,16 +45,22 @@ import {
   encodeUserAddress,
   entryPointHash,
   hashToCurve,
+  jubjubSampleScalar,
+  jubjubScalarFromNative,
   leafHash,
   LedgerParameters,
   type LogEventType,
   maxAlignedSize,
   maxField,
+  maxJubjubScalar,
+  nativeFromJubjubScalar,
   type Op,
+  parseCheckResult,
   partitionTranscripts,
   persistentCommit,
   persistentHash,
   PreTranscript,
+  proofDataIntoSerializedPreimage,
   QueryContext,
   rawTokenType,
   runProgram,
@@ -405,6 +413,72 @@ describe('Ledger API - functions', () => {
     expect(bigIntModFr(maxField())).toEqual(maxField());
     expect(() => bigIntModFr(maxField() + 1n)).toThrow('out of bounds for prime field');
     expect(() => bigIntModFr(-1n)).toThrow("Invalid character '-' at position 0");
+  });
+
+  test('maxJubjubScalar is the JubJub scalar field modulus minus one', () => {
+    expect(maxJubjubScalar()).toEqual(6554484396890773809930967563523245729705921265872317281365359162392183254198n);
+  });
+
+  test('jubjubSampleScalar samples distinct in-range scalars', () => {
+    const max = maxJubjubScalar();
+    const samples = Array.from({ length: 8 }, () => valueToBigInt(jubjubSampleScalar()));
+
+    samples.forEach((s) => {
+      expect(s).toBeGreaterThanOrEqual(0n);
+      expect(s).toBeLessThanOrEqual(max);
+    });
+    expect(new Set(samples.map(String)).size).toBeGreaterThan(1);
+  });
+
+  test('jubjubScalarFromNative reduces native field elements modulo the JubJub modulus', () => {
+    const max = maxJubjubScalar();
+    const fromNative = (x: bigint) => valueToBigInt(jubjubScalarFromNative(bigIntToValue(x)));
+
+    expect(fromNative(5n)).toEqual(5n);
+    expect(fromNative(max)).toEqual(max);
+    // max + 1 == modulus, which reduces to 0; max + 2 reduces to 1.
+    expect(fromNative(max + 1n)).toEqual(0n);
+    expect(fromNative(max + 2n)).toEqual(1n);
+  });
+
+  test('JubJub and native scalar conversions round-trip', () => {
+    const jubjub = jubjubScalarFromNative(bigIntToValue(123n));
+
+    expect(valueToBigInt(nativeFromJubjubScalar(jubjub))).toEqual(123n);
+    expect(valueToBigInt(jubjubScalarFromNative(nativeFromJubjubScalar(jubjub)))).toEqual(123n);
+  });
+
+  describe('proof-server payload helpers', () => {
+    test('proofDataIntoSerializedPreimage is deterministic and keyed by location', () => {
+      const av = Static.alignedValue;
+      const preimage = proofDataIntoSerializedPreimage(av, av, [], []);
+
+      expect(preimage.length).toBeGreaterThan(0);
+      expect(proofDataIntoSerializedPreimage(av, av, [], [])).toEqual(preimage);
+      expect(proofDataIntoSerializedPreimage(av, av, [], [], 'midnight/zswap/output')).not.toEqual(preimage);
+    });
+
+    test('createCheckPayload wraps a preimage deterministically', () => {
+      const preimage = proofDataIntoSerializedPreimage(Static.alignedValue, Static.alignedValue, [], []);
+      const payload = createCheckPayload(preimage);
+
+      expect(payload.length).toBeGreaterThan(0);
+      expect(createCheckPayload(preimage)).toEqual(payload);
+    });
+
+    test('createProvingTransactionPayload serializes an unproven transaction deterministically', () => {
+      const tx = Static.unprovenTransactionGuaranteed();
+      const payload = createProvingTransactionPayload(tx, new Map());
+
+      expect(payload.length).toBeGreaterThan(0);
+      expect(createProvingTransactionPayload(tx, new Map())).toEqual(payload);
+    });
+
+    test('parseCheckResult rejects input without the expected header tag', () => {
+      expect(() => parseCheckResult(new Uint8Array([1, 2, 3]))).toThrow(
+        "expected header tag 'midnight:vec(option(u64)):'"
+      );
+    });
   });
 
   /**

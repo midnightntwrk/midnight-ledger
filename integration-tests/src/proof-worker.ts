@@ -17,7 +17,7 @@ import { keyMaterialProvider } from './test-objects.js';
 
 export const wasmProver = provingProvider(keyMaterialProvider);
 
-const [op, fname, args]: ['check' | 'prove', string, any[]] = workerData;
+const [op, args]: ['check' | 'prove', any[]] = workerData;
 // we handle polymorphic data here
 // @ts-nocheck
 if (op === 'check') {

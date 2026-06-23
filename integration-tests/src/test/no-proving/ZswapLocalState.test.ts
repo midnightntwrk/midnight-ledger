@@ -56,63 +56,53 @@ describe('Ledger API - ZswapLocalState', () => {
     expect(deserialized.toString()).toEqual(localState.toString());
   });
 
-  // it.each([['success'], ['partialSuccess']])('applyProofErasedTx - success - should apply tx - %s)', (res) => {
-  //  const localState = new ZswapLocalState();
-  //  const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
-  //  const coinInfo = Static.shieldedCoinInfo(10n);
-  //  const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
-  //  const unprovenOffer = ZswapOffer.fromOutput(
-  //    ZswapOutput.new(coinInfo, 0, secretKeys.coinPublicKey, secretKeys.encryptionPublicKey),
-  //    coinInfo.type,
-  //    coinInfo.value
-  //  );
-  //  const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
-  //  const proofErasedTransaction = unprovenTransaction.eraseProofs();
-  //  const appliedTxLocalState = localState.applyTx(secretKeys, proofErasedTransaction, {
-  //    type: res as 'success' | 'partialSuccess' | 'failure',
-  //    successfulSegments:
-  //      res === 'partialSuccess'
-  //        ? new Map([
-  //            [0, true],
-  //            [1, false]
-  //          ])
-  //        : undefined
-  //  });
+  /**
+   * Test reverting a transaction whose coins are not owned locally.
+   *
+   * @given An empty ZswapLocalState and an unrelated transaction
+   * @when Reverting that transaction against the local state
+   * @then The local state should be unchanged (revert of an unowned transaction is a no-op)
+   */
+  test('revertTransaction leaves state unchanged for an unrelated transaction', () => {
+    const localState = new ZswapLocalState();
+    const tx = Static.unprovenTransactionGuaranteed();
 
-  //  expect(appliedTxLocalState.pendingSpends.size).toEqual(0);
-  //  expect(appliedTxLocalState.pendingOutputs.size).toEqual(0);
-  //  expect(appliedTxLocalState.firstFree).toEqual(1n);
-  //  expect(appliedTxLocalState.coins.size).toEqual(1);
-  //  expect(appliedTxLocalState.coins.values().next().value).toEqual(qualifiedCoinInfo);
-  //  assertSerializationSuccess(appliedTxLocalState);
-  // });
+    const txReverted = localState.revertTransaction(tx);
 
-  /// **
-  // * Test application of failed transaction.
-  // *
-  // * @given A ZswapLocalState with a transaction marked as failed
-  // * @when Applying the transaction with 'failure' status
-  // * @then Should maintain empty state with no coins or pending items
-  // */
-  // test('should fail to apply transaction on failure status', () => {
-  //  const localState = new ZswapLocalState();
-  //  const coinInfo = Static.shieldedCoinInfo(10n);
-  //  const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
-  //  const unprovenOffer = ZswapOffer.fromOutput(
-  //    ZswapOutput.new(coinInfo, 0, secretKeys.coinPublicKey, secretKeys.encryptionPublicKey),
-  //    coinInfo.type,
-  //    coinInfo.value
-  //  );
-  //  const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
-  //  const proofErasedTransaction = unprovenTransaction.eraseProofs();
-  //  const appliedTxLocalState = localState.applyTx(secretKeys, proofErasedTransaction, { type: 'failure' });
+    expect(txReverted.serialize()).toEqual(localState.serialize());
+  });
 
-  //  expect(appliedTxLocalState.pendingSpends.size).toEqual(0);
-  //  expect(appliedTxLocalState.pendingOutputs.size).toEqual(0);
-  //  expect(appliedTxLocalState.firstFree).toEqual(0n);
-  //  expect(appliedTxLocalState.coins.size).toEqual(0);
-  //  assertSerializationSuccess(appliedTxLocalState);
-  // });
+  /**
+   * Test applying a failed offer not owned by the local wallet.
+   *
+   * @given An empty ZswapLocalState and an offer targeting other keys
+   * @when Applying the offer as a failed transaction
+   * @then The resulting state should hold no coins and remain serializable
+   */
+  test('applyFailed of an unowned offer yields an empty local state', () => {
+    const localState = new ZswapLocalState();
+
+    const after = localState.applyFailed(Static.unprovenOfferFromOutput());
+
+    expect(after.coins.size).toEqual(0);
+    expect(after.serialize().length).toBeGreaterThan(0);
+  });
+
+  /**
+   * Test replaying a raw (serialized) event stream.
+   *
+   * @given An empty raw event stream
+   * @when Replaying it with replayRawEvents
+   * @then The resulting state should match replaying an empty event list
+   */
+  test('replayRawEvents with no raw events matches replaying an empty event list', () => {
+    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+
+    const fromRaw = new ZswapLocalState().replayRawEvents(secretKeys, new Uint8Array(0));
+    const fromList = new ZswapLocalState().replayEvents(secretKeys, []);
+
+    expect(fromRaw.state.serialize()).toEqual(fromList.serialize());
+  });
 
   /**
    * Test spending coins from local state.
