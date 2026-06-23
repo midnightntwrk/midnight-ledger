@@ -121,19 +121,36 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
     // executor's worker thread for the full prove time (seconds on
     // desktop, tens of seconds on ARM emulator), starving the
     // Dioxus render loop and the `DioxusEvalBridge` driver, so the
-    // UI freezes. `block_in_place` keeps us on the same thread but
-    // signals to tokio's multi-thread runtime that the current
-    // worker is about to block, letting it spin up an extra worker
-    // for the other tasks. The `Handle::current().block_on(...)` is
-    // the documented escape hatch when the work has lifetime ties
-    // to local state — here `provider` borrows `resolver`, so
-    // `spawn_blocking` (which requires `'static + Send`) wouldn't
-    // fit without a heavier refactor.
+    // UI freezes.
+    //
+    // Two runtime flavours to handle:
+    //
+    //   1. **Multi-thread runtime** (desktop/iOS path) — use
+    //      `block_in_place` so tokio knows the current worker is
+    //      about to block, letting it spin up an extra worker for
+    //      the other tasks while we crunch. Wraps
+    //      `Handle::current().block_on(...)` which is the documented
+    //      escape hatch when the work has lifetime ties to local
+    //      state (here `provider` borrows `resolver`, so
+    //      `spawn_blocking` doesn't fit without a heavier refactor).
+    //
+    //   2. **Current-thread runtime** (Android wallet-worker, see
+    //      `dioxus-wallet/src/worker`) — `block_in_place` panics on
+    //      `runtime=current-thread`. We polled the future directly
+    //      since the body never yields anyway. The UI doesn't freeze
+    //      here because the wallet-worker is its own thread, separate
+    //      from the Dioxus render loop and `DioxusEvalBridge` driver.
     let t_prove = std::time::Instant::now();
-    let proved = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current()
-            .block_on(tx.prove(provider, &INITIAL_COST_MODEL))
-    })
+    let prove_fut = tx.prove(provider, &INITIAL_COST_MODEL);
+    let proved = if tokio::runtime::Handle::current().runtime_flavor()
+        == tokio::runtime::RuntimeFlavor::CurrentThread
+    {
+        prove_fut.await
+    } else {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(prove_fut)
+        })
+    }
     .map_err(|e| TxError::Prove(e.to_string()))?;
     let prove_ms = t_prove.elapsed().as_millis();
     tracing::info!(
