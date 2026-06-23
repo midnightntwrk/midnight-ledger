@@ -1,6 +1,6 @@
 [package]
 name = "midnight-zkir-v3"
-version = "3.0.0"
+version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -12,7 +12,16 @@ path = "src/main.rs"
 required-features = ["binary"]
 
 [features]
-binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
+binary = [
+  "dep:log",
+  "dep:tracing-subscriber",
+  "dep:clap",
+  "dep:env_logger",
+  "dep:tokio",
+  "dep:indicatif",
+  "dep:console",
+  "dep:futures-executor",
+]
 proptest = [
   "dep:pastey",
   "dep:proptest",
@@ -25,12 +34,14 @@ proptest = [
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = [
+  "cli",
+] }
 
-midnight-curves = { version = "^0.3.0" }
-midnight-proofs = { version = "^0.8.0" }
-midnight-circuits = { version = "^7.0.0" }
-midnight-zk-stdlib = { version = "^2.0.0" }
+midnight-curves = { version = "^0.3.1" }
+midnight-proofs = { version = "^0.8.1" }
+midnight-circuits = { version = "^7.2.1" }
+midnight-zk-stdlib = { version = "^2.3.1" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"
@@ -51,7 +62,11 @@ log = { version = "^0.4.28", optional = true }
 tracing-subscriber = { version = "^0.3.19", optional = true }
 clap = { version = "^4.5.40", features = ["derive"], optional = true }
 env_logger = { version = "^0.11.8", optional = true }
-tokio = { version = "^1.46.1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
+tokio = { version = "^1.46.1", features = [
+  "rt",
+  "macros",
+  "rt-multi-thread",
+], optional = true }
 indicatif = { version = "^0.18.4", optional = true }
 console = { version = "^0.16.3", optional = true }
 futures-executor = { version = "^0.3.32", optional = true }

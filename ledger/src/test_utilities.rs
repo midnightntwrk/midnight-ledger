@@ -21,8 +21,8 @@ use crate::events::Event;
 pub use crate::prove::Resolver;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::{
-    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters, LedgerState,
-    MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
+    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters,
+    LedgerState, MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
     ProofPreimageMarker, SignatureKind, SystemTransaction, Transaction, UnshieldedOffer, Utxo,
     UtxoOutput,
 };
@@ -44,6 +44,7 @@ use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
+use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
@@ -63,7 +64,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 #[cfg(feature = "proving")]
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 #[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProverKey, ProvingProvider, Resolver as ResolverT, WrappedIr};
 #[cfg(feature = "proving")]
@@ -571,9 +571,15 @@ impl<D: DB> TestState<D> {
         let old_dust = self.dust.clone();
         let mut last_dust = 0;
         while let Some(mut dust) = merged_tx
-            .balance(Some(merged_tx.fees_with_impl(&self.ledger.parameters, |contract, entry_point| {
-                self.ledger.index(contract).and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
-            }, false)?))?
+            .balance(Some(merged_tx.fees_with_impl(
+                &self.ledger.parameters,
+                |contract, entry_point| {
+                    self.ledger
+                        .index(contract)
+                        .and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
+                },
+                false,
+            )?))?
             .get(&(TokenType::Dust, 0))
             .and_then(|bal| (*bal < 0).then_some((-*bal) as u128))
         {
@@ -634,14 +640,28 @@ impl<D: DB> TestState<D> {
     }
 }
 
-pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<VerifierKey> {
-    use serialize::tagged_deserialize;
+/// Resolves the key material for `name` and builds the corresponding
+/// [`ContractOperation`], deserializing the verifier key into the v1 (`v2`) or
+/// v2 (`v3`) field depending on its tag.
+pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> ContractOperation {
     use transient_crypto::proofs::Resolver;
     let proof_data = resolver
         .resolve_key(KeyLocation(std::borrow::Cow::Borrowed(name)))
         .await
-        .ok()??;
-    tagged_deserialize(&mut &proof_data.verifier_key[..]).ok()
+        .expect("resolving verifier key should not error")
+        .expect("verifier key should be present");
+    let mut op = ContractOperation::new(None, None);
+    if let Ok(vk) = serialize::tagged_deserialize::<transient_crypto::proofs::VerifierKey>(
+        &mut &proof_data.verifier_key[..],
+    ) {
+        op.v3 = Some(vk);
+    } else {
+        op.v2 = Some(
+            serialize::tagged_deserialize(&mut &proof_data.verifier_key[..])
+                .expect("verifier key should deserialize as a v1 or v2 verifier key"),
+        );
+    }
+    op
 }
 
 pub fn test_resolver(test_name: &'static str) -> Resolver {
@@ -896,6 +916,9 @@ impl ProvingProvider for ProofServerProvider<'_> {
     }
     fn split(&mut self) -> Self {
         self.clone()
+    }
+    fn resolver(&self) -> &impl ResolverT {
+        self.resolver
     }
 }
 

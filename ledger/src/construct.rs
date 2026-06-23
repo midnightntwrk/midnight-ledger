@@ -14,14 +14,15 @@
 use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
-    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, Signature,
-    SignatureKind, SignaturesValue, SigningKey, SingleUpdate, StandardTransaction, Transaction,
-    TransactionCostModel, UnshieldedOffer,
+    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent,
+    IntentSigningEnvelope, LedgerParameters, MIN_PROOF_SIZE, MaintenanceUpdate,
+    ProofPreimageMarker, ProofPreimageVersioned, Signature, SignatureKind, SignaturesValue,
+    SigningKey, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
+    UnshieldedOffer,
 };
 use crate::structure::{
     EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
-    FRESH_DUST_COMMITMENT_HASHES, SegIntent, UTXO_SIZE, VERIFIER_KEY_SIZE,
+    FRESH_DUST_COMMITMENT_HASHES, UTXO_SIZE, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
@@ -383,12 +384,14 @@ impl<
             .erase_signatures()
             .data_to_sign(segment_id);
 
-        let mut sign_unshielded_offers =
-            |unshielded_offer: &mut Option<Sp<UnshieldedOffer<S, D>, D>>,
-             signing_keys: &[SigningKey]|
-             -> Result<(), MalformedTransaction<D>> {
-                if let Some(offer) = unshielded_offer {
-                    let signatures: Vec<<S as SignatureKind<D>>::Signature<SegIntent<D>>> = offer
+        let mut sign_unshielded_offers = |unshielded_offer: &mut Option<
+            Sp<UnshieldedOffer<S, D>, D>,
+        >,
+                                          signing_keys: &[SigningKey]|
+         -> Result<(), MalformedTransaction<D>> {
+            if let Some(offer) = unshielded_offer {
+                let signatures: Vec<<S as SignatureKind<D>>::Signature<IntentSigningEnvelope<D>>> =
+                    offer
                         .inputs
                         .iter()
                         .zip(signing_keys)
@@ -400,12 +403,12 @@ impl<
                         })
                         .collect::<Result<Vec<_>, _>>()?;
 
-                    let mut new = (*offer).deref().clone();
-                    new.add_signatures(signatures);
-                    *unshielded_offer = Some(Sp::new(new.clone()));
-                }
-                Ok(())
-            };
+                let mut new = (*offer).deref().clone();
+                new.add_signatures(signatures);
+                *unshielded_offer = Some(Sp::new(new.clone()));
+            }
+            Ok(())
+        };
 
         sign_unshielded_offers(
             &mut self.guaranteed_unshielded_offer,
@@ -871,7 +874,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
             validation += model.proof_verify(public_input_count);
             validation.compute_time += model.runtime_cost_model.verifier_key_load;
         }
-        validation.compute_time = validation.compute_time / model.parallelism_factor;
+        validation.compute_time = validation.compute_time * model.validation_factor;
 
         let mut application = RunningCost::ZERO;
         application += model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -879,6 +882,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
             + model.map_index(1)
             + model.map_insert(1, true);
         application += model.stack_setup_cost_for_effects(&self.context.effects);
+        application.compute_time = application.compute_time * model.guaranteed_factor;
 
         transcript_gas_cost_with_overhead + validation + application
     }
@@ -943,7 +947,7 @@ fn per_tx_cost_reserve<D: DB>(
         model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
     // Dust spend proof verification (heuristically assume 1)
     validation += model.proof_verify(crate::dust::DUST_SPEND_PIS);
-    validation.compute_time = validation.compute_time / model.parallelism_factor;
+    validation.compute_time = validation.compute_time * model.validation_factor;
 
     // === Application cost ===
     let mut application = model.baseline_cost;
@@ -988,6 +992,7 @@ fn per_tx_cost_reserve<D: DB>(
         + model.cell_write(FR_BYTES as u64, false)
         + model.time_filter_map_lookup() * 2u64;
 
+    application.compute_time = application.compute_time * model.guaranteed_factor;
     let total = validation + application;
     CostDuration::max(total.compute_time, total.read_time)
 }

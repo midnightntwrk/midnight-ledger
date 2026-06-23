@@ -371,10 +371,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v6]")
+        Cow::Borrowed("verifier-key[v7]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v6]".into()
+        "verifier-key[v7]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
@@ -695,6 +695,8 @@ pub trait ProvingProvider {
     /// Creates a copy of this provider. As providers often include an RNG, this
     /// may mutate the provider itself.
     fn split(&mut self) -> Self;
+    /// Retrieves the resolver underlying this proving provider.
+    fn resolver(&self) -> &impl Resolver;
 }
 
 /// Everything necessary to produce a proof.

@@ -24,6 +24,9 @@ use crate::{
 /// Equality constraint is supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -51,6 +54,9 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
 /// Equality constraint is supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -65,6 +71,17 @@ pub fn constrain_eq_incircuit(
     match (a, b) {
         (Native(x), Native(y)) => std_lib.assert_equal(layouter, x, y),
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().assert_equal(layouter, p, q),
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => {
+            std_lib.secp256k1().assert_equal(layouter, p, q)
+        }
+        (Secp256k1Base(s), Secp256k1Base(r)) => {
+            (std_lib.secp256k1().base_field_chip()).assert_equal(layouter, s, r)
+        }
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => {
+            (std_lib.secp256k1().scalar_field_chip()).assert_equal(layouter, s, r)
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
@@ -77,7 +94,7 @@ pub fn constrain_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::JubjubSubgroup;
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -91,5 +108,12 @@ mod tests {
         assert!(constrain_eq_offcircuit(&Native(x), &Native(x)).is_ok());
         assert!(constrain_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).is_ok());
         assert!(constrain_eq_offcircuit(&Native(x), &JubjubPoint(p)).is_err());
+
+        let p = k256::K256::random(OsRng);
+        let s = k256::Fp::random(OsRng);
+        let r = k256::Fq::random(OsRng);
+        assert!(constrain_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).is_ok());
     }
 }

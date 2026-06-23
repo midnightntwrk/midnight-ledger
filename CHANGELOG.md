@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
+- breaking: unify the construction of signing envelopes
+
 ## Ledger 9.0.1.0-rc.1
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
@@ -21,6 +26,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
   for the new v3 verifier key field
 - feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
+- feat: maintenance updates can insert and remove the IR of a contract operation
+  via the `SingleUpdate::IrInsert` / `SingleUpdate::IrRemove` variants (exposed in
+  ledger-wasm as `IrInsert` / `IrRemove`)
 
 ## Unreleased (8.2)
 
@@ -31,6 +39,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: address non-associativity of Dust event processing.
 - fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
+- fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
 ## 8.1.0
 

@@ -69,11 +69,11 @@ pub(crate) async fn prove(
     ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    if let Ok(_ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
+    if zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)).is_ok() {
         ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
             .map_err(|e| e.to_string())
-    } else if let Ok(_ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(ir_source) {
+    } else if tagged_deserialize::<zkir_v3::IrSource>(ir_source).is_ok() {
         ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
             .map_err(|e| e.to_string())
@@ -85,11 +85,24 @@ pub(crate) async fn prove(
 #[cfg(not(feature = "experimental"))]
 pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
-    _ir_source: &[u8],
+    ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
+    use base_crypto::rng::SplittableRng;
+    use transient_crypto::proofs::ProvingProvider;
+
+    let mut provider = zkir_v2::LocalProvingProvider {
+        rng: OsRng.split(),
+        resolver,
+        params: &*PUBLIC_PARAMS,
+    };
+    let proof = provider
+        .split()
+        .prove(&ppi, None)
         .await
         .map_err(|e| e.to_string())?;
-    Ok((proof, vec![]))
+    let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
+        .map_err(|e| e.to_string())?;
+    let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
+    Ok((proof, skips))
 }
