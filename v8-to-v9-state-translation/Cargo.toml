@@ -13,7 +13,7 @@ onchain-state-v8 = { version = "3.0.0", package = "midnight-onchain-state" }
 
 # v9: in-prerelease. Workspace `[patch.crates-io]` redirects these to the
 # alpha git tags per the v9 release instructions.
-ledger-v9        = { version = "0.1.0", package = "midnight-ledger-v9", features = ["proving", "test-utilities"] }
+ledger-v9        = { version = "1.0.0", package = "midnight-ledger-v9", features = ["proving", "test-utilities"] }
 onchain-state-v9 = { version = "4.0.0", package = "midnight-onchain-state" }
 
 # Shared infrastructure: same crates.io versions for both v8 and v9.
@@ -22,6 +22,11 @@ serialize   = { version = "1.1.0", package = "midnight-serialize" }
 base-crypto = { version = "1.0.0", package = "midnight-base-crypto" }
 
 [dev-dependencies]
+# v8-side coin-structure (crates.io), used to build the v8 input state.
 coin-structure    = { version = "2.0.1", package = "midnight-coin-structure" }
+# v9-side coin-structure (patched to the v9 git tag), used to key into the
+# translated v9 state. v9 bumped coin-structure to a new major, so it is a
+# distinct crate from the v8 one above.
+coin-structure-v9 = { version = "3.0.0", package = "midnight-coin-structure" }
 transient-crypto  = { version = "2.1.0", package = "midnight-transient-crypto" }
 rand              = { version = "^0.8.4", features = ["getrandom"] }

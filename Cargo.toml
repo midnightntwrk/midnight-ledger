@@ -70,15 +70,21 @@ panic = "abort"
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
 
-# v9 alpha patches per the release instructions. v8 + shared infra come from
-# crates.io (the released ledger-8.1.0 set is published, and v9's alpha
-# requirements all overlap with v8's released versions or are explicitly
-# patched here).
+# v9 release-candidate patches per the release instructions. v8 + shared infra
+# come from crates.io (the released ledger-8.1.0 set is published, and v9's rc
+# requirements all overlap with v8's released versions or are explicitly patched
+# here). `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to
+# the rc tag so it unifies with zkir-2.2's bumped requirement.
 [patch.crates-io]
-midnight-ledger-v9       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.0.1.0-alpha.1" }
-midnight-coin-structure  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-2.1.0-alpha.1" }
-midnight-base-crypto     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-alpha.1" }
-zswap-9                  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-alpha.1",        package = "midnight-zswap" }
-onchain-state-9          = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-alpha.1", package = "midnight-onchain-state" }
-onchain-runtime-9        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-alpha.1", package = "midnight-onchain-runtime" }
-onchain-vm-9             = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-alpha.1",   package = "midnight-onchain-vm" }
+midnight-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-rc.2" }
+midnight-base-crypto-derive = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
+midnight-ledger-v9 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.1.0.0-rc.3" }
+midnight-zswap = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-rc.3" }
+midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-3.0.0-rc.1" }
+midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-3.0.0-rc.2" }
+midnight-transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1" }
+midnight-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-rc.3" }
+midnight-onchain-vm = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-rc.2" }
+midnight-onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-rc.2" }
+midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.3" }
+midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.2.0-rc.1" }

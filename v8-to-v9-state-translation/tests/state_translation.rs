@@ -23,6 +23,11 @@ use storage::storage::HashMap;
 use transient_crypto::proofs::VerifierKey;
 use v8_to_v9_state_translation::StateTranslationTable;
 
+// v9 uses a new-major coin-structure, distinct from the `coin_structure` (v8)
+// crate above. Addresses generated for the v8 input must be re-wrapped into
+// these types before keying into the translated v9 state.
+use coin_structure_v9 as cs9;
+
 const TEST_NETWORK_ID: &str = "test-network";
 const ENTRY_OP_A: &[u8] = b"operationA";
 const ENTRY_OP_B: &[u8] = b"operationB";
@@ -59,7 +64,7 @@ fn test_contract_preserved_after_translation() {
 
     let translated = v9
         .contract
-        .get(&addr)
+        .get(&v9_contract_addr(&addr))
         .expect("contract should exist after translation");
     assert_eq!(translated.operations.iter().count(), entry_count);
     for ep in [ENTRY_OP_A, ENTRY_OP_B, ENTRY_OP_C] {
@@ -70,10 +75,16 @@ fn test_contract_preserved_after_translation() {
         );
     }
     // v8→v9 KEEPS verifier keys (unlike the v6→v7 reference, which wiped them).
+    // The v8 key is a zk-stdlib-v1 key, so it lands in v9's `v2` slot; the new
+    // zk-stdlib-v2 `v3` (`latest`) slot stays empty.
     for entry in translated.operations.iter() {
         assert!(
-            entry.1.latest().is_some(),
+            entry.1.v2_vk().is_some(),
             "verifier key should survive v8→v9 translation",
+        );
+        assert!(
+            entry.1.latest().is_none(),
+            "v8 key must not be promoted to the v9 (v3) slot",
         );
     }
 }
@@ -96,13 +107,13 @@ fn test_multiple_contracts_translated() {
     for (i, addr) in addresses.iter().enumerate() {
         let c = v9
             .contract
-            .get(addr)
+            .get(&v9_contract_addr(addr))
             .unwrap_or_else(|| panic!("contract {i} should exist after translation"));
         let op = c
             .operations
             .get(&ENTRY_OP_A.into())
             .expect("operationA should exist");
-        assert!(op.latest().is_some(), "verifier key {i} should survive");
+        assert!(op.v2_vk().is_some(), "verifier key {i} should survive");
     }
 }
 
@@ -117,7 +128,10 @@ fn test_contract_with_empty_operations() {
 
     let v9 = translate_to_completion(v8);
 
-    let translated = v9.contract.get(&addr).expect("contract should exist");
+    let translated = v9
+        .contract
+        .get(&v9_contract_addr(&addr))
+        .expect("contract should exist");
     assert!(
         translated.operations.iter().next().is_none(),
         "contract should have no operations",
@@ -138,10 +152,13 @@ fn test_contract_balance_preserved() {
 
     let v9 = translate_to_completion(v8);
 
-    let translated = v9.contract.get(&addr).expect("contract should exist");
+    let translated = v9
+        .contract
+        .get(&v9_contract_addr(&addr))
+        .expect("contract should exist");
     let translated_balance = translated
         .balance
-        .get(&TokenType::Dust)
+        .get(&cs9::coin::TokenType::Dust)
         .expect("balance entry should exist");
     assert_eq!(*translated_balance, amount);
 }
@@ -166,7 +183,10 @@ fn test_maintenance_authority_preserved() {
 
     let v9 = translate_to_completion(v8);
 
-    let translated = v9.contract.get(&addr).expect("contract should exist");
+    let translated = v9
+        .contract
+        .get(&v9_contract_addr(&addr))
+        .expect("contract should exist");
     assert_eq!(translated.maintenance_authority.threshold, 2);
     assert_eq!(translated.maintenance_authority.counter, 3);
     // The v8 schnorr-only committee gets wrapped as the Schnorr variant of
@@ -195,7 +215,7 @@ fn test_incremental_translation_requires_multiple_iterations() {
     for (i, addr) in addresses.iter().enumerate() {
         let c = v9
             .contract
-            .get(addr)
+            .get(&v9_contract_addr(addr))
             .unwrap_or_else(|| panic!("contract {i} should exist after translation"));
         for ep in [ENTRY_OP_A, ENTRY_OP_B, ENTRY_OP_C] {
             assert!(c.operations.get(&ep.into()).is_some(),);
@@ -237,12 +257,24 @@ fn test_bridge_receiving_preserved() {
 
     let translated = v9
         .bridge_receiving
-        .get(&addr)
+        .get(&v9_user_addr(&addr))
         .expect("bridge_receiving entry should survive translation");
     assert_eq!(*translated, amount);
 }
 
 // ---------- Helpers ----------
+
+/// Re-wrap a v8 contract address as the (distinct) v9 coin-structure type.
+/// `HashOutput` comes from the version-unified `base-crypto`, so the inner
+/// value carries across the coin-structure major-version boundary unchanged.
+fn v9_contract_addr(a: &ContractAddress) -> cs9::contract::ContractAddress {
+    cs9::contract::ContractAddress(a.0)
+}
+
+/// Re-wrap a v8 user address as the v9 coin-structure type (see above).
+fn v9_user_addr(a: &UserAddress) -> cs9::coin::UserAddress {
+    cs9::coin::UserAddress(a.0)
+}
 
 fn translate_to_completion(
     v8: ledger_v8::structure::LedgerState<InMemoryDB>,
@@ -402,13 +434,23 @@ fn translates_serialized_non_trivial_state_preserving_invariants() {
         .expect("translated v9 state must preserve NIGHT-balance invariant");
 
     // (b) Non-trivial pieces survive the translation.
-    assert_eq!(*v9.bridge_receiving.get(&bridge_addr).expect("bridge entry"), bridge_amount);
     assert_eq!(
-        *v9.unclaimed_block_rewards.get(&reward_addr).expect("reward entry"),
+        *v9.bridge_receiving
+            .get(&v9_user_addr(&bridge_addr))
+            .expect("bridge entry"),
+        bridge_amount,
+    );
+    assert_eq!(
+        *v9.unclaimed_block_rewards
+            .get(&v9_user_addr(&reward_addr))
+            .expect("reward entry"),
         reward_amount,
     );
     for addr in &contract_addrs {
-        assert!(v9.contract.get(addr).is_some(), "contract should survive");
+        assert!(
+            v9.contract.get(&v9_contract_addr(addr)).is_some(),
+            "contract should survive",
+        );
     }
     assert_eq!(v9.parameters.global_ttl, base_crypto::time::Duration::from_secs(3600));
     assert_eq!(

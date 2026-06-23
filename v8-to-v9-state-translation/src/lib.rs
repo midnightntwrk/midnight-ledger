@@ -37,9 +37,10 @@
 //!
 //! | type                         | v8 tag                               | v9 tag                               | change |
 //! | ---------------------------- | ------------------------------------ | ------------------------------------ | ------ |
-//! | LedgerState                  | `ledger-state[v13]`                  | `ledger-state[v16]`                  | `bridge_receiving` map gains `NightAnn` |
-//! | LedgerParameters             | `ledger-parameters[v5]`              | `ledger-parameters[v6]`              | adds `min_block_price` |
-//! | ContractState                | `contract-state[v6]`                 | `contract-state[v7]`                 | reflows `ContractMaintenanceAuthority` change |
+//! | LedgerState                  | `ledger-state[v13]`                  | `ledger-state[v18]`                  | `bridge_receiving` map gains `NightAnn` |
+//! | LedgerParameters             | `ledger-parameters[v5]`              | `ledger-parameters[v8]`              | adds `min_block_price`; `TransactionLimits` adds `max_contract_metadata_size` (`transaction-limits[v2]`→`[v3]`); `TransactionCostModel` drops `parallelism_factor`, adds `validation`/`guaranteed`/`fallible` factors (`transaction-cost-model[v4]`→`[v5]`) |
+//! | ContractState                | `contract-state[v6]`                 | `contract-state[v8]`                 | reflows `ContractOperation` + `ContractMaintenanceAuthority` changes |
+//! | ContractOperation            | `contract-operation[v4]`             | `contract-operation[v6]`             | single `v2` key → `{ v2, v3, ir }`; v8 key maps to `v2` (still `verifier-key[v6]`), new `v3` (`verifier-key[v7]`)/`ir` empty |
 //! | ContractMaintenanceAuthority | `contract-maintenance-authority[v1]` | `contract-maintenance-authority[v2]` | `committee: Vec<VerifyingKey>` → `Vec<ContractMaintenanceVerifyingKey>` (Schnorr/ECDSA sum) |
 //!
 //! Everything else (zswap, utxo, dust, replay_protection, treasury,
@@ -47,9 +48,11 @@
 //!
 //! ## Maintenance notes
 //!
-//! - When v9 ships its first release tag, swap the workspace path deps for
-//!   `[patch.crates-io]` entries pinned to the tag, and remove the local
-//!   `[patch.crates-io]` block from the workspace `Cargo.toml`.
+//! - The v9 crates are pinned to pre-release git tags via the workspace
+//!   `[patch.crates-io]` block (currently `ledger-v9 1.0.0-rc.3`). When v9
+//!   bumps tags, update those tags and re-check the hardcoded `TABLE` tags
+//!   below against the new types (the `table_tags_match_types` test guards
+//!   this). When v9 publishes to crates.io, drop the patch block entirely.
 //! - If production rolls past `ledger-8.1.0`, bump the `ledger-v8` and
 //!   `onchain-state-v8` versions in `Cargo.toml`.
 //! - Final home for this crate is `state-translation/v8-to-v9` (per the
@@ -375,11 +378,45 @@ impl<D: DB>
         // Base-crypto-backed fields (Duration, FixedPoint, primitives) are
         // assignable directly because `midnight-base-crypto` is unified across
         // v8 and v9 by workspace patches. Composite types defined in `ledger`
-        // (TransactionCostModel, TransactionLimits, etc.) are tag-stable but
-        // not identical types, so we go through the (de)serializer.
+        // (TransactionCostModel, dust parameters, etc.) are tag-stable but not
+        // identical types, so we go through the (de)serializer.
+        //
+        // `TransactionLimits` is the exception: v9 bumped it to
+        // `transaction-limits[v3]` by adding `max_contract_metadata_size`, so
+        // it is no longer tag-stable and is rebuilt field-by-field (its other
+        // fields are unified base-crypto types).
         Ok(Some(ledger_v9::structure::LedgerParameters {
-            cost_model: recast_base(&source.cost_model)?,
-            limits: recast_base(&source.limits)?,
+            // `TransactionCostModel` bumped `transaction-cost-model[v4]`→`[v5]`:
+            // v9 drops `parallelism_factor` and adds three `FixedPoint` factors.
+            // The two surviving fields are tag-stable and recast through; the new
+            // factors get the v9 INITIAL_PARAMETERS defaults.
+            cost_model: ledger_v9::structure::TransactionCostModel {
+                runtime_cost_model: recast_base(&source.cost_model.runtime_cost_model)?,
+                baseline_cost: recast_base(&source.cost_model.baseline_cost)?,
+                // NEW IN v9 — placeholder; the production value should match the
+                // value chosen for the hardfork.
+                validation_factor: ledger_v9::structure::INITIAL_PARAMETERS
+                    .cost_model
+                    .validation_factor,
+                guaranteed_factor: ledger_v9::structure::INITIAL_PARAMETERS
+                    .cost_model
+                    .guaranteed_factor,
+                fallible_factor: ledger_v9::structure::INITIAL_PARAMETERS
+                    .cost_model
+                    .fallible_factor,
+            },
+            limits: ledger_v9::structure::TransactionLimits {
+                transaction_byte_limit: source.limits.transaction_byte_limit,
+                time_to_dismiss_per_byte: source.limits.time_to_dismiss_per_byte,
+                min_time_to_dismiss: source.limits.min_time_to_dismiss,
+                block_limits: source.limits.block_limits,
+                block_withdrawal_minimum_multiple: source.limits.block_withdrawal_minimum_multiple,
+                // NEW IN v9 — placeholder; the production value should match
+                // the value chosen for the hardfork.
+                max_contract_metadata_size: ledger_v9::structure::INITIAL_PARAMETERS
+                    .limits
+                    .max_contract_metadata_size,
+            },
             dust: recast_base(&source.dust)?,
             fee_prices: recast_base(&source.fee_prices)?,
             global_ttl: source.global_ttl,
@@ -408,6 +445,28 @@ fn recast_base<A: Tagged + serialize::Serializable, B: Tagged + serialize::Deser
     B::deserialize(&mut &buf[..], 0)
 }
 
+// ---------- ContractOperation v8 → v9 ----------
+
+/// Translate a single contract operation. v9 grew `ContractOperation` from a
+/// single `v2` verifier key (`contract-operation[v4]`) to `{ v2, v3, ir }`
+/// (`contract-operation[v6]`). v8's only key is a zk-stdlib-v1 key
+/// (`verifier-key[v6]`), which v9 keeps in its `v2` slot: that slot is backed by
+/// the same `transient-crypto` 2.x crate (`transient_crypto_old`), so it is the
+/// identical type and assigns directly. The new zk-stdlib-v2 `v3` key
+/// (`verifier-key[v7]`, transient-crypto 3.x) and the `ir` slot have no v8
+/// equivalent and stay empty — v9 keys are *not* synthesized from v8 keys.
+/// (Note `ContractOperation::new(vk, ir)` sets `v3`, not `v2`, so the struct is
+/// built field-wise here.)
+fn translate_contract_operation(
+    source: &onchain_state_v8::state::ContractOperation,
+) -> onchain_state_v9::state::ContractOperation {
+    // `ContractOperation` is `#[non_exhaustive]`; `new` seeds `v3`/`ir`, and the
+    // v8 key goes into the `v2` slot field-wise.
+    let mut op = onchain_state_v9::state::ContractOperation::new(None, None);
+    op.v2 = source.v2.clone();
+    op
+}
+
 // ---------- ContractState v8 → v9 ----------
 
 struct ContractStateTl;
@@ -432,8 +491,17 @@ impl<D: DB>
         _limit: &mut CostDuration,
         _cache: &TranslationCache<D>,
     ) -> io::Result<Option<onchain_state_v9::state::ContractState<D>>> {
-        // ChargedState, ContractOperation, EntryPointBuf, balance HashMap —
-        // all tag-stable, recast through.
+        // `operations` entries (ContractOperation) changed shape, so the map
+        // is rebuilt entry-by-entry. The translation machinery can't walk these
+        // base-storable leaves nested under a contract, but a contract's
+        // operation set is small, so an in-place rebuild is fine. ChargedState
+        // and the balance map (keyed u128) are tag-stable and recast through.
+        let mut operations = HashMap::new();
+        for entry in source.operations.iter() {
+            let (key, op) = &*entry;
+            let key_v9: onchain_state_v9::state::EntryPointBuf = key[..].into();
+            operations = operations.insert(key_v9, translate_contract_operation(op));
+        }
         let committee_v9 = source
             .maintenance_authority
             .committee
@@ -455,10 +523,7 @@ impl<D: DB>
             >(&Sp::new(source.data.clone()))?
             .deref()
             .clone(),
-            operations: HashMap(Map {
-                mpt: recast(&source.operations.0.mpt)?,
-                key_type: PhantomData,
-            }),
+            operations,
             maintenance_authority,
             balance: HashMap(Map {
                 mpt: recast(&source.balance.0.mpt)?,
@@ -478,7 +543,7 @@ impl<D: DB> TranslationTable<D> for StateTranslationTable {
         (
             TranslationId(
                 Cow::Borrowed("ledger-state[v13]"),
-                Cow::Borrowed("ledger-state[v16]"),
+                Cow::Borrowed("ledger-state[v18]"),
             ),
             &DirectSpTranslation::<_, _, LedgerStateTl, _>(PhantomData),
         ),
@@ -486,7 +551,7 @@ impl<D: DB> TranslationTable<D> for StateTranslationTable {
         (
             TranslationId(
                 Cow::Borrowed("ledger-parameters[v5]"),
-                Cow::Borrowed("ledger-parameters[v6]"),
+                Cow::Borrowed("ledger-parameters[v8]"),
             ),
             &DirectSpTranslation::<_, _, LedgerParametersTl, _>(PhantomData),
         ),
@@ -494,7 +559,7 @@ impl<D: DB> TranslationTable<D> for StateTranslationTable {
         (
             TranslationId(
                 Cow::Borrowed("contract-state[v6]"),
-                Cow::Borrowed("contract-state[v7]"),
+                Cow::Borrowed("contract-state[v8]"),
             ),
             &DirectSpTranslation::<_, _, ContractStateTl, _>(PhantomData),
         ),
@@ -502,7 +567,7 @@ impl<D: DB> TranslationTable<D> for StateTranslationTable {
         (
             TranslationId(
                 Cow::Borrowed("mpt(contract-state[v6],night-annotation)"),
-                Cow::Borrowed("mpt(contract-state[v7],night-annotation)"),
+                Cow::Borrowed("mpt(contract-state[v8],night-annotation)"),
             ),
             &DirectSpTranslation::<
                 MerklePatriciaTrie<
@@ -527,7 +592,7 @@ impl<D: DB> TranslationTable<D> for StateTranslationTable {
         (
             TranslationId(
                 Cow::Borrowed("mpt-node(contract-state[v6],night-annotation)"),
-                Cow::Borrowed("mpt-node(contract-state[v7],night-annotation)"),
+                Cow::Borrowed("mpt-node(contract-state[v8],night-annotation)"),
             ),
             &DirectSpTranslation::<
                 merkle_patricia_trie::Node<
