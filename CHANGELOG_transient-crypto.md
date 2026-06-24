@@ -1,5 +1,19 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: the proving-chain traits (`Resolver`, `ParamsProverProvider`,
+  `ProvingProvider`) now return `Send` futures off `wasm32`, so a whole
+  `Transaction::prove` future is `Send` and can be driven on multi-threaded
+  executors (e.g. `tokio::spawn`ed proving). This is expressed via the new
+  `MaybeSend`/`MaybeSync` marker bounds, which alias `Send`/`Sync` everywhere
+  except `wasm32` (where they are vacuous, preserving the `!Send`
+  `JsValue`-backed WASM bindings). `async fn` implementations are unaffected as
+  long as their futures are `Send` off `wasm32`.
+- breaking (non-`wasm32`): out-of-tree `Resolver`/`ProvingProvider`/
+  `ParamsProverProvider` implementations whose futures are not `Send` will no
+  longer compile off `wasm32`.
+
 ## Version `3.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7

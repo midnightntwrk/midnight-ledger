@@ -52,13 +52,48 @@ use storage_core::db::DB;
 use storage_core::storable::Loader;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use derive_where::derive_where;
+use std::future::Future;
+
+/// Marker bound applied to the futures returned by the proving-chain traits
+/// ([`ParamsProverProvider`], [`Resolver`], [`ProvingProvider`]).
+///
+/// Off `wasm32` it is an alias for [`Send`], so those futures can be driven on
+/// multi-threaded executors (e.g. `tokio::spawn`ed proving) and a whole
+/// `Transaction::prove` future stays `Send`. On `wasm32` it is a vacuous bound:
+/// the WASM bindings (`ledger-wasm`, `zkir-wasm`) implement these traits with
+/// `!Send` `JsValue`/`js_sys::Function`-backed futures, and WASM is single-threaded
+/// so `Send` is neither available nor needed there.
+///
+/// Implementors never name this bound — an `async fn` implementation satisfies it
+/// automatically as long as its future is `Send` (off `wasm32`).
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send> MaybeSend for T {}
+/// See the non-`wasm32` definition above; on `wasm32` this bound is vacuous.
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSend for T {}
+
+/// Companion to [`MaybeSend`] for [`Sync`]: an alias for [`Sync`] off `wasm32`,
+/// vacuous on `wasm32`. Used to bound the generic provider/resolver types whose
+/// `&T` is captured across awaits, so a `MaybeSend` future built from them is
+/// actually `Send` off `wasm32`.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSync: Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Sync> MaybeSync for T {}
+/// See the non-`wasm32` definition above; on `wasm32` this bound is vacuous.
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSync for T {}
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {
-    // Allowed because we don't care about auto traits here.
-    #[allow(async_fn_in_trait)]
     /// Retrieve the parameters for a given `k` value
-    async fn get_params(&self, k: u8) -> io::Result<ParamsProver>;
+    fn get_params(&self, k: u8) -> impl Future<Output = io::Result<ParamsProver>> + MaybeSend;
 }
 
 /// The hash used during proof transcript processing
@@ -674,24 +709,27 @@ tag_enforcement_test!(ProvingKeyMaterial);
 /// A mechanism to retrieve / resolve zero-knowledge key material from a short location string.
 pub trait Resolver {
     /// Resolves the given key to the key material it represents, if available.
-    // Allowed as we do not need auto traits here
-    #[allow(async_fn_in_trait)]
-    async fn resolve_key(&self, key: KeyLocation) -> io::Result<Option<ProvingKeyMaterial>>;
+    fn resolve_key(
+        &self,
+        key: KeyLocation,
+    ) -> impl Future<Output = io::Result<Option<ProvingKeyMaterial>>> + MaybeSend;
 }
 
 /// A tool that provides proving against opaque/serialized proof preimages
 /// It is assumed (though not strictly required) that this also implements
 /// `Resolver` to resolve keys.
-#[allow(async_fn_in_trait)]
 pub trait ProvingProvider {
     /// Check the proof preimage is valid, and if so returns the pi skip sequence
-    async fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, anyhow::Error>;
+    fn check(
+        &self,
+        preimage: &ProofPreimage,
+    ) -> impl Future<Output = Result<Vec<Option<usize>>, anyhow::Error>> + MaybeSend;
     /// Produces the proof, optionally modifying the binding input in the proof preimage first.
-    async fn prove(
+    fn prove(
         self,
         preimage: &ProofPreimage,
         overwrite_binding_input: Option<Fr>,
-    ) -> Result<Proof, anyhow::Error>;
+    ) -> impl Future<Output = Result<Proof, anyhow::Error>> + MaybeSend;
     /// Creates a copy of this provider. As providers often include an RNG, this
     /// may mutate the provider itself.
     fn split(&mut self) -> Self;
