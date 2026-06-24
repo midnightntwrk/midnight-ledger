@@ -482,6 +482,92 @@ pub enum Instruction {
         /// The output variable names
         output: Identifier,
     },
+    /// Transforms the given value into its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    IntoBytes32 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Constructs an element of the given type from its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    FromBytes32 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Decomposes a `Bytes32` value into two `Native` field elements.
+    ///
+    /// The first output (`low`) encodes the first 31 bytes of the input as a
+    /// little-endian native field element. The second output (`high`) encodes
+    /// the 32nd (most significant) byte as a native field element.
+    ///
+    /// This is the inverse of `Bytes32FromLowHigh`.
+    ///
+    /// This instruction imposes no off-circuit errors and no in-circuit constraints.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32IntoLowHigh {
+        /// The input bytes
+        bytes: Operand,
+        /// The output variables: (low, high)
+        outputs: (Identifier, Identifier),
+    },
+    /// Constructs a `Bytes32` value from two `Native` field elements in low-high form.
+    ///
+    /// The first input (`low`) must encode at most 31 bytes, i.e. its value must be
+    /// less than 2^248. The second input (`high`) must encode a single byte, i.e. its
+    /// value must be less than 256. The result concatenates the first 31 bytes from `low`
+    /// with byte `high`.
+    ///
+    /// This is the inverse of `Bytes32IntoLowHigh`.
+    ///
+    /// # Errors and constraints
+    ///
+    /// Off-circuit: returns an error if `low >= 2^248` or `high >= 256`.
+    ///
+    /// In-circuit: the constraint `low < 2^248` is enforced by asserting that the
+    /// 32nd byte of the little-endian decomposition of `low` is zero, making the
+    /// circuit unsatisfiable if violated. The constraint `high < 256` is enforced
+    /// by a byte range check on `high`, also causing unsatisfiability if violated.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32FromLowHigh {
+        /// The inputs: (low, high)
+        inputs: (Operand, Operand),
+        /// The output variable name
+        output: Identifier,
+    },
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`
