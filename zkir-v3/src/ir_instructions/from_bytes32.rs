@@ -52,15 +52,19 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 
         IrType::Secp256k1Base => {
             let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fp::modulus());
+            let mut rem_bytes = rem.to_bytes_le();
+            rem_bytes.resize(32, 0);
             Ok(Secp256k1Base(
-                k256::Fp::from_bytes_le(&rem.to_bytes_le()).unwrap(),
+                k256::Fp::from_bytes_le(&rem_bytes).unwrap(),
             ))
         }
 
         IrType::Secp256k1Scalar => {
             let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fq::modulus());
+            let mut rem_bytes = rem.to_bytes_le();
+            rem_bytes.resize(32, 0);
             Ok(Secp256k1Scalar(
-                k256::Fq::from_bytes_le(&rem.to_bytes_le()).unwrap(),
+                k256::Fq::from_bytes_le(&rem_bytes).unwrap(),
             ))
         }
 
