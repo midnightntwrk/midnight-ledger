@@ -331,34 +331,6 @@ pub enum Instruction {
         /// The output variable names
         outputs: Vec<Identifier>,
     },
-    /// Decodes the given raw Fr elements as a value of the given type.
-    ///
-    /// This operation will result in an error if the number of inputs
-    /// is not the exact number of raw Fr elements required to represent a
-    /// value of the given type:
-    ///
-    ///  - Native:       1 input
-    ///  - JubjubPoint:  2 inputs (x and y coordinates)
-    ///  - JubjubScalar: 1 input
-    ///
-    ///  - Secp256k1Point:  8 inputs (4 for x and 4 for y)
-    ///  - Secp256k1Base:   4 inputs (64-bits LE limbs)
-    ///  - Secp256k1Scalar: 4 inputs (64-bits LE limbs)
-    ///
-    /// It will also result in an error if the operands are not of type
-    /// `Native`.
-    ///
-    /// The circuit may become unsatisfiable if the inputs do not encode
-    /// a valid value of the given type.
-    Decode {
-        /// The inputs to decode
-        inputs: Vec<Operand>,
-        /// The type to decode as
-        #[serde(rename = "type")]
-        val_t: IrType,
-        /// The output variable name
-        output: Identifier,
-    },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
     /// No outputs
@@ -478,6 +450,122 @@ pub enum Instruction {
         /// The values to hash to a curve point
         inputs: Vec<Operand>,
         /// The resulting point
+        output: Identifier,
+    },
+    /// The affine coordinates of the given elliptic curve point.
+    /// On Weierstrass curves the identity has no affine coordinates, so
+    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
+    ///
+    /// Supported on types:
+    /// * JubjubPoint
+    /// * Secp256k1Point
+    ///
+    /// Outputs 2 elements, the coordinates (x, y)
+    IntoCoordinates {
+        /// The point whose coordinate are extracted
+        point: Operand,
+        /// The output variable names (x, y)
+        outputs: (Identifier, Identifier),
+    },
+    /// Reconstructs an elliptic curve point from the given affine coordinates.
+    ///
+    /// On Weierstrass curves the identity cannot be built with this instruction.
+    ///
+    /// Supported on types:
+    /// * (Native, Native):               producing a JubjubPoint
+    /// * (Secp256k1Base, Secp256k1Base): producing a Secp256k1Point
+    ///
+    /// Outputs 1 element, the point
+    FromCoordinates {
+        /// The affine coordinates (x, y)
+        inputs: (Operand, Operand),
+        /// The output variable names
+        output: Identifier,
+    },
+    /// Transforms the given value into its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    IntoBytes32 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Constructs an element of the given type from its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    FromBytes32 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Decomposes a `Bytes32` value into two `Native` field elements.
+    ///
+    /// The first output (`low`) encodes the first 31 bytes of the input as a
+    /// little-endian native field element. The second output (`high`) encodes
+    /// the 32nd (most significant) byte as a native field element.
+    ///
+    /// This is the inverse of `Bytes32FromLowHigh`.
+    ///
+    /// This instruction imposes no off-circuit errors and no in-circuit constraints.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32IntoLowHigh {
+        /// The input bytes
+        bytes: Operand,
+        /// The output variables: (low, high)
+        outputs: (Identifier, Identifier),
+    },
+    /// Constructs a `Bytes32` value from two `Native` field elements in low-high form.
+    ///
+    /// The first input (`low`) must encode at most 31 bytes, i.e. its value must be
+    /// less than 2^248. The second input (`high`) must encode a single byte, i.e. its
+    /// value must be less than 256. The result concatenates the first 31 bytes from `low`
+    /// with byte `high`.
+    ///
+    /// This is the inverse of `Bytes32IntoLowHigh`.
+    ///
+    /// # Errors and constraints
+    ///
+    /// Off-circuit: returns an error if `low >= 2^248` or `high >= 256`.
+    ///
+    /// In-circuit: the constraint `low < 2^248` is enforced by asserting that the
+    /// 32nd byte of the little-endian decomposition of `low` is zero, making the
+    /// circuit unsatisfiable if violated. The constraint `high < 256` is enforced
+    /// by a byte range check on `high`, also causing unsatisfiability if violated.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32FromLowHigh {
+        /// The inputs: (low, high)
+        inputs: (Operand, Operand),
+        /// The output variable name
         output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).
