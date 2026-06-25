@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use group::ff::FromUniformBytes;
-use midnight_circuits::{instructions::DecompositionInstructions, types::AssignedByte};
+use group::ff::{FromUniformBytes, PrimeField};
+use midnight_circuits::{CircuitField, instructions::DecompositionInstructions, types::AssignedByte};
 
 use midnight_curves::k256;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
+use num_bigint::BigUint;
+use num_traits::Euclid;
 use transient_crypto::curve::Fr;
 
 use crate::{
@@ -41,16 +43,26 @@ use crate::{
 /// Errors if the input is not a supported type.
 pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrValue, anyhow::Error> {
     use IrValue::*;
+
     let mut buffer = [0u8; 64];
     buffer[..32].copy_from_slice(bytes);
 
     match val_t {
         IrType::Native => Ok(Native(Fr(F::from_uniform_bytes(&buffer)))),
 
-        // FIXME: Compilation error
-        IrType::Secp256k1Base => Ok(Secp256k1Base(k256::Fp::from_uniform_bytes(&buffer))),
+        IrType::Secp256k1Base => {
+            let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fp::modulus());
+            Ok(Secp256k1Base(
+                k256::Fp::from_bytes_le(&rem.to_bytes_le()).unwrap(),
+            ))
+        }
 
-        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(k256::Fq::from_uniform_bytes(&buffer))),
+        IrType::Secp256k1Scalar => {
+            let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fq::modulus());
+            Ok(Secp256k1Scalar(
+                k256::Fq::from_bytes_le(&rem.to_bytes_le()).unwrap(),
+            ))
+        }
 
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
