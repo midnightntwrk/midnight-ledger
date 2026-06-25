@@ -1,8 +1,8 @@
-[**@midnight/ledger v1.0.0-rc.2**](README.md)
+[**@midnight/ledger v1.0.0-rc.3**](README.md)
 
 ***
 
-# @midnight/ledger v1.0.0-rc.2
+# @midnight/ledger v1.0.0-rc.3
 
 ## Classes
 
@@ -35,6 +35,8 @@
 - [EncryptionSecretKey](classes/EncryptionSecretKey.md)
 - [Event](classes/Event.md)
 - [Intent](classes/Intent.md)
+- [IrInsert](classes/IrInsert.md)
+- [IrRemove](classes/IrRemove.md)
 - [LedgerParameters](classes/LedgerParameters.md)
 - [LedgerState](classes/LedgerState.md)
 - [MaintenanceUpdate](classes/MaintenanceUpdate.md)
