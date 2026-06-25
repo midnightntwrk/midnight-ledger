@@ -563,7 +563,7 @@
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_104
+              pkgs.wasm-bindgen-cli_0_2_108
             ];
             buildInputs = [packages.public-params];
 
