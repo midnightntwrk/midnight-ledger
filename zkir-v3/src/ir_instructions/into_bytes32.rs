@@ -94,7 +94,7 @@ pub fn into_bytes32_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::secp256k1;
+    use midnight_curves::k256;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -109,11 +109,11 @@ mod tests {
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
-        let x = Secp256k1Base(secp256k1::Fp::random(OsRng));
+        let x = Secp256k1Base(k256::Fp::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
-        let x = Secp256k1Scalar(secp256k1::Fq::random(OsRng));
+        let x = Secp256k1Scalar(k256::Fq::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
     }

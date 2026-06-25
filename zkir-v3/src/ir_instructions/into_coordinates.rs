@@ -103,7 +103,7 @@ pub fn into_coordinates_incircuit(
 
 #[cfg(test)]
 mod tests {
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -119,7 +119,7 @@ mod tests {
             (Native(Fr(x)), Native(Fr(y)))
         );
 
-        let p = secp256k1::Secp256k1::random(OsRng);
+        let p = k256::K256::random(OsRng);
         let (x, y) = p.coordinates().unwrap();
         assert_eq!(
             into_coordinates_offcircuit(&Secp256k1Point(p)).unwrap(),
@@ -128,7 +128,7 @@ mod tests {
 
         // The Secp256k1 identity has no affine coordinates.
         assert!(
-            into_coordinates_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err()
+            into_coordinates_offcircuit(&Secp256k1Point(k256::K256::identity())).is_err()
         );
 
         // Coordinate extraction on a scalar is unsupported.

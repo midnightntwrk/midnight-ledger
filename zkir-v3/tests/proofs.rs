@@ -1179,7 +1179,7 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let jp = JubjubSubgroup::random(OsRng);
-        let sp = secp256k1::Secp256k1::random(OsRng);
+        let sp = k256::K256::random(OsRng);
 
         let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
             encode_offcircuit(&v)
@@ -1279,8 +1279,8 @@ mod proof_tests {
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let native_val: transient_crypto::curve::Fr = rand::random();
-        let base_val = secp256k1::Fp::random(OsRng);
-        let scalar_val = secp256k1::Fq::random(OsRng);
+        let base_val = k256::Fp::random(OsRng);
+        let scalar_val = k256::Fq::random(OsRng);
         let raw_bytes = [0xffu8; 32];
 
         let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {

@@ -99,7 +99,7 @@ pub fn from_coordinates_incircuit(
 #[cfg(test)]
 mod tests {
     use group::Group;
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -116,7 +116,7 @@ mod tests {
             JubjubPoint(p)
         );
 
-        let p = secp256k1::Secp256k1::random(OsRng);
+        let p = k256::K256::random(OsRng);
         let (x, y) = p.coordinates().unwrap();
         assert_eq!(
             from_coordinates_offcircuit(&Secp256k1Base(x), &Secp256k1Base(y)).unwrap(),

@@ -103,7 +103,7 @@ pub fn test_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, secp256k1, k256};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;

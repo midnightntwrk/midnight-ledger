@@ -116,7 +116,7 @@ pub fn from_bytes32_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::secp256k1;
+    use midnight_curves::k256;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -137,13 +137,13 @@ mod tests {
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
 
-        let x = Secp256k1Base(secp256k1::Fp::random(OsRng));
+        let x = Secp256k1Base(k256::Fp::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         let y = from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
 
-        let x = Secp256k1Scalar(secp256k1::Fq::random(OsRng));
+        let x = Secp256k1Scalar(k256::Fq::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         let y = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
@@ -164,11 +164,11 @@ mod tests {
         );
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap(),
-            IrValue::Secp256k1Base(secp256k1::Fp::from_uniform_bytes(&buffer))
+            IrValue::Secp256k1Base(k256::Fp::from_bytes_le(&buffer).unwrap())
         );
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap(),
-            IrValue::Secp256k1Scalar(secp256k1::Fq::from_uniform_bytes(&buffer))
+            IrValue::Secp256k1Scalar(k256::Fq::from_bytes_le(&buffer).unwrap())
         );
     }
 }
