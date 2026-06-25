@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use midnight_circuits::instructions::DecompositionInstructions;
+use midnight_circuits::{CircuitField, instructions::DecompositionInstructions};
 
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
@@ -38,10 +38,9 @@ pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error
     match value {
         Native(x) => Ok(Bytes32(x.0.to_bytes_le())),
 
-        // FIXME: Uses big-endian encoding, in contradiction to doc comment now.
-        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes().into())),
+        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes_le().into())),
 
-        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes().into())),
+        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes_le().into())),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported into_bytes32 for {:?}",
