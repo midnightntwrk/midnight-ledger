@@ -268,6 +268,280 @@ The split:
 
 ---
 
-## Other items
+## SSI demo — Track 2: P0/P1 codebase fixes from the 2026-06-25 audit
 
-(none yet — append below as they come up)
+**Status:** scoped, deferred. Quick wins — could ride on PR #4
+(wallet) and PR #54 (dApp).
+
+Audit identified after the SSI demo shipped. Each one is a silent
+fall-through that masks a config bug; we hit two of them during the
+demo (DEFAULT_VAULT_CONTRACT_ADDRESS Android arm; dApp shim dropping
+`contractAddress`). The rest are still live.
+
+### P0 — fix before next demo cycle
+
+- **`DEFAULT_DAPP_URL` hardcoded to one tailnet IP** —
+  `mobile-bench/dioxus-wallet/src/app.rs:1048,1050`. Breaks any other
+  operator's phone demo. Fix: `option_env!("MIDNIGHT_DAPP_URL")`
+  fallback (read at build via `--env` or at runtime via wallet config
+  if we can persist it).
+- **`getTotalLocked()` silently returns 0n on error** —
+  `apps/dapp/lib/vault.ts:76-80`. Masks "wrong vault address"
+  config bugs (which the user can't see). Fix: return
+  `{ ok, value?, error? }`, render the error in `VaultCard`.
+- **Issuer `ISSUER_URL/REDIRECT_URL` default to localhost** —
+  `midnight-passport-issuer/src/config/index.ts:77,94`. We patched in
+  the demo bootstrap script (PR #23 phase 8). Fix at source: read
+  from a `PUBLIC_HOST` env var, default to `host.docker.internal:8080`
+  inside container (works for sim + emu without tailnet override).
+
+### P1 — same PR family
+
+- **`vaultListCredentials` has no error fallback** —
+  `apps/dapp/lib/vault.ts:99-101`. Compare to `listLocks()` which
+  silently returns `[]`. Currently crashes the UI on disconnect.
+- **Vault address duplicated in 3 places** — `bridge.rs:549-553`,
+  `apps/dapp/lib/vault.ts:21-23`, `apps/dapp/.env.local:2`. Every
+  redeploy needs 3 manual edits + APK rebuild. Fix candidates:
+  fetch from indexer's contract registry at startup, or read from a
+  single config file the demo bootstrap writes.
+- **`vaultListCredentials` typed to accept `contractAddress` but
+  ignores it** — misleading API. Remove from the type, OR thread it
+  through `mobile-bench-host.ts` shim + wallet bridge.
+
+**Effort:** ~3–4 hours total. Best landed as one follow-up PR on each
+repo.
+
+---
+
+## SSI demo — Track 3: `/setup` page port (verifier admin in dApp)
+
+**Status:** scoped, deferred. Needs design discussion before
+implementation.
+
+Today the verifier admin runs 7 `npm` scripts from `apps/cli`:
+`deploy` → `make-issuer-anchor` → `set-trusted-issuer` →
+`create-lock` → `deposit` → `claim` → `show-state`. The user wants
+this in a dApp `/setup` page so non-engineers can configure a
+verifier.
+
+**Implementation surface:**
+
+| Script | dApp surface |
+|---|---|
+| `deploy` | "Deploy Vault" button. Needs verifier wallet seed (admin key) — **not** the end-user's wallet. |
+| `make-issuer-anchor` + `set-trusted-issuer` | "Trust Issuer" form: paste DID URL + Jubjub secret hex, generate anchor + submit rotation. |
+| `create-lock` | "Create Lock" form: min-age, max-claim, issuing-state/document gates. |
+| `deposit` | "Top up Lock" form: lockId + amount. |
+| `claim` | already in `VaultCard` (end-user flow). |
+| `show-state` | already in `VaultCard` (locks list, total locked). |
+
+**Hard problem — admin secret handling:**
+The verifier's signing key is NOT end-user-owned. Today it's in
+`apps/cli/.env` (`VAULT_ADMIN_SEED_HEX`). A public dApp form is
+unsafe. Three options:
+
+1. **Out-of-band ceremony** — admin runs a one-time setup CLI that
+   produces an encrypted key file the dApp loads via file picker.
+2. **Hardware-wallet style** — admin's wallet exposes a "sign as
+   vault operator" verb; dApp prompts the wallet to sign each
+   admin tx (cleanest, but needs wallet support).
+3. **Time-boxed in-memory secret** — admin pastes seed once, dApp
+   holds it in JS memory only, expires on tab close. Acceptable for
+   demo + lab, NOT for production.
+
+**Recommended path:** start with option 3 (gated behind a "demo
+mode" flag), upgrade to option 2 as wallet matures.
+
+**Effort:** 3–4 days for option 3 / demo-mode. Design discussion
+before code.
+
+**Files to touch:**
+- New: `apps/dapp/app/setup/page.tsx`, `apps/dapp/components/SetupCard.tsx`
+- Extend: `apps/dapp/lib/vault.ts` with `deployVault`, `rotateTrustedIssuer`, etc.
+- Extend: `apps/dapp/lib/midnight/connector.ts` with admin verbs (or expose via `getProvingProvider` + standard contract-call API)
+
+---
+
+## SSI demo — Track 4: Simulator support (Android emu + iOS sim)
+
+**Status:** scoped, deferred. Network bridging is the only real work.
+
+The "phone-driven" demo works against a real device over tailscale.
+Teammates without a phone (or without tailscale setup) currently
+can't reproduce. Goal: same demo against:
+
+- **Android emulator** — host is reachable via `10.0.2.2` (Android
+  emu's magic gateway). The wallet's `MIDNIGHT_INDEXER_HTTP_URL` etc.
+  need to point there instead of tailnet IP.
+- **iOS simulator** — host is reachable via `host.docker.internal`
+  inside Docker, and `127.0.0.1` from the iOS sim (it shares the
+  host's netstack). Probably easier than Android emu.
+
+**Implementation:**
+
+1. Wallet: extend `startup_network()` and `vault_contract_address()`
+   resolution to read a JSON config (`/sdcard/midnight-demo.json`?)
+   instead of compiled-in const. Lets the demo bootstrap script
+   inject the right URLs per platform.
+2. Demo bootstrap: in `demos/bootstrap.py` add `--platform` flag
+   (`real-phone | android-emu | ios-sim`). Picks the right host IP +
+   pushes the config file via `adb push` / `xcrun simctl`.
+3. APK build path: still needed for new contract addresses **unless**
+   the runtime config above lands first. Once it lands, ONE APK
+   serves all three platforms.
+
+**Effort:** 1–2 days once the config-file pattern lands. The
+config-file refactor is itself the long pole — see Track 2 P1
+"Vault address duplicated in 3 places."
+
+**Files to touch:**
+- `mobile-bench/dioxus-wallet/src/app.rs` (startup_network, vault default)
+- `mobile-bench/dioxus-wallet/src/bridge.rs` (DEFAULT_VAULT_CONTRACT_ADDRESS)
+- `demos/bootstrap.py` + `demos/lib/net.py` in midnight-identity-workspace
+- New: `demos/lib/platform.py` (per-platform IP + push logic)
+
+---
+
+## SSI demo — Track 5: Demo bootstrap follow-ups (PR #23)
+
+**Status:** PR #23 (`feat(demos): one-command demo bootstrap orchestrator`)
+landed with 5 commits, verified end-to-end live. Follow-ups the
+agent flagged:
+
+- **Container-name compatibility** — script accepts both
+  `fixtures-node-1` and `midnight-node`. Safer to set
+  `container_name:` in the compose files so naming is deterministic
+  regardless of which compose project the operator runs from.
+- **Submodule structure** — `demos/` resolves `apps/cli` + `apps/dapp`
+  from either the in-tree submodule or sibling `midnight-workspace-vc-test`
+  checkout (env-driven). Canonical fix: land `apps/cli + apps/dapp`
+  in the in-tree submodule so there's one source of truth.
+- **APK rebuild path** — intentionally out of scope of the bootstrap
+  today. Becomes irrelevant once Track 4's config-file pattern lands.
+
+---
+
+## Verifier (`vault.compact`) — Track 6: contract review follow-ups
+
+**Status:** general correctness pass DONE (2026-06-25 sub-agent
+review). No P0/P1 findings on the cryptographic side — `trustedIssuer`
+stored as `persistentHash<JubjubPoint>` is correct by design (refuted
+the "should be `Field` or `Point`" hypothesis).
+
+Minor follow-up:
+- **Explicit subgroup-membership check** — contract trusts the prover
+  to supply a valid Jubjub point in `credentialProof.publicKey`. The
+  Schnorr signature verification implicitly catches off-curve / small-
+  subgroup points, but a redundant check would be belt-and-braces.
+  Cite: `vault/src/passport-vault.compact:435-439` +
+  `vault/src/vendored/credentials/types.compact:135-141`.
+
+---
+
+## ZK pipeline — Track 7: Jolt-inspired optimization candidates
+
+**Status:** investigation done (2026-06-25 sub-agent). Five
+candidates surfaced ranked by ROI. Not blocking anything; pick up
+when there's prover-perf appetite.
+
+### 7.1 Profiling harness (PREREQ — do this first)
+
+**Effort:** ~1 week. **Confidence:** high.
+
+Stand up `tracing` + flamegraph + heap profiling on the existing
+`log_phase(...)` markers in `proofs/src/plonk/prover.rs:522,538,552,945+`.
+Capture flamegraphs on three real SSI demo proofs (passport-VC
+issuance, zswap transfer, dust). One-page report ranked by % wall-
+clock + peak RSS. **This data tells us which of 7.2–7.5 is worth
+funding** — don't start any of them without it.
+
+### 7.2 LogUp / LogUp-GKR replacing classical plookup
+
+**Effort:** 6–10 weeks. **Confidence:** high (multiple halo2-derivs
+have done it).
+
+Replace `proofs/src/plonk/lookup/prover.rs:152-260`'s grand-product
+fraction-form lookup with logarithmic-derivative lookups
+(Haböck 2022) or LogUp-GKR (Papini–Haböck 2023). Savings: ~30–40%
+fewer commits per lookup. Compounds because zk_stdlib's heavy chips
+(sha256 with 4 lookup tables, keccak, blake2b, automaton) each use
+multiple lookup arguments. Needs verifier-key wire format bump +
+re-keygen for the test corpus.
+
+### 7.3 Sparse-aware quotient computation
+
+**Effort:** 3–4 weeks. **Confidence:** medium (wins are
+circuit-shape dependent).
+
+`proofs/src/plonk/prover.rs:862-980` `compute_h_poly` multiplies
+through dead rows. The disk-spill machinery at `:389` is a tacit
+admission that extended-domain FFTs are the prover's RAM bottleneck.
+Track per-region sparsity in `ProvingKey`, skip MSM/FFT chunks where
+all involved columns are zero. Circuits with many disjoint chips
+(passport, claim verification) likely win 20–40%; dense circuits
+win nothing.
+
+### 7.4 Streamed witness generation
+
+**Effort:** 2–3 weeks. **Confidence:** medium (mobile-specific win).
+
+Today `transient-crypto/src/proofs.rs:742-770` `ProofPreimage::prove`
+holds the full `Preprocessed` (`zkir-v3/src/ir_vm.rs:62`: full memory
+map + PI vector) in RAM before the prover starts. Split into
+sink/source, ring-buffer between IR-evaluator and prover. Reduces
+peak RAM materially — relevant on the on-device wallet prover
+(already an issue per memory: `block_in_place panics on current-
+thread runtime`).
+
+### 7.5 GKR sum-check for hash chips (speculative)
+
+**Effort:** 3–6 months, research-grade. **Confidence:** low.
+
+Re-implement Poseidon / SHA-256 verification inside the PLONK proof
+using a GKR sub-proof (sum-check over a layered hash circuit) +
+wrapper verifier. Pattern works (Nexus, RISC0 Continuations, Jolt-
+Atlas). Pay-off: 5–10× on hash-heavy circuits if it works. Risk:
+the wrapper-verifier may eat the savings.
+
+### Things that DON'T transfer from Jolt
+
+- **RISC-V opcode lookups (Lasso)** — midnight proves app circuits,
+  not VM execution.
+- **Twist + Shout verbatim** — designed for uniform RAM model
+  midnight doesn't have.
+- **Multilinear commitments / dropping KZG** — incompatible with
+  midnight's KZG-onchain story, `aggregator/` IPA tail, public
+  BLS12-381 SRS supply chain, and Jubjub embedding.
+- **Binary field arithmetic** — requires moving off BLS12-381;
+  breaks Jubjub embedding which is load-bearing across the wallet.
+- **BN254 / 256-bit field tradeoff** — Jolt's choice is folding-
+  recursion-friendly; midnight's BLS12-381 is locked by onchain
+  verifier compatibility.
+
+### Bench coverage gap (orthogonal)
+
+`zk_stdlib/` and `aggregator/` have **no criterion benches** today.
+`proofs/`, `curves/`, `circuits/` do. CI has no prover-time
+regression gate. Adding even one bench per crate would catch
+performance regressions during the 7.x work. ~2 days.
+
+### Test coverage gap (orthogonal)
+
+`zk_stdlib/lib.rs` is 1600+ lines, only 3 files have `#[test]`. The
+chip-level tests in `circuits/` cover the units, but the integration
+surface is under-tested. ~1 week to bring it up to par.
+
+---
+
+## Index of repo locations
+
+| Track | Primary repo | Branch / PR |
+|---|---|---|
+| Path B (full sync) | midnight-ledger | future PR |
+| Track 2 (P0/P1 audit) | midnight-ledger + identity-solution-examples | extend PR #4 / #54 |
+| Track 3 (/setup page) | identity-solution-examples | new feature branch |
+| Track 4 (simulator) | midnight-ledger + midnight-ssi-demo | new feature branch |
+| Track 5 (bootstrap follow-ups) | midnight-ssi-demo | follow-up commits on PR #23 |
+| Track 6 (contract review) | identity-solution-examples (vault contract) | new feature branch |
+| Track 7 (ZK optimizations) | midnight-ledger + midnight-zk | gated on 7.1 profiling |
