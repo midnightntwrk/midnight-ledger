@@ -867,21 +867,21 @@ mod prove_endpoint {
             .await
             .expect("Request failed");
 
-        let status = response.status();
-        if status == 400 {
-            let error_text = response.text().await.expect("Failed to get response text");
-            dbg!(error_text);
-        } else {
-            let bytes = response
-                .bytes()
-                .await
-                .expect("Failed to get response bytes");
-            log::info!("Prove response: {} bytes", bytes.len());
+        assert_eq!(
+            response.status(),
+            200,
+            "Unexpected status: {}",
+            response.status()
+        );
 
-            let _proof: ledger::structure::ProofVersioned =
-                tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
-        }
-        assert_eq!(status, 200, "Unexpected status: {}", status);
+        let bytes = response
+            .bytes()
+            .await
+            .expect("Failed to get response bytes");
+        log::info!("Prove response: {} bytes", bytes.len());
+
+        let _proof: ledger::structure::ProofVersioned =
+            tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
 
         stop_server(server).await;
     }
