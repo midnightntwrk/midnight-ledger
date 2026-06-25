@@ -17,15 +17,16 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
-    UtxoState,
+    ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker,
+    SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol,
+    TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
+use crate::utils::VecEnvelope;
 use crate::verify::{StateReference, WellFormedStrictness};
+use base_crypto::envelope::Envelope;
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
-    schnorr::VerifyingKey,
     time::{Duration, Timestamp},
 };
 use base_crypto::{
@@ -45,11 +46,10 @@ use onchain_runtime::{
 };
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "proof-verifying")]
-use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::marker::PhantomData;
 #[cfg(test)]
 use storage::db::InMemoryDB;
 use storage::{
@@ -63,8 +63,6 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
-#[cfg(feature = "proof-verifying")]
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
@@ -82,9 +80,9 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
-            .expect("Zswap Output VK should be valid");
+    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+            .expect("Dust Spend VK should be valid");
 }
 
 pub struct DustResolver(pub MidnightDataProvider);
@@ -637,10 +635,21 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                P::latest_proof_verify(
-                    &SPEND_VK,
-                    &self.proof,
+                let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
+                dust_op.v2 = Some(SPEND_VK.clone());
+                let dust_call = crate::structure::ContractCall {
+                    address: coin_structure::contract::ContractAddress::default(),
+                    entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
+                    guaranteed_transcript: None,
+                    fallible_transcript: None,
+                    communication_commitment: Fr::default(),
+                    proof: self.proof.clone().into(),
+                };
+                P::proof_verify(
+                    &dust_op,
+                    &self.proof.clone().into(),
                     pis,
+                    &dust_call,
                     strictness.proof_verification_mode,
                 )
                 .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
@@ -654,18 +663,31 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Clone, PartialEq, Eq, Debug; S)]
 #[storable(db = D)]
-#[tag = "dust-registration[v1]"]
+#[envelope(DustRegistrationSigningEnvelope<S, D>)]
+#[tag = "dust-registration[v2]"]
 pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
-    pub night_key: VerifyingKey,
+    pub night_key: SignatureVerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
     #[allow(clippy::type_complexity)]
-    pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
+    pub signature: Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-registration-signing-envelope[v8]"]
+#[phantom(D)]
+pub struct DustRegistrationSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    pub night_key: SignatureVerifyingKey,
+    pub dust_address: Option<Sp<DustPublicKey, D>>,
+    pub allow_fee_payment: u128,
+    #[allow(clippy::type_complexity)]
+    pub signature: PhantomData<Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>>,
+}
+tag_enforcement_test!(DustRegistrationSigningEnvelope<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     pub(crate) fn erase_signatures(&self) -> DustRegistration<(), D> {
@@ -702,17 +724,28 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Debug)]
 #[derive_where(Clone, PartialEq, Eq; S, P)]
 #[storable(db = D)]
-#[tag = "dust-actions[v1]"]
+#[envelope(DustActionsSigningEnvelope<S, P, D>)]
+#[tag = "dust-actions[v2]"]
 pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub spends: storage::storage::Array<DustSpend<P, D>, D>,
     pub registrations: storage::storage::Array<DustRegistration<S, D>, D>,
     pub ctime: Timestamp,
 }
 tag_enforcement_test!(DustActions<(), (), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-actions-signing-envelope[v2]"]
+#[phantom(D)]
+pub struct DustActionsSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
+    pub spends: storage::storage::Array<DustSpend<P, D>, D>,
+    pub registrations: VecEnvelope<DustRegistrationSigningEnvelope<S, D>>,
+    pub ctime: Timestamp,
+}
+tag_enforcement_test!(DustActionsSigningEnvelope<(), (), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustActions<S, ProofPreimageMarker, D> {
     pub(crate) async fn prove(
@@ -1163,7 +1196,7 @@ impl<D: DB> DustState<D> {
         &self,
         utxo_state: &UtxoState<D>,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         params: &DustParameters,
     ) -> u128 {
         let generationless_inputs = parent_intent

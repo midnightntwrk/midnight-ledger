@@ -14,7 +14,7 @@
 use group::cofactor::CofactorGroup;
 use midnight_circuits::{ecc::curves::CircuitCurve, instructions::EccInstructions};
 
-use midnight_curves::{JubjubExtended, JubjubSubgroup, secp256k1};
+use midnight_curves::{JubjubExtended, JubjubSubgroup, k256};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 
@@ -45,7 +45,7 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
                 "Cannot build a Jubjub point from ({x}, {y})",
             )),
 
-        (Secp256k1Base(x), Secp256k1Base(y)) => secp256k1::Secp256k1::from_xy(*x, *y)
+        (Secp256k1Base(x), Secp256k1Base(y)) => k256::K256::from_xy(*x, *y)
             .map(Secp256k1Point)
             .ok_or(anyhow::anyhow!(
                 "Cannot build a Secp256k1Point point from ({x:?}, {y:?})",
@@ -84,7 +84,7 @@ pub fn from_coordinates_incircuit(
             .map(JubjubPoint),
 
         (Secp256k1Base(x), Secp256k1Base(y)) => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .point_from_coordinates(layouter, x, y)
             .map(Secp256k1Point),
 

@@ -36,8 +36,8 @@ pub fn mul_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
     use IrValue::*;
     match (x, y) {
         (Native(a), Native(b)) => Ok(Native(*a * *b)),
-        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(s * r)),
-        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(s * r)),
+        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(*s * *r)),
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(*s * *r)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported multiplication: {:?} x {:?}",
@@ -69,11 +69,11 @@ pub fn mul_incircuit(
             Ok(Native(r))
         }
         (Secp256k1Base(a), Secp256k1Base(b)) => {
-            let r = (std_lib.secp256k1_curve().base_field_chip()).mul(layouter, a, b, None)?;
+            let r = (std_lib.secp256k1().base_field_chip()).mul(layouter, a, b, None)?;
             Ok(Secp256k1Base(r))
         }
         (Secp256k1Scalar(a), Secp256k1Scalar(b)) => {
-            let r = (std_lib.secp256k1_curve().scalar_field_chip()).mul(layouter, a, b, None)?;
+            let r = (std_lib.secp256k1().scalar_field_chip()).mul(layouter, a, b, None)?;
             Ok(Secp256k1Scalar(r))
         }
 
@@ -97,7 +97,7 @@ impl Mul for IrValue {
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::secp256k1;
+    use midnight_curves::k256;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -111,8 +111,8 @@ mod tests {
 
         assert_eq!(Native(x) * Native(y), Native(x * y));
 
-        let [x, y] = core::array::from_fn(|_| secp256k1::Fp::random(OsRng));
-        let [r, s] = core::array::from_fn(|_| secp256k1::Fq::random(OsRng));
+        let [x, y] = core::array::from_fn(|_| k256::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| k256::Fq::random(OsRng));
 
         assert_eq!(Secp256k1Base(x) * Secp256k1Base(y), Secp256k1Base(x * y));
         assert_eq!(

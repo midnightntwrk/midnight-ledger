@@ -61,16 +61,17 @@ pub use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, Intent, IntentHash, LedgerState, ProofPreimageMarker,
     Transaction, UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
-pub use midnight_ledger::test_utilities::{Resolver, verifier_key};
+pub use midnight_ledger::test_utilities::{Resolver, contract_operation};
 pub use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
 pub use midnight_ledger::test_utilities::{Tx, TxBound};
 pub use midnight_ledger::test_utilities::{test_intents, test_resolver};
 pub use midnight_ledger::verify::WellFormedStrictness;
+pub use midnight_ledger_v9 as midnight_ledger;
 pub use onchain_runtime::context::QueryContext;
 pub use onchain_runtime::ops::{Key, Op, key};
 pub use onchain_runtime::program_fragments::*;
 pub use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-pub use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+pub use onchain_runtime::state::{ContractState, StateValue, stval};
 pub use rand::rngs::StdRng;
 pub use rand::{CryptoRng, Rng, SeedableRng};
 pub use serialize::Serializable;

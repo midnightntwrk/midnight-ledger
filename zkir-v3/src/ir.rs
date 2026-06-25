@@ -20,7 +20,7 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_deserialize};
+use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::io::{self, Read};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
@@ -70,6 +70,8 @@ pub enum IrMinorVersion {
 }
 
 impl Zkir for IrSource {
+    type ProverKey = midnight_zk_stdlib::MidnightPK<IrSource>;
+
     fn check(
         &self,
         preimage: &ProofPreimage,
@@ -100,12 +102,50 @@ impl Zkir for IrSource {
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
     }
 
-    fn load_ir_from_tagged(reader: impl Read + io::Seek) -> io::Result<Self> {
-        tagged_deserialize(reader)
+    fn k(&self) -> u8 {
+        midnight_zk_stdlib::optimal_k(self) as u8
     }
 
-    fn load_prover_key_from_tagged(reader: impl Read + io::Seek) -> io::Result<ProverKey<Self>> {
-        tagged_deserialize(reader)
+    async fn keygen_vk(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
+        use midnight_zk_stdlib::setup_vk;
+        Ok(transient_crypto::proofs::VerifierKey::from(
+            setup_vk(params.get_params(self.k()).await?.as_ref(), self),
+        ))
+    }
+
+    async fn keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, transient_crypto::proofs::VerifierKey), anyhow::Error> {
+        use midnight_zk_stdlib::{setup_pk, setup_vk};
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let pk = setup_pk(self, &vk);
+        Ok((ProverKey::from_raw(pk), transient_crypto::proofs::VerifierKey::from(vk)))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + std::io::Seek) -> std::io::Result<Self> {
+        serialize::tagged_deserialize(reader)
+    }
+
+    fn load_prover_key_from_tagged(reader: impl Read + std::io::Seek) -> std::io::Result<ProverKey<Self>> {
+        serialize::tagged_deserialize(reader)
+    }
+
+    fn read_raw_pk(reader: impl Read) -> std::io::Result<Self::ProverKey> {
+        midnight_zk_stdlib::MidnightPK::<Self>::read(
+            &mut { reader },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
+    }
+
+    fn write_raw_pk(writer: impl std::io::Write, pk: &Self::ProverKey) -> std::io::Result<()> {
+        pk.write(
+            &mut { writer },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
     }
 }
 
@@ -821,7 +861,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_zk_stdlib::cost_model(self),
+            model: midnight_zk_stdlib::cost_model(self, None),
         }
     }
 

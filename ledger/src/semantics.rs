@@ -160,7 +160,7 @@ impl<D: DB> GuaranteedApplyResult<D> {
         let mut total_success = true;
 
         for segment in stx.fallible_segments() {
-            match new_st.apply_section(stx, self.tx.hash, segment, context) {
+            match new_st.apply_section(stx, self.tx.hash, self.tx.fees, segment, context) {
                 Ok((state, deferred)) => {
                     new_st = state;
                     events.extend(deferred.into_iter().map(|f| f()));
@@ -534,6 +534,7 @@ impl<D: DB> LedgerState<D> {
             .copied()
             .unwrap_or(0);
         let unclaimed_rewards = self.unclaimed_block_rewards.ann().value;
+        let bridge_receiving = self.bridge_receiving.ann().value;
         let contract_value = self.contract.ann().value;
 
         // Ensure the total supply of NIGHT is conserved.
@@ -543,6 +544,7 @@ impl<D: DB> LedgerState<D> {
             + self.block_reward_pool
             + treasury_night
             + unclaimed_rewards
+            + bridge_receiving
             + contract_value;
 
         if total_night != MAX_SUPPLY {
@@ -716,6 +718,34 @@ impl<D: DB> LedgerState<D> {
                     treasury,
                     ..self.clone()
                 };
+                state.check_night_balance_invariant()?;
+                let res = (state, vec![]);
+                Ok(res)
+            }
+            SystemTransaction::UnlockToTreasury { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to treasury rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to treasury");
+                let mut treasury = self.treasury.clone();
+                let native_token = treasury
+                    .get(&TokenType::Unshielded(NIGHT))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(*amount);
+                treasury = treasury.insert(TokenType::Unshielded(NIGHT), native_token);
+                let state = LedgerState {
+                    locked_pool: self.locked_pool - *amount,
+                    treasury,
+                    ..self.clone()
+                };
+                state.check_night_balance_invariant()?;
                 let res = (state, vec![]);
                 Ok(res)
             }
@@ -948,7 +978,7 @@ impl<D: DB> LedgerState<D> {
                 state.dust = Sp::new(dust_state);
                 Ok((state, events))
             }
-            SystemTransaction::DistributeReserve(amount) => {
+            SystemTransaction::DistributeReserve { amount } => {
                 if *amount > self.reserve_pool {
                     error!(?amount, reserve_supply = ?self.reserve_pool, "[privileged] reserve distribution rejected due to insufficient reserve supply");
                     return Err(SystemTransactionError::IllegalReserveDistribution {
@@ -963,6 +993,31 @@ impl<D: DB> LedgerState<D> {
                 let new_st = LedgerState {
                     reserve_pool,
                     block_reward_pool,
+                    ..self.clone()
+                };
+
+                new_st.check_night_balance_invariant()?;
+
+                Ok((new_st, vec![]))
+            }
+            SystemTransaction::UnlockToReserve { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to reserve rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to reserve");
+
+                let locked_pool = self.locked_pool - *amount;
+                let reserve_pool = self.reserve_pool + *amount;
+
+                let new_st = LedgerState {
+                    reserve_pool,
+                    locked_pool,
                     ..self.clone()
                 };
 
@@ -1002,6 +1057,7 @@ impl<D: DB> LedgerState<D> {
         &self,
         tx: &StandardTransaction<S, P, B, D>,
         transaction_hash: TransactionHash,
+        fees: u128,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
@@ -1089,9 +1145,7 @@ impl<D: DB> LedgerState<D> {
                 //
                 // NOTE: The `unwrap_or` is safe here, as fees have already been
                 // checked during well-formedness.
-                let mut fees_remaining = Transaction::Standard(tx.clone())
-                    .fees(&self.parameters, true)
-                    .unwrap_or(0);
+                let mut fees_remaining = fees;
                 // apply spends first, to make sure registration outputs get the maximum dust they can.
                 let intents = tx.intents.sorted_iter().collect::<Vec<_>>();
                 for (phys_seg, time, dust_spend) in intents.iter().flat_map(|(phys_seg, i)| {
@@ -1315,7 +1369,8 @@ impl<D: DB> LedgerState<D> {
     ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
         match &tx.inner {
             Transaction::Standard(stx) => {
-                let (state, deferred_events) = self.apply_section(stx, tx.hash, 0, context)?;
+                let (state, deferred_events) =
+                    self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
                 debug!(
                     "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
                     self.state_hash(),
@@ -1459,6 +1514,29 @@ impl<D: DB> LedgerState<D> {
                         if res.contract.contains_key(&addr) {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) = crate::verify::check_entry_point_metadata_sizes(
+                            &deploy.initial_state,
+                            limit,
+                        ) {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
+                        }
                         res.contract = res.contract.insert(addr, deploy.initial_state.clone());
                         events.push(Event {
                             source: event_source.clone(),
@@ -1490,8 +1568,8 @@ impl<D: DB> LedgerState<D> {
                                 }
                                 SingleUpdate::VerifierKeyRemove(ep, ver) => {
                                     let mut op = match cstate.operations.get(ep) {
-                                        Some(op) => op.deref().clone(),
-                                        None => {
+                                        Some(op) if ver.has(&op) => op.deref().clone(),
+                                        _ => {
                                             return Err(TransactionInvalid::VerifierKeyNotFound(
                                                 ep.clone(),
                                                 ver.clone(),
@@ -1499,7 +1577,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op == ContractOperation::new(None) {
+                                    if op == ContractOperation::new(None, None) {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
@@ -1509,7 +1587,7 @@ impl<D: DB> LedgerState<D> {
                                 SingleUpdate::VerifierKeyInsert(ep, vk) => {
                                     let mut op = match cstate.operations.get(ep) {
                                         Some(op) => (*op).clone(),
-                                        None => ContractOperation::new(None),
+                                        None => ContractOperation::new(None, None),
                                     };
                                     if vk.as_version().has(&op) {
                                         return Err(TransactionInvalid::VerifierKeyAlreadyPresent(
@@ -1520,7 +1598,58 @@ impl<D: DB> LedgerState<D> {
                                     vk.insert_into(&mut op);
                                     cstate.operations = cstate.operations.insert(ep.clone(), op);
                                 }
+                                SingleUpdate::IrRemove(ep) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => op.deref().clone(),
+                                        None => {
+                                            return Err(TransactionInvalid::IrNotFound(ep.clone()));
+                                        }
+                                    };
+                                    op.ir = None;
+
+                                    if op == ContractOperation::new(None, None) {
+                                        cstate.operations = cstate.operations.remove(ep);
+                                    } else {
+                                        cstate.operations =
+                                            cstate.operations.insert(ep.clone(), op);
+                                    }
+                                }
+                                SingleUpdate::IrInsert(ep, ir) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => (*op).clone(),
+                                        None => ContractOperation::new(None, None),
+                                    };
+                                    if op.ir.is_some() {
+                                        return Err(TransactionInvalid::IrAlreadyPresent(
+                                            ep.clone(),
+                                        ));
+                                    }
+                                    op.ir = Some(Sp::new(ir.clone()));
+                                    cstate.operations = cstate.operations.insert(ep.clone(), op);
+                                }
                             }
+                        }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) =
+                            crate::verify::check_entry_point_metadata_sizes(&cstate, limit)
+                        {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
                         }
                         res.contract = res.contract.insert(addr, cstate);
                     }
@@ -1571,18 +1700,25 @@ impl<D: DB> LedgerState<D> {
         overall_block_fullness: FixedPoint,
     ) -> Self {
         let mut new_st = self.clone();
-        let fee_prices = self.parameters.fee_prices.update_from_fullness(
+        let mut fee_prices = self.parameters.fee_prices.update_from_fullness(
             detailed_block_fullness,
             overall_block_fullness,
             self.parameters.cost_dimension_min_ratio,
             self.parameters.price_adjustment_a_parameter,
         );
+        if fee_prices.overall_price < self.parameters.min_block_price {
+            fee_prices.overall_price = self.parameters.min_block_price;
+        }
         new_st.parameters = Sp::new(LedgerParameters {
             fee_prices,
             ..(*self.parameters).clone()
         });
         new_st.replay_protection = Sp::new(new_st.replay_protection.post_block_update(tblock));
-        new_st.zswap = Sp::new(new_st.zswap.post_block_update(tblock));
+        new_st.zswap = Sp::new(
+            new_st
+                .zswap
+                .post_block_update(tblock, self.parameters.global_ttl),
+        );
         new_st.dust = Sp::new(
             new_st
                 .dust
@@ -1610,7 +1746,7 @@ impl<D: DB> LedgerState<D> {
 }
 
 const fn basis_points_of(points: u32, val: u128) -> Result<u128, SystemTransactionError> {
-    if points <= 10_000 {
+    if points > 10_000 {
         return Err(SystemTransactionError::InvalidBasisPoints(points));
     }
 
@@ -1959,11 +2095,10 @@ impl SystemTransaction {
 mod tests {
     use crate::{
         annotation::NightAnn,
-        structure::{INITIAL_PARAMETERS, LedgerParameters},
+        structure::{INITIAL_PARAMETERS, LedgerParameters, SignatureVerifyingKey},
     };
 
     use super::*;
-    use base_crypto::schnorr::VerifyingKey;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;
@@ -1975,7 +2110,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
         let state = LedgerState {
@@ -2029,7 +2164,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), 1000);
         let state = LedgerState {
@@ -2084,7 +2219,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
@@ -2139,7 +2274,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), 200000);
@@ -2268,5 +2403,117 @@ mod tests {
 
         assert!(!state.utxos.contains_key(&a));
         assert!(state.utxos.contains_key(&b));
+    }
+
+    #[test]
+    fn bridge_transfer_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = 10_000_000_000;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after bridge transfer");
+
+        let expected_fee = basis_points_of(
+            INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
+            amount,
+        )
+        .unwrap();
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            amount - expected_fee
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            expected_fee
+        );
+        assert_eq!(new_state.locked_pool, 0);
+    }
+
+    #[test]
+    fn bridge_transfer_sub_minimum_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = INITIAL_PARAMETERS.c_to_m_bridge_min_amount - 1;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("sub-minimum bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after sub-minimum bridge transfer");
+
+        // Sub-minimum: entire amount goes to treasury as fee, nothing to bridge_receiving
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            amount
+        );
+        assert_eq!(new_state.locked_pool, 0);
     }
 }

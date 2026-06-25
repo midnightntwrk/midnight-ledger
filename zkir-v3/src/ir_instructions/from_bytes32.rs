@@ -14,7 +14,7 @@
 use group::ff::FromUniformBytes;
 use midnight_circuits::{instructions::DecompositionInstructions, types::AssignedByte};
 
-use midnight_curves::secp256k1;
+use midnight_curves::k256;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -47,9 +47,10 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
     match val_t {
         IrType::Native => Ok(Native(Fr(F::from_uniform_bytes(&buffer)))),
 
-        IrType::Secp256k1Base => Ok(Secp256k1Base(secp256k1::Fp::from_uniform_bytes(&buffer))),
+        // FIXME: Compilation error
+        IrType::Secp256k1Base => Ok(Secp256k1Base(k256::Fp::from_uniform_bytes(&buffer))),
 
-        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(secp256k1::Fq::from_uniform_bytes(&buffer))),
+        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(k256::Fq::from_uniform_bytes(&buffer))),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
@@ -83,13 +84,13 @@ pub fn from_bytes32_incircuit(
         IrType::Native => std_lib.assigned_from_le_bytes(layouter, bytes).map(Native),
 
         IrType::Secp256k1Base => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .base_field_chip()
             .assigned_from_le_bytes(layouter, bytes)
             .map(Secp256k1Base),
 
         IrType::Secp256k1Scalar => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .scalar_field_chip()
             .assigned_from_le_bytes(layouter, bytes)
             .map(Secp256k1Scalar),

@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-rc.3**](../README.md)
 
 ***
 
@@ -7,11 +7,18 @@
 # Function: sampleSigningKey()
 
 ```ts
-function sampleSigningKey(): string
+function sampleSigningKey(kind?): SigningKey
 ```
 
-Randomly samples a [SigningKey](../type-aliases/SigningKey.md).
+Randomly samples a [SigningKey](../type-aliases/SigningKey.md). If `kind` is not supplied, assumes
+`schnorr`.
+
+## Parameters
+
+### kind?
+
+[`SignatureKind`](../type-aliases/SignatureKind.md)
 
 ## Returns
 
-`string`
+[`SigningKey`](../type-aliases/SigningKey.md)

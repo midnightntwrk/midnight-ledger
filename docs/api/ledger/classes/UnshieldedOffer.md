@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -36,7 +36,7 @@ readonly outputs: UtxoOutput[];
 ### signatures
 
 ```ts
-readonly signatures: string[];
+readonly signatures: S[];
 ```
 
 ## Methods
@@ -51,7 +51,7 @@ addSignatures(signatures): UnshieldedOffer<S>;
 
 ##### signatures
 
-`string`[]
+`S`[]
 
 #### Returns
 
@@ -110,7 +110,7 @@ signatures): UnshieldedOffer<SignatureEnabled>;
 
 ##### signatures
 
-`string`[]
+[`SignatureEnabled`](SignatureEnabled.md)[]
 
 #### Returns
 

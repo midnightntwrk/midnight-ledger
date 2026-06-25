@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -73,7 +73,7 @@ The raw data any valid signature must be over to approve this update.
 ### signatures
 
 ```ts
-readonly signatures: [bigint, string][];
+readonly signatures: [bigint, Signature][];
 ```
 
 The signatures on this update
@@ -106,7 +106,7 @@ Adds a new signature to this update
 
 ##### signature
 
-`string`
+[`Signature`](../type-aliases/Signature.md)
 
 #### Returns
 

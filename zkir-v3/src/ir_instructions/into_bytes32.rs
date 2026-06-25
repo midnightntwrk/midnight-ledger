@@ -38,9 +38,10 @@ pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error
     match value {
         Native(x) => Ok(Bytes32(x.0.to_bytes_le())),
 
-        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes())),
+        // FIXME: Uses big-endian encoding, in contradiction to doc comment now.
+        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes().into())),
 
-        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes())),
+        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes().into())),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported into_bytes32 for {:?}",
@@ -73,13 +74,13 @@ pub fn into_bytes32_incircuit(
             .map(|bytes| Bytes32(bytes.try_into().unwrap())),
 
         Secp256k1Base(s) => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .base_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
             .map(|bytes| Bytes32(bytes.try_into().unwrap())),
 
         Secp256k1Scalar(s) => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .scalar_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
             .map(|bytes| Bytes32(bytes.try_into().unwrap())),

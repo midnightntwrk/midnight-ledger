@@ -79,15 +79,15 @@ pub fn neg_incircuit(
         }
 
         Secp256k1Point(p) => {
-            let r = std_lib.secp256k1_curve().negate(layouter, p)?;
+            let r = std_lib.secp256k1().negate(layouter, p)?;
             Ok(Secp256k1Point(r))
         }
         Secp256k1Base(a) => {
-            let r = (std_lib.secp256k1_curve().base_field_chip()).neg(layouter, a)?;
+            let r = (std_lib.secp256k1().base_field_chip()).neg(layouter, a)?;
             Ok(Secp256k1Base(r))
         }
         Secp256k1Scalar(a) => {
-            let r = (std_lib.secp256k1_curve().scalar_field_chip()).neg(layouter, a)?;
+            let r = (std_lib.secp256k1().scalar_field_chip()).neg(layouter, a)?;
             Ok(Secp256k1Scalar(r))
         }
 
@@ -111,7 +111,7 @@ impl Neg for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -127,9 +127,9 @@ mod tests {
         assert_eq!(-Native(x), Native(-x));
         assert_eq!(-JubjubPoint(p), JubjubPoint(-p));
 
-        let p = secp256k1::Secp256k1::random(OsRng);
-        let x = secp256k1::Fp::random(OsRng);
-        let r = secp256k1::Fq::random(OsRng);
+        let p = k256::K256::random(OsRng);
+        let x = k256::Fp::random(OsRng);
+        let r = k256::Fq::random(OsRng);
         assert_eq!(-Secp256k1Point(p), Secp256k1Point(-p));
         assert_eq!(-Secp256k1Base(x), Secp256k1Base(-x));
         assert_eq!(-Secp256k1Scalar(r), Secp256k1Scalar(-r));

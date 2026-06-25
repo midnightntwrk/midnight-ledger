@@ -87,7 +87,7 @@ pub fn into_coordinates_incircuit(
             ))
         }
         Secp256k1Point(p) => {
-            let curve = std_lib.secp256k1_curve();
+            let curve = std_lib.secp256k1();
             curve.assert_non_zero(layouter, p)?;
             Ok((
                 Secp256k1Base(curve.x_coordinate(p)),

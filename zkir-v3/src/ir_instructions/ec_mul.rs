@@ -32,7 +32,7 @@ pub fn ec_mul_offcircuit(point: &IrValue, scalar: &IrValue) -> Result<IrValue, a
     use IrValue::*;
     match (point, scalar) {
         (JubjubPoint(p), JubjubScalar(s)) => Ok(JubjubPoint(p * s)),
-        (Secp256k1Point(p), Secp256k1Scalar(s)) => Ok(Secp256k1Point(p * s)),
+        (Secp256k1Point(p), Secp256k1Scalar(s)) => Ok(Secp256k1Point(*p * s)),
         _ => Err(anyhow::anyhow!(
             "Unsupported EC multiplication: {:?} x {:?}",
             point.get_type(),
@@ -62,7 +62,7 @@ pub fn ec_mul_incircuit(
             Ok(JubjubPoint(r))
         }
         (Secp256k1Point(p), Secp256k1Scalar(s)) => {
-            let r = std_lib.secp256k1_curve().msm(
+            let r = std_lib.secp256k1().msm(
                 layouter,
                 std::slice::from_ref(s),
                 std::slice::from_ref(p),
@@ -81,7 +81,7 @@ pub fn ec_mul_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, secp256k1};
+    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -98,8 +98,8 @@ mod tests {
             JubjubPoint(p * s)
         );
 
-        let q = secp256k1::Secp256k1::random(OsRng);
-        let r = secp256k1::Fq::random(OsRng);
+        let q = k256::K256::random(OsRng);
+        let r = k256::Fq::random(OsRng);
 
         assert_eq!(
             ec_mul_offcircuit(&Secp256k1Point(q), &Secp256k1Scalar(r)).unwrap(),

@@ -4,7 +4,34 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## Ledger 9.1.0.0-rc.3
+
+- feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
+- breaking: unify the construction of signing envelopes
+- fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly
+- fix: `ContractOperationVersionedVerifierKey::V3` and `V4` serialize independently (no longer share a match arm)
+- feat: `IrInsert` / `IrRemove` wasm bindings with `IrBuf` support for IR field in contract operations
+- feat: `lookup_key` exposed in ledger-wasm proving path, allowing the prover to use the correct key version
+- feat: add explicit price floor, denominated in full blocks, and governed by
+  ledger parameters.
+- feat: add support for ECDSA signatures
+- feat: add `UnlockToTreasury` system transaction, moving funds from the locked
+  pool to the treasury.
+- feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
+  matching the new on-chain event format.
+- fix: correctly exclude the identity point during coin ciphertext decryption
+- feat: `ContractOperation` extended with `v3` field for zk-stdlib v2 verifier keys
+- feat: `ProofVersioned::V3` variant for proofs generated against zk-stdlib v2
+- feat: `proof_verify` dynamically dispatches v1 or v2 verification based on
+  proof version (V2 → `v1_verify`, V3 → current `vk.verify`)
+- feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
+  for the new v3 verifier key field
+- feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
+- feat: maintenance updates can insert and remove the IR of a contract operation
+  via the `SingleUpdate::IrInsert` / `SingleUpdate::IrRemove` variants (exposed in
+  ledger-wasm as `IrInsert` / `IrRemove`)
+
+## Unreleased (8.2)
 
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
@@ -19,6 +46,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
 - feat: expose event contents to the extent that they are useful to the wallet in wasm bindings.
+- breaking: fix Zswap root retention period to match spec - global TTL param instead of hardcoded 1 hour;
+- breaking: adjust Zswap Ledger state API to take retention duration in the `post_block_update` hook
 
 ## 8.0.3
 

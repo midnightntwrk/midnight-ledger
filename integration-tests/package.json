@@ -18,8 +18,8 @@
   "scripts": {
     "clean": "rm -rf dist node_modules reports lib-sources coverage logs",
     "build": "tsc",
-    "local-prepare": "sudo rm -rf lib-sources && mkdir -p lib-sources && cp -r -L ../result/lib/node_modules/@midnight-ntwrk lib-sources",
-    "test:coverage:prepare": "mkdir -p lib-sources && cp -r -L ../result/lib/node_modules/@midnight-ntwrk lib-sources",
+    "local-prepare": "sudo rm -rf lib-sources && mkdir -p lib-sources && cp -r -L ../result/lib/node_modules/@midnightntwrk lib-sources/@midnight-ntwrk",
+    "test:coverage:prepare": "mkdir -p lib-sources && cp -r -L ../result/lib/node_modules/@midnightntwrk lib-sources/@midnight-ntwrk",
     "test:coverage": "MN_AXIOS=true vitest run --config=vitest.config.coverage.ts",
     "test": "MN_AXIOS=true DEBUG='testcontainers:containers' vitest run",
     "test:wasm": "MN_WASM_PROVING=true MN_AXIOS=true DEBUG='testcontainers:containers' vitest run --config=vitest.config.wasm.ts",
@@ -31,8 +31,8 @@
     "lint:fix": "eslint . --ext .ts --fix"
   },
   "dependencies": {
-    "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnight-ntwrk/ledger-v8",
-    "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnight-ntwrk/zkir-v2"
+    "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v9",
+    "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2"
   },
   "devDependencies": {
     "@d2t/vitest-ctrf-json-reporter": "1.2.0",

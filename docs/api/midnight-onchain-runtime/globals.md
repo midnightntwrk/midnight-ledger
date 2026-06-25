@@ -1,8 +1,8 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-rc.3**](README.md)
 
 ***
 
-# @midnight-ntwrk/onchain-runtime v3.1.0
+# @midnight-ntwrk/onchain-runtime v4.0.0-rc.3
 
 ## Classes
 
@@ -41,6 +41,7 @@
 - [Fr](type-aliases/Fr.md)
 - [GatherResult](type-aliases/GatherResult.md)
 - [Key](type-aliases/Key.md)
+- [LogEventType](type-aliases/LogEventType.md)
 - [Nonce](type-aliases/Nonce.md)
 - [Nullifier](type-aliases/Nullifier.md)
 - [Op](type-aliases/Op.md)
@@ -51,6 +52,7 @@
 - [ShieldedCoinInfo](type-aliases/ShieldedCoinInfo.md)
 - [ShieldedTokenType](type-aliases/ShieldedTokenType.md)
 - [Signature](type-aliases/Signature.md)
+- [SignatureKind](type-aliases/SignatureKind.md)
 - [SignatureVerifyingKey](type-aliases/SignatureVerifyingKey.md)
 - [SigningKey](type-aliases/SigningKey.md)
 - [TokenType](type-aliases/TokenType.md)
@@ -85,9 +87,13 @@
 - [encodeUserAddress](functions/encodeUserAddress.md)
 - [entryPointHash](functions/entryPointHash.md)
 - [hashToCurve](functions/hashToCurve.md)
+- [jubjubSampleScalar](functions/jubjubSampleScalar.md)
+- [jubjubScalarFromNative](functions/jubjubScalarFromNative.md)
 - [leafHash](functions/leafHash.md)
 - [maxAlignedSize](functions/maxAlignedSize.md)
 - [maxField](functions/maxField.md)
+- [maxJubjubScalar](functions/maxJubjubScalar.md)
+- [nativeFromJubjubScalar](functions/nativeFromJubjubScalar.md)
 - [persistentCommit](functions/persistentCommit.md)
 - [persistentHash](functions/persistentHash.md)
 - [proofDataIntoSerializedPreimage](functions/proofDataIntoSerializedPreimage.md)

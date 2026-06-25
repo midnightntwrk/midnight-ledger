@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -10,4 +10,4 @@
 type ContractAddress = string;
 ```
 
-A contract address, as a hex-encoded 35-byte string
+A contract address, as a hex-encoded 32-byte string

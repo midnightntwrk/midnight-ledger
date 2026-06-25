@@ -13,7 +13,7 @@
 
 import { provingProvider } from '@midnight-ntwrk/zkir-v2';
 import { parentPort, workerData } from 'worker_threads';
-import { keyMaterialProvider } from './test-objects';
+import { keyMaterialProvider } from './test-objects.js';
 
 export const wasmProver = provingProvider(keyMaterialProvider);
 

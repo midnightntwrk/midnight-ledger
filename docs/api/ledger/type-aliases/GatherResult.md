@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -13,7 +13,11 @@ type GatherResult =
   tag: "read";
 }
   | {
-  content: EncodedStateValue;
+  content: {
+     data: EncodedStateValue;
+     eventType: LogEventType;
+     version: number;
+  };
   tag: "log";
 };
 ```

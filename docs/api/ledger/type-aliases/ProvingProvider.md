@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -9,6 +9,7 @@
 ```ts
 type ProvingProvider = {
   check: Promise<(bigint | undefined)[]>;
+  lookupKey: Promise<ProvingKeyMaterial | undefined>;
   prove: Promise<Uint8Array<ArrayBufferLike>>;
 };
 ```
@@ -34,6 +35,24 @@ check(serializedPreimage, keyLocation): Promise<(bigint | undefined)[]>;
 #### Returns
 
 `Promise`\<(`bigint` \| `undefined`)[]\>
+
+***
+
+### lookupKey()
+
+```ts
+lookupKey(keyLocation): Promise<ProvingKeyMaterial | undefined>;
+```
+
+#### Parameters
+
+##### keyLocation
+
+`string`
+
+#### Returns
+
+`Promise`\<[`ProvingKeyMaterial`](ProvingKeyMaterial.md) \| `undefined`\>
 
 ***
 
