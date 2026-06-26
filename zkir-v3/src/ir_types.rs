@@ -72,9 +72,9 @@ impl IrType {
             IrType::JubjubPoint => 2,
             IrType::JubjubScalar => 1,
 
-            IrType::Secp256k1Point => 8,
-            IrType::Secp256k1Base => 4,
-            IrType::Secp256k1Scalar => 4,
+            IrType::Secp256k1Point => 5,
+            IrType::Secp256k1Base => 2,
+            IrType::Secp256k1Scalar => 2,
         }
     }
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::{
+    CircuitField,
     field::foreign::params::MultiEmulationParams as MEP,
     instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
@@ -22,8 +23,6 @@ use midnight_circuits::{
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
-use num_bigint::BigUint;
-use num_traits::Num;
 use transient_crypto::curve::Fr;
 
 use crate::{
@@ -174,14 +173,11 @@ pub fn jubjub_scalar_from_biguint(
     x: AssignedBigUint<F>,
 ) -> Result<AssignedScalarOfNativeCurve<JubjubExtended>, Error> {
     let jubjub_order = {
-        let p_str = "e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
-        let p = BigUint::from_str_radix(p_str, 16).unwrap();
+        let p = JubjubFr::modulus();
         std_lib.biguint().assign_fixed_biguint(layouter, p)?
     };
     let (_q, r) = std_lib.biguint().div_rem(layouter, &x, &jubjub_order)?;
 
     let r_le_bytes = std_lib.biguint().to_le_bytes(layouter, &r)?;
-    std_lib
-        .jubjub()
-        .scalar_from_le_bytes(layouter, &r_le_bytes)
+    std_lib.jubjub().scalar_from_le_bytes(layouter, &r_le_bytes)
 }
