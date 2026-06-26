@@ -534,6 +534,50 @@ surface is under-tested. ~1 week to bring it up to par.
 
 ---
 
+## Track 8: Relocate `demos/` (and friends) into identity-solution-examples
+
+**Status:** scoped, deferred. Pick up AFTER the consolidation PRs land:
+[midnight-identity-solution-examples#55](https://github.com/midnightntwrk/midnight-identity-solution-examples/pull/55),
+[midnight-identity-workspace#24](https://github.com/midnightntwrk/midnight-identity-workspace/pull/24),
+[patextreme/midnight-passport-kyc#4](https://github.com/patextreme/midnight-passport-kyc/pull/4).
+
+The Python orchestrator (`demos/bootstrap.py`) drives `apps/issuer`,
+`apps/dapp`, `apps/cli` — all of which live in
+`midnight-identity-solution-examples`. Co-locating the orchestrator
+with what it orchestrates eliminates the submodule-bump dance every
+release.
+
+**What to move:**
+- `demos/` (Python orchestrator + Justfile + README + .env.example)
+- `scripts/run-demo.sh` (bash bootstrap-issuer / start-passport-issuer)
+- `scripts/docker-compose.demo.yml`
+- `scripts/docker-compose.passport-issuer.yml`
+- `scripts/smocker-entrypoint.sh`
+- Nix devshell additions: Python deps (click, httpx, rich, python-dotenv) + jq +
+  just (the workspace already has the latter two)
+
+**What stays in `midnight-identity-workspace` (the umbrella):**
+- `midnight-ledger` submodule (wallet)
+- Glue for the `proof-server-bootstrap` image build (from `midnight-did`)
+- Operator-level coordination across midnight-did + midnight-vc +
+  midnight-ledger (the libs the demo's apps depend on)
+
+**Open question:** does the umbrella have a reason to exist after the
+move? If `midnight-ledger` becomes a versioned NPM/cargo dep instead
+of a submodule, the umbrella shrinks to nothing and can be archived.
+That's a bigger discussion — flag for the next architecture sync.
+
+**Effort:** ~1 day. Mostly fiddling with paths in run-demo.sh +
+demos/lib/config.py + the nix devshell + the README. Functional
+behaviour unchanged.
+
+**Why NOT NOW:**
+- PRs #55 + #24 + #4 are in-flight and tightly scoped against the
+  current layout. Disrupting them costs more than waiting.
+- This move is a strict improvement — no urgency.
+
+---
+
 ## Index of repo locations
 
 | Track | Primary repo | Branch / PR |
@@ -544,4 +588,6 @@ surface is under-tested. ~1 week to bring it up to par.
 | Track 4 (simulator) | midnight-ledger + midnight-ssi-demo | new feature branch |
 | Track 5 (bootstrap follow-ups) | midnight-ssi-demo | follow-up commits on PR #23 |
 | Track 6 (contract review) | identity-solution-examples (vault contract) | new feature branch |
+| Track 7 (ZK optimizations) | midnight-ledger + midnight-zk | gated on 7.1 profiling |
+| Track 8 (demos/ relocation) | midnight-identity-workspace → identity-solution-examples | gated on #55/#24/#4 |
 | Track 7 (ZK optimizations) | midnight-ledger + midnight-zk | gated on 7.1 profiling |
