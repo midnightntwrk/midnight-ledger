@@ -12,9 +12,10 @@
 // limitations under the License.
 
 use group::ff::FromUniformBytes;
-use midnight_circuits::{CircuitField, instructions::DecompositionInstructions, types::AssignedByte};
+use midnight_circuits::{
+    CircuitField, instructions::DecompositionInstructions, types::AssignedByte,
+};
 
-use midnight_curves::k256;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
@@ -50,23 +51,9 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
     match val_t {
         IrType::Native => Ok(Native(Fr(F::from_uniform_bytes(&buffer)))),
 
-        IrType::Secp256k1Base => {
-            let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fp::modulus());
-            let mut rem_bytes = rem.to_bytes_le();
-            rem_bytes.resize(32, 0);
-            Ok(Secp256k1Base(
-                k256::Fp::from_bytes_le(&rem_bytes).unwrap(),
-            ))
-        }
+        IrType::Secp256k1Base => Ok(Secp256k1Base(from_le_bytes_with_reduction(&bytes))),
 
-        IrType::Secp256k1Scalar => {
-            let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&k256::Fq::modulus());
-            let mut rem_bytes = rem.to_bytes_le();
-            rem_bytes.resize(32, 0);
-            Ok(Secp256k1Scalar(
-                k256::Fq::from_bytes_le(&rem_bytes).unwrap(),
-            ))
-        }
+        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
@@ -117,6 +104,15 @@ pub fn from_bytes32_incircuit(
     }
 }
 
+/// Builds a prime field element from the given 32 bytes by interpreting them
+/// in little-endian as an integer. The integer can be bigger than field order.
+pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8; 32]) -> F {
+    let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&F::modulus());
+    let mut rem_bytes = rem.to_bytes_le();
+    rem_bytes.resize(32, 0);
+    F::from_bytes_le(&rem_bytes).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
@@ -159,20 +155,18 @@ mod tests {
     #[test]
     fn test_from_bytes32_reduces_non_canonical_input() {
         let bytes = [0xffu8; 32];
-        let mut buffer = [0u8; 64];
-        buffer[..32].copy_from_slice(&bytes);
 
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Native, &bytes).unwrap(),
-            IrValue::Native(Fr(F::from_uniform_bytes(&buffer)))
+            IrValue::Native(Fr(from_le_bytes_with_reduction(&bytes)))
         );
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap(),
-            IrValue::Secp256k1Base(k256::Fp::from_bytes_le(&buffer).unwrap())
+            IrValue::Secp256k1Base(from_le_bytes_with_reduction(&bytes))
         );
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap(),
-            IrValue::Secp256k1Scalar(k256::Fq::from_bytes_le(&buffer).unwrap())
+            IrValue::Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))
         );
     }
 }
