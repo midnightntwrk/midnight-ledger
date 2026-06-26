@@ -127,9 +127,7 @@ mod tests {
         );
 
         // The Secp256k1 identity has no affine coordinates.
-        assert!(
-            into_coordinates_offcircuit(&Secp256k1Point(k256::K256::identity())).is_err()
-        );
+        assert!(into_coordinates_offcircuit(&Secp256k1Point(k256::K256::identity())).is_err());
 
         // Coordinate extraction on a scalar is unsupported.
         assert!(into_coordinates_offcircuit(&Native(Fr::from(1))).is_err());

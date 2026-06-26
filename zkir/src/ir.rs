@@ -145,8 +145,14 @@ impl Zkir for IrSource {
                 let preproc = self.preprocess(preimage)?;
                 let pis = preproc.pis.clone();
                 let pi_skips = preproc.pi_skips.clone();
-                let proof =
-                    prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
+                let proof = prove::<_, TranscriptHash>(
+                    params_k.as_ref(),
+                    &inner_pk,
+                    self,
+                    &pis,
+                    preproc,
+                    rng,
+                )?;
                 Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
             }
         }
@@ -550,10 +556,7 @@ impl IrSource {
         let k = midnight_zk_stdlib::optimal_k(self) as u8;
         let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
-        Ok((
-            ProverKey::from_raw(pk),
-            VerifierKey::from(vk),
-        ))
+        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
     }
 
     /// Retrieves a model representation of this circuit.
@@ -684,7 +687,8 @@ impl IrSource {
         let params_k = params.get_params(inner_pk.k()).await?;
         let pis = preproc.pis.clone();
 
-        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
+        let proof =
+            prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
 
         Ok(Proof(proof))
     }

@@ -101,8 +101,8 @@ pub(crate) async fn prove(
         .prove(&ppi, None)
         .await
         .map_err(|e| e.to_string())?;
-    let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
-        .map_err(|e| e.to_string())?;
+    let ir =
+        zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)).map_err(|e| e.to_string())?;
     let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
     Ok((proof, skips))
 }

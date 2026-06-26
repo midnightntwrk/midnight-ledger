@@ -111,9 +111,10 @@ impl Zkir for IrSource {
         params: &impl ParamsProverProvider,
     ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(transient_crypto::proofs::VerifierKey::from(
-            setup_vk(params.get_params(self.k()).await?.as_ref(), self),
-        ))
+        Ok(transient_crypto::proofs::VerifierKey::from(setup_vk(
+            params.get_params(self.k()).await?.as_ref(),
+            self,
+        )))
     }
 
     async fn keygen(
@@ -123,14 +124,19 @@ impl Zkir for IrSource {
         use midnight_zk_stdlib::{setup_pk, setup_vk};
         let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
-        Ok((ProverKey::from_raw(pk), transient_crypto::proofs::VerifierKey::from(vk)))
+        Ok((
+            ProverKey::from_raw(pk),
+            transient_crypto::proofs::VerifierKey::from(vk),
+        ))
     }
 
     fn load_ir_from_tagged(reader: impl Read + std::io::Seek) -> std::io::Result<Self> {
         serialize::tagged_deserialize(reader)
     }
 
-    fn load_prover_key_from_tagged(reader: impl Read + std::io::Seek) -> std::io::Result<ProverKey<Self>> {
+    fn load_prover_key_from_tagged(
+        reader: impl Read + std::io::Seek,
+    ) -> std::io::Result<ProverKey<Self>> {
         serialize::tagged_deserialize(reader)
     }
 

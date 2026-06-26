@@ -82,9 +82,7 @@ pub fn test_eq_incircuit(
 
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().is_equal(layouter, p, q),
 
-        (Secp256k1Point(p), Secp256k1Point(q)) => {
-            std_lib.secp256k1().is_equal(layouter, p, q)
-        }
+        (Secp256k1Point(p), Secp256k1Point(q)) => std_lib.secp256k1().is_equal(layouter, p, q),
         (Secp256k1Base(s), Secp256k1Base(r)) => {
             (std_lib.secp256k1().base_field_chip()).is_equal(layouter, s, r)
         }

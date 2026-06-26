@@ -149,15 +149,11 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
                 .map(IrValue::Secp256k1Point)
         }
 
-        IrType::Secp256k1Base => {
-            AssignedField::<F, k256::Fp, MEP>::from_public_input(&encoded)
-                .map(IrValue::Secp256k1Base)
-        }
+        IrType::Secp256k1Base => AssignedField::<F, k256::Fp, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256k1Base),
 
-        IrType::Secp256k1Scalar => {
-            AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
-                .map(IrValue::Secp256k1Scalar)
-        }
+        IrType::Secp256k1Scalar => AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256k1Scalar),
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
 }

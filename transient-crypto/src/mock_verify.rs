@@ -388,7 +388,10 @@ impl Zkir for TestIr {
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self)))
+        Ok(VerifierKey::from(setup_vk(
+            params.get_params(self.k()).await?.as_ref(),
+            self,
+        )))
     }
     async fn keygen(
         &self,
@@ -408,10 +411,16 @@ impl Zkir for TestIr {
         tagged_deserialize(reader)
     }
     fn read_raw_pk(reader: impl std::io::Read) -> std::io::Result<Self::ProverKey> {
-        MidnightPK::<Self>::read(&mut { reader }, midnight_proofs::utils::SerdeFormat::RawBytesUnchecked)
+        MidnightPK::<Self>::read(
+            &mut { reader },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
     }
     fn write_raw_pk(writer: impl std::io::Write, pk: &Self::ProverKey) -> std::io::Result<()> {
-        pk.write(&mut { writer }, midnight_proofs::utils::SerdeFormat::RawBytesUnchecked)
+        pk.write(
+            &mut { writer },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
     }
 }
 
