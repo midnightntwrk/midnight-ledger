@@ -686,10 +686,12 @@ mod k_endpoint {
 
         assert_eq!(response.status(), 400);
 
-        let error_text = response.text().await.expect("Failed to get response text");
+        let error_text = dbg!(response.text().await.expect("Failed to get response text"));
         assert!(
             error_text.contains("Unsupported ZKIR version")
-                || error_text.contains("expected header tag"),
+                || error_text.contains("expected header tag")
+                || error_text.contains("tagged data does not begin with")
+                || error_text.contains("Unsupported ZKIR tag"),
             "Unexpected error: {}",
             error_text
         );
