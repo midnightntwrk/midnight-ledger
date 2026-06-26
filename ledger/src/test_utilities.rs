@@ -187,7 +187,7 @@ impl<D: DB> TestState<D> {
         }
     }
 
-    pub async fn reward_night(&mut self, rng: &mut (impl CryptoRng + SplittableRng), amount: u128) {
+    pub async fn reward_night(&mut self, rng: &mut (impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync), amount: u128) {
         let amount = u128::max(amount, self.ledger.parameters.min_claimable_rewards());
         let address = UserAddress::from(self.night_key.verifying_key());
 
@@ -240,7 +240,7 @@ impl<D: DB> TestState<D> {
 
     pub async fn rewards_unshielded(
         &mut self,
-        rng: &mut (impl CryptoRng + SplittableRng),
+        rng: &mut (impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync),
         token: UnshieldedTokenType,
         amount: u128,
     ) {
@@ -355,7 +355,7 @@ impl<D: DB> TestState<D> {
 
     pub async fn give_fee_token(
         &mut self,
-        rng: &mut (impl CryptoRng + SplittableRng),
+        rng: &mut (impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync),
         utxos: usize,
     ) {
         use crate::structure::STARS_PER_NIGHT;
@@ -482,7 +482,7 @@ impl<D: DB> TestState<D> {
         B: Serializable + Clone + PedersenDowngradeable<D> + Storable<D>,
     >(
         &mut self,
-        mut rng: impl CryptoRng + SplittableRng,
+        mut rng: impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync,
         mut tx: Transaction<S, P, B, D>,
         resolver: &Resolver,
     ) -> Result<Transaction<S, P, B, D>, MalformedTransaction<D>> {
@@ -721,7 +721,11 @@ pub enum ClientProvingError<D: DB> {
 
 pub async fn tx_prove_bind<
     S: SignatureKind<D> + Tagged,
-    R: Rng + CryptoRng + SplittableRng,
+    R: Rng
+        + CryptoRng
+        + SplittableRng
+        + transient_crypto::proofs::MaybeSend
+        + transient_crypto::proofs::MaybeSync,
     D: DB,
 >(
     #[allow(unused_mut)] mut rng: R,
@@ -738,7 +742,15 @@ pub async fn tx_prove_bind<
     }
 }
 
-pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + SplittableRng, D: DB>(
+pub async fn tx_prove<
+    S: SignatureKind<D> + Tagged,
+    R: Rng
+        + CryptoRng
+        + SplittableRng
+        + transient_crypto::proofs::MaybeSend
+        + transient_crypto::proofs::MaybeSync,
+    D: DB,
+>(
     #[cfg_attr(feature = "proving", allow(unused_mut))] mut _rng: R,
     tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
     #[cfg_attr(not(feature = "proving"), allow(unused_variables))] resolver: &Resolver,
@@ -955,7 +967,7 @@ pub trait ProofKindExt<B: Storable<D>, D: DB>: ProofKind<D> {
     // Allowed as this is testing-only API
     #[allow(async_fn_in_trait)]
     async fn from_unproven<S: SignatureKind<D> + Tagged>(
-        rng: impl CryptoRng + SplittableRng,
+        rng: impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync,
         resolver: &Resolver,
         tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
     ) -> Transaction<S, Self, B, D>;
@@ -966,7 +978,7 @@ pub trait ProofKindExt<B: Storable<D>, D: DB>: ProofKind<D> {
 
 impl<D: DB> ProofKindExt<PedersenRandomness, D> for ProofPreimageMarker {
     async fn from_unproven<S: SignatureKind<D> + Tagged>(
-        _rng: impl CryptoRng + SplittableRng,
+        _rng: impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync,
         _resolver: &Resolver,
         tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
     ) -> Transaction<S, Self, PedersenRandomness, D> {
@@ -981,7 +993,7 @@ impl<D: DB> ProofKindExt<PedersenRandomness, D> for ProofPreimageMarker {
 
 impl<D: DB> ProofKindExt<Pedersen, D> for () {
     async fn from_unproven<S: SignatureKind<D> + Tagged>(
-        mut _rng: impl CryptoRng + SplittableRng,
+        mut _rng: impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync,
         _resolver: &Resolver,
         tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
     ) -> Transaction<S, Self, Pedersen, D> {
@@ -997,7 +1009,7 @@ impl<D: DB> ProofKindExt<Pedersen, D> for () {
 #[cfg(feature = "proving")]
 impl<D: DB> ProofKindExt<PureGeneratorPedersen, D> for ProofMarker {
     async fn from_unproven<S: SignatureKind<D> + Tagged>(
-        mut rng: impl CryptoRng + SplittableRng,
+        mut rng: impl CryptoRng + SplittableRng + transient_crypto::proofs::MaybeSend + transient_crypto::proofs::MaybeSync,
         resolver: &Resolver,
         tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
     ) -> Transaction<S, Self, PureGeneratorPedersen, D> {
@@ -1016,7 +1028,11 @@ impl<D: DB> ProofKindExt<PureGeneratorPedersen, D> for ProofMarker {
 #[cfg(feature = "proving")]
 #[allow(clippy::type_complexity, clippy::result_large_err)]
 pub fn well_formed_tx_builder<
-    R: Rng + CryptoRng + SplittableRng,
+    R: Rng
+        + CryptoRng
+        + SplittableRng
+        + transient_crypto::proofs::MaybeSend
+        + transient_crypto::proofs::MaybeSync,
     S: SignatureKind<D> + Tagged,
     D: DB,
 >(

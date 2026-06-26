@@ -11,6 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// WASM bindings: this crate is `!Send` by nature (its `Resolver`/`ProvingProvider`
+// impls capture `JsValue`/`JsFuture`). Off `wasm32` the proving-chain trait futures in
+// `transient-crypto` require `Send` (so the node's `Transaction::prove` future is `Send`),
+// which these bindings cannot satisfy. This crate only ever runs on `wasm32`, so gate it
+// to that target: keeps `cargo {check,clippy,build} --workspace` green on the host while
+// the real artifacts are still built for `wasm32` via the `*-wasm` nix targets.
+// NOTE: rust-analyzer (host target) treats this crate as inactive; set
+// `rust-analyzer.cargo.target = "wasm32-unknown-unknown"` locally when editing it.
+#![cfg(target_arch = "wasm32")]
 #![allow(dead_code)]
 use hex::FromHex;
 use js_sys::{BigInt, Function, JsString, Promise, Uint8Array};

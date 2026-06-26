@@ -38,9 +38,13 @@ pub struct LocalProvingProvider<'a, R: Rng + CryptoRng + SplittableRng, S, P> {
 
 impl<
     'a,
-    R: Rng + CryptoRng + SplittableRng,
-    S: transient_crypto::proofs::Resolver,
-    P: transient_crypto::proofs::ParamsProverProvider,
+    R: Rng
+        + CryptoRng
+        + SplittableRng
+        + transient_crypto::proofs::MaybeSend
+        + transient_crypto::proofs::MaybeSync,
+    S: transient_crypto::proofs::Resolver + transient_crypto::proofs::MaybeSync,
+    P: transient_crypto::proofs::ParamsProverProvider + transient_crypto::proofs::MaybeSync,
 > transient_crypto::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
 {
     async fn check(
