@@ -11,9 +11,9 @@ default = ["proof-verifying"]
 proving = []
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
-proof-verifying = ["zswap/proof-verifying", "dep:zkir_v2"]
+proof-verifying = ["zswap/proof-verifying"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
-test-utilities = ["dep:reqwest", "dep:zkir_v2"]
+test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
@@ -30,6 +30,7 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
+zkir_v3 = { version = "3.0.0-rc.2", path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"

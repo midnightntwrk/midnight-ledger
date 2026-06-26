@@ -316,8 +316,10 @@
             MIDNIGHT_PP = "${packages.public-params}";
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
+              pkgs.jq
               packages.public-params
               zkir.packages.${system}.zkir
+              zkir.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -329,7 +331,12 @@
                 mv "$contract" "$contract-tmp"
                 mkdir -p "$contract/keys"
                 mv $contract-tmp "$contract/zkir"
-                zkir compile-many "$contract/zkir" "$contract/keys"
+                VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
+                if [[ "$VERSION" == "2" ]]; then
+                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                elif [[ "$VERSION" == "3" ]]; then
+                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                fi
               done
             '';
             installPhase = ''
