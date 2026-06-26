@@ -51,9 +51,9 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
     match val_t {
         IrType::Native => Ok(Native(Fr(F::from_uniform_bytes(&buffer)))),
 
-        IrType::Secp256k1Base => Ok(Secp256k1Base(from_le_bytes_with_reduction(&bytes))),
+        IrType::Secp256k1Base => Ok(Secp256k1Base(from_le_bytes_with_reduction(bytes))),
 
-        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))),
+        IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(from_le_bytes_with_reduction(bytes))),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
