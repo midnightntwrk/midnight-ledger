@@ -1,4 +1,4 @@
-[**@midnight/ledger v2.2.0-rc.2**](../README.md)
+[**@midnight/ledger v2.2.0-rc.3**](../README.md)
 
 ***
 
@@ -10,10 +10,10 @@
 type ProvingProvider = {
   check: Promise<(bigint | undefined)[]>;
   prove: Promise<Uint8Array<ArrayBufferLike>>;
-};
+} & KeyMaterialProvider;
 ```
 
-## Methods
+## Type Declaration
 
 ### check()
 
@@ -34,8 +34,6 @@ check(serializedPreimage, keyLocation): Promise<(bigint | undefined)[]>;
 #### Returns
 
 `Promise`\<(`bigint` \| `undefined`)[]\>
-
-***
 
 ### prove()
 

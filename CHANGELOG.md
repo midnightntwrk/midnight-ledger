@@ -4,13 +4,14 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## Ledger 9.1.0.0-rc.3
 
 - feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
 - breaking: unify the construction of signing envelopes
-
-## Ledger 9.0.1.0-rc.1
-
+- fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly
+- fix: `ContractOperationVersionedVerifierKey::V3` and `V4` serialize independently (no longer share a match arm)
+- feat: `IrInsert` / `IrRemove` wasm bindings with `IrBuf` support for IR field in contract operations
+- feat: `lookup_key` exposed in ledger-wasm proving path, allowing the prover to use the correct key version
 - feat: add explicit price floor, denominated in full blocks, and governed by
   ledger parameters.
 - feat: add support for ECDSA signatures

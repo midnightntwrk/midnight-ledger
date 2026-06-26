@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.2**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -10,7 +10,9 @@
 type SingleUpdate = 
   | ReplaceAuthority
   | VerifierKeyRemove
-  | VerifierKeyInsert;
+  | VerifierKeyInsert
+  | IrRemove
+  | IrInsert;
 ```
 
 A single update instruction in a [MaintenanceUpdate](../classes/MaintenanceUpdate.md).

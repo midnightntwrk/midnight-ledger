@@ -1,6 +1,6 @@
 [package]
 name = "midnight-ledger-wasm-v9"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 license.workspace = true
 edition = "2024"
 publish = false

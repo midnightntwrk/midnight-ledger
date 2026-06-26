@@ -70,9 +70,24 @@ pub(crate) async fn prove(
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
     if zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)).is_ok() {
-        ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+        // Use LocalProvingProvider for v2 IRs to handle V0/V1 backward compat routing.
+        use base_crypto::rng::SplittableRng;
+        use transient_crypto::proofs::ProvingProvider;
+
+        let mut provider = zkir_v2::LocalProvingProvider {
+            rng: OsRng.split(),
+            resolver,
+            params: &*PUBLIC_PARAMS,
+        };
+        let proof = provider
+            .split()
+            .prove(&ppi, None)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
+            .map_err(|e| e.to_string())?;
+        let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
+        Ok((proof, skips))
     } else if tagged_deserialize::<zkir_v3::IrSource>(ir_source).is_ok() {
         ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
