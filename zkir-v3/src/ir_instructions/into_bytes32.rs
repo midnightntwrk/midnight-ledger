@@ -38,9 +38,9 @@ pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error
     match value {
         Native(x) => Ok(Bytes32(x.0.to_bytes_le())),
 
-        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes_le().into())),
+        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes_le())),
 
-        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes_le().into())),
+        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported into_bytes32 for {:?}",

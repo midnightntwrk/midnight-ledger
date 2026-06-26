@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use group::ff::{FromUniformBytes, PrimeField};
+use group::ff::FromUniformBytes;
 use midnight_circuits::{CircuitField, instructions::DecompositionInstructions, types::AssignedByte};
 
 use midnight_curves::k256;
