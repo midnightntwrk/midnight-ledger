@@ -16,15 +16,15 @@ use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng};
 use storage::db::InMemoryDB;
 use transient_crypto::proofs::{
-    ParamsProverProvider, Proof, ProofPreimage, ProvingError, Resolver,
+    MaybeSend, MaybeSync, ParamsProverProvider, Proof, ProofPreimage, ProvingError, Resolver,
 };
 use zkir_v2::LocalProvingProvider;
 
 fn sync_prove(
     offer: &Offer<ProofPreimage, InMemoryDB>,
-    rng: impl CryptoRng + SplittableRng,
-    pp: &impl ParamsProverProvider,
-    resolver: &impl Resolver,
+    rng: impl CryptoRng + SplittableRng + MaybeSend + MaybeSync,
+    pp: &(impl ParamsProverProvider + MaybeSync),
+    resolver: &(impl Resolver + MaybeSync),
 ) -> Result<Offer<Proof, InMemoryDB>, ProvingError> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
