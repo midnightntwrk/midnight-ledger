@@ -98,7 +98,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 fn init_logging(verbose: bool) {
-    let level = if verbose { Level::DEBUG } else { Level::INFO };
+    let level = if verbose { Level::TRACE } else { Level::INFO };
     Registry::default()
         .with(
             tracing_subscriber::fmt::layer().with_filter(

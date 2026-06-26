@@ -16,7 +16,7 @@ use std::sync::Arc;
 use ledger::prove::Resolver;
 use rand::rngs::OsRng;
 #[allow(unused_imports)]
-use serialize::{tagged_deserialize, peek_tag};
+use serialize::{peek_tag, tagged_deserialize};
 use std::io::Cursor;
 use transient_crypto::proofs::{Proof, ProofPreimage, Zkir};
 use zkir as zkir_v2;
@@ -28,14 +28,16 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
     let tag = peek_tag(&mut std::io::Cursor::new(request)).map_err(|e| e.to_string())?;
     match tag.as_str() {
         "ir-source[v2]" | "ir-source[v2-generic]" => {
-            let ir_v2 = zkir_v2::IrSource::load_from_tagged(Cursor::new(request)).map_err(|e| e.to_string())?;
+            let ir_v2 = zkir_v2::IrSource::load_from_tagged(Cursor::new(request))
+                .map_err(|e| e.to_string())?;
             Ok(ir_v2.k())
-        } 
+        }
         "ir-source[v3-generic]" => {
-            let ir_v3 = tagged_deserialize::<zkir_v3::IrSource>(request).map_err(|e| e.to_string())?;
+            let ir_v3 =
+                tagged_deserialize::<zkir_v3::IrSource>(request).map_err(|e| e.to_string())?;
             Ok(ir_v3.k())
         }
-        _ => Err(format!("Unsupported ZKIR tag: '{tag}'"))
+        _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
 
@@ -53,14 +55,15 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
     let tag = peek_tag(&mut std::io::Cursor::new(ir)).map_err(|e| e.to_string())?;
     match tag.as_str() {
         "ir-source[v2]" | "ir-source[v2-generic]" => {
-            let ir_v2 = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)).map_err(|e| e.to_string())?;
+            let ir_v2 =
+                zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)).map_err(|e| e.to_string())?;
             ppi.check(&ir_v2).map_err(|e| e.to_string())
-        } 
+        }
         "ir-source[v3-generic]" => {
             let ir_v3 = tagged_deserialize::<zkir_v3::IrSource>(ir).map_err(|e| e.to_string())?;
             ppi.check(&ir_v3).map_err(|e| e.to_string())
         }
-        _ => Err(format!("Unsupported ZKIR tag: '{tag}'"))
+        _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
 
@@ -82,7 +85,8 @@ pub(crate) async fn prove(
     let tag = peek_tag(&mut std::io::Cursor::new(ir_source)).map_err(|e| e.to_string())?;
     match tag.as_str() {
         "ir-source[v2]" | "ir-source[v2-generic]" => {
-            let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)).map_err(|e| e.to_string())?;
+            let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
+                .map_err(|e| e.to_string())?;
             // Use LocalProvingProvider for v2 IRs to handle V0/V1 backward compat routing.
             use base_crypto::rng::SplittableRng;
             use transient_crypto::proofs::ProvingProvider;
@@ -99,14 +103,14 @@ pub(crate) async fn prove(
                 .map_err(|e| e.to_string())?;
             let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
             Ok((proof, skips))
-        } 
+        }
         "ir-source[v3-generic]" => {
             //let ir_source = tagged_deserialize::<zkir_v3::IrSource>(ir_source).map_err(|e| e.to_string())?;
             ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
                 .await
                 .map_err(|e| e.to_string())
         }
-        _ => Err(format!("Unsupported ZKIR tag: '{tag}'"))
+        _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
 

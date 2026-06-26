@@ -637,6 +637,60 @@ mod proof_tests {
             .unwrap();
     }
 
+    // Regression test: a guarded-off `impact` must contribute a *zeroed* public
+    // input, and the `prepare` and `synthesize` runs must agree on this. A guard
+    // of "0x00" zeroes the `0x30` input, so the public input vector is
+    // [binding_input, 0] and the value is recorded as skipped.
+    #[actix_rt::test]
+    async fn test_impact_guarded_off_zeroes_public_input() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
+               { "op": "constrain_bits", "val": "%v_1", "bits": 248 },
+               { "op": "cond_select", "bit": "%v_0", "a": "0x00", "b": "0x01", "output": "%v_2" },
+               { "op": "assert", "cond": "%v_2" },
+               { "op": "impact", "guard": "0x00", "inputs": ["0x30"] }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // The impact is guarded off, so nothing is contributed to the public
+        // transcript inputs.
+        let preimage = ProofPreimage {
+            binding_input: 48.into(),
+            communications_commitment: None,
+            inputs: vec![0.into(), 42.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        // The guarded-off impact input is zeroed in the public input vector.
+        vk.verify(&PARAMS_VERIFIER, &proof, [48.into(), 0.into()].into_iter())
+            .unwrap();
+    }
+
     #[actix_rt::test]
     async fn test_immediate_little_endian_encoding() {
         let ir_raw = r#"{

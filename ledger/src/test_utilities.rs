@@ -48,7 +48,7 @@ use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
-use serialize::{Serializable, Tagged};
+use serialize::{Serializable, Tagged, peek_tag};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
@@ -738,6 +738,85 @@ pub async fn tx_prove_bind<
     }
 }
 
+#[cfg(feature = "proving")]
+struct CombinedProofProvider<'a, R: Rng + CryptoRng + SplittableRng> {
+    rng: R,
+    zkir_v2: LocalProvingProvider<'a, R, Resolver, Resolver>,
+    resolver: &'a Resolver,
+}
+
+#[cfg(feature = "proving")]
+impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofProvider<'a, R> {
+    async fn check(
+        &self,
+        preimage: &transient_crypto::proofs::ProofPreimage,
+    ) -> Result<Vec<Option<usize>>, anyhow::Error> {
+        let key_material = self
+            .resolver()
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "could not resolve key location: {}",
+                    &preimage.key_location.0
+                )
+            })?;
+        let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
+        match tag.as_str() {
+            "ir-source[v2]" | "ir-source[v2-generic]" => self.zkir_v2.check(preimage).await,
+            "ir-source[v3-generic]" => {
+                let ir_v3: zkir_v3::IrSource =
+                    tagged_deserialize(&mut &key_material.ir_source[..])?;
+                preimage.check(&ir_v3)
+            }
+            _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
+        }
+    }
+    async fn prove(
+        self,
+        preimage: &transient_crypto::proofs::ProofPreimage,
+        overwrite_binding_input: Option<Fr>,
+    ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
+        let key_material = self
+            .resolver()
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "could not resolve key location: {}",
+                    &preimage.key_location.0
+                )
+            })?;
+        let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
+        match tag.as_str() {
+            "ir-source[v2]" | "ir-source[v2-generic]" => {
+                self.zkir_v2.prove(preimage, overwrite_binding_input).await
+            }
+            "ir-source[v3-generic]" => {
+                let mut preimage = preimage.clone();
+                if let Some(binding_input) = overwrite_binding_input {
+                    preimage.binding_input = binding_input;
+                }
+                preimage
+                    .prove::<zkir_v3::IrSource>(self.rng, self.resolver, self.resolver)
+                    .await
+                    .map(|(proof, _)| proof)
+            }
+            _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
+        }
+    }
+    fn split(&mut self) -> Self {
+        CombinedProofProvider {
+            rng: self.rng.split(),
+            zkir_v2: self.zkir_v2.split(),
+            resolver: self.resolver,
+        }
+    }
+    fn resolver(&self) -> &impl ResolverT {
+        self.resolver
+    }
+}
+
 pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + SplittableRng, D: DB>(
     #[cfg_attr(feature = "proving", allow(unused_mut))] mut _rng: R,
     tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
@@ -754,9 +833,13 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 .await
                 .map_err(ClientProvingError::Local)
         } else {
-            let provider = LocalProvingProvider {
+            let provider = CombinedProofProvider {
                 rng: _rng.split(),
-                params: resolver,
+                zkir_v2: LocalProvingProvider {
+                    rng: _rng.split(),
+                    params: resolver,
+                    resolver,
+                },
                 resolver,
             };
             // Duplication because ProvingProvider isn't dyn-compatible :(

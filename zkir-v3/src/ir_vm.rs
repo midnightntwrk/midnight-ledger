@@ -538,15 +538,20 @@ impl IrSource {
                 }
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
-                    for input in inputs {
-                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
-                        pis.push(x);
-                        public_transcript_inputs_idx += 1;
-                    }
                     if !resolve_operand_bool(&memory, guard)? {
+                        // A guarded-off impact contributes zeroed public inputs,
+                        // matching the in-circuit `select(guard, x, 0)` of the
+                        // `synthesize` run, and is recorded as skipped.
+                        for _ in inputs {
+                            pis.push(0.into());
+                        }
                         pi_skips.push(Some(count));
-                        public_transcript_inputs_idx -= count;
                     } else {
+                        for input in inputs {
+                            let x: Fr = resolve_operand(&memory, input)?.try_into()?;
+                            pis.push(x);
+                            public_transcript_inputs_idx += 1;
+                        }
                         pi_skips.push(None);
                         for i in 0..count {
                             let idx = public_transcript_inputs_idx - count + i;
@@ -587,9 +592,7 @@ impl IrSource {
                     let s = resolve_operand(&memory, scalar)?;
                     let p = match s.get_type() {
                         IrType::JubjubScalar => IrValue::JubjubPoint(JubjubSubgroup::generator()),
-                        IrType::Secp256k1Scalar => {
-                            IrValue::Secp256k1Point(k256::K256::generator())
-                        }
+                        IrType::Secp256k1Scalar => IrValue::Secp256k1Point(k256::K256::generator()),
                         t => bail!("Unsupported EcMulGenerator for scalar of type {t:?}"),
                     };
                     let r = ec_mul_offcircuit(&p, &s)?;
