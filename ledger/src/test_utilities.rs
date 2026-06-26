@@ -48,9 +48,9 @@ use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
-use serialize::{Serializable, Tagged, peek_tag};
+use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::{tagged_deserialize, tagged_serialize, peek_tag};
 use std::collections::VecDeque;
 use std::env;
 use std::io;
