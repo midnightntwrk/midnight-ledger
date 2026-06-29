@@ -1013,16 +1013,29 @@ fn parse_seed_hex_env(var: &str) -> Option<[u8; 32]> {
 /// afterwards. Also the default network for vault verbs (see
 /// `bridge::vault_network`).
 pub(crate) fn startup_network() -> Network {
-    // ANDROID: default to `UndeployedYurii` so dApp methods (vault claim,
-    // address derivation, dust syncer) align with the laptop-hosted
-    // standalone chain on Yurii's tailnet. Without this, `vaultClaim`
-    // would route to PreProd, where the vault contract doesn't exist.
-    // The Wallet-tab network picker is the source of truth for UI state;
-    // this constant only governs the implicit network used by connector
-    // RPC methods when the dApp doesn't pin one in `params`.
+    // Platform default for the implicit network used by connector RPC
+    // methods when the dApp doesn't pin one in `params`. The Wallet-tab
+    // picker is the source of truth for UI state; this constant only
+    // governs what `vaultListLocks` / `vaultClaim` / similar fall back
+    // to when there's no in-params override.
+    //
+    // ANDROID: `UndeployedYurii` — the phone reaches the laptop-hosted
+    // standalone chain via Yurii's tailnet. Without this, `vaultClaim`
+    // would route to PreProd and miss the local vault.
+    //
+    // IOS (sim + device): `Undeployed` — sim shares the Mac's loopback,
+    // so localhost:18088/19944/16300 are the chain. Real iOS devices
+    // need a different default (likely PreProd or a runtime config),
+    // but the sim is the most common iOS path today and PreProd would
+    // strand the demo flow the same way Android-without-tailnet did.
+    //
+    // Desktop / other: PreProd, the conventional non-local default for
+    // dev work that doesn't bring up its own chain.
     #[cfg(target_os = "android")]
     let fallback = Network::UndeployedYurii;
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    let fallback = Network::Undeployed;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let fallback = Network::PreProd;
     match std::env::var("MIDNIGHT_WALLET_NETWORK") {
         Ok(s) if !s.trim().is_empty() => match crate::bridge::parse_network(s.trim()) {
