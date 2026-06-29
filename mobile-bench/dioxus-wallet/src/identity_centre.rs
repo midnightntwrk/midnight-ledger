@@ -234,65 +234,56 @@ fn run_oid4vp_authenticate(
     let in_mem_metrics = bridge_state.metrics();
     let action_id = crate::worker::next_action_id();
 
-    // Thread-affinity wrap — see the OID4VCI counterpart for the
-    // full rationale. The bootstrap path's commit fdba2182 fix
-    // applies here too: `router::register` MUST run on the same
-    // Dioxus task-pool thread as the outcome-pump's `take`, or
-    // the worker's outcome is silently dropped.
-    spawn(async move {
-        // Register the outcome handler BEFORE sending so a very fast
-        // worker can't race the registration. The closure captures
-        // the local signals + metrics; it runs inside the outcome-
-        // pump `use_future` (Dioxus scope) so signal writes are
-        // valid. The metrics counter increments mirror the pre-
-        // worker inline behaviour.
-        crate::worker::router::register(
-            action_id,
-            Box::new(move |outcome| {
-                match outcome {
-                    crate::worker::WorkOutcome::Oid4vpOk {
-                        session_id,
-                        status,
-                        ..
-                    } => {
-                        in_mem_metrics.incr("oid4vp.ok", 1);
-                        if let Ok(mut w) = ok_msg.try_write() {
-                            *w = Some(format!(
-                                "session_id={session_id} status={status}",
-                            ));
-                        }
-                    }
-                    crate::worker::WorkOutcome::Err { msg, .. } => {
-                        in_mem_metrics.incr("oid4vp.failed", 1);
-                        if let Ok(mut w) = err_msg.try_write() {
-                            *w = Some(format!("authenticate failed: {msg}"));
-                        }
-                    }
-                    // Worker only emits Oid4vpOk / Err for an
-                    // Oid4vpAuthenticate action_id; log defensively
-                    // if a future variant routes wrongly.
-                    other => {
-                        tracing::warn!(
-                            target: "wallet_worker",
-                            action_id,
-                            ?other,
-                            "OID4VP handler received unexpected outcome",
-                        );
+    // dispatch_action wraps the spawn + register + send sequence
+    // on the Dioxus task-pool thread. See `worker::dispatch_action`
+    // for the thread-affinity invariant — never call `register +
+    // send` directly from a UI event handler.
+    crate::worker::dispatch_action(
+        &worker,
+        action_id,
+        Box::new(move |outcome| {
+            match outcome {
+                crate::worker::WorkOutcome::Oid4vpOk {
+                    session_id,
+                    status,
+                    ..
+                } => {
+                    in_mem_metrics.incr("oid4vp.ok", 1);
+                    if let Ok(mut w) = ok_msg.try_write() {
+                        *w = Some(format!(
+                            "session_id={session_id} status={status}",
+                        ));
                     }
                 }
-                if let Ok(mut w) = busy.try_write() {
-                    *w = false;
+                crate::worker::WorkOutcome::Err { msg, .. } => {
+                    in_mem_metrics.incr("oid4vp.failed", 1);
+                    if let Ok(mut w) = err_msg.try_write() {
+                        *w = Some(format!("authenticate failed: {msg}"));
+                    }
                 }
-            }),
-        );
-
-        worker.send(crate::worker::WorkMsg::Oid4vpAuthenticate {
+                // Worker only emits Oid4vpOk / Err for an
+                // Oid4vpAuthenticate action_id; log defensively
+                // if a future variant routes wrongly.
+                other => {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        action_id,
+                        ?other,
+                        "OID4VP handler received unexpected outcome",
+                    );
+                }
+            }
+            if let Ok(mut w) = busy.try_write() {
+                *w = false;
+            }
+        }),
+        crate::worker::WorkMsg::Oid4vpAuthenticate {
             action_id,
             network,
             did,
             qr_url: url,
-        });
-    });
+        },
+    );
 }
 
 /// Run the OID4VCI issuance flow with a known DID + URL. Counterpart
@@ -343,74 +334,55 @@ fn run_oid4vci_request(
     let in_mem_metrics = bridge_state.metrics();
     let action_id = crate::worker::next_action_id();
 
-    // Thread-affinity invariant of `worker::router`: the
-    // register-side and the take-side must execute on the same
-    // Dioxus task-pool thread, because the router stores
-    // handlers in `thread_local!` storage. The outcome-pump
-    // (`use_future` in the parent App) runs on the task pool;
-    // this function is called from the WebView dispatch thread,
-    // so a bare `register + send` here lands the handler on the
-    // wrong thread, the worker emits its outcome, and the
-    // pump's `take` returns `None` ("outcome dropped — no
-    // registered handler" — see worker/router.rs).
-    //
-    // Wrap both register + send in `spawn(async move {…})` so
-    // the work runs on the task pool, matching where the pump
-    // pulls the outcome from. Same fix as the bootstrap path
-    // (commit fdba2182) — keeping the OID4VP/OID4VCI paths
-    // structurally aligned.
-    spawn(async move {
-        // Outcome handler captures the per-component signals +
-        // metrics counters + the cross-component VC inventory tick.
-        // Runs inside the App's outcome-pump `use_future` (Dioxus
-        // scope), so signal writes + the global-signal bump are
-        // valid.
-        crate::worker::router::register(
-            action_id,
-            Box::new(move |outcome| {
-                match outcome {
-                    crate::worker::WorkOutcome::Oid4vciOk { vc_uri, .. } => {
-                        in_mem_metrics.incr("vcs.issued", 1);
-                        // Cross-tab refresh signal: the worker
-                        // persisted a row into vcs.redb; the
-                        // Credentials → inventory `use_resource`
-                        // resubscribes via this bump and reads the
-                        // new row on the next paint (commit
-                        // ea972c42 added this for the pre-worker
-                        // path; preserved here).
-                        bump_vc_inventory_tick();
-                        if let Ok(mut w) = ok_msg.try_write() {
-                            *w = Some(format!("issued {vc_uri}"));
-                        }
-                    }
-                    crate::worker::WorkOutcome::Err { msg, .. } => {
-                        in_mem_metrics.incr("vcs.issuance_failed", 1);
-                        if let Ok(mut w) = err_msg.try_write() {
-                            *w = Some(msg);
-                        }
-                    }
-                    other => {
-                        tracing::warn!(
-                            target: "wallet_worker",
-                            action_id,
-                            ?other,
-                            "OID4VCI handler received unexpected outcome",
-                        );
+    // dispatch_action wraps the spawn + register + send sequence
+    // on the Dioxus task-pool thread. See `worker::dispatch_action`
+    // for the thread-affinity invariant — never call `register +
+    // send` directly from a UI event handler.
+    crate::worker::dispatch_action(
+        &worker,
+        action_id,
+        Box::new(move |outcome| {
+            match outcome {
+                crate::worker::WorkOutcome::Oid4vciOk { vc_uri, .. } => {
+                    in_mem_metrics.incr("vcs.issued", 1);
+                    // Cross-tab refresh signal: the worker
+                    // persisted a row into vcs.redb; the
+                    // Credentials → inventory `use_resource`
+                    // resubscribes via this bump and reads the
+                    // new row on the next paint (commit
+                    // ea972c42 added this for the pre-worker
+                    // path; preserved here).
+                    bump_vc_inventory_tick();
+                    if let Ok(mut w) = ok_msg.try_write() {
+                        *w = Some(format!("issued {vc_uri}"));
                     }
                 }
-                if let Ok(mut w) = busy.try_write() {
-                    *w = false;
+                crate::worker::WorkOutcome::Err { msg, .. } => {
+                    in_mem_metrics.incr("vcs.issuance_failed", 1);
+                    if let Ok(mut w) = err_msg.try_write() {
+                        *w = Some(msg);
+                    }
                 }
-            }),
-        );
-
-        worker.send(crate::worker::WorkMsg::Oid4vciIssuance {
+                other => {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        action_id,
+                        ?other,
+                        "OID4VCI handler received unexpected outcome",
+                    );
+                }
+            }
+            if let Ok(mut w) = busy.try_write() {
+                *w = false;
+            }
+        }),
+        crate::worker::WorkMsg::Oid4vciIssuance {
             action_id,
             network,
             did,
             qr_url: url,
-        });
-    });
+        },
+    );
 }
 
 /// Top-level Identity Centre panel. Renders the four sections
@@ -884,83 +856,66 @@ fn BootstrapSection(
             let in_mem_metrics = bridge_state.metrics();
             let action_id = crate::worker::next_action_id();
 
-            // Thread-affinity invariant of `worker::router`: the
-            // register-side and the take-side must execute on the
-            // same Dioxus task-pool thread, because the router
-            // stores handlers in `thread_local!` storage. The
-            // outcome-pump (`use_future` in the parent App)
-            // already runs on the task pool — typically
-            // ThreadId(2). This `onclick` closure runs on the
-            // WebView dispatch thread — typically ThreadId(4) —
-            // so a bare `register + send` here lands the handler
-            // on the wrong thread, the worker emits its outcome,
-            // and the pump's `take` returns `None` ("outcome
-            // dropped — no registered handler" — see
-            // worker/router.rs).
-            //
-            // Wrap both register + send in `spawn(async move {…})`
-            // so the work runs on the task pool, matching where
-            // the pump pulls the outcome from. Same fix as the
-            // Unlock path; lock-step with the Worker Task 5
-            // remediation in commit fdba2182.
-            spawn(async move {
-                crate::worker::router::register(
-                    action_id,
-                    Box::new(move |outcome| {
-                        match outcome {
-                            crate::worker::WorkOutcome::BootstrapOk {
-                                did_str, ..
-                            } => {
-                                in_mem_metrics.incr("dids.bootstrapped", 1);
-                                on_did_minted_eh.call((did_str.clone(), network));
-                                // Use try_write() instead of .set() to avoid
-                                // ValueDroppedError panic when the component
-                                // has already unmounted by the time the
-                                // worker thread delivers the outcome.
-                                if let Ok(mut w) = ic_did.try_write() {
-                                    *w = Some(did_str.clone());
-                                }
-                                if let Ok(mut w) = ok_msg_sig.try_write() {
-                                    *w = Some(format!(
-                                        "Bootstrapped {did_str}. Switch to the Dids \
-                                         tab to see it; click Resolve there to fill \
-                                         in counter / VM counts.",
-                                    ));
-                                }
+            // dispatch_action wraps the spawn + register + send sequence
+            // on the Dioxus task-pool thread. See `worker::dispatch_action`
+            // for the thread-affinity invariant — never call `register +
+            // send` directly from a UI event handler.
+            crate::worker::dispatch_action(
+                &worker,
+                action_id,
+                Box::new(move |outcome| {
+                    match outcome {
+                        crate::worker::WorkOutcome::BootstrapOk {
+                            did_str, ..
+                        } => {
+                            in_mem_metrics.incr("dids.bootstrapped", 1);
+                            on_did_minted_eh.call((did_str.clone(), network));
+                            // Use try_write() instead of .set() to avoid
+                            // ValueDroppedError panic when the component
+                            // has already unmounted by the time the
+                            // worker thread delivers the outcome.
+                            if let Ok(mut w) = ic_did.try_write() {
+                                *w = Some(did_str.clone());
                             }
-                            crate::worker::WorkOutcome::Err { msg, .. } => {
-                                in_mem_metrics.incr("dids.bootstrap_failed", 1);
-                                let friendly = humanize_bootstrap_error(&msg);
-                                if let Ok(mut w) = err_msg_sig.try_write() {
-                                    *w = Some(friendly);
-                                }
-                            }
-                            // The worker only ever emits BootstrapOk
-                            // / Err for a Bootstrap action_id; the
-                            // other arms aren't reachable for this
-                            // registration. Log defensively in case
-                            // a future variant routes wrongly.
-                            other => {
-                                tracing::warn!(
-                                    target: "wallet_worker",
-                                    action_id,
-                                    ?other,
-                                    "Bootstrap handler received unexpected outcome",
-                                );
+                            if let Ok(mut w) = ok_msg_sig.try_write() {
+                                *w = Some(format!(
+                                    "Bootstrapped {did_str}. Switch to the Dids \
+                                     tab to see it; click Resolve there to fill \
+                                     in counter / VM counts.",
+                                ));
                             }
                         }
-                        if let Ok(mut w) = busy_sig.try_write() {
-                            *w = false;
+                        crate::worker::WorkOutcome::Err { msg, .. } => {
+                            in_mem_metrics.incr("dids.bootstrap_failed", 1);
+                            let friendly = humanize_bootstrap_error(&msg);
+                            if let Ok(mut w) = err_msg_sig.try_write() {
+                                *w = Some(friendly);
+                            }
                         }
-                    }),
-                );
-
-                worker.send(crate::worker::WorkMsg::Bootstrap {
+                        // The worker only ever emits BootstrapOk
+                        // / Err for a Bootstrap action_id; the
+                        // other arms aren't reachable for this
+                        // registration. Log defensively in case
+                        // a future variant routes wrongly.
+                        other => {
+                            tracing::warn!(
+                                target: "wallet_worker",
+                                action_id,
+                                ?other,
+                                "Bootstrap handler received unexpected outcome",
+                            );
+                        }
+                    }
+                    if let Ok(mut w) = busy_sig.try_write() {
+                        *w = false;
+                    }
+                }),
+                crate::worker::WorkMsg::Bootstrap {
                     action_id,
                     network,
                     seed: DEMO_IC_SEED,
-                });
-            });
+                },
+            );
         }
     };
 

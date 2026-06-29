@@ -1668,18 +1668,15 @@ pub fn App() -> Element {
         let mut last_did_id = last_did_id;
         let mut last_resolved = last_resolved;
 
-        // `spawn` here is load-bearing: on Android the onclick
-        // event for the very first interactive screen (Unlock)
-        // fires on a different OS thread than the outcome pump's
-        // `use_future`. The router's `PENDING` is `thread_local!`,
-        // so a register done directly from the click body lands in
-        // the wrong slot and `take` returns `None`. Wrapping in
-        // `spawn` schedules the register + send on Dioxus' own
-        // task pool — the same pool the pump runs on — so both
-        // ends share the thread_local. See `worker/router.rs`
-        // module doc for the full invariant.
-        spawn(async move {
-            crate::worker::router::register(action_id, Box::new(move |outcome| {
+        // dispatch_action wraps the thread-affinity-critical spawn +
+        // register + send sequence so this Unlock site can never
+        // regress to a bare `register` from the WebView dispatch
+        // thread (the pre-fdba2182 bug). See `worker::dispatch_action`
+        // for the full invariant.
+        crate::worker::dispatch_action(
+            &worker,
+            action_id,
+            Box::new(move |outcome| {
             let store = match outcome {
                 crate::worker::WorkOutcome::OpenStoreOk { store, .. } => store,
                 crate::worker::WorkOutcome::Err { msg, .. } => {
@@ -1944,13 +1941,12 @@ pub fn App() -> Element {
                         }));
                     }
             }
-        }));
-
-            worker.send(crate::worker::WorkMsg::OpenStore {
+        }),
+            crate::worker::WorkMsg::OpenStore {
                 action_id,
                 passphrase: entered,
-            });
-        });
+            },
+        );
     };
 
     use_future(move || {

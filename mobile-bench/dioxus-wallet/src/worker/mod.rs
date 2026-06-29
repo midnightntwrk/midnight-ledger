@@ -35,6 +35,67 @@ pub fn next_action_id() -> u64 {
     N.fetch_add(1, Ordering::Relaxed)
 }
 
+/// **Safe dispatch wrapper — always use this for UI-initiated work.**
+///
+/// Bundles the three-step `register-handler → send-message →
+/// outcome-pump take` dance into one call that guarantees the
+/// thread-affinity invariant of [`router`] holds. The previous
+/// "register + send" pair was a footgun because:
+///
+/// - [`router::register`] writes the handler into a `thread_local!`
+///   map keyed by `action_id`.
+/// - The outcome pump's [`router::take`] reads from *its* thread's
+///   `thread_local!` map.
+/// - If those two calls execute on different threads, `take` finds
+///   nothing and the worker's outcome is silently dropped
+///   ("outcome dropped — no registered handler — see
+///   worker/router.rs"). UI sits forever waiting for a notification
+///   that's already been thrown away.
+///
+/// On Android (Pixel-Fold-API-35 emulator confirmed), a click
+/// handler runs on the WebView dispatch thread (~ThreadId(4)),
+/// while the outcome pump's `use_future` runs on the Dioxus task
+/// pool (~ThreadId(2)). Same hazard on iOS sim. Wrapping the
+/// register + send in [`dioxus::prelude::spawn`] runs them on the
+/// task pool — matching where the pump's take eventually executes.
+///
+/// History: commit `fdba2182` fixed the bootstrap path with an
+/// inline spawn wrap, `96c5214b` repeated the same fix for
+/// OID4VCI + OID4VP, this helper landed afterwards to make the
+/// fix unforgettable at every call site.
+///
+/// **Only [`router::register`] itself stays public** — for the
+/// outcome-pump's smoke-test, which is already on the task pool by
+/// construction. Every other path should use this `dispatch_action`.
+///
+/// # Example
+///
+/// ```ignore
+/// let action_id = worker::next_action_id();
+/// worker::dispatch_action(
+///     &worker_handle,
+///     action_id,
+///     Box::new(move |outcome| match outcome {
+///         WorkOutcome::Oid4vciOk { vc_uri, .. } => { /* update UI */ }
+///         WorkOutcome::Err { msg, .. } => { /* show error */ }
+///         _ => {}
+///     }),
+///     WorkMsg::Oid4vciIssuance { action_id, network, did, qr_url },
+/// );
+/// ```
+pub fn dispatch_action(
+    worker: &AppWorker,
+    action_id: u64,
+    handler: router::OutcomeHandler,
+    msg: WorkMsg,
+) {
+    let worker = worker.clone();
+    dioxus::prelude::spawn(async move {
+        router::register(action_id, handler);
+        worker.send(msg);
+    });
+}
+
 /// All heavy chain ops the worker serialises. Each variant
 /// carries an `action_id` so the matching [`WorkOutcome`] can be
 /// routed back without inspecting the payload.
