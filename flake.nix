@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/f227f1e5771c165d829501b830e36b4acbb411ec";
+      url = "github:midnightntwrk/midnight-ledger/aace4f8f664314f967e440d88fa7a88b617c3684";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -154,6 +154,9 @@
                 then "${self.packages.${system}.test-artifacts}"
                 else "";
               RUST_BACKTRACE = "full";
+              # ZK proving overflows the 2 MiB default thread stack; the test
+              # harness threads need a larger stack (see .cargo/config.toml).
+              RUST_MIN_STACK = "67108864";
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
@@ -316,8 +319,10 @@
             MIDNIGHT_PP = "${packages.public-params}";
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
+              pkgs.jq
               packages.public-params
               zkir.packages.${system}.zkir
+              zkir.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -329,7 +334,12 @@
                 mv "$contract" "$contract-tmp"
                 mkdir -p "$contract/keys"
                 mv $contract-tmp "$contract/zkir"
-                zkir compile-many "$contract/zkir" "$contract/keys"
+                VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
+                if [[ "$VERSION" == "2" ]]; then
+                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                elif [[ "$VERSION" == "3" ]]; then
+                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                fi
               done
             '';
             installPhase = ''
