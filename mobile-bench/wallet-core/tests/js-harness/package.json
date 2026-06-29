@@ -8,19 +8,19 @@
     "harness": "node harness.mjs"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did-contract": "file:../../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
-    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:../../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-jubjub-schnorr-0.4.0.tgz",
-    "@midnight-ntwrk/compact-runtime": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/compact-runtime",
-    "@midnight-ntwrk/onchain-runtime-v3": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/onchain-runtime-v3",
-    "@midnight-ntwrk/ledger-v8": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/ledger-v8",
-    "@midnight-ntwrk/compact-js": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/compact-js",
-    "@midnight-ntwrk/midnight-js-contracts": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-contracts",
-    "@midnight-ntwrk/midnight-js-types": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-types",
-    "@midnight-ntwrk/midnight-js-network-id": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-network-id",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider",
+    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/libs/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/libs/midnight-did/midnight-ntwrk-midnight-did-jubjub-schnorr-0.4.0.tgz",
+    "@midnight-ntwrk/compact-runtime": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/compact-runtime",
+    "@midnight-ntwrk/onchain-runtime-v3": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/onchain-runtime-v3",
+    "@midnight-ntwrk/ledger-v8": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/ledger-v8",
+    "@midnight-ntwrk/compact-js": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/compact-js",
+    "@midnight-ntwrk/midnight-js-contracts": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/midnight-js-contracts",
+    "@midnight-ntwrk/midnight-js-types": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/midnight-js-types",
+    "@midnight-ntwrk/midnight-js-network-id": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/midnight-js-network-id",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider",
     "@midnight-ntwrk/midnight-did-credentials-digital-passport": "file:../../../../../midnight-verifiable-credentials/packages/prototypes/credential-families/digital-passport",
     "@midnight-ntwrk/midnight-did-credentials-openid": "file:../../../../../midnight-verifiable-credentials/packages/protocols/openid",
     "@midnight-ntwrk/midnight-did-credentials": "file:../../../../../midnight-verifiable-credentials/packages/core/primitives/credentials",
-    "@input-output-hk/passport-vault-contract": "file:../../../../../midnight-identity-solution-examples/passport-vault-demo/packages/passport-vault-contract"
+    "@input-output-hk/passport-vault-contract": "file:/Users/ysh/iohk/midnight-workspace-vc-test/midnight-identity-solution-examples/packages/contracts/vault"
   }
 }
