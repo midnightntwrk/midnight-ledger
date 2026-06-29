@@ -1012,6 +1012,46 @@ fn parse_seed_hex_env(var: &str) -> Option<[u8; 32]> {
 /// signal is created; the in-app network switcher can change it
 /// afterwards. Also the default network for vault verbs (see
 /// `bridge::vault_network`).
+/// True if this Android build is running on the qemu emulator rather
+/// than a real device. Reads the `ro.kernel.qemu` system property
+/// (which Android sets to `"1"` only on the emulator) via the
+/// libc-bundled `__system_property_get`. Returns false on any read
+/// failure (including non-Android targets — the cfg-gate keeps this
+/// from being called there, but the safe default is "not emulator"
+/// so phone-style routing wins).
+///
+/// Used by `startup_network` to pick `Network::Undeployed` (localhost,
+/// reachable via `adb reverse`) instead of `Network::UndeployedYurii`
+/// (Tailscale IP, not routable inside qemu) when the wallet boots on
+/// the emulator.
+#[cfg(target_os = "android")]
+fn is_android_emulator() -> bool {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+
+    // `__system_property_get` is declared in <sys/system_properties.h>
+    // and exported by libc on every Android NDK target — linking is
+    // automatic via the standard ndk-build cdylib pipeline.
+    unsafe extern "C" {
+        fn __system_property_get(name: *const c_char, value: *mut c_char) -> i32;
+    }
+
+    let key = c"ro.kernel.qemu";
+    // The Android sysprop API mandates a buffer of at least
+    // PROP_VALUE_MAX (92 bytes including NUL) — anything smaller risks
+    // truncation. The string we care about is "1" (1 byte) or "0", so
+    // the buffer size is purely defensive.
+    let mut buf = [0u8; 96];
+    let len = unsafe {
+        __system_property_get(key.as_ptr(), buf.as_mut_ptr() as *mut c_char)
+    };
+    if len <= 0 {
+        return false;
+    }
+    let value = unsafe { CStr::from_ptr(buf.as_ptr() as *const c_char) };
+    value.to_bytes() == b"1"
+}
+
 pub(crate) fn startup_network() -> Network {
     // Platform default for the implicit network used by connector RPC
     // methods when the dApp doesn't pin one in `params`. The Wallet-tab
@@ -1019,9 +1059,15 @@ pub(crate) fn startup_network() -> Network {
     // governs what `vaultListLocks` / `vaultClaim` / similar fall back
     // to when there's no in-params override.
     //
-    // ANDROID: `UndeployedYurii` — the phone reaches the laptop-hosted
-    // standalone chain via Yurii's tailnet. Without this, `vaultClaim`
-    // would route to PreProd and miss the local vault.
+    // ANDROID (real device): `UndeployedYurii` — the phone reaches the
+    // laptop-hosted standalone chain via Yurii's tailnet. Without this,
+    // `vaultClaim` would route to PreProd and miss the local vault.
+    //
+    // ANDROID EMULATOR: `Undeployed` — the emulator can't route to
+    // Mac's tailnet interface (no Tailscale inside the qemu VM), but
+    // `adb reverse tcp:18088 tcp:18088` (etc) tunnels localhost from
+    // the emulator to the Mac. Detect emulator at runtime via
+    // `ro.kernel.qemu`, which Android sets to "1" only on the emulator.
     //
     // IOS (sim + device): `Undeployed` — sim shares the Mac's loopback,
     // so localhost:18088/19944/16300 are the chain. Real iOS devices
@@ -1032,7 +1078,11 @@ pub(crate) fn startup_network() -> Network {
     // Desktop / other: PreProd, the conventional non-local default for
     // dev work that doesn't bring up its own chain.
     #[cfg(target_os = "android")]
-    let fallback = Network::UndeployedYurii;
+    let fallback = if is_android_emulator() {
+        Network::Undeployed
+    } else {
+        Network::UndeployedYurii
+    };
     #[cfg(target_os = "ios")]
     let fallback = Network::Undeployed;
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
