@@ -2,13 +2,16 @@ name: Ledger Test Coverage
 
 on:
   workflow_dispatch:
+  workflow_call:
   pull_request:
   push:
     branches:
       - master
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Prefixed so a reusable-workflow call does not share a group with siblings
+  # in the same run (e.g. benchmark in the release flow).
+  group: test-coverage-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

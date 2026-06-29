@@ -3,11 +3,14 @@ name: Ledger Benchmark
 
 on:
   workflow_dispatch:
+  workflow_call:
   schedule:
     - cron: '0 5 * * *'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Prefixed so a reusable-workflow call does not share a group with siblings
+  # in the same run (e.g. test-coverage in the release flow).
+  group: benchmark-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -79,7 +82,10 @@ jobs:
         run: |
           git remote update
           git fetch
-          git checkout master
+          # Compare against the repo's default branch (ledger-8 now, ledger-9
+          # later), resolved dynamically so this survives the hardfork rollover.
+          DEFAULT_BRANCH=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+          git checkout "$DEFAULT_BRANCH"
           nix develop .#default -c cargo bench --all-features --bench benchmarking -- --save-baseline before
           rm target/release -rf
           git stash

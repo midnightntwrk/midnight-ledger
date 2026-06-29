@@ -2,31 +2,37 @@ name: Publish Ledger Release
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Overwrite existing GH Packages versions (delete-then-republish). Public npm cannot be overwritten and will error."
+        type: boolean
+        default: false
+      dry_run:
+        description: "Dry run: build, test and assemble artifacts but skip every irreversible action (npm publish, docs/tag push, GitHub Release, Slack, Docker push)."
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
+  DRY_RUN: ${{ github.event.inputs.dry_run }}
 
 jobs:
   build:
     runs-on: ubuntu-latest-8-core-x64
+    # Real publishes require approval from a reviewer on the protected `release`
+    # environment (configure its required reviewers = ledger maintainers in repo
+    # Settings -> Environments). Dry runs need no approval. The build job is the
+    # gate because npm publish + tag push happen here, before anything downstream.
+    environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
+    permissions:
+      contents: write
+    outputs:
+      tag_name: ${{ steps.ids.outputs.tag_name }}
+      version: ${{ steps.ids.outputs.version }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
-
-      - name: Setup GitHub Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup API Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
 
       - name: Install Dependencies
         run: |
@@ -40,7 +46,7 @@ jobs:
         with:
           always-auth: true
           registry-url: https://npm.pkg.github.com/
-          scope: '@midnight-ntwrk'
+          scope: '@midnightntwrk'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
@@ -65,49 +71,63 @@ jobs:
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
             cd "$project"
-            VERSION=$((grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml)| awk -F '"' '{print $2}')
+            VERSION=$( (grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml) | awk -F '"' '{print $2}')
             echo "$project version: $VERSION"
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
+            echo "$VAR_NAME=$VERSION" >> "$GITHUB_ENV"
             cd ..
             done
 
-      - name: Add tags for upstream crates
+      - name: Compute release identifiers
+        id: ids
         run: |
-          git config --global user.name 'MidnightCI'
-          git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          projects=("coin-structure" "base-crypto" "serialize" "storage" "transient-crypto")
-          for project in "${projects[@]}"; do
-            VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            VERSION=${!VAR_NAME}
-            SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
-            TAG_NAME="${project}-${VERSION}"
-            SHORT_TAG_NAME="${project}-${SHORT_VERSION}"
-
-            # Check if the long version tag exists on the remote
-            if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-              echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ${project}."
-              continue
-            fi
-
-            # Create and push the new tag
-            git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
-          done
+          # Display version is epoch (from flake.nix) + the ledger-wasm crate
+          # version, e.g. 9 + 1.0.0-rc.3 -> 9.1.0.0-rc.3, matching the git tag.
+          SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
+          DISPLAY_VERSION="${SHORT_VERSION}.${LEDGER_WASM_VERSION}"
+          echo "version=${DISPLAY_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=ledger-${DISPLAY_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "LEDGER_VERSION")
-          VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
-          TAG_NAME="ledger-${VERSION}"
+          # Use wasm version, as this will include pre-release tags
+          VERSION="${LEDGER_WASM_VERSION}"
+          SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
+          TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}"
+          PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd ledger-wasm
             cargo check
@@ -119,7 +139,7 @@ jobs:
             else
               git add ../docs
               git commit -m "chore: update ledger-wasm docs"
-              git push
+              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
             fi
 
             cd ..
@@ -127,29 +147,67 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-v"${SHORT_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger-v"${SHORT_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
+            TGZ="midnight-ledger-v${SHORT_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
+            # Copy out before the next nix build overwrites result/lib.
+            mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
+            cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          else
             git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
           fi
 
 
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ONCHAIN_RUNTIME_VERSION")
-          VERSION=${!VAR_NAME}
+          # Use wasm version, as this will include pre-release tags
+          VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
+          PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd onchain-runtime-wasm
             cargo check
@@ -161,7 +219,7 @@ jobs:
             else
               git add ../docs
               git commit -m "chore: update onchain-runtime-wasm docs"
-              git push
+              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
             fi
 
             cd ..
@@ -169,29 +227,68 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-onchain-runtime-v"${SHORT_VERSION}"-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/onchain-runtime-v"${SHORT_VERSION}"@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
+            mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
+            cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          else
             git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
           fi
 
 
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ZKIR_VERSION")
-          VERSION=${!VAR_NAME}
+          # ZKIR's git tag tracks the zkir crate version, but the published npm
+          # package uses the zkir-wasm version — check existence against the wasm version.
+          VERSION="${ZKIR_VERSION}"
           TAG_NAME="zkir-${VERSION}"
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
+          WASM_VERSION="${ZKIR_WASM_VERSION}"
+          SHORT_VERSION=$(echo "$WASM_VERSION" | awk -F. '{print $1}')
+          PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd zkir-wasm
             cargo check
@@ -203,7 +300,7 @@ jobs:
             else
               git add ../docs
               git commit -m "chore: update zkir-wasm docs"
-              git push
+              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
             fi
 
             cd ..
@@ -211,20 +308,228 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-zkir-v"${SHORT_VERSION}"-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/zkir-v"${SHORT_VERSION}"@${{ env.ZKIR_WASM_VERSION }}
+            TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
+            mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
+            cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
             cd ../..
-
-            # Create and push the new tag
-            git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
           fi
+
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          else
+            git tag "${TAG_NAME}"
+            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
+          fi
+
+      - name: Upload npm package tarballs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: npm-packages
+          path: release-artifacts/*.tgz
+          if-no-files-found: warn
 
 
   docker-push:
     needs: build
+    if: ${{ github.event.inputs.dry_run != 'true' }}
     uses: ./.github/workflows/docker-push.yml
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+
+  coverage:
+    needs: build
+    uses: ./.github/workflows/test-coverage.yml
+    secrets: inherit
+
+  integration:
+    needs: build
+    uses: ./.github/workflows/integration-tests.yml
+    secrets: inherit
+
+  benchmark:
+    needs: build
+    # Non-blocking: the release job waits for it but does not require it to pass
+    # (see the release job's `if:`).
+    uses: ./.github/workflows/benchmark.yml
+    secrets: inherit
+
+  unit-tests:
+    needs: build
+    runs-on: ubuntu-latest-8-core-x64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+
+      - name: Build and Test (default features)
+        run: |
+          # pipefail so a test failure (not tee's exit) fails the job.
+          set -o pipefail
+          cargo install cargo2junit
+          nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results.json
+          # Filter is a workaround for johnterickson/cargo2junit#85
+          jq -cR 'fromjson? | select( .type != "report" )' test-results.json | cargo2junit > ./test-results.xml
+
+      - name: Upload unit test results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: unit-test-results
+          path: |
+            test-results.json
+            test-results.xml
+
+  release:
+    needs: [ build, coverage, integration, unit-tests, benchmark ]
+    # Gated on build + the test suites; benchmark result is intentionally ignored.
+    if: >-
+      ${{ !cancelled()
+          && needs.build.result == 'success'
+          && needs.coverage.result == 'success'
+          && needs.integration.result == 'success'
+          && needs['unit-tests'].result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.build.outputs.tag_name }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: downloaded-artifacts
+
+      - name: Assemble release assets and checksums
+        id: assets
+        run: |
+          set -euo pipefail
+          STAGING="release-assets"
+          mkdir -p "$STAGING"
+          # nullglob so absent artifacts (e.g. a failed benchmark) skip cleanly.
+          shopt -s nullglob
+
+          for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
+          for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-latest/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-latest/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
+
+          if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then
+            for f in downloaded-artifacts/"Lcov Coverage Report"/*; do cp "$f" "$STAGING/coverage.lcov"; done
+          fi
+          if [ -d downloaded-artifacts/"Coverage Report" ]; then
+            ( cd downloaded-artifacts/"Coverage Report" && zip -qr "${GITHUB_WORKSPACE}/${STAGING}/coverage-html-report.zip" . )
+          fi
+
+          for f in downloaded-artifacts/benchmark-report-output/*; do cp "$f" "$STAGING/benchmark-output.txt"; done
+          if [ -d downloaded-artifacts/benchmark-report ]; then
+            ( cd downloaded-artifacts/benchmark-report && zip -qr "${GITHUB_WORKSPACE}/${STAGING}/benchmark-html-report.zip" . )
+          fi
+
+          # Guard: `sha256sum *` would block on stdin if STAGING were empty.
+          if [ -n "$(ls -A "$STAGING")" ]; then
+            ( cd "$STAGING" && sha256sum * > SHA256SUMS )
+          else
+            echo "::warning::No release assets were assembled."
+          fi
+          echo "Assembled release assets:"
+          ls -lah "$STAGING"
+          echo "staging=$STAGING" >> "$GITHUB_OUTPUT"
+
+      - name: Upload assembled release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: warn
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          STAGING="${{ steps.assets.outputs.staging }}"
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "[dry-run] would create/update release ${TAG_NAME} (title: Ledger ${VERSION}) with assets:"
+            ls -1 "${STAGING}"
+            exit 0
+          fi
+          NOTES_FILE="${GITHUB_WORKSPACE}/.github/release-notes/${TAG_NAME}.md"
+
+          PRERELEASE_FLAG=""
+          case "${VERSION}" in
+            *-rc*|*-alpha*|*-beta*|*-performance*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            echo "Release ${TAG_NAME} exists - refreshing assets."
+            gh release upload "${TAG_NAME}" "${STAGING}"/* --clobber
+          elif [ -f "${NOTES_FILE}" ]; then
+            gh release create "${TAG_NAME}" --title "Ledger ${VERSION}" \
+              --notes-file "${NOTES_FILE}" ${PRERELEASE_FLAG} "${STAGING}"/*
+          else
+            echo "::warning::No release notes at .github/release-notes/${TAG_NAME}.md - creating release with auto-generated notes. Add the file before release to use curated notes."
+            gh release create "${TAG_NAME}" --title "Ledger ${VERSION}" \
+              --generate-notes ${PRERELEASE_FLAG} "${STAGING}"/*
+          fi
+
+      - name: Announce release on Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_TOPIC_LEDGER_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "[dry-run] would announce Ledger ${VERSION} on Slack (topic-ledger)."
+            exit 0
+          fi
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+            echo "::warning::SLACK_TOPIC_LEDGER_WEBHOOK_URL not set - skipping Slack announcement."
+            exit 0
+          fi
+          RELEASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG_NAME}"
+          KIND="release"
+          case "${VERSION}" in
+            *-rc*|*-alpha*|*-beta*|*-performance*) KIND="pre-release" ;;
+          esac
+          TEXT=":rocket: Ledger ${KIND} *${VERSION}* is out. <${RELEASE_URL}|Release notes & artifacts>"
+          payload=$(jq -n --arg t "$TEXT" '{text: $t}')
+          curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
