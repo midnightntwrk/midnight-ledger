@@ -1037,29 +1037,34 @@ pub(crate) fn startup_network() -> Network {
 }
 
 /// Default Vault-dApp URL when `MIDNIGHT_DAPP_URL` is unset — the
-/// Next.js dev server's default origin.
-// Android can't reach `localhost:3000` — that's the phone's own
-// loopback. The dApp runs on the laptop and is reachable from the
-// phone over Yurii's tailnet at the laptop's `100.110.241.102` IP.
-// Keep `localhost` for desktop / iOS-sim where the dApp is on the
-// same host. `MIDNIGHT_DAPP_URL` env override (see `dapp_url()`)
-// trumps both on any target.
-#[cfg(target_os = "android")]
-const DEFAULT_DAPP_URL: &str = "http://100.110.241.102:3000";
-#[cfg(not(target_os = "android"))]
-const DEFAULT_DAPP_URL: &str = "http://localhost:3000";
-
 /// URL the embedded Vault-dApp iframe loads.
 ///
 /// The dApp is always loaded from a URL (there is no bundled export).
-/// Set `MIDNIGHT_DAPP_URL` to point the iframe at the dApp — e.g.
-/// `http://localhost:3000` for a `next dev` server, or a deployed URL.
-/// Defaults to [`DEFAULT_DAPP_URL`] when unset or blank.
+/// Resolution order (first match wins):
+///
+/// 1. `MIDNIGHT_DAPP_URL` env override — anything non-blank wins on any
+///    target. Used by dev rebuilds and CI to redirect the iframe at an
+///    arbitrary URL without rebuilding the binary.
+/// 2. The `dapp_url` field of the CURRENT network's
+///    [`wallet_core::NetworkConfig`] — keeps the dApp on the same
+///    routing path as the chain endpoints, so `Undeployed` →
+///    `http://localhost:3000`, `UndeployedYurii` →
+///    `http://100.110.241.102:3000` (tailnet), production networks →
+///    their deployed dApp origins.
+///
+/// The previous `#[cfg(target_os = "android")]` arm hardcoded the
+/// tailnet IP at compile time. That broke whenever the wallet was
+/// pointed at a non-tailnet `Undeployed` chain (e.g. localhost on a
+/// desktop / sim build that happened to have the android cfg set), so
+/// network-driven resolution is the right layer.
 pub(crate) fn dapp_url() -> String {
-    match std::env::var("MIDNIGHT_DAPP_URL") {
-        Ok(u) if !u.trim().is_empty() => u.trim().to_string(),
-        _ => DEFAULT_DAPP_URL.to_string(),
+    if let Ok(u) = std::env::var("MIDNIGHT_DAPP_URL") {
+        let trimmed = u.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
     }
+    startup_network().config().dapp_url.to_string()
 }
 
 /// Process-wide map of `Network → Arc<DustSyncer>`. Populated by

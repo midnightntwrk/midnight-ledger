@@ -36,6 +36,14 @@ pub struct NetworkConfig {
     /// The proof server is host-local in gsd-wallet's defaults; we keep
     /// the same convention here. Override per-wallet later.
     pub proving_server_url: &'static str,
+    /// Default URL for the verifier dApp paired with this network.
+    /// Used by the wallet's Dapp tab as the iframe src when no per-process
+    /// `MIDNIGHT_DAPP_URL` env override is set. Pairs with the chain URLs
+    /// above — `Undeployed` → `localhost`, `UndeployedYurii` → tailnet,
+    /// production networks → the deployed dApp origin. Keeping the dApp
+    /// URL on the same routing path as the chain avoids the
+    /// "wallet sees one chain, dApp talks to another" footgun.
+    pub dapp_url: &'static str,
 }
 
 impl Network {
@@ -114,6 +122,7 @@ impl Network {
                 indexer_ws_url: "wss://indexer.mainnet.midnight.network/api/v4/graphql/ws",
                 node_ws_url: "wss://rpc.mainnet.midnight.network",
                 proving_server_url: "http://localhost:6300",
+                dapp_url: "https://passport-vault.midnight.network",
             },
             Network::PreProd => NetworkConfig {
                 network_id: "preprod",
@@ -121,6 +130,7 @@ impl Network {
                 indexer_ws_url: "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
                 node_ws_url: "wss://rpc.preprod.midnight.network",
                 proving_server_url: "http://localhost:6300",
+                dapp_url: "https://passport-vault.preprod.midnight.network",
             },
             Network::Preview => NetworkConfig {
                 network_id: "preview",
@@ -128,6 +138,7 @@ impl Network {
                 indexer_ws_url: "wss://indexer.preview.midnight.network/api/v4/graphql/ws",
                 node_ws_url: "wss://rpc.preview.midnight.network",
                 proving_server_url: "http://localhost:6300",
+                dapp_url: "https://passport-vault.preview.midnight.network",
             },
             Network::QaNet => NetworkConfig {
                 network_id: "qanet",
@@ -135,6 +146,7 @@ impl Network {
                 indexer_ws_url: "wss://indexer.qanet.midnight.network/api/v4/graphql/ws",
                 node_ws_url: "wss://rpc.qanet.midnight.network",
                 proving_server_url: "http://localhost:6300",
+                dapp_url: "https://passport-vault.qanet.midnight.network",
             },
             Network::DevNet => NetworkConfig {
                 network_id: "devnet",
@@ -142,6 +154,7 @@ impl Network {
                 indexer_ws_url: "wss://indexer.devnet.midnight.network/api/v4/graphql/ws",
                 node_ws_url: "wss://rpc.devnet.midnight.network",
                 proving_server_url: "http://localhost:6300",
+                dapp_url: "https://passport-vault.devnet.midnight.network",
             },
             Network::Undeployed => NetworkConfig {
                 // Standalone Midnight env, host-port-shifted by +10000
@@ -162,6 +175,7 @@ impl Network {
                 indexer_ws_url: "ws://localhost:18088/api/v4/graphql/ws",
                 node_ws_url: "ws://localhost:19944",
                 proving_server_url: "http://localhost:16300",
+                dapp_url: "http://localhost:3000",
             },
             Network::UndeployedYurii => NetworkConfig {
                 // Same standalone chain as [`Network::Undeployed`],
@@ -180,6 +194,7 @@ impl Network {
                 indexer_ws_url: "ws://100.110.241.102:18088/api/v4/graphql/ws",
                 node_ws_url: "ws://100.110.241.102:19944",
                 proving_server_url: "http://100.110.241.102:16300",
+                dapp_url: "http://100.110.241.102:3000",
             },
         }
     }
