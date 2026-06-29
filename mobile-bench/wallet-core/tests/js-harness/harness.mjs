@@ -822,6 +822,83 @@ const methods = {
     }
   },
 
+  // Vault ledger readers — ported from
+  // `mobile-bench/dioxus-wallet/web/src/entry.ts:1290-1402`. Decode
+  // the passport-vault `ContractState` hex blob via the vendored
+  // `@input-output-hk/passport-vault-contract` module. Used by
+  // `HeadlessWallet::vault_total_locked` + `::vault_list_locks`.
+  // Read-only — no seed, dust, proving, or submission.
+  readVaultLedger: async (params) => {
+    const [pvContract, compactRuntime] = await Promise.all([
+      import(
+        "@input-output-hk/passport-vault-contract/managed/passport-vault/contract/index.js"
+      ),
+      import("@midnight-ntwrk/compact-runtime"),
+    ]);
+    const contractState = compactRuntime.ContractState.deserialize(
+      Buffer.from(params.contractStateHex, "hex"),
+    );
+    const led = pvContract.ledger(contractState.data);
+    const totalDeposited =
+      led.totalDeposited != null ? BigInt(led.totalDeposited) : 0n;
+    const totalReleased =
+      led.totalReleased != null ? BigInt(led.totalReleased) : 0n;
+    const locked =
+      totalDeposited > totalReleased ? totalDeposited - totalReleased : 0n;
+    return {
+      totalLockedBaseUnits: locked.toString(),
+      totalDepositedBaseUnits: totalDeposited.toString(),
+      hasDeposit: locked > 0n,
+    };
+  },
+
+  readVaultLocks: async (params) => {
+    const [pvContract, compactRuntime] = await Promise.all([
+      import(
+        "@input-output-hk/passport-vault-contract/managed/passport-vault/contract/index.js"
+      ),
+      import("@midnight-ntwrk/compact-runtime"),
+    ]);
+    const contractState = compactRuntime.ContractState.deserialize(
+      Buffer.from(params.contractStateHex, "hex"),
+    );
+    const led = pvContract.ledger(contractState.data);
+    const lockCountBig =
+      led.lockCount != null ? BigInt(led.lockCount) : 0n;
+    const locks = [];
+    // Compact runtime's Map type doesn't implement the JS iterator
+    // protocol — enumerate by id range from `lockCount`. See
+    // entry.ts:1352 + auto-memory `feedback_webview_compact_map_iterator`.
+    for (let i = 0n; i < lockCountBig; i++) {
+      if (!led.locks.member(i)) continue;
+      const rec = led.locks.lookup(i);
+      const dep = BigInt(rec.totalDeposited ?? 0n);
+      const rel = BigInt(rec.totalReleased ?? 0n);
+      const remaining = dep > rel ? dep - rel : 0n;
+      locks.push({
+        lockId: i.toString(),
+        lockerHex: Buffer.from(rec.locker).toString("hex"),
+        minimumAgeYears: BigInt(rec.minimumAgeYears).toString(),
+        requireIssuingState: !!rec.requireIssuingState,
+        requiredIssuingStateHex: Buffer.from(rec.requiredIssuingState).toString(
+          "hex",
+        ),
+        requireDocumentNumber: !!rec.requireDocumentNumber,
+        requiredDocumentNumberHex: Buffer.from(
+          rec.requiredDocumentNumber,
+        ).toString("hex"),
+        maxClaimAmount: BigInt(rec.maxClaimAmount).toString(),
+        verifierChallengeHashHex: Buffer.from(
+          rec.verifierChallengeHash,
+        ).toString("hex"),
+        totalDeposited: dep.toString(),
+        totalReleased: rel.toString(),
+        lockedRemaining: remaining.toString(),
+      });
+    }
+    return { lockCount: lockCountBig.toString(), locks };
+  },
+
   contractLayerInfo: async () => {
     const { contract, compactRuntime } = await loadContractLayer();
     const did = contract.DIDContract;
