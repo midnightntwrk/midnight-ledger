@@ -6,9 +6,9 @@ on:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
-      DOCKERHUB_MIDNIGHTNTWRK_USER:
+      GH_USERNAME:
         required: true
-      DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
+      GH_PASSWORD:
         required: true
 
 jobs:
