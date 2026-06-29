@@ -1,0 +1,119 @@
+name: Prepare Ledger Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Comma-separated crate=version pairs to bump, e.g. "ledger-wasm=1.0.0-rc.4, ledger=1.0.0, onchain-runtime-wasm=4.0.0-rc.4"'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Bump crate versions
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra PAIRS <<< "${{ inputs.versions }}"
+          for pair in "${PAIRS[@]}"; do
+            crate="$(echo "$pair" | cut -d= -f1 | xargs)"
+            ver="$(echo "$pair" | cut -d= -f2 | xargs)"
+            f="${crate}/Cargo.toml"
+            [ -f "$f" ] || { echo "::error::no such crate manifest: $f"; exit 1; }
+            # Replace only the first top-level `version = "..."` (the [package] one).
+            awk -v v="$ver" '!done && /^version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+            grep -qE "^version = \"${ver}\"" "$f" || { echo "::error::failed to set version in $f"; exit 1; }
+            echo "bumped ${crate} -> ${ver}"
+          done
+
+      - name: Refresh Cargo.lock
+        run: nix develop .#ci -c cargo metadata --format-version 1 >/dev/null
+
+      - name: Compute display version
+        id: ver
+        run: |
+          set -euo pipefail
+          LW=$(grep -m1 '^version' ledger-wasm/Cargo.toml | awk -F'"' '{print $2}')
+          EPOCH=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$EPOCH" ]; then echo "::error::could not derive ledger epoch from flake.nix"; exit 1; fi
+          echo "display=${EPOCH}.${LW}" >> "$GITHUB_OUTPUT"
+          echo "tag=ledger-${EPOCH}.${LW}" >> "$GITHUB_OUTPUT"
+
+      - name: Draft changelog and release notes
+        run: |
+          set -euo pipefail
+          DISPLAY="${{ steps.ver.outputs.display }}"
+          TAG="${{ steps.ver.outputs.tag }}"
+          BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+
+          # Insert a new section above the first existing "## " heading. The
+          # section is read from a file (not awk -v) so embedded newlines are
+          # portable across awk implementations.
+          printf '## Ledger %s\n\n%s\n\n' "$DISPLAY" "$BULLETS" > .release-section.md
+          awk 'FNR==NR{sec = sec $0 "\n"; next} /^## /&&!ins{printf "%s", sec; ins=1} {print}' \
+            .release-section.md CHANGELOG.md > CHANGELOG.md.tmp
+          mv CHANGELOG.md.tmp CHANGELOG.md
+          rm -f .release-section.md
+
+          # Scaffold the release-notes file from the template (idempotent).
+          NOTES=".github/release-notes/${TAG}.md"
+          if [ ! -f "$NOTES" ]; then
+            sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
+            printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
+          fi
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          BRANCH="release/${TAG}"
+          git config user.name 'MidnightCI'
+          git config user.email 'midnight-automation+midnightci@iohk.io'
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore: prepare ${TAG}"
+          git push -u origin "$BRANCH"
+          gh pr create --base "${GITHUB_REF_NAME}" --head "$BRANCH" \
+            --title "Prepare ${TAG}" \
+            --body "$(printf '%s\n' \
+              "Automated release prep for \`${TAG}\`." \
+              "" \
+              "- [ ] Versions correct (see \`Cargo.toml\` / \`Cargo.lock\` diff)" \
+              "- [ ] \`CHANGELOG.md\` section reviewed and edited" \
+              "- [ ] \`.github/release-notes/${TAG}.md\` prose written" \
+              "" \
+              "After merge, run **Publish Ledger Release** on \`${GITHUB_REF_NAME}\`.")"
