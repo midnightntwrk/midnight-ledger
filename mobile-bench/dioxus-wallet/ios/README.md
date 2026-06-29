@@ -2,34 +2,39 @@
 
 Working notes for running the dioxus-wallet on the iOS Simulator. Most of this content is *not* a property of our app — it's standing iOS-sim quirks that bite anyone trying to drive a WKWebView app through scripted input.
 
-## One-time per fresh install
+## Quick recipes (`just`)
 
-Granting clipboard permission on iOS 16+ requires either tapping a system banner the first time the app reads the pasteboard, or pre-granting via `simctl`:
+All the simctl incantations below are wrapped in [the wallet's Justfile](../Justfile). Run from `mobile-bench/dioxus-wallet/`:
 
 ```sh
-SIM_UDID=$(xcrun simctl list devices booted --json \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); [print(dev["udid"]) for r,ds in d["devices"].items() for dev in ds if dev["state"]=="Booted"][0]')
-BUNDLE=io.iohk.midnight.wallet
-
-xcrun simctl privacy "$SIM_UDID" grant pasteboard "$BUNDLE"
+just --list                    # show all iOS recipes
+just ios-grant-pasteboard      # one-time: grant clipboard read perm
+just ios-paste                 # force Mac → sim clipboard sync (run before every ⌘V)
+just ios-paste-check           # verify Mac ↔ sim pasteboard parity
+just ios-pbpaste               # peek at the sim's clipboard
+just ios-relaunch              # terminate + restart the wallet on the booted sim
+just ios-udid                  # print the booted sim's UDID
 ```
 
-The simulator usually swallows the banner instead of showing it, so the default state is effectively "Deny". Both `navigator.clipboard.readText()` *and* a regular `⌘V` into a `<textarea>` go through the same permission gate — both fail silently without this grant.
+`just` is provided by the demo workspace's nix devshell (`nix develop` from `midnight-identity-workspace/`), or install standalone via `brew install just`.
 
-## Every time: Mac → sim clipboard
+The rest of this doc explains the *why* behind each recipe.
+
+## One-time per fresh install — `just ios-grant-pasteboard`
+
+Granting clipboard permission on iOS 16+ requires either tapping a system banner the first time the app reads the pasteboard, or pre-granting via `simctl`. The simulator usually swallows the banner instead of showing it, so the default state is effectively "Deny". Both `navigator.clipboard.readText()` *and* a regular `⌘V` into a `<textarea>` go through the same permission gate — both fail silently without this grant.
+
+Under the hood: `xcrun simctl privacy <udid> grant pasteboard io.iohk.midnight.wallet`.
+
+## Every time: Mac → sim clipboard — `just ios-paste`
 
 `com.apple.iphonesimulator.PasteboardAutomaticSync = 1` is the default and reads as "ON", but **does not actually sync reliably**. Confirmed empirically (Xcode 16 + iOS 17.5 sim): Mac's pasteboard has 569 chars, sim's `pbpaste` returns 0 chars.
 
 Workaround — force-push after every Mac-side copy:
 
 ```sh
-pbpaste | xcrun simctl pbcopy "$SIM_UDID"
-```
-
-Verify with:
-
-```sh
-diff <(pbpaste) <(xcrun simctl pbpaste "$SIM_UDID") && echo OK || echo "STILL OUT OF SYNC"
+just ios-paste                 # equivalent to: pbpaste | xcrun simctl pbcopy <udid>
+just ios-paste-check           # diffs both pasteboards; exits 1 on mismatch
 ```
 
 Then in the sim: tap into the textarea, **⌘V** (Mac keyboard forwards to sim if Hardware Keyboard is connected — see below). Long-press → Paste from the iOS edit menu also works once the permission grant is in place.

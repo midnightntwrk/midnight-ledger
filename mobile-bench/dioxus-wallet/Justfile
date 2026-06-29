@@ -1,0 +1,64 @@
+# Justfile for dioxus-wallet
+#
+# iOS Simulator helpers. See ios/README.md for the *why* behind each.
+# Run `just --list` to see all recipes.
+
+BUNDLE := "io.iohk.midnight.wallet"
+
+# Print the UDID of the currently booted iOS sim (exits 1 if none booted).
+_ios-udid:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    udid=$(xcrun simctl list devices booted | awk -F'[()]' '/Booted/{print $2; exit}')
+    [[ -n "$udid" ]] || { echo "no booted iOS simulator — boot one first" >&2; exit 1; }
+    echo "$udid"
+
+# Force-push the Mac clipboard to the booted iOS sim.
+# Works around `PasteboardAutomaticSync=1` being unreliable.
+ios-paste:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIM=$(just _ios-udid)
+    pbpaste | xcrun simctl pbcopy "$SIM"
+    echo "→ pushed $(pbpaste | wc -c | tr -d ' ') bytes to $SIM"
+
+# One-time: grant pasteboard read permission to the wallet on the booted sim.
+# iOS 16+ blocks pasteboard reads by default; this is needed even for ⌘V.
+ios-grant-pasteboard:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIM=$(just _ios-udid)
+    xcrun simctl privacy "$SIM" grant pasteboard "{{BUNDLE}}"
+    echo "→ granted pasteboard to {{BUNDLE}} on $SIM"
+
+# Show the booted sim's current pasteboard contents.
+ios-pbpaste:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIM=$(just _ios-udid)
+    xcrun simctl pbpaste "$SIM"
+
+# Verify the Mac ↔ sim pasteboard contents match (exits 0 OK / 1 mismatch).
+ios-paste-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIM=$(just _ios-udid)
+    if diff <(pbpaste) <(xcrun simctl pbpaste "$SIM") >/dev/null; then
+        echo "OK ($(pbpaste | wc -c | tr -d ' ') bytes match)"
+    else
+        echo "MISMATCH — run \`just ios-paste\` to resync" >&2
+        exit 1
+    fi
+
+# Terminate + relaunch the wallet on the booted sim.
+ios-relaunch:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SIM=$(just _ios-udid)
+    xcrun simctl terminate "$SIM" "{{BUNDLE}}" 2>/dev/null || true
+    xcrun simctl launch "$SIM" "{{BUNDLE}}"
+    echo "→ launched {{BUNDLE}} on $SIM"
+
+# Print the booted sim's UDID (public alias of the helper, handy for scripting).
+ios-udid:
+    @just _ios-udid
