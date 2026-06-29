@@ -11,7 +11,10 @@ name = "headless-wallet"
 path = "src/main.rs"
 
 [dependencies]
-wallet-core = { path = "../wallet-core" }
+# `test-support` feature unlocks the `HeadlessWallet` façade. The feature
+# name is historical (it was originally test-only); this binary depends
+# on it for production use too.
+wallet-core = { path = "../wallet-core", features = ["test-support"] }
 tokio = { version = "1.46.1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -19,3 +22,4 @@ clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
+hex = "0.4"

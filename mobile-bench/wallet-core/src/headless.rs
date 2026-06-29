@@ -110,6 +110,12 @@ pub enum HeadlessError {
     Issuance(#[from] IssuanceFlowError),
     #[error("verify: vc not found in store: {0}")]
     VcNotFound(String),
+    /// Wraps the `String`-typed errors that `Wallet`'s vault methods
+    /// surface — they bubble up `format!(...)` messages from the
+    /// indexer / JS bridge / submission pipeline. Carry them verbatim
+    /// so the dispatcher can echo them into the JSON `error.message`.
+    #[error("vault: {0}")]
+    Vault(String),
 }
 
 /// Result of [`HeadlessWallet::bootstrap`] — the freshly minted
@@ -287,6 +293,124 @@ impl HeadlessWallet {
     pub fn network(&self) -> Network {
         self.network
     }
+
+    // ─── Vault verbs ──────────────────────────────────────────────
+    //
+    // Thin delegators to [`Wallet`]'s vault methods. The Rust path
+    // signs the funding spend itself, sidestepping the JS SDK's
+    // `1010 InputsSignaturesLengthMismatch` (per `wallet.rs:2014`).
+    // The verifier (dApp / CLI) pins which vault to act on by
+    // passing `contract_address_hex` to every verb; there's no
+    // wallet-side default.
+
+    /// Read the vault's currently-locked NIGHT total (base units).
+    /// Read-only: no seed, dust, proving, or submission involved.
+    pub async fn vault_total_locked(
+        &self,
+        contract_address_hex: String,
+    ) -> Result<u128, HeadlessError> {
+        self.wallet
+            .vault_total_locked(contract_address_hex)
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+
+    /// Enumerate the vault's locks (id, policy, per-lock pool) plus
+    /// the global `lockCount`. Returns the raw `readVaultLocks` JSON.
+    pub async fn vault_list_locks(
+        &self,
+        contract_address_hex: String,
+    ) -> Result<serde_json::Value, HeadlessError> {
+        self.wallet
+            .list_locks(contract_address_hex)
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+
+    /// Enumerate this wallet's stored digital-passport credentials.
+    /// Reads from the session's `vc_store` — no vault contract is
+    /// involved (the parameter list is therefore empty).
+    pub fn vault_list_credentials(&self) -> Result<Vec<StoredVcSummary>, HeadlessError> {
+        let vcs = self
+            .vc_store
+            .list_ordered()
+            .map_err(HeadlessError::OpenVcStore)?;
+        Ok(vcs
+            .into_iter()
+            .map(|stored| StoredVcSummary {
+                vc_uri: stored.vc_uri,
+                issuer_did: stored.issuer_did,
+                holder_did: stored.holder_did,
+                format: stored.format,
+                issued_at_ms: stored.issued_at_ms,
+            })
+            .collect())
+    }
+
+    /// Create a new lock with `policy` and an optional initial
+    /// deposit of `initial_amount` base units. Returns the submitted
+    /// tx hash plus the assigned lock id (pre-increment lockCount).
+    pub async fn vault_create_lock(
+        &self,
+        contract_address_hex: String,
+        policy: crate::VaultLockPolicy,
+        initial_amount: u128,
+    ) -> Result<crate::wallet::VaultCreateLockOutcome, HeadlessError> {
+        self.wallet
+            .create_lock(contract_address_hex, policy, initial_amount)
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+
+    /// Top up an existing lock's pool with `amount_base_units` of
+    /// native UNSHIELDED NIGHT. Returns the submitted tx hash. Only
+    /// the lock's creator may deposit (enforced on-chain).
+    pub async fn vault_deposit(
+        &self,
+        contract_address_hex: String,
+        lock_id: u64,
+        amount_base_units: u128,
+    ) -> Result<String, HeadlessError> {
+        self.wallet
+            .deposit_to_lock(contract_address_hex, lock_id, amount_base_units)
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+
+    /// Claim `amount_base_units` from `lock_id` against a stored
+    /// credential's `bundle`. Returns the submitted tx hash.
+    pub async fn vault_claim(
+        &self,
+        contract_address_hex: String,
+        lock_id: u64,
+        amount_base_units: u128,
+        bundle: serde_json::Value,
+        current_day: Option<u64>,
+    ) -> Result<String, HeadlessError> {
+        self.wallet
+            .claim_from_lock(
+                contract_address_hex,
+                lock_id,
+                amount_base_units,
+                bundle,
+                current_day,
+            )
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+}
+
+/// Display-only summary of a credential held in the session's
+/// `vc_store`. Mirrors the dApp connector's `VaultCredential` shape
+/// — enough to populate the credential picker, no PII or
+/// signature material.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StoredVcSummary {
+    pub vc_uri: String,
+    pub issuer_did: String,
+    pub holder_did: String,
+    pub format: String,
+    pub issued_at_ms: u64,
 }
 
 // ─── Internal adapters ─────────────────────────────────────────
