@@ -57,7 +57,7 @@ impl Network {
             Network::QaNet => "QANet",
             Network::DevNet => "DevNet",
             Network::Undeployed => "Undeployed",
-            Network::UndeployedYurii => "Undeployed (Yurii's)",
+            Network::UndeployedYurii => "Undeployed (Tailscale)",
         }
     }
 
