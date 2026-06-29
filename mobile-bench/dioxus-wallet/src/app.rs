@@ -1012,6 +1012,36 @@ fn parse_seed_hex_env(var: &str) -> Option<[u8; 32]> {
 /// signal is created; the in-app network switcher can change it
 /// afterwards. Also the default network for vault verbs (see
 /// `bridge::vault_network`).
+/// Process-wide mirror of the runtime-selected network (the Wallet-tab
+/// picker's `network` signal). Initialized to [`startup_network`] on
+/// App boot; rewritten by the picker `onchange` handler whenever the
+/// user flips between variants (e.g. `Undeployed → Undeployed (Tailscale)`).
+///
+/// Bridge / FFI handlers that need the **current** network — without
+/// access to the Dioxus signal — should call [`current_network`]
+/// instead of [`startup_network`]. The two diverge as soon as the user
+/// touches the picker; reading the latter at request time would lock
+/// every connector reply (chain URLs, vault network, etc.) to whatever
+/// the binary started on, regardless of the picker.
+static CURRENT_NETWORK: std::sync::OnceLock<std::sync::RwLock<Network>> = std::sync::OnceLock::new();
+
+/// Returns the current runtime network (picker-selected, falls back to
+/// [`startup_network`] before the App has initialized the mirror).
+pub(crate) fn current_network() -> Network {
+    *CURRENT_NETWORK
+        .get_or_init(|| std::sync::RwLock::new(startup_network()))
+        .read()
+        .expect("CURRENT_NETWORK RwLock poisoned")
+}
+
+/// Updates the process-wide network mirror. Called once from the App
+/// component on init (to seed from `startup_network`) and from the
+/// Wallet-tab picker `onchange` handler each time the user switches.
+pub(crate) fn set_current_network(net: Network) {
+    let lock = CURRENT_NETWORK.get_or_init(|| std::sync::RwLock::new(net));
+    *lock.write().expect("CURRENT_NETWORK RwLock poisoned") = net;
+}
+
 pub(crate) fn startup_network() -> Network {
     // First-launch default for the implicit network used by connector
     // RPC methods when the dApp doesn't pin one in `params`. The
@@ -1058,26 +1088,28 @@ pub(crate) fn startup_network() -> Network {
 /// 1. `MIDNIGHT_DAPP_URL` env override — anything non-blank wins on any
 ///    target. Used by dev rebuilds and CI to redirect the iframe at an
 ///    arbitrary URL without rebuilding the binary.
-/// 2. The `dapp_url` field of the CURRENT network's
+/// 2. The `dapp_url` field of the passed-in [`Network`]'s
 ///    [`wallet_core::NetworkConfig`] — keeps the dApp on the same
 ///    routing path as the chain endpoints, so `Undeployed` →
 ///    `http://localhost:3000`, `UndeployedYurii` →
 ///    `http://100.110.241.102:3000` (tailnet), production networks →
 ///    their deployed dApp origins.
 ///
-/// The previous `#[cfg(target_os = "android")]` arm hardcoded the
-/// tailnet IP at compile time. That broke whenever the wallet was
-/// pointed at a non-tailnet `Undeployed` chain (e.g. localhost on a
-/// desktop / sim build that happened to have the android cfg set), so
-/// network-driven resolution is the right layer.
-pub(crate) fn dapp_url() -> String {
+/// `net` must be the **runtime-selected** network (the `network`
+/// signal in `App`), not [`startup_network`] — the user can switch
+/// networks via the Wallet-tab picker at any time, and the dApp
+/// iframe `src` has to follow the picker, otherwise toggling
+/// `Undeployed → Undeployed (Tailscale)` leaves the iframe pointed
+/// at `localhost:3000` even though every chain call now goes through
+/// the tailnet.
+pub(crate) fn dapp_url(net: Network) -> String {
     if let Ok(u) = std::env::var("MIDNIGHT_DAPP_URL") {
         let trimmed = u.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    startup_network().config().dapp_url.to_string()
+    net.config().dapp_url.to_string()
 }
 
 /// Process-wide map of `Network → Arc<DustSyncer>`. Populated by
@@ -1424,6 +1456,11 @@ pub fn App() -> Element {
     // WalletInfo is derived from the same network so its seed (incl. a
     // `MIDNIGHT_WALLET_SEED_HEX` override) drives the bridge loop too.
     let initial_network = startup_network();
+    // `CURRENT_NETWORK` self-initializes via `OnceLock::get_or_init`
+    // on the first `current_network()` call (using `startup_network()`
+    // as the seed), so no explicit init is needed here. Doing so
+    // explicitly from the render body would re-run on every re-render
+    // and clobber the user's picker selection back to `startup_network()`.
     let mut network = use_signal(move || initial_network);
     let mut wallet = use_signal::<Option<WalletInfo>>(move || {
         Some(WalletInfo::from_wallet(&app_wallet_for(initial_network)))
@@ -2202,9 +2239,12 @@ pub fn App() -> Element {
                 div { class: "dapp-host",
                     iframe {
                         style: "width:100%; height:calc(100vh - 150px); min-height:520px; border:0; border-radius:12px; background:#0b0e1a;",
-                        // The dApp is loaded from `MIDNIGHT_DAPP_URL`
-                        // (default `http://localhost:3000`); see `dapp_url`.
-                        src: dapp_url(),
+                        // `dapp_url` resolves the iframe URL from the runtime
+                        // `network` signal (NOT `startup_network`), so flipping
+                        // the picker from Undeployed → Undeployed (Tailscale)
+                        // re-renders the iframe at the tailnet origin instead
+                        // of leaving it stuck on localhost:3000.
+                        src: dapp_url(*network.read()),
                         title: "Passport Vault dApp",
                     }
                 }
@@ -2244,6 +2284,10 @@ pub fn App() -> Element {
                                 return;
                             }
                             network.set(n);
+                            // Keep the process-wide mirror in lockstep
+                            // with the picker so bridge handlers see
+                            // the new network on the very next call.
+                            set_current_network(n);
                             chain.set(ChainSnapshot::default());
                             phase.set(SyncPhase::Idle);
                             night_subunits.set(None);

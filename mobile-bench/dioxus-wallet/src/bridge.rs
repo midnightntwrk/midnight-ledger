@@ -534,41 +534,31 @@ pub(crate) fn parse_network(s: &str) -> Result<Network, String> {
 /// Mirrors the dApp's `VAULT_CONTRACT_ADDRESS` default so the embedded
 /// dApp's argument-less `vaultTotalLocked()` / `vaultDeposit()` verbs
 /// resolve to the same contract without the dApp having to pass it.
-// Vault contract default. Was hardcoded to the preprod-deployed vault;
-// for Android (phone-over-tailnet demo shape) the dApp + CLI deploy
-// to the standalone chain and the wallet's connector RPCs need to
-// route claims at THAT contract. The dApp's `vaultClaim` call doesn't
-// thread `contractAddress` in params today, so this constant is the
-// fallback. Per-shape override via `MIDNIGHT_VAULT_CONTRACT_ADDRESS`
-// env still wins; this just sets a sane platform default.
-//
-// TODO once the dApp wires `contractAddress` through to the connector
-// call this constant becomes vestigial — keep only as a last-ditch
-// safety net.
-#[cfg(target_os = "android")]
-const DEFAULT_VAULT_CONTRACT_ADDRESS: &str =
-    "07665aa4a994ecc035d637c4251701552db7c188eacdd9fcada7b38531789c55";
-#[cfg(not(target_os = "android"))]
-const DEFAULT_VAULT_CONTRACT_ADDRESS: &str =
-    "bdec50fe2f43959767a9bbc3b0626d5d9e9e08e06a723d3d2d0faca2e6c1dc25";
-
-/// Resolve the vault contract address for a vault verb: explicit
-/// `contractAddress` param first, then the
-/// `MIDNIGHT_VAULT_CONTRACT_ADDRESS` env var, then the preprod default.
-fn vault_contract_address(params: &serde_json::Value) -> String {
+/// Resolve the vault contract address for a vault verb: REQUIRES the dApp
+/// to pass `contractAddress` in params (or, for headless dev tooling, set
+/// `MIDNIGHT_VAULT_CONTRACT_ADDRESS` env). There is no wallet-side
+/// compile-time default — the vault contract is a property of the verifier
+/// (dApp / CLI), not the wallet. Mixing the two layers caused keystore-drift
+/// claim failures and per-target `#[cfg]` arms baking the wrong address.
+fn vault_contract_address(params: &serde_json::Value) -> Result<String, String> {
     if let Some(addr) = params.get("contractAddress").and_then(|v| v.as_str()) {
         let addr = addr.trim();
         if !addr.is_empty() {
-            return addr.to_string();
+            return Ok(addr.to_string());
         }
     }
     if let Ok(addr) = std::env::var("MIDNIGHT_VAULT_CONTRACT_ADDRESS") {
         let addr = addr.trim().to_string();
         if !addr.is_empty() {
-            return addr;
+            return Ok(addr);
         }
     }
-    DEFAULT_VAULT_CONTRACT_ADDRESS.to_string()
+    Err(
+        "missing `contractAddress` — the verifier (dApp) must pin which vault \
+         to act on. Pass it in the connector call params, or set the \
+         `MIDNIGHT_VAULT_CONTRACT_ADDRESS` env var for headless dev tooling."
+            .to_string(),
+    )
 }
 
 /// Resolve the network for a vault verb: explicit `network` param first,
@@ -585,23 +575,25 @@ fn vault_network(params: &serde_json::Value) -> Network {
             return n;
         }
     }
-    // Default to the wallet's launch network (PreProd unless
-    // MIDNIGHT_WALLET_NETWORK overrides), so vault ops follow the wallet
-    // unless explicitly pinned via MIDNIGHT_VAULT_NETWORK.
-    crate::app::startup_network()
+    // Default to the wallet's CURRENT picker selection (not the boot-time
+    // network), so vault ops follow the wallet's runtime state — vital
+    // for variants that share a `network_id` but route differently
+    // (e.g. `Undeployed` localhost vs `UndeployedYurii` tailnet).
+    crate::app::current_network()
 }
 
 /// Resolve the network for a STANDARD connector method (addresses /
 /// connection status): explicit `network` param first, else the
-/// wallet's launch network. Address encodings are network-scoped
-/// (HRP), so this must match the network the dApp connected to.
+/// wallet's currently-selected network. Address encodings are
+/// network-scoped (HRP), so this must match the network the dApp
+/// connected to.
 fn connected_network(params: &serde_json::Value) -> Network {
     if let Some(net) = params.get("network").and_then(|v| v.as_str()) {
         if let Ok(n) = parse_network(net.trim()) {
             return n;
         }
     }
-    crate::app::startup_network()
+    crate::app::current_network()
 }
 
 /// Resolve the holder credential bundle (v3 JSON) for a claim: a
@@ -1041,13 +1033,28 @@ async fn run_method(
             // requested network. Mirrors the DApp Connector
             // `getConfiguration()` shape so the embedded dApp can point
             // its own indexer/proof clients at the same services.
+            //
+            // Resolution: if the dApp omits `network`, OR passes a
+            // network whose `network_id` matches the wallet's currently
+            // selected variant (e.g. dApp says "undeployed" while the
+            // wallet picker is on `Undeployed (Tailscale)`), return the
+            // wallet's CURRENT variant — preserving the routing path
+            // (localhost vs tailnet) the user actually picked.
+            // Otherwise, fall back to parsing the literal string and
+            // return that variant's canonical URLs (covers cross-network
+            // queries like dApp on `preprod` while wallet is on `undeployed`).
             #[derive(serde::Deserialize)]
             struct Params {
                 network: Option<String>,
             }
             let p: Params =
                 serde_json::from_value(params).unwrap_or(Params { network: None });
-            let net = parse_network(p.network.as_deref().unwrap_or("preprod"))?;
+            let current = crate::app::current_network();
+            let net = match p.network.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                Some(s) if current.config().network_id.eq_ignore_ascii_case(s) => current,
+                Some(s) => parse_network(s)?,
+                None => current,
+            };
             let cfg = net.config();
             Ok(serde_json::json!({
                 "indexerUri": cfg.indexer_http_url,
@@ -1115,7 +1122,7 @@ async fn run_method(
         // follow-ups).
         "vaultTotalLocked" => {
             let net = vault_network(&params);
-            let addr = vault_contract_address(&params);
+            let addr = vault_contract_address(&params)?;
             let total = crate::app::app_vault_wallet_for(net)
                 .vault_total_locked(addr)
                 .await?;
@@ -1125,7 +1132,7 @@ async fn run_method(
         }
         "vaultListLocks" => {
             let net = vault_network(&params);
-            let addr = vault_contract_address(&params);
+            let addr = vault_contract_address(&params)?;
             let locks_json = crate::app::app_vault_wallet_for(net)
                 .list_locks(addr)
                 .await?;
@@ -1142,7 +1149,7 @@ async fn run_method(
             // running wallet becomes the lock's creator. Funds the
             // `receiveUnshielded` with the wallet's unshielded NIGHT.
             let net = vault_network(&params);
-            let addr = vault_contract_address(&params);
+            let addr = vault_contract_address(&params)?;
             let initial_amount: u128 = params
                 .get("amountBaseUnits")
                 .and_then(|v| v.as_str())
@@ -1162,7 +1169,7 @@ async fn run_method(
             // amount), add the wallet's unshielded NIGHT spend + change +
             // DUST fees, prove, submit. Lock-creator-only on-chain.
             let net = vault_network(&params);
-            let addr = vault_contract_address(&params);
+            let addr = vault_contract_address(&params)?;
             let lock_id = parse_lock_id(&params)?;
             let amount = parse_amount(&params, "vaultDeposit")?;
             let tx_hash = crate::app::app_vault_wallet_for(net)
@@ -1177,7 +1184,7 @@ async fn run_method(
             // + age proof), DUST-balance + prove + submit. The released
             // NIGHT goes to this wallet's unshielded address.
             let net = vault_network(&params);
-            let addr = vault_contract_address(&params);
+            let addr = vault_contract_address(&params)?;
             let lock_id = parse_lock_id(&params)?;
             let amount = parse_amount(&params, "vaultClaim")?;
             let bundle = resolve_credential_bundle(&params)?;
