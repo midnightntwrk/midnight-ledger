@@ -27,6 +27,9 @@ use crate::{
 /// Supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -48,6 +51,9 @@ pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue,
 /// Supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -65,6 +71,17 @@ pub fn select_incircuit(
         (JubjubPoint(p), JubjubPoint(q)) => {
             Ok(JubjubPoint(std_lib.jubjub().select(layouter, bit, p, q)?))
         }
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(
+            std_lib.secp256k1().select(layouter, bit, p, q)?,
+        )),
+        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(
+            (std_lib.secp256k1().base_field_chip()).select(layouter, bit, s, r)?,
+        )),
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(
+            (std_lib.secp256k1().scalar_field_chip()).select(layouter, bit, s, r)?,
+        )),
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported cond_select: {:?} ? {:?}",
             a.get_type(),
