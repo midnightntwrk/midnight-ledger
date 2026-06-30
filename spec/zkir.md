@@ -234,7 +234,7 @@ be unsound or error.
 * **Operands:** `a: Index`, `b: Index`, `bits: u32`. **Outputs:** 1 — boolean
   `a < b`.
 * **Semantics:** compares `a` and `b` as `bits`-bit unsigned integers.
-* **UB:** `a` and `b` must each fit in `bits` bits; otherwise the comparison
+* **Precondition:** `a` and `b` must each fit in `bits` bits; otherwise the comparison
   is meaningless (inputs are bit-constrained to `bits` during evaluation).
 
 ### 3.5 Constants and copies
