@@ -135,7 +135,7 @@ circuits use `V1`.
 | Convention | Meaning |
 |---|---|
 | `Index` | A `u32` memory position. The value stored there is a native field element. |
-| boolean operand | An `Index` whose value **must** be `0` or `1`. Reading a non-boolean where a boolean is required is a runtime error (`Expected boolean`); in-circuit, callers are responsible for the `0/1` precondition (see "UB" notes). |
+| boolean operand | An `Index` whose value **must** be `0` or `1`. |
 | point operand | A **pair** of indices `(x, y)`. The pair must be a valid Jubjub point or preprocessing errors (`point not on curve`). |
 | scalar operand | An `Index` interpreted as a Jubjub scalar. |
 | `bits` | A `u32` immediate (compile-time constant), not a memory index. |
@@ -280,7 +280,7 @@ Curve points are `(x, y)` index pairs; each of these pushes **2** outputs
 
 #### `EcAdd { a_x, a_y, b_x, b_y }`
 * **Outputs:** 2 — point `a + b`.
-* **UB:** `(a_x, a_y)` and `(b_x, b_y)` must each be valid Jubjub points
+* **UB:** `(a_x, a_y)` and `(b_x, b_y)` must each be valid Jubjub points as a prerequisite.
   (else `point not on curve`).
 
 #### `EcMul { a_x, a_y, scalar }`
