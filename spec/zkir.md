@@ -61,8 +61,7 @@ A v2 circuit is described by this structure (`zkir/src/ir.rs`):
 
 Because outputs are appended, an instruction can only reference values produced
 **before** it. The number of values each instruction appends is fixed and
-listed per-instruction below (most push 1; EC ops and `DivModPowerOfTwo` /
-`PersistentHash` push 2; pure constraints / assertions push 0).
+listed per-instruction below.
 
 ### 1.3 The field and the embedded curve
 
