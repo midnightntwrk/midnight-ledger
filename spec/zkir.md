@@ -85,6 +85,14 @@ vector is assembled during preprocessing in this order:
    `do_communications_commitment`.
 3. One entry per `DeclarePubInput` instruction, in execution order.
 
+The `DeclarePubInput` entries are how the circuit binds itself to a specific sequence of **Impact VM operations**: each operation's arguments are pinned into the PI vector, and the proof attests that the circuit produced exactly that sequence. 
+
+  > Intuitively, the public inputs *are* the Impact VM operations the proof
+  > commits to: a valid proof attests that some ZKIR execution produced
+  > exactly that sequence, and the Impact VM then executes those operations
+  > on chain. The proof therefore gates *which* instructions reach the VM -
+  > they are run only if the proof verifies.
+  
 ZKIR also consumes three **transcript** streams from the `ProofPreimage`, each
 with its own cursor that **must be fully consumed** by the end of the program
 (otherwise preprocessing fails with `Transcripts not fully consumed`):
