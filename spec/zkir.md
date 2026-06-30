@@ -202,7 +202,7 @@ be unsound or error.
 #### `ConstrainBits { var, bits }`
 * **Operands:** `var: Index`, `bits: u32`. **Outputs:** none.
 * **Semantics:** constrains `var` to fit in `bits` bits (i.e. `var < 2^bits`).
-* **Precondition:** `bits < FR_BITS` (255). A larger bound errors with
+* **Precondition:** `|bits| < FR_BITS` (255). A larger bound errors with
   `Excessive bit bound`.
 
 ### 3.4 Bit decomposition and reconstruction
