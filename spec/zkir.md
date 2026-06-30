@@ -309,7 +309,7 @@ Curve points are `(x, y)` index pairs; each of these pushes **2** outputs
 #### `DeclarePubInput { var }`
 * **Operands:** `var: Index`. **Outputs:** none.
 * **Semantics:** appends `memory[var]` to the public-input vector and
-  advances the public-transcript-inputs cursor. Should be **followed** by a
+  advances the public-transcript-inputs cursor. Must be **followed** by a
   `PiSkip` covering it (see below).
 
 #### `PiSkip { guard, count }`
