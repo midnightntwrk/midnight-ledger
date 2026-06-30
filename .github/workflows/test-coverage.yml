@@ -9,9 +9,7 @@ on:
       - master
 
 concurrency:
-  # Prefixed so a reusable-workflow call does not share a group with siblings
-  # in the same run (e.g. benchmark in the release flow).
-  group: test-coverage-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:

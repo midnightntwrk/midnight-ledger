@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Overwrite existing GH Packages versions (delete-then-republish). Public npm cannot be overwritten and will error."
+        description: "Real runs only: overwrite an existing GH Packages version (delete-then-republish). Public npm cannot be overwritten and will error. Not needed for a dry run."
         type: boolean
         default: false
       dry_run:
-        description: "Dry run: build, test and assemble artifacts but skip every irreversible action (npm publish, docs/tag push, GitHub Release, Slack, Docker push)."
+        description: "Dry run: build, test and assemble artifacts (always builds, even for already-published versions) but skip every irreversible action (npm publish, docs/tag push, GitHub Release, Slack, Docker push)."
         type: boolean
         default: false
 
@@ -81,11 +81,16 @@ jobs:
       - name: Compute release identifiers
         id: ids
         run: |
-          # Display version is epoch (from flake.nix) + the ledger-wasm crate
-          # version, e.g. 9 + 1.0.0-rc.3 -> 9.1.0.0-rc.3, matching the git tag.
+          # Display version always starts with the epoch (from flake.nix).
+          # ledger-8 style: the crate version already carries it (8.1.0 -> 8.1.0).
+          # ledger-9+ style: the epoch is decoupled, so prepend it
+          # (epoch 9 + 1.0.0-rc.3 -> 9.1.0.0-rc.3). Both match the git tag.
           SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
-          DISPLAY_VERSION="${SHORT_VERSION}.${LEDGER_WASM_VERSION}"
+          case "$LEDGER_WASM_VERSION" in
+            ${SHORT_VERSION}.*) DISPLAY_VERSION="$LEDGER_WASM_VERSION" ;;
+            *)                  DISPLAY_VERSION="${SHORT_VERSION}.${LEDGER_WASM_VERSION}" ;;
+          esac
           echo "version=${DISPLAY_VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag_name=ledger-${DISPLAY_VERSION}" >> "$GITHUB_OUTPUT"
 
@@ -102,7 +107,13 @@ jobs:
           VERSION="${LEDGER_WASM_VERSION}"
           SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
-          TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}"
+          # Tag always starts with the epoch: ledger-8 carries it in the version
+          # (8.1.0 -> ledger-8.1.0); ledger-9+ decouples it (9 + 1.0.0-rc.3 ->
+          # ledger-9.1.0.0-rc.3).
+          case "$VERSION" in
+            ${SHORT_VERSION}.*) TAG_NAME="ledger-${VERSION}" ;;
+            *)                  TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}" ;;
+          esac
           PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
@@ -121,10 +132,12 @@ jobs:
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
-          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
+          # the tarballs to assemble). The "--<scope>:registry" override is required: for
           # scoped packages npm uses the scope->registry mapping in .npmrc and
           # ignores --registry, so without it both checks hit GH Packages.
           if [ "${FORCE:-false}" != "true" ] \
+             && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
@@ -201,10 +214,12 @@ jobs:
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
-          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
+          # the tarballs to assemble). The "--<scope>:registry" override is required: for
           # scoped packages npm uses the scope->registry mapping in .npmrc and
           # ignores --registry, so without it both checks hit GH Packages.
           if [ "${FORCE:-false}" != "true" ] \
+             && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
@@ -282,10 +297,12 @@ jobs:
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
-          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
+          # the tarballs to assemble). The "--<scope>:registry" override is required: for
           # scoped packages npm uses the scope->registry mapping in .npmrc and
           # ignores --registry, so without it both checks hit GH Packages.
           if [ "${FORCE:-false}" != "true" ] \
+             && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$WASM_VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs — skipping build/publish."
@@ -357,13 +374,6 @@ jobs:
     uses: ./.github/workflows/integration-tests.yml
     secrets: inherit
 
-  benchmark:
-    needs: build
-    # Non-blocking: the release job waits for it but does not require it to pass
-    # (see the release job's `if:`).
-    uses: ./.github/workflows/benchmark.yml
-    secrets: inherit
-
   unit-tests:
     needs: build
     runs-on: ubuntu-latest-8-core-x64
@@ -414,14 +424,7 @@ jobs:
             test-results.xml
 
   release:
-    needs: [ build, coverage, integration, unit-tests, benchmark ]
-    # Gated on build + the test suites; benchmark result is intentionally ignored.
-    if: >-
-      ${{ !cancelled()
-          && needs.build.result == 'success'
-          && needs.coverage.result == 'success'
-          && needs.integration.result == 'success'
-          && needs['unit-tests'].result == 'success' }}
+    needs: [ build, coverage, integration, unit-tests ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -443,7 +446,7 @@ jobs:
           set -euo pipefail
           STAGING="release-assets"
           mkdir -p "$STAGING"
-          # nullglob so absent artifacts (e.g. a failed benchmark) skip cleanly.
+          # nullglob so an absent optional artifact skips cleanly.
           shopt -s nullglob
 
           for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
@@ -457,11 +460,6 @@ jobs:
           fi
           if [ -d downloaded-artifacts/"Coverage Report" ]; then
             ( cd downloaded-artifacts/"Coverage Report" && zip -qr "${GITHUB_WORKSPACE}/${STAGING}/coverage-html-report.zip" . )
-          fi
-
-          for f in downloaded-artifacts/benchmark-report-output/*; do cp "$f" "$STAGING/benchmark-output.txt"; done
-          if [ -d downloaded-artifacts/benchmark-report ]; then
-            ( cd downloaded-artifacts/benchmark-report && zip -qr "${GITHUB_WORKSPACE}/${STAGING}/benchmark-html-report.zip" . )
           fi
 
           # Guard: `sha256sum *` would block on stdin if STAGING were empty.
