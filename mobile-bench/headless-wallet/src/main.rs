@@ -302,12 +302,40 @@ async fn handle_create_lock(wallet: &HeadlessWallet, verb: &str, args: Json) -> 
         Some(v) => v,
         None => return err(verb, "bad-args", "missing/invalid maxClaimBaseUnits"),
     };
+    // REQUIRED, NOT optional. The passport-vault contract asserts
+    // `verifierChallengeHash != zeros` in `createLock` (and the claim
+    // path matches it against the holder's bundle), so a lock created
+    // with the zero default is permanently un-claimable. Earlier version
+    // defaulted to zeros and silently produced stranded locks — caught
+    // 2026-06-30 with 3 NIGHT permanently locked in 2 stranded locks.
+    // The verifier challenge is the lock's verifier-side anchor; the
+    // caller MUST source it (e.g. hash of `VAULT_VERIFIER_CHALLENGE` env,
+    // or `bundle.verifierChallengeHashHex` if anchoring against a
+    // specific issued credential).
     let challenge = match args.get("verifierChallengeHex").and_then(|v| v.as_str()) {
         Some(h) if !h.is_empty() => match decode_hex32(h, "verifierChallengeHex") {
-            Ok(b) => b,
+            Ok(b) if b != [0u8; 32] => b,
+            Ok(_) => {
+                return err(
+                    verb,
+                    "bad-args",
+                    "verifierChallengeHex must be non-zero — vault contract \
+                     asserts it, locks with zero challenge are un-claimable",
+                );
+            }
             Err(e) => return err(verb, "bad-args", e.to_string()),
         },
-        _ => [0u8; 32],
+        _ => {
+            return err(
+                verb,
+                "bad-args",
+                "missing verifierChallengeHex — REQUIRED for createLock \
+                 (the vault contract asserts it non-zero; locks with zero \
+                 challenge cannot be claimed). Derive from \
+                 `VAULT_VERIFIER_CHALLENGE` env or the credential bundle's \
+                 `verifierChallengeHashHex`.",
+            );
+        }
     };
     let initial = args
         .get("initialAmountBaseUnits")
