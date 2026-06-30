@@ -70,6 +70,7 @@ listed per-instruction below.
 * **Embedded curve** — **Jubjub** (`EmbeddedGroupAffine`; the Jubjub base field
   is the BLS12-381 scalar field, which is why curve coordinates fit directly
   in native memory elements). In v2, a curve point is represented as **two**
+* **Embedded curve** — ZKIRv2 supports operations over the embedded curve, **Jubjub**. Jubjub is the native curve, whose base field is compact's 'native field'. This enables efficient operations over this curve. A curve point is represented as **two**
   memory elements: its affine `x` and `y` coordinates.
 * **Embedded scalar field** — the Jubjub scalar field (`EmbeddedFr`), used as
   the scalar argument to `EcMul` / `EcMulGenerator`.
