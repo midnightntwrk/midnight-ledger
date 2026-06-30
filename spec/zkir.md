@@ -135,7 +135,7 @@ circuits use `V1`.
 | `Index` | A `u32` memory position. The value stored there is a native field element. |
 | boolean operand | An `Index` whose value **must** be `0` or `1`. Reading a non-boolean where a boolean is required is a runtime error (`Expected boolean`); in-circuit, callers are responsible for the `0/1` precondition (see "UB" notes). |
 | point operand | A **pair** of indices `(x, y)`. The pair must be a valid Jubjub point or preprocessing errors (`point not on curve`). |
-| scalar operand | An `Index` interpreted as an embedded-curve (Jubjub) scalar. |
+| scalar operand | An `Index` interpreted as a Jubjub scalar. |
 | `bits` | A `u32` immediate (compile-time constant), not a memory index. |
 | `imm` | A native field constant embedded in the instruction (`LoadImm`). |
 | `alignment` | A field-aligned-binary `Alignment` describing how inputs pack into bytes (`PersistentHash`). |
