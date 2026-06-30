@@ -294,6 +294,31 @@ impl HeadlessWallet {
         self.network
     }
 
+    /// Return the wallet's own unshielded NIGHT receive address (bech32m).
+    /// Used by operator scripts that need to know where to send funds to
+    /// THIS wallet — e.g. the orchestrator computes a deterministic admin
+    /// seed's address by spinning up a HeadlessWallet with that seed and
+    /// asking it for its `unshielded_address`.
+    pub fn unshielded_address(&self) -> Result<String, HeadlessError> {
+        self.wallet
+            .unshielded_address()
+            .map_err(|e| HeadlessError::Vault(format!("unshielded address: {e}")))
+    }
+
+    /// Transfer native NIGHT (unshielded) to a bech32m recipient. Returns
+    /// the submitted tx hash. Thin delegator to [`Wallet::send_unshielded`];
+    /// see that method for funding, change, and signing details.
+    pub async fn send_unshielded(
+        &self,
+        recipient_address: &str,
+        amount_base_units: u128,
+    ) -> Result<String, HeadlessError> {
+        self.wallet
+            .send_unshielded(recipient_address, amount_base_units)
+            .await
+            .map_err(HeadlessError::Vault)
+    }
+
     // ─── Vault verbs ──────────────────────────────────────────────
     //
     // Thin delegators to [`Wallet`]'s vault methods. The Rust path

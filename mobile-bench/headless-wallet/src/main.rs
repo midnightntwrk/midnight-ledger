@@ -40,6 +40,15 @@
 //!                              "amountBaseUnits", "bundle",
 //!                              "currentDay"? }`
 //!
+//! Operator (treasury / address-derivation primitives):
+//!   - `getUnshieldedAddress` — `args: {}`. Returns
+//!                              `{ "address": "<bech32m>" }` for the
+//!                              currently-connected wallet.
+//!   - `sendUnshielded`       — `args: { "recipientAddress": "<bech32m>",
+//!                              "amountBaseUnits": "<decimal>" }`.
+//!                              Transfers native NIGHT, returns
+//!                              `{ "txHash": "<hex>" }`.
+//!
 //! Identity (deferred — `bootstrap` lands first, login / issuance
 //! arrive in a follow-up wave):
 //!   - `login`              — TBD
@@ -272,6 +281,27 @@ async fn handle_verb(wallet: &HeadlessWallet, verb: &str, args: Json) -> Respons
             {
                 Ok(tx_hash) => ok(verb, serde_json::json!({ "txHash": tx_hash })),
                 Err(e) => err(verb, "vault-claim-failed", e.to_string()),
+            }
+        }
+
+        "getUnshieldedAddress" => match wallet.unshielded_address() {
+            Ok(addr) => ok(verb, serde_json::json!({ "address": addr })),
+            Err(e) => err(verb, "address-derivation-failed", e.to_string()),
+        },
+
+        "sendUnshielded" => {
+            let recipient = match args.get("recipientAddress").and_then(|v| v.as_str()) {
+                Some(s) if !s.is_empty() => s.to_string(),
+                _ => return err(verb, "bad-args", "missing recipientAddress"),
+            };
+            let amount = match args.get("amountBaseUnits").and_then(json_as_u128) {
+                Some(v) if v > 0 => v,
+                Some(_) => return err(verb, "bad-args", "amountBaseUnits must be > 0"),
+                None => return err(verb, "bad-args", "missing/invalid amountBaseUnits"),
+            };
+            match wallet.send_unshielded(&recipient, amount).await {
+                Ok(tx_hash) => ok(verb, serde_json::json!({ "txHash": tx_hash })),
+                Err(e) => err(verb, "send-unshielded-failed", e.to_string()),
             }
         }
 
