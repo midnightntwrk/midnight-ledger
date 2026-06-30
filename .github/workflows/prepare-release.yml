@@ -43,9 +43,12 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Bump crate versions
+        # Pass the input via env (not inline ${{ }}) so it cannot inject shell.
+        env:
+          VERSIONS: ${{ inputs.versions }}
         run: |
           set -euo pipefail
-          IFS=',' read -ra PAIRS <<< "${{ inputs.versions }}"
+          IFS=',' read -ra PAIRS <<< "$VERSIONS"
           for pair in "${PAIRS[@]}"; do
             crate="$(echo "$pair" | cut -d= -f1 | xargs)"
             ver="$(echo "$pair" | cut -d= -f2 | xargs)"
