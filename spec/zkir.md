@@ -67,7 +67,6 @@ listed per-instruction below.
 
 * **Native field (`Fr`)** — the **BLS12-381 scalar field** (`outer::Scalar` in
   `transient-crypto`). Every memory element is a native field element.
-  `FR_BITS = 255`, `FR_BYTES = 32`, `FR_BYTES_STORED = 31`.
 * **Embedded curve** — **Jubjub** (`EmbeddedGroupAffine`; the Jubjub base field
   is the BLS12-381 scalar field, which is why curve coordinates fit directly
   in native memory elements). In v2, a curve point is represented as **two**
