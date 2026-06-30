@@ -17,7 +17,7 @@ use base_crypto::time::Timestamp;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction};
-use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
+use midnight_ledger::test_utilities::{Resolver, TestState, contract_operation, test_resolver};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v9 as midnight_ledger;
@@ -27,7 +27,7 @@ use onchain_runtime::program_fragments::{
     HistoricMerkleTree_check_root, HistoricMerkleTree_insert,
 };
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+use onchain_runtime::state::{ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::borrow::Cow;
@@ -61,8 +61,8 @@ async fn simple_merkle_tree() {
 
     // Part 1: Deploy
     let root = MerkleTree::<()>::blank(10).root();
-    let store_op = ContractOperation::new(verifier_key(&RESOLVER, "store").await, None);
-    let check_op = ContractOperation::new(verifier_key(&RESOLVER, "check").await, None);
+    let store_op = contract_operation(&RESOLVER, "store").await;
+    let check_op = contract_operation(&RESOLVER, "check").await;
     let contract = ContractState::new(
         stval!([[{MT(10) {}}, (0u64), {root => null}]]),
         HashMap::new()

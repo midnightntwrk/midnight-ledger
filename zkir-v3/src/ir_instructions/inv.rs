@@ -1,0 +1,127 @@
+// This file is part of midnight-ledger.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use group::ff::Field;
+use midnight_circuits::instructions::ArithInstructions;
+use midnight_proofs::{circuit::Layouter, plonk};
+use midnight_zk_stdlib::ZkStdLib;
+use transient_crypto::curve::Fr;
+
+use crate::{
+    ir_instructions::F,
+    ir_types::{CircuitValue, IrValue},
+};
+
+/// Inverts off-circuit the given input.
+/// Inversion is supported on:
+///   - `Native`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
+///
+/// # Errors
+///
+/// This function results in an error if the input type is not supported,
+/// or if the given value is zero.
+pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
+    use IrValue::*;
+    let zero_err = || anyhow::anyhow!("cannot invert zero of type {:?}", x.get_type());
+    match x {
+        Native(a) => Option::from(a.0.invert())
+            .ok_or_else(zero_err)
+            .map(Fr)
+            .map(Native),
+
+        Secp256k1Base(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(Secp256k1Base),
+
+        Secp256k1Scalar(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(Secp256k1Scalar),
+
+        _ => Err(anyhow::anyhow!(
+            "Unsupported inversion of {:?}",
+            x.get_type(),
+        )),
+    }
+}
+
+/// Inverts in-circuit the given input.
+/// Inversion is supported on:
+///   - `Native`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
+///
+/// # Errors
+///
+/// This function results in an error if the input type is not supported,
+/// or if the given value is zero.
+pub fn inv_incircuit(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    x: &CircuitValue,
+) -> Result<CircuitValue, plonk::Error> {
+    use CircuitValue::*;
+    match x {
+        Native(a) => {
+            let r = std_lib.inv(layouter, a)?;
+            Ok(Native(r))
+        }
+        Secp256k1Base(a) => {
+            let r = (std_lib.secp256k1().base_field_chip()).inv(layouter, a)?;
+            Ok(Secp256k1Base(r))
+        }
+        Secp256k1Scalar(a) => {
+            let r = (std_lib.secp256k1().scalar_field_chip()).inv(layouter, a)?;
+            Ok(Secp256k1Scalar(r))
+        }
+
+        _ => Err(plonk::Error::Synthesis(format!(
+            "Unsupported inversion of {:?}",
+            x.get_type(),
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use group::ff::Field;
+    use midnight_curves::k256;
+    use rand_chacha::rand_core::OsRng;
+    use transient_crypto::curve::Fr;
+
+    use super::*;
+
+    #[test]
+    fn test_inv() {
+        use IrValue::*;
+
+        let x = Fr(F::random(OsRng));
+        assert_eq!(
+            inv_offcircuit(&Native(x)).unwrap(),
+            Native(Fr(x.0.invert().unwrap()))
+        );
+
+        let x = k256::Fp::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Secp256k1Base(x)).unwrap(),
+            Secp256k1Base(x.invert().unwrap())
+        );
+
+        let x = k256::Fq::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Secp256k1Scalar(x)).unwrap(),
+            Secp256k1Scalar(x.invert().unwrap())
+        );
+    }
+}

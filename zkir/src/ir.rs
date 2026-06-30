@@ -16,6 +16,8 @@
 use anyhow::Result;
 use base_crypto::fab::Alignment;
 use midnight_proofs::dev::cost_model::CircuitModel;
+use midnight_proofs::utils::SerdeFormat;
+use midnight_zk_stdlib::MidnightPK;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -28,32 +30,12 @@ use serialize::{
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
-use midnight_proofs::utils::SerdeFormat;
-use midnight_zk_stdlib::MidnightPK;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash,
     VerifierKey, Zkir,
 };
 
-type V1IrSource = zkir_old::IrSource;
-type V1MidnightPK = midnight_zk_stdlib_v1::MidnightPK<V1IrSource>;
-
 const PK_COMPRESSION_LEVEL: u32 = 6;
-
-#[derive(Debug)]
-pub enum VersionedInnerPK {
-    V1(V1MidnightPK),
-    V2(MidnightPK<IrSource>),
-}
-
-impl VersionedInnerPK {
-    pub fn k(&self) -> u8 {
-        match self {
-            VersionedInnerPK::V1(pk) => pk.k(),
-            VersionedInnerPK::V2(pk) => pk.k(),
-        }
-    }
-}
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -122,8 +104,9 @@ impl TryFrom<&IrSource> for OldIrSource {
 #[non_exhaustive]
 pub enum IrMinorVersion {
     V0,
-    #[default]
     V1,
+    #[default]
+    V2,
 }
 
 #[derive(Serializable)]
@@ -131,7 +114,7 @@ pub enum IrMinorVersion {
 struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
-    type ProverKey = VersionedInnerPK;
+    type ProverKey = MidnightPK<IrSource>;
 
     fn check(
         &self,
@@ -147,43 +130,41 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        let inner_pk = pk
-            .init()
-            .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
-
-        let v2_pk = match &*inner_pk {
-            VersionedInnerPK::V2(pk) => pk,
-            VersionedInnerPK::V1(_) => {
+        match self.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
                 anyhow::bail!(
-                    "Zkir::prove called with a v1 prover key; \
-                     use the v1 proving pipeline (ir_v1::v1_prove) instead"
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for proving"
                 )
             }
-        };
-
-        use midnight_zk_stdlib::prove;
-        let params_k = params.get_params(v2_pk.k()).await?;
-        let preproc = self.preprocess(preimage)?;
-        let pis = preproc.pis.clone();
-        let pi_skips = preproc.pi_skips.clone();
-        let proof = prove::<_, TranscriptHash>(
-            params_k.as_ref(),
-            v2_pk,
-            self,
-            &pis,
-            preproc,
-            rng,
-        )?;
-        Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+            IrMinorVersion::V2 => {
+                let inner_pk = pk
+                    .init()
+                    .map_err(|e| anyhow::anyhow!("Could not init pk: {e:?}"))?;
+                use midnight_zk_stdlib::prove;
+                let params_k = params.get_params(inner_pk.k()).await?;
+                let preproc = self.preprocess(preimage)?;
+                let pis = preproc.pis.clone();
+                let pi_skips = preproc.pi_skips.clone();
+                let proof = prove::<_, TranscriptHash>(
+                    params_k.as_ref(),
+                    &inner_pk,
+                    self,
+                    &pis,
+                    preproc,
+                    rng,
+                )?;
+                Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+            }
+        }
     }
 
     fn k(&self) -> u8 {
-        match self.to_v1() {
-            Ok(old_ir) => {
-                use transient_crypto_old::proofs::Zkir as _;
-                old_ir.k()
+        match self.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                use transient_crypto_old::proofs::Zkir as V1Zkir;
+                V1Zkir::k(self)
             }
-            Err(_) => midnight_zk_stdlib::optimal_k(self) as u8,
+            IrMinorVersion::V2 => midnight_zk_stdlib::optimal_k(self) as u8,
         }
     }
 
@@ -191,21 +172,18 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
-        if let Ok(old_ir) = self.to_v1() {
-            let v1_params = crate::ir_v1::V1Params(params);
-            use transient_crypto_old::proofs::Zkir as _;
-            let old_vk = old_ir.keygen_vk(&v1_params).await?;
-            let raw = {
-                let mut buf = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
-                buf
-            };
-            let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
-            Ok(vk)
-        } else {
-            use midnight_zk_stdlib::setup_vk;
-            let k = midnight_zk_stdlib::optimal_k(self) as u8;
-            Ok(VerifierKey::from(setup_vk(params.get_params(k).await?.as_ref(), self)))
+        match self.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                anyhow::bail!(
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for keygen_vk"
+                )
+            }
+            IrMinorVersion::V2 => {
+                use midnight_zk_stdlib::setup_vk;
+                let k = midnight_zk_stdlib::optimal_k(self) as u8;
+                let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
+                Ok(VerifierKey::from(vk))
+            }
         }
     }
 
@@ -213,50 +191,29 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-        if let Ok(old_ir) = self.to_v1() {
-            let v1_params = crate::ir_v1::V1Params(params);
-            use transient_crypto_old::proofs::Zkir as _;
-            let (old_pk, old_vk) = old_ir.keygen(&v1_params).await?;
-            let v1_inner_pk = old_pk.init()?;
-            let versioned_pk = VersionedInnerPK::V1((*v1_inner_pk).clone());
-            let raw = {
-                let mut buf = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
-                buf
-            };
-            let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
-            Ok((ProverKey::from_raw(versioned_pk), vk))
-        } else {
-            self.v2_keygen(params).await
+        match self.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                anyhow::bail!(
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for keygen"
+                )
+            }
+            IrMinorVersion::V2 => self.v2_keygen(params).await,
         }
     }
 
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
-        // Default: read as v1 (the existing key material is all v1).
         let mut reader = flate2::read::GzDecoder::new(reader);
-        let v1_pk = V1MidnightPK::read(
+        let pk = MidnightPK::read(
             &mut { &mut reader },
-            midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
         )?;
-        Ok(VersionedInnerPK::V1(v1_pk))
+        Ok(pk)
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
-        let mut writer = flate2::write::GzEncoder::new(
-            writer,
-            flate2::Compression::new(PK_COMPRESSION_LEVEL),
-        );
-        match pk {
-            VersionedInnerPK::V1(v1_pk) => {
-                v1_pk.write(
-                    &mut { &mut writer },
-                    midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
-                )
-            }
-            VersionedInnerPK::V2(v2_pk) => {
-                v2_pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
-            }
-        }
+        let mut writer =
+            flate2::write::GzEncoder::new(writer, flate2::Compression::new(PK_COMPRESSION_LEVEL));
+        pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
     }
 
     fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
@@ -590,13 +547,6 @@ impl Model {
 }
 
 impl IrSource {
-    /// Converts to the v1 `IrSource` via tagged serialization round-trip.
-    pub fn to_v1(&self) -> io::Result<V1IrSource> {
-        let mut buf = Vec::new();
-        self.serialize_to_tagged(&mut buf)?;
-        serialize_old::tagged_deserialize(&mut &buf[..])
-    }
-
     /// v2 (zk-stdlib v2) key generation. Not the default; use `Zkir::keygen` for v1.
     pub async fn v2_keygen(
         &self,
@@ -606,7 +556,7 @@ impl IrSource {
         let k = midnight_zk_stdlib::optimal_k(self) as u8;
         let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
-        Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
+        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
     }
 
     /// Retrieves a model representation of this circuit.
@@ -616,18 +566,16 @@ impl IrSource {
         }
     }
 
-    /// Attempts to load from a tagged source, which may be *either* of
-    /// - `ir-source[v2-generic]`
-    /// - `ir-source[v2]`
-    ///
-    /// This is due to a need for a backwards-compatible format change.
+    /// Attempts to load from a tagged source, accepting both
+    /// `ir-source[v2-generic]` (current, with version field) and `ir-source[v2]`
+    /// (legacy, no version field).
     pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
         let tag = peek_tag(&mut reader)?;
         let expected_tag_new = IrSource::tag();
         let expected_tag_old = OldIrSource::tag();
-        if tag == expected_tag_new {
+        if tag == *expected_tag_new {
             serialize::tagged_deserialize(&mut reader)
-        } else if tag == expected_tag_old {
+        } else if tag == *expected_tag_old {
             serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
         } else {
             Err(io::Error::new(
@@ -662,7 +610,25 @@ impl IrSource {
                 let facade = FacadeProverKey(container);
                 tagged_serialize(&facade, writer)
             }
-            IrMinorVersion::V1 => tagged_serialize(pk, writer),
+            IrMinorVersion::V1 | IrMinorVersion::V2 => tagged_serialize(pk, writer),
+        }
+    }
+
+    /// Writes out a stdlib-v1 prover key with tag, preserving v0's old tag structure.
+    pub fn serialize_stdlib_v1_prover_key_to_tagged<W: Write>(
+        version: IrMinorVersion,
+        pk: &transient_crypto_old::proofs::ProverKey<Self>,
+        writer: W,
+    ) -> io::Result<()> {
+        match version {
+            IrMinorVersion::V0 => {
+                let mut raw = Vec::new();
+                Serializable::serialize(pk, &mut raw)?;
+                let container = <Vec<u8> as Deserializable>::deserialize(&mut &raw[..], 0)?;
+                let facade = FacadeProverKey(container);
+                tagged_serialize(&facade, writer)
+            }
+            IrMinorVersion::V1 | IrMinorVersion::V2 => tagged_serialize(pk, writer),
         }
     }
 
@@ -682,7 +648,7 @@ impl IrSource {
                 match ver {
                     SerdeVersion {
                         major: 2,
-                        minor: 0..=1,
+                        minor: 0..=2,
                     } => {
                         obj.insert(
                             "version".into(),
@@ -718,17 +684,11 @@ impl IrSource {
             .init()
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
 
-        let v2_pk = match &*inner_pk {
-            VersionedInnerPK::V2(pk) => pk,
-            VersionedInnerPK::V1(_) => {
-                anyhow::bail!("prove_unchecked requires a v2 prover key")
-            }
-        };
-
-        let params_k = params.get_params(v2_pk.k()).await?;
+        let params_k = params.get_params(inner_pk.k()).await?;
         let pis = preproc.pis.clone();
 
-        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
+        let proof =
+            prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
 
         Ok(Proof(proof))
     }

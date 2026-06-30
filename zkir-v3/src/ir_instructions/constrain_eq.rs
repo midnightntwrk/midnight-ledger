@@ -23,7 +23,11 @@ use crate::{
 /// Constrains off-circuit the given inputs to be equal.
 /// Equality constraint is supported on:
 ///   - `Native`
+///   - `Bytes32`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -50,7 +54,11 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
 /// Constrains in-circuit the given inputs to be equal.
 /// Equality constraint is supported on:
 ///   - `Native`
+///   - `Bytes32`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -64,7 +72,22 @@ pub fn constrain_eq_incircuit(
     use CircuitValue::*;
     match (a, b) {
         (Native(x), Native(y)) => std_lib.assert_equal(layouter, x, y),
+
+        (Bytes32(xs), Bytes32(ys)) => xs
+            .iter()
+            .zip(ys.iter())
+            .try_for_each(|(x, y)| std_lib.assert_equal(layouter, x, y)),
+
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().assert_equal(layouter, p, q),
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => std_lib.secp256k1().assert_equal(layouter, p, q),
+        (Secp256k1Base(s), Secp256k1Base(r)) => {
+            (std_lib.secp256k1().base_field_chip()).assert_equal(layouter, s, r)
+        }
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => {
+            (std_lib.secp256k1().scalar_field_chip()).assert_equal(layouter, s, r)
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
@@ -77,7 +100,8 @@ pub fn constrain_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::JubjubSubgroup;
+    use midnight_curves::{JubjubSubgroup, k256};
+    use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -87,9 +111,20 @@ mod tests {
     fn constrain_eq_offcircuit_behavior() {
         use IrValue::*;
         let x = Fr(F::random(OsRng));
-        let p = JubjubSubgroup::random(OsRng);
         assert!(constrain_eq_offcircuit(&Native(x), &Native(x)).is_ok());
+
+        let bytes: [u8; 32] = std::array::from_fn(|_| rand::thread_rng().r#gen());
+        assert!(constrain_eq_offcircuit(&Bytes32(bytes), &Bytes32(bytes)).is_ok());
+
+        let p = JubjubSubgroup::random(OsRng);
         assert!(constrain_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).is_ok());
         assert!(constrain_eq_offcircuit(&Native(x), &JubjubPoint(p)).is_err());
+
+        let p = k256::K256::random(OsRng);
+        let s = k256::Fp::random(OsRng);
+        let r = k256::Fq::random(OsRng);
+        assert!(constrain_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).is_ok());
     }
 }

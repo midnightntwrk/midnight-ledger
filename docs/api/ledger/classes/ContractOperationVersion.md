@@ -1,4 +1,4 @@
-[**@midnight/ledger v0.1.0-rc.1**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -20,7 +20,7 @@ new ContractOperationVersion(version): ContractOperationVersion;
 
 ##### version
 
-`"v3"`
+`"v3"` | `"v4"`
 
 #### Returns
 
@@ -31,7 +31,7 @@ new ContractOperationVersion(version): ContractOperationVersion;
 ### version
 
 ```ts
-readonly version: "v3";
+readonly version: "v3" | "v4";
 ```
 
 ## Methods

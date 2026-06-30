@@ -1,5 +1,18 @@
 # `zkir` Changelog
 
+## Version `2.3.0`
+
+- breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)
+- breaking: default `IrMinorVersion` changed from `V1` to `V2`
+- feat: `LocalProvingProvider` dynamically dispatches V0/V1 circuits through
+  the old (zk-stdlib v1) pipeline and V2+ through the current pipeline
+- refactor: `ir_v1` module rewritten — implements `midnight_zk_stdlib_v1::Relation`
+  directly on `IrSource`, removing the `zkir-old` dependency entirely
+- fix: zkir-wasm proving now correctly dispatches v1 vs v2 pipelines based on
+  IR version tag, with separate `transient_crypto_old::proofs::ParamsProverProvider`
+  implementation for v1 circuits
+- fix: precompile hash fixtures updated for new key format
+
 ## Version `2.2.0`
 
 - feat: dual v1/v2 proving and verification pipeline

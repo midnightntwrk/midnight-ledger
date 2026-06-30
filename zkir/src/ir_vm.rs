@@ -863,9 +863,9 @@ impl Relation for IrSource {
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
-        let nr_pow2range_cols: u8 = match self.version {
+        let nr_pow2range_cols = match self.version {
             IrMinorVersion::V0 => 1,
-            IrMinorVersion::V1 => 4,
+            IrMinorVersion::V1 | IrMinorVersion::V2 => 4,
         };
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,

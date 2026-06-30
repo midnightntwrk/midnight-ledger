@@ -6,7 +6,7 @@ on:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
-      ATTIC_CACHE_TOKEN:
+      GH_USERNAME:
         required: true
       GH_PASSWORD:
         required: true
@@ -35,13 +35,14 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Cache Nix
-        uses: input-output-hk/actions/attic@dbb6ea6d50ffc37a2d481fd8047aff028bac3223 # latest
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          endpoint: https://attic.ci.iog.io
-          cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh

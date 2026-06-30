@@ -1515,9 +1515,10 @@ impl<D: DB> LedgerState<D> {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
                         let limit = self.parameters.limits.max_contract_metadata_size;
-                        if let Err(e) =
-                            crate::verify::check_entry_point_metadata_sizes(&deploy.initial_state, limit)
-                        {
+                        if let Err(e) = crate::verify::check_entry_point_metadata_sizes(
+                            &deploy.initial_state,
+                            limit,
+                        ) {
                             return Err(match e {
                                 crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
                                     TransactionInvalid::ContractMetadataTooLarge {
@@ -1567,8 +1568,8 @@ impl<D: DB> LedgerState<D> {
                                 }
                                 SingleUpdate::VerifierKeyRemove(ep, ver) => {
                                     let mut op = match cstate.operations.get(ep) {
-                                        Some(op) => op.deref().clone(),
-                                        None => {
+                                        Some(op) if ver.has(&op) => op.deref().clone(),
+                                        _ => {
                                             return Err(TransactionInvalid::VerifierKeyNotFound(
                                                 ep.clone(),
                                                 ver.clone(),
@@ -1576,7 +1577,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op.v2.is_none() {
+                                    if op == ContractOperation::new(None, None) {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
@@ -1595,6 +1596,35 @@ impl<D: DB> LedgerState<D> {
                                         ));
                                     }
                                     vk.insert_into(&mut op);
+                                    cstate.operations = cstate.operations.insert(ep.clone(), op);
+                                }
+                                SingleUpdate::IrRemove(ep) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => op.deref().clone(),
+                                        None => {
+                                            return Err(TransactionInvalid::IrNotFound(ep.clone()));
+                                        }
+                                    };
+                                    op.ir = None;
+
+                                    if op == ContractOperation::new(None, None) {
+                                        cstate.operations = cstate.operations.remove(ep);
+                                    } else {
+                                        cstate.operations =
+                                            cstate.operations.insert(ep.clone(), op);
+                                    }
+                                }
+                                SingleUpdate::IrInsert(ep, ir) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => (*op).clone(),
+                                        None => ContractOperation::new(None, None),
+                                    };
+                                    if op.ir.is_some() {
+                                        return Err(TransactionInvalid::IrAlreadyPresent(
+                                            ep.clone(),
+                                        ));
+                                    }
+                                    op.ir = Some(Sp::new(ir.clone()));
                                     cstate.operations = cstate.operations.insert(ep.clone(), op);
                                 }
                             }

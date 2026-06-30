@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use midnight_circuits::instructions::EqualityInstructions;
+use midnight_circuits::instructions::{BinaryInstructions, EqualityInstructions};
 use midnight_circuits::types::AssignedBit;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
@@ -24,7 +24,11 @@ use crate::{
 /// Tests off-circuit whether the given inputs are equal.
 /// Equality testing is supported on:
 ///   - `Native`
+///   - `Bytes32`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -33,7 +37,13 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
     use IrValue::*;
     match (a, b) {
         (Native(x), Native(y)) => Ok(x == y),
+        (Bytes32(xs), Bytes32(ys)) => Ok(xs == ys),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(p == q),
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => Ok(p == q),
+        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(s == r),
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(s == r),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
@@ -46,6 +56,9 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 /// Equality testing is supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -59,7 +72,23 @@ pub fn test_eq_incircuit(
     use CircuitValue::*;
     match (a, b) {
         (Native(x), Native(y)) => std_lib.is_equal(layouter, x, y),
+
+        (Bytes32(xs), Bytes32(ys)) => {
+            let pair_wise_eqs = (xs.iter().zip(ys.iter()))
+                .map(|(x, y)| std_lib.is_equal(layouter, x, y))
+                .collect::<Result<Vec<_>, plonk::Error>>()?;
+            std_lib.and(layouter, &pair_wise_eqs)
+        }
+
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().is_equal(layouter, p, q),
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => std_lib.secp256k1().is_equal(layouter, p, q),
+        (Secp256k1Base(s), Secp256k1Base(r)) => {
+            (std_lib.secp256k1().base_field_chip()).is_equal(layouter, s, r)
+        }
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => {
+            (std_lib.secp256k1().scalar_field_chip()).is_equal(layouter, s, r)
+        }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
@@ -72,7 +101,8 @@ pub fn test_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::JubjubSubgroup;
+    use midnight_curves::{JubjubSubgroup, k256};
+    use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -82,9 +112,20 @@ mod tests {
     fn test_eq_offcircuit_behavior() {
         use IrValue::*;
         let x = Fr(F::random(OsRng));
-        let p = JubjubSubgroup::random(OsRng);
         assert!(test_eq_offcircuit(&Native(x), &Native(x)).unwrap());
+
+        let bytes: [u8; 32] = std::array::from_fn(|_| rand::thread_rng().r#gen());
+        assert!(test_eq_offcircuit(&Bytes32(bytes), &Bytes32(bytes)).unwrap());
+
+        let p = JubjubSubgroup::random(OsRng);
         assert!(test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap());
         assert!(test_eq_offcircuit(&Native(x), &JubjubPoint(p)).is_err());
+
+        let p = k256::K256::random(OsRng);
+        let s = k256::Fp::random(OsRng);
+        let r = k256::Fq::random(OsRng);
+        assert!(test_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).unwrap());
     }
 }

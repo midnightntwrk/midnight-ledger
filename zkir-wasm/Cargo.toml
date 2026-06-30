@@ -1,6 +1,6 @@
 [package]
 name = "midnight-zkir-wasm"
-version = "2.1.0"
+version = "2.2.0-rc.3"
 edition = "2024"
 license.workspace = true
 publish = false
@@ -13,6 +13,7 @@ proptest = []
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.2.0" }
 zkir = { path = "../zkir", package = "midnight-zkir" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 

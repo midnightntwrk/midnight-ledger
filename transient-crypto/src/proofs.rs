@@ -17,6 +17,7 @@
 
 use crate::curve::{Fr, outer};
 use base_crypto::hash::{HashOutput, persistent_hash};
+use derive_where::derive_where;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use midnight_curves::Bls12;
@@ -51,7 +52,6 @@ use storage_core::arena::ArenaKey;
 use storage_core::db::DB;
 use storage_core::storable::Loader;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-use derive_where::derive_where;
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {
@@ -318,9 +318,7 @@ impl<T: Zkir> ProverKey<T> {
                 writer.write_all(data)?;
                 Ok(())
             }
-            InnerProverKey::Initialized(key) => {
-                T::write_raw_pk(&mut writer, key)
-            }
+            InnerProverKey::Initialized(key) => T::write_raw_pk(&mut writer, key),
         }
     }
 }
@@ -371,10 +369,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v6]")
+        Cow::Borrowed("verifier-key[v7]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v6]".into()
+        "verifier-key[v7]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
@@ -391,7 +389,8 @@ impl Distribution<VerifierKey> for Standard {
 impl From<MidnightVK> for VerifierKey {
     fn from(vk: MidnightVK) -> Self {
         let mut raw = Vec::new();
-        vk.write(&mut raw, SerdeFormat::Processed).expect("in-memory serialize");
+        vk.write(&mut raw, SerdeFormat::Processed)
+            .expect("in-memory serialize");
         VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))))
     }
 }
@@ -546,9 +545,7 @@ impl VerifierKey {
     /// Returns the original raw bytes, preserved even after initialization.
     pub fn original_bytes(&self) -> Vec<u8> {
         match &*self.0.lock().expect("mutex is not poisoned") {
-            InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
-                data.clone()
-            }
+            InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => data.clone(),
             InnerVerifierKey::Initialized(_, original) => original.clone(),
         }
     }
@@ -695,6 +692,8 @@ pub trait ProvingProvider {
     /// Creates a copy of this provider. As providers often include an RNG, this
     /// may mutate the provider itself.
     fn split(&mut self) -> Self;
+    /// Retrieves the resolver underlying this proving provider.
+    fn resolver(&self) -> &impl Resolver;
 }
 
 /// Everything necessary to produce a proof.

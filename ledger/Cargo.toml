@@ -1,6 +1,6 @@
 [package]
 name = "midnight-ledger-v9"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -11,24 +11,26 @@ default = ["proof-verifying"]
 proving = []
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
-proof-verifying = ["zswap/proof-verifying", "dep:zkir_v2"]
+proof-verifying = ["zswap/proof-verifying"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
-test-utilities = ["dep:reqwest", "dep:zkir_v2"]
+test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
-coin-structure = { version = "2.1.0", path = "../coin-structure", package = "midnight-coin-structure" }
+coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
-zkir_v2 = { version = "2.1.0", path = "../zkir", package = "midnight-zkir", optional = true }
+zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
+zkir_v3 = { version = "3.0.0-rc.2", path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
