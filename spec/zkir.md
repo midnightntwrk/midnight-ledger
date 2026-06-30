@@ -212,7 +212,7 @@ be unsound or error.
   order:
   1. `var >> bits` (the quotient / high bits)
   2. `var & ((1 << bits) - 1)` (the remainder / low `bits` bits)
-* **Precondition:** `bits ≤ FR_BYTES_STORED * 8` (248). Larger errors with
+* **Precondition:** `|bits| ≤ FR_BYTES_STORED * 8` (248). Larger errors with
   `Excessive bit count`.
 
 #### `ReconstituteField { divisor, modulus, bits }`
