@@ -72,8 +72,10 @@ listed per-instruction below.
   in native memory elements). In v2, a curve point is represented as **two**
 * **Embedded curve** — ZKIRv2 supports operations over the embedded curve, **Jubjub**. Jubjub is the native curve, whose base field is compact's 'native field'. This enables efficient operations over this curve. A curve point is represented as **two**
   memory elements: its affine `x` and `y` coordinates.
-* **Embedded scalar field** — the Jubjub scalar field (`EmbeddedFr`), used as
-  the scalar argument to `EcMul` / `EcMulGenerator`.
+* **Embedded scalar field** — the Jubjub scalar field (`EmbeddedFr`), used as 
+  the scalar argument to `EcMul` / `EcMulGenerator`. Scalars are carried in 
+  native `Fr` memory slots, and any value exceeding the Jubjub scalar-field 
+  order is reduced modulo it.
 
 ### 1.4 Public inputs, transcripts, and guards
 
