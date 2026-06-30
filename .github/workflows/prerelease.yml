@@ -81,10 +81,9 @@ jobs:
       - name: Compute release identifiers
         id: ids
         run: |
-          # Display version always starts with the epoch (from flake.nix).
-          # ledger-8 style: the crate version already carries it (8.1.0 -> 8.1.0).
-          # ledger-9+ style: the epoch is decoupled, so prepend it
-          # (epoch 9 + 1.0.0-rc.3 -> 9.1.0.0-rc.3). Both match the git tag.
+          # Display version starts with the epoch (flake.nix): ledger-8 carries it
+          # in the crate version (8.1.0); ledger-9+ decouples it, so prepend
+          # (epoch 9 + 1.0.0-rc.3 -> 9.1.0.0-rc.3). Matches the git tag.
           SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
           case "$LEDGER_WASM_VERSION" in
@@ -121,26 +120,21 @@ jobs:
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
           if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
           fi
-          # Write the resolved token into the file npm actually reads: setup-node
-          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. The value is written directly (not npm's ${VAR} expansion,
-          # which left the token empty -> ENEEDAUTH). The leading newline guards
-          # against setup-node's npmrc lacking a trailing newline, which would
-          # otherwise concatenate this onto its last line and corrupt both.
+          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
+          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
+          # Leading newline guards a setup-node npmrc with no trailing newline.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
-          # Build only if the version is missing from at least one target registry
-          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
-          # the tarballs to assemble). The "--<scope>:registry" override is required: for
-          # scoped packages npm uses the scope->registry mapping in .npmrc and
-          # ignores --registry, so without it both checks hit GH Packages.
+          # Build unless the version already exists on both registries (FORCE or
+          # dry run always builds). The --<scope>:registry override is required:
+          # npm resolves scoped packages via .npmrc and ignores --registry.
           if [ "${FORCE:-false}" != "true" ] \
              && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
-            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
+            echo "$PKG@$VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
             cd ledger-wasm
             cargo check
@@ -203,26 +197,21 @@ jobs:
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
           if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
           fi
-          # Write the resolved token into the file npm actually reads: setup-node
-          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. The value is written directly (not npm's ${VAR} expansion,
-          # which left the token empty -> ENEEDAUTH). The leading newline guards
-          # against setup-node's npmrc lacking a trailing newline, which would
-          # otherwise concatenate this onto its last line and corrupt both.
+          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
+          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
+          # Leading newline guards a setup-node npmrc with no trailing newline.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
-          # Build only if the version is missing from at least one target registry
-          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
-          # the tarballs to assemble). The "--<scope>:registry" override is required: for
-          # scoped packages npm uses the scope->registry mapping in .npmrc and
-          # ignores --registry, so without it both checks hit GH Packages.
+          # Build unless the version already exists on both registries (FORCE or
+          # dry run always builds). The --<scope>:registry override is required:
+          # npm resolves scoped packages via .npmrc and ignores --registry.
           if [ "${FORCE:-false}" != "true" ] \
              && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
-            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
+            echo "$PKG@$VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
             cd onchain-runtime-wasm
             cargo check
@@ -274,7 +263,7 @@ jobs:
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # ZKIR's git tag tracks the zkir crate version, but the published npm
-          # package uses the zkir-wasm version — check existence against the wasm version.
+          # package uses the zkir-wasm version - check existence against the wasm version.
           VERSION="${ZKIR_VERSION}"
           TAG_NAME="zkir-${VERSION}"
           WASM_VERSION="${ZKIR_WASM_VERSION}"
@@ -286,26 +275,21 @@ jobs:
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
           if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
           fi
-          # Write the resolved token into the file npm actually reads: setup-node
-          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. The value is written directly (not npm's ${VAR} expansion,
-          # which left the token empty -> ENEEDAUTH). The leading newline guards
-          # against setup-node's npmrc lacking a trailing newline, which would
-          # otherwise concatenate this onto its last line and corrupt both.
+          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
+          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
+          # Leading newline guards a setup-node npmrc with no trailing newline.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
-          # Build only if the version is missing from at least one target registry
-          # (or FORCE is set, or this is a dry run - so a rehearsal always builds
-          # the tarballs to assemble). The "--<scope>:registry" override is required: for
-          # scoped packages npm uses the scope->registry mapping in .npmrc and
-          # ignores --registry, so without it both checks hit GH Packages.
+          # Build unless the version already exists on both registries (FORCE or
+          # dry run always builds). The --<scope>:registry override is required:
+          # npm resolves scoped packages via .npmrc and ignores --registry.
           if [ "${FORCE:-false}" != "true" ] \
              && [ "${DRY_RUN:-false}" != "true" ] \
              && npm view "$PKG@$WASM_VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
              && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
-            echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs — skipping build/publish."
+            echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
             cd zkir-wasm
             cargo check
@@ -422,6 +406,45 @@ jobs:
           path: |
             test-results.json
             test-results.xml
+
+  crates-io:
+    needs: [ build, coverage, integration, unit-tests ]
+    # crates.io is immutable, so publish only after the suite is green (npm/tags
+    # go out earlier, in `build`). Final releases only: pre-releases (version
+    # contains a '-') skip the job - they ship via cargo [patch] + git tag.
+    if: ${{ !contains(needs.build.outputs.version, '-') }}
+    runs-on: ubuntu-latest-8-core-x64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Publish crates to crates.io
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          nix develop .#ci -c .github/scripts/cargo-publish-crates.sh "$VERSION"
 
   release:
     needs: [ build, coverage, integration, unit-tests ]
