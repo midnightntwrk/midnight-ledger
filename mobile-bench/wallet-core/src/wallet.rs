@@ -2002,6 +2002,207 @@ impl Wallet {
             .map_err(|e| format!("parse total locked '{}': {e}", read.total_locked_base_units))
     }
 
+    /// Transfer `amount_base_units` of native UNSHIELDED NIGHT to the
+    /// bech32m-encoded `recipient_address`. Returns the submitted tx hash.
+    ///
+    /// The wallet pays the DUST fees from its own dust state and the NIGHT
+    /// from its unshielded UTXO set. Both are re-synced internally before
+    /// the transfer, so callers do not need to call `sync_*` first. Change
+    /// returns to this wallet's own unshielded address.
+    ///
+    /// Use this for one-off operator transfers — e.g. funding a deterministic
+    /// admin wallet from the genesis-funded wallet during demo bring-up. The
+    /// recipient MUST be on the same `Network` as this wallet (the HRP check
+    /// happens inside `unshielded_bech32m_decode`).
+    pub async fn send_unshielded(
+        &self,
+        recipient_address: &str,
+        amount_base_units: u128,
+    ) -> Result<String, String> {
+        use base_crypto::hash::HashOutput;
+        use base_crypto::signatures::{Signature, SigningKey};
+        use coin_structure::coin::{NIGHT, UserAddress};
+        use ledger::structure::{
+            Intent, IntentHash, ProofPreimageMarker, StandardTransaction, Transaction,
+            UnshieldedOffer, UtxoOutput, UtxoSpend,
+        };
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        use storage::DefaultDB;
+        use storage::arena::Sp;
+        use storage::storage::{Array, HashMap};
+        use transient_crypto::commitment::PedersenRandomness;
+
+        // Intent slot for a free-standing NIGHT transfer. Distinct from the
+        // dust (0xFEED) and unshielded-balance (0xBEEF) segments so a future
+        // balance helper can merge cleanly even if we ever route a transfer
+        // through it. Non-zero by ledger rule (`IntentAtGuaranteedSegmentId`).
+        const SEND_UNSHIELDED_SEGMENT: u16 = 0xCAFE;
+
+        if amount_base_units == 0 {
+            return Err("send_unshielded: amount must be > 0".to_string());
+        }
+
+        let network = self.network;
+        let network_id = network.config().network_id.to_string();
+
+        // 1. Decode the recipient address.
+        let recipient = crate::address::unshielded_bech32m_decode(recipient_address, network)
+            .map_err(|e| format!("decode recipient address: {e}"))?;
+
+        // 2. Sync the wallet's unshielded UTXOs (the funding source).
+        tracing::info!(target: "wallet_core", "send_unshielded: syncing unshielded NIGHT");
+        let utxos = self
+            .sync_unshielded()
+            .await
+            .map_err(|e| format!("sync unshielded: {e}"))?;
+        let night_sk = self
+            .did_controller_signing_key()
+            .map_err(|e| format!("night key: {e}"))?;
+        let night_vk = night_sk.verifying_key();
+
+        // 3. Pick UTXOs to cover the amount. The picker takes the smallest
+        //    set that meets or exceeds the target; any surplus comes back
+        //    as a change output to this wallet.
+        let night_token = crate::unshielded::TokenType(vec![0u8; 32]);
+        let picked = utxos
+            .pick_for_amount(&night_token, amount_base_units)
+            .ok_or_else(|| {
+                format!(
+                    "insufficient unshielded NIGHT: need {amount_base_units} base units"
+                )
+            })?;
+
+        let mut total: u128 = 0;
+        let mut inputs: Vec<UtxoSpend> = Vec::with_capacity(picked.len());
+        for u in &picked {
+            total = total.saturating_add(u.value);
+            inputs.push(UtxoSpend {
+                value: u.value,
+                owner: night_vk.clone(),
+                type_: NIGHT,
+                intent_hash: IntentHash(HashOutput(u.id.intent_hash)),
+                output_no: u.id.output_index,
+            });
+        }
+
+        // 4. Outputs: recipient + change-back-to-self when total > amount.
+        let mut outputs: Vec<UtxoOutput> = vec![UtxoOutput {
+            value: amount_base_units,
+            owner: recipient,
+            type_: NIGHT,
+        }];
+        if total > amount_base_units {
+            outputs.push(UtxoOutput {
+                value: total - amount_base_units,
+                owner: UserAddress::from(night_vk.clone()),
+                type_: NIGHT,
+            });
+        }
+
+        // The ledger requires both vectors sorted; otherwise it returns
+        // `InputsNotSorted` / `OutputsNotSorted` (errors 189 / 190).
+        inputs.sort();
+        outputs.sort();
+        let n_inputs = inputs.len();
+
+        let offer: UnshieldedOffer<Signature, DefaultDB> = UnshieldedOffer {
+            inputs: inputs.into(),
+            outputs: outputs.into(),
+            signatures: Array::new(),
+        };
+
+        let mut rng = ChaCha20Rng::from_entropy();
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
+
+        // 5. Sign the intent. The offer lives in `guaranteed_unshielded_offer`
+        //    so it accounts at balance-segment 0 (sum of input values equals
+        //    sum of output values, so the intent is internally balanced).
+        let mut intent: Intent<Signature, ProofPreimageMarker, PedersenRandomness, DefaultDB> =
+            Intent::empty(&mut rng, ttl);
+        intent.guaranteed_unshielded_offer = Some(Sp::new(offer));
+
+        let signing_keys: Vec<SigningKey> =
+            std::iter::repeat(night_sk.clone()).take(n_inputs).collect();
+        let signed = intent
+            .sign(&mut rng, SEND_UNSHIELDED_SEGMENT, &signing_keys, &[], &[])
+            .map_err(|e| format!("sign send-unshielded intent: {e:?}"))?;
+
+        let mut intents = HashMap::new();
+        intents = intents.insert(SEND_UNSHIELDED_SEGMENT, signed);
+        let stx = StandardTransaction::new(&network_id, intents, None, HashMap::new());
+        let unproven: crate::tx::build::UnprovenTx = Transaction::Standard(stx);
+
+        // 6. DUST balance — same pattern as the vault flow above.
+        tracing::info!(target: "wallet_core", "send_unshielded: syncing dust");
+        let mut dust_state = self
+            .sync_dust()
+            .await
+            .map_err(|e| format!("sync dust: {e}"))?;
+        let dust_key = self
+            .dust_secret_key()
+            .map_err(|e| format!("dust key: {e}"))?;
+        let indexer = self
+            .resolve_indexer()
+            .map_err(|e| format!("indexer client: {e}"))?;
+        let tip_params_hex = match indexer.chain_tip().await {
+            Ok(Some(t)) => t.ledger_parameters_hex,
+            _ => None,
+        };
+        let parsed_tip_params: Option<ledger::structure::LedgerParameters> =
+            tip_params_hex.as_ref().and_then(|h| {
+                let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                serialize::tagged_deserialize(&bytes[..]).ok()
+            });
+        let initial_params_fallback = ledger::structure::INITIAL_PARAMETERS;
+        let params: &ledger::structure::LedgerParameters =
+            parsed_tip_params.as_ref().unwrap_or(&initial_params_fallback);
+        let chain_tip_secs: u64 = match indexer.chain_tip().await {
+            Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+            _ => 0,
+        };
+        let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+            base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+        } else {
+            dust_state.sync_time
+        };
+        let mut ctx = crate::tx::balance::BalanceCtx {
+            dust_state: &mut dust_state,
+            dust_key: &dust_key,
+            params,
+            time: ctime,
+            ttl,
+            network_id: &network_id,
+        };
+        let balanced = crate::tx::balance::balance(unproven, &mut ctx)
+            .map_err(|e| format!("dust balance: {e}"))?;
+
+        // 7. Prove + submit.
+        tracing::info!(target: "wallet_core", "send_unshielded: proving");
+        let proven = self
+            .resolve_prover()
+            .prove(balanced)
+            .await
+            .map_err(|e| format!("prove: {e}"))?;
+        tracing::info!(target: "wallet_core", "send_unshielded: submitting");
+        let scale_bytes =
+            crate::tx::scale::scale_encode(&proven).map_err(|e| format!("encode: {e}"))?;
+        let signer = self.midnight_signer().map_err(|e| format!("signer: {e}"))?;
+        let node = self
+            .resolve_node()
+            .await
+            .map_err(|e| format!("node connect: {e}"))?;
+        let submit = node
+            .submit_deploy(scale_bytes, &signer)
+            .await
+            .map_err(|e| format!("submit: {e}"))?;
+        Ok(hex::encode(submit.tx_hash))
+    }
+
     /// Run an UNSHIELDED-funded passport-vault circuit (`createLock` with an
     /// initial deposit, or `depositToLock`): compose the call in the
     /// WebView/Node bridge (whose `receiveUnshielded(nativeToken(), amount)`

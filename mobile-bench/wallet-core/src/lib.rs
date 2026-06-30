@@ -63,7 +63,7 @@ pub mod headless;
 
 pub use address::{
     AddressError, shielded_bech32m, shielded_hrp, truncate_middle, unshielded_bech32m,
-    unshielded_hrp,
+    unshielded_bech32m_decode, unshielded_hrp,
 };
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,

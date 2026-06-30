@@ -22,10 +22,16 @@ pub enum AddressError {
     InvalidSigningKey(String),
     #[error("bech32 encode: {0}")]
     Bech32(#[from] bech32::EncodeError),
+    #[error("bech32 decode: {0}")]
+    Bech32Decode(#[from] bech32::DecodeError),
     #[error("bech32 hrp: {0}")]
     Hrp(#[from] bech32::primitives::hrp::Error),
     #[error("key serialise: {0}")]
     KeySerialise(String),
+    #[error("address hrp mismatch: expected {expected}, got {actual}")]
+    HrpMismatch { expected: String, actual: String },
+    #[error("address payload length: expected 32 bytes, got {0}")]
+    PayloadLength(usize),
 }
 
 /// HRP for an unshielded NIGHT receive address per network.
@@ -125,6 +131,34 @@ pub fn unshielded_bech32m(
     Ok(encoded)
 }
 
+/// Decode a Bech32m-encoded unshielded NIGHT address back to its 32-byte
+/// `UserAddress` payload. Verifies the HRP matches the expected network.
+///
+/// Inverse of [`unshielded_bech32m`]. Used by callers that need to drive
+/// an unshielded transfer to an arbitrary recipient (e.g. funding a
+/// constant admin wallet from the genesis-funded wallet) — the recipient
+/// is identified by the bech32m string the operator pastes in, and the
+/// chain wants the raw 32-byte payload inside a `UtxoOutput.owner`.
+pub fn unshielded_bech32m_decode(
+    address: &str,
+    network: Network,
+) -> Result<UserAddress, AddressError> {
+    let (hrp, payload) = bech32::decode(address)?;
+    let expected_hrp = unshielded_hrp(network);
+    if hrp.as_str() != expected_hrp {
+        return Err(AddressError::HrpMismatch {
+            expected: expected_hrp.to_string(),
+            actual: hrp.as_str().to_string(),
+        });
+    }
+    if payload.len() != 32 {
+        return Err(AddressError::PayloadLength(payload.len()));
+    }
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&payload);
+    Ok(UserAddress(base_crypto::hash::HashOutput(bytes)))
+}
+
 /// Truncated middle for display (`mn_addr_preprod1qx…f9zg`).
 /// Used by the address pill; the full string remains available via
 /// `unshielded_bech32m` for the copy button.
@@ -189,5 +223,31 @@ mod tests {
         let s = "mn_addr_preprod1qxabcdef0123456789xyzlongtail";
         let t = truncate_middle(s, 18, 6);
         assert_eq!(t, "mn_addr_preprod1qx…ngtail");
+    }
+
+    #[test]
+    fn decode_round_trips_through_encode() {
+        let seed = [0xc7u8; 32];
+        // Encode a known seed's address...
+        let encoded = unshielded_bech32m(&seed, Network::Undeployed).unwrap();
+        // ...then decode and re-encode; the second encoding must match.
+        let user_address = unshielded_bech32m_decode(&encoded, Network::Undeployed).unwrap();
+        // Re-encode by hand the same way unshielded_bech32m does.
+        let payload: [u8; 32] = user_address.0.0;
+        let hrp = bech32::Hrp::parse(unshielded_hrp(Network::Undeployed)).unwrap();
+        let reencoded = bech32::encode::<bech32::Bech32m>(hrp, &payload).unwrap();
+        assert_eq!(encoded, reencoded);
+    }
+
+    #[test]
+    fn decode_rejects_wrong_network_hrp() {
+        let seed = [0xc8u8; 32];
+        let preprod_addr = unshielded_bech32m(&seed, Network::PreProd).unwrap();
+        // Try to decode it as Undeployed → HRP mismatch.
+        let err = unshielded_bech32m_decode(&preprod_addr, Network::Undeployed).unwrap_err();
+        assert!(
+            matches!(err, AddressError::HrpMismatch { .. }),
+            "expected HrpMismatch, got {err:?}"
+        );
     }
 }
