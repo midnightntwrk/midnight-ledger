@@ -163,7 +163,7 @@ be unsound or error.
 
 #### `Neg { a }`
 * **Operands:** `a: Index`. **Outputs:** 1 — `-a`.
-* **Semantics:** additive negation in the native prime field.
+* **Semantics:** negation in the native prime field.
 
 ### 3.2 Boolean and selection
 
