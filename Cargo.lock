@@ -3669,7 +3669,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zk-stdlib 2.3.1",
+ "midnight-zk-stdlib 2.3.3",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3710,9 +3710,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zk-stdlib"
-version = "2.3.1"
+version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "598158a5c37a98947f2d99715846f115353e6e4f1a164ebe4802a65db6768e47"
+checksum = "2a2efda6c377c6ff82e368a72d5b237fa94971d9ed7334f13d71305ff8921801"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -3756,7 +3756,7 @@ dependencies = [
  "midnight-transient-crypto 2.0.1",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 1.2.0",
- "midnight-zk-stdlib 2.3.1",
+ "midnight-zk-stdlib 2.3.3",
  "midnight-zkir",
  "num-bigint",
  "pastey 0.2.2",
@@ -3796,7 +3796,7 @@ dependencies = [
  "midnight-proofs 0.8.1",
  "midnight-serialize",
  "midnight-transient-crypto 3.0.0",
- "midnight-zk-stdlib 2.3.1",
+ "midnight-zk-stdlib 2.3.3",
  "midnight-zkir-v3",
  "num-bigint",
  "num-traits",
@@ -4193,7 +4193,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
