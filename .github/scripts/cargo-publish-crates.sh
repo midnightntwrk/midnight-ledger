@@ -52,4 +52,6 @@ if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
   exit 1
 fi
 
-cargo workspaces publish "${args[@]}" --token "$CARGO_REGISTRY_TOKEN"
+# Auth comes from CARGO_REGISTRY_TOKEN in the environment (cargo reads it
+# natively); keep it off argv so it can't leak via process listings or traces.
+cargo workspaces publish "${args[@]}"

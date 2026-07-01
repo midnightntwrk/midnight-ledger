@@ -31,7 +31,7 @@ jobs:
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -75,10 +75,12 @@ jobs:
           echo "tag=ledger-${EPOCH}.${LW}" >> "$GITHUB_OUTPUT"
 
       - name: Draft changelog and release notes
+        # Pass step outputs via env (not inline ${{ }}) so they cannot inject shell.
+        env:
+          DISPLAY: ${{ steps.ver.outputs.display }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
-          DISPLAY="${{ steps.ver.outputs.display }}"
-          TAG="${{ steps.ver.outputs.tag }}"
           BULLETS="$(.github/scripts/draft-release-bullets.sh)"
 
           # Insert a new section above the first existing "## " heading. The
@@ -98,18 +100,21 @@ jobs:
           fi
 
       - name: Open release PR
+        # TAG via env (not inline ${{ }}) so it cannot inject shell.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${{ steps.ver.outputs.tag }}"
           BRANCH="release/${TAG}"
-          git config user.name 'MidnightCI'
-          git config user.email 'midnight-automation+midnightci@iohk.io'
-          git checkout -b "$BRANCH"
           git add -A
-          git commit -m "chore: prepare ${TAG}"
-          git push -u origin "$BRANCH"
+          # Create the branch at the checked-out commit, then commit the bumps onto
+          # it as a GitHub-signed (verified) commit so branch protection that
+          # requires signed commits accepts the PR.
+          gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${BRANCH}" -f sha="$(git rev-parse HEAD)" >/dev/null 2>&1 \
+            || echo "branch ${BRANCH} already exists; committing onto it"
+          .github/scripts/gh-commit.sh "$BRANCH" "chore: prepare ${TAG}"
           gh pr create --base "${GITHUB_REF_NAME}" --head "$BRANCH" \
             --title "Prepare ${TAG}" \
             --body "$(printf '%s\n' \

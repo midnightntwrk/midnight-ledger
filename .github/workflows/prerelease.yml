@@ -59,7 +59,7 @@ jobs:
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -98,6 +98,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          # Default token (has contents:write via job permissions) for the
+          # verified docs commit; API commits are signed by GitHub's web-flow key.
+          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -145,8 +148,8 @@ jobs:
               echo "No changes to the docs"
             else
               git add ../docs
-              git commit -m "chore: update ledger-wasm docs"
-              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
+              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
+                "$GITHUB_REF_NAME" "chore: update ledger-wasm docs"
             fi
 
             cd ..
@@ -182,6 +185,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          # Default token (has contents:write via job permissions) for the
+          # verified docs commit; API commits are signed by GitHub's web-flow key.
+          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -222,8 +228,8 @@ jobs:
               echo "No changes to the docs"
             else
               git add ../docs
-              git commit -m "chore: update onchain-runtime-wasm docs"
-              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
+              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
+                "$GITHUB_REF_NAME" "chore: update onchain-runtime-wasm docs"
             fi
 
             cd ..
@@ -258,6 +264,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          # Default token (has contents:write via job permissions) for the
+          # verified docs commit; API commits are signed by GitHub's web-flow key.
+          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -300,8 +309,8 @@ jobs:
               echo "No changes to the docs"
             else
               git add ../docs
-              git commit -m "chore: update zkir-wasm docs"
-              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push
+              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
+                "$GITHUB_REF_NAME" "chore: update zkir-wasm docs"
             fi
 
             cd ..
@@ -348,15 +357,15 @@ jobs:
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
 
+  # No `secrets:` - neither reusable workflow consumes any (GITHUB_TOKEN is
+  # always provided), so passing them would violate least privilege.
   coverage:
     needs: build
     uses: ./.github/workflows/test-coverage.yml
-    secrets: inherit
 
   integration:
     needs: build
     uses: ./.github/workflows/integration-tests.yml
-    secrets: inherit
 
   unit-tests:
     needs: build
@@ -375,7 +384,7 @@ jobs:
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -427,7 +436,7 @@ jobs:
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
