@@ -27,7 +27,7 @@ transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = 
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
+midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
 zkir_v3 = { version = "3.0.0-rc.2", path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
