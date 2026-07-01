@@ -79,7 +79,9 @@ NEW_OID=$(jq -n \
   | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
 
 echo "Committed ${NEW_OID} to ${BRANCH} (verified)."
-# Advance local HEAD to the new commit so any subsequent staged commit in this
-# job diffs against it and does not re-send what was just committed.
+# Advance local HEAD to the new commit (so a later tag/commit in this job is
+# based on it). --mixed, like a plain `git commit`: resets HEAD and index but
+# leaves the working tree, preserving unstaged changes (e.g. a cargo-touched
+# Cargo.lock) that a following build step may rely on.
 git fetch --quiet origin "$BRANCH"
-git reset --hard "$NEW_OID"
+git reset --mixed "$NEW_OID"

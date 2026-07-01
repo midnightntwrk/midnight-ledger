@@ -147,10 +147,19 @@ jobs:
       - name: Build zkir-wasm
         run: nix build .#zkir-wasm
 
+  # Inline matrix job (not a reusable-workflow call) so the check name stays
+  # `integration-tests (ubuntu-latest)`. The steps live in a composite action
+  # shared with the release flow (prerelease.yml), so there is no duplication.
   integration-tests:
-    # No `secrets:` - integration-tests.yml consumes none (GITHUB_TOKEN is always
-    # provided), so inheriting all repo secrets would violate least privilege.
-    uses: ./.github/workflows/integration-tests.yml
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - name: Run integration tests
+        uses: ./.github/actions/integration-tests
 
   build-ledger:
     strategy:
