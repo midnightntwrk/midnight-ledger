@@ -49,6 +49,9 @@ jobs:
         run: |
           set -euo pipefail
           IFS=',' read -ra PAIRS <<< "$VERSIONS"
+          # Every crate whose version actually changed, as "<dir> <version>"; used
+          # afterwards to sync internal dependency requirements that point at them.
+          BUMPED=()
           for pair in "${PAIRS[@]}"; do
             crate="$(echo "$pair" | cut -d= -f1 | xargs)"
             ver="$(echo "$pair" | cut -d= -f2 | xargs)"
@@ -62,13 +65,29 @@ jobs:
               mv Cargo.toml.tmp Cargo.toml
               grep -qE "^package\.version = \"${ver}\"" Cargo.toml || { echo "::error::failed to set workspace version for ${crate}"; exit 1; }
               echo "bumped ${crate} (workspace package.version) -> ${ver}"
+              # Record every workspace-inheriting crate - they all moved to $ver.
+              for d in */; do d="${d%/}"; [ -f "$d/Cargo.toml" ] && grep -qE '^version\.workspace = true' "$d/Cargo.toml" && BUMPED+=("$d $ver"); done
             else
               # Replace only the first top-level `version = "..."` (the [package] one).
               awk -v v="$ver" '!done && /^version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' "$f" > "$f.tmp"
               mv "$f.tmp" "$f"
               grep -qE "^version = \"${ver}\"" "$f" || { echo "::error::failed to set version in $f"; exit 1; }
               echo "bumped ${crate} -> ${ver}"
+              BUMPED+=("${crate} ${ver}")
             fi
+          done
+
+          # Sync internal dependency requirements to the new crate versions. A
+          # caret requirement (e.g. version = "8.1.0") does not accept a
+          # pre-release like 8.2.0-rc.1, so every internal dependency that points
+          # at a bumped crate (path = "../<dir>") must be pinned to its new exact
+          # version. No-op for deps on crates that were not bumped.
+          for entry in "${BUMPED[@]}"; do
+            read -r bdir bver <<< "$entry"
+            BDIR="$bdir" BVER="$bver" perl -i -pe '
+              my ($c, $v) = ($ENV{BDIR}, $ENV{BVER});
+              s/version = "[^"]*"/version = "$v"/ if /path = "\.\.\/\Q$c\E"/;
+            ' */Cargo.toml
           done
 
       - name: Refresh Cargo.lock
