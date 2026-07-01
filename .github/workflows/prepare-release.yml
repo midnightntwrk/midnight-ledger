@@ -54,11 +54,21 @@ jobs:
             ver="$(echo "$pair" | cut -d= -f2 | xargs)"
             f="${crate}/Cargo.toml"
             [ -f "$f" ] || { echo "::error::no such crate manifest: $f"; exit 1; }
-            # Replace only the first top-level `version = "..."` (the [package] one).
-            awk -v v="$ver" '!done && /^version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' "$f" > "$f.tmp"
-            mv "$f.tmp" "$f"
-            grep -qE "^version = \"${ver}\"" "$f" || { echo "::error::failed to set version in $f"; exit 1; }
-            echo "bumped ${crate} -> ${ver}"
+            if grep -qE '^version\.workspace = true' "$f"; then
+              # Crate inherits `[workspace] package.version` from the root manifest
+              # (ledger, zswap, proof-server), so bump it there. This moves every
+              # crate that inherits the workspace version together.
+              awk -v v="$ver" '!done && /^package\.version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' Cargo.toml > Cargo.toml.tmp
+              mv Cargo.toml.tmp Cargo.toml
+              grep -qE "^package\.version = \"${ver}\"" Cargo.toml || { echo "::error::failed to set workspace version for ${crate}"; exit 1; }
+              echo "bumped ${crate} (workspace package.version) -> ${ver}"
+            else
+              # Replace only the first top-level `version = "..."` (the [package] one).
+              awk -v v="$ver" '!done && /^version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' "$f" > "$f.tmp"
+              mv "$f.tmp" "$f"
+              grep -qE "^version = \"${ver}\"" "$f" || { echo "::error::failed to set version in $f"; exit 1; }
+              echo "bumped ${crate} -> ${ver}"
+            fi
           done
 
       - name: Refresh Cargo.lock
@@ -71,8 +81,15 @@ jobs:
           LW=$(grep -m1 '^version' ledger-wasm/Cargo.toml | awk -F'"' '{print $2}')
           EPOCH=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$EPOCH" ]; then echo "::error::could not derive ledger epoch from flake.nix"; exit 1; fi
-          echo "display=${EPOCH}.${LW}" >> "$GITHUB_OUTPUT"
-          echo "tag=ledger-${EPOCH}.${LW}" >> "$GITHUB_OUTPUT"
+          # Display version always starts with the epoch, matching the Publish
+          # workflow: ledger-8 already carries it in the crate version (8.2.0 ->
+          # 8.2.0); ledger-9+ decouples it, so prepend (1.0.0-rc.3 -> 9.1.0.0-rc.3).
+          case "$LW" in
+            ${EPOCH}.*) DISPLAY="$LW" ;;
+            *)          DISPLAY="${EPOCH}.${LW}" ;;
+          esac
+          echo "display=${DISPLAY}" >> "$GITHUB_OUTPUT"
+          echo "tag=ledger-${DISPLAY}" >> "$GITHUB_OUTPUT"
 
       - name: Draft changelog and release notes
         # Pass step outputs via env (not inline ${{ }}) so they cannot inject shell.
