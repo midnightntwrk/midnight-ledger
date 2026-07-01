@@ -107,7 +107,9 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="release/${TAG}"
-          git add -A
+          # Exclude .cargo/ (configure-cargo.sh writes an untracked config there)
+          # so the generated file is not committed into the release PR.
+          git add -A -- ':!.cargo'
           # Create the branch at the checked-out commit, then commit the bumps onto
           # it as a GitHub-signed (verified) commit so branch protection that
           # requires signed commits accepts the PR.
