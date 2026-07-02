@@ -202,7 +202,8 @@ jobs:
               "Automated release prep for \`${TAG}\`." \
               "" \
               "- [ ] Versions correct (see \`Cargo.toml\` / \`Cargo.lock\` diff)" \
-              "- [ ] \`CHANGELOG.md\` section reviewed and edited" \
+              "- [ ] \`CHANGELOG.md\` + per-crate \`CHANGELOG_*.md\` drafts reviewed and edited" \
+              "- [ ] Regenerated \`docs/api/**\` diff looks right" \
               "- [ ] \`.github/release-notes/${TAG}.md\` prose written" \
               "" \
               "After merge, run **Publish Ledger Release** on \`${GITHUB_REF_NAME}\`.")"

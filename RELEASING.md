@@ -91,13 +91,20 @@ is identical to a final release):
    Add the others if they ship too, e.g.
    `onchain-runtime-wasm=3.1.1, onchain-runtime=3.1.1, zkir=2.1.1, zkir-wasm=2.1.1`.
 4. Run it. The workflow then:
-   - bumps each crate's `Cargo.toml` and refreshes `Cargo.lock`,
-   - drafts a `## Ledger <version>` section in `CHANGELOG.md` from commit history,
+   - bumps each crate's version (`Cargo.toml`, or the root `[workspace]
+     package.version` for `ledger`/`zswap`/`proof-server`) and refreshes `Cargo.lock`,
+   - pins internal dependency requirements on bumped crates to the new exact
+     version (needed so pre-releases resolve),
+   - drafts a `## Ledger <version>` section in `CHANGELOG.md`, and a
+     `## Version <version>` section in each bumped crate's `CHANGELOG_<crate>.md`,
+     from commit history,
+   - regenerates the wasm markdown API docs under `docs/api/**`,
    - scaffolds `.github/release-notes/ledger-<version>.md` from the template,
-   - opens a `release/ledger-<version>` PR.
-5. **Review the PR.** Edit `.github/release-notes/ledger-<version>.md` (write the
-   real summary / breaking changes), tidy the changelog, confirm the versions,
-   then merge it into the release branch.
+   - opens a `release/ledger-<version>` PR with all of the above in one signed commit.
+5. **Review the PR.** The changelog and doc changes are auto-generated *drafts*:
+   edit `.github/release-notes/ledger-<version>.md` (real summary / breaking
+   changes), tidy the top-level and per-crate changelogs, skim the `docs/api/**`
+   diff, confirm the versions, then merge it into the release branch.
 
 > The release notes file is what becomes the GitHub Release body. See
 > `.github/release-notes/README.md` for the convention.
