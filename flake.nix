@@ -125,6 +125,7 @@
           isCrossArm ? false,
           heavy-checks ? false,
           build-target ? null,
+          features ? null,
         }: (pkgs.makeRustPlatform {
             rustc = self.packages.${system}.rust-build-toolchain;
             cargo = self.packages.${system}.rust-build-toolchain;
@@ -146,7 +147,7 @@
                 cargo clippy --all-targets --workspace --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
                 ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
-              cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
+              cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}" + (if features != null then " --features ${features}" else "");
 
               MIDNIGHT_PP = "${self.packages.${system}.local-params}";
               MIDNIGHT_LEDGER_TEST_STATIC_DIR =
@@ -203,13 +204,14 @@
               else {}
             ));
 
-        mkDocker = isCrossArm:
+        mkDocker = { isCrossArm, experimental ? false }:
           with if isCrossArm
           then pkgs.pkgsCross.aarch64-multiplatform-musl
           else pkgs.pkgsCross.musl64; let
             proof-server = mkLedger {
               inherit isCrossArm;
               build-target = "midnight-proof-server";
+              features = if experimental then "experimental" else null;
             };
           in
             dockerTools.buildImage {
@@ -218,7 +220,7 @@
                 if isCrossArm
                 then "arm64"
                 else "amd64"
-              }";
+              }" + (if experimental then "_experimental" else "");
               copyToRoot = [
                 # When we want tools in /, we need to symlink them in order to
                 # still have libraries in /nix/store. This behavior differs from
@@ -406,9 +408,13 @@
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
 
-          packages.proof-server-oci = mkDocker false;
+          packages.proof-server-oci = mkDocker { isCrossArm = false; };
 
-          packages.proof-server-oci-arm64 = mkDocker true;
+          packages.proof-server-oci-arm64 = mkDocker { isCrossArm = true; };
+
+          packages.proof-server-oci-experimental = mkDocker { isCrossArm = false; experimental = true; };
+
+          packages.proof-server-oci-arm64-experimental = mkDocker { isCrossArm = true; experimental = true; };
 
           packages.zkir = ({
               "x86_64-linux" = pkgsStatic;

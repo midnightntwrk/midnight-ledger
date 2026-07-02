@@ -67,6 +67,17 @@ jobs:
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
           docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
 
+      - name: Create experimental proof-server images
+        run: |
+          PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          nix build -L .#proof-server-oci-experimental 
+          docker load -i result
+          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+
   docker-arm64:
     runs-on: ubuntu-latest-4-core-arm64
 
@@ -114,6 +125,17 @@ jobs:
           docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64 \
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
           docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+
+      - name: Create experimental proof-server images
+        run: |
+          PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          nix build -L .#proof-server-oci-arm64-experimental 
+          docker load -i result
+          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
 
   docker-manifest:
     runs-on: ubuntu-latest
@@ -163,13 +185,25 @@ jobs:
             ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
           docker manifest push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION
 
+          # GHCR multi-arch manifest - experimental
+          docker manifest create ghcr.io/midnight-ntwrk/proof-server:${PROOF_SERVER_VERSION}_experimental \
+            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental \
+            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+          docker manifest push ghcr.io/midnight-ntwrk/proof-server:${PROOF_SERVER_VERSION}_experimental
+
           # Docker Hub multi-arch manifest
           docker manifest create docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION \
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
           docker manifest push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION
 
-          # :latest only for release versions (no pre-release suffix)
+          # Docker Hub multi-arch manifest - experimental
+          docker manifest create docker.io/midnightntwrk/proof-server:${PROOF_SERVER_VERSION}_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+          docker manifest push docker.io/midnightntwrk/proof-server:${PROOF_SERVER_VERSION}_experimental
+
+          # :latest only for release versions (no pre-release suffix) and non-experimental
           if [[ "$PROOF_SERVER_VERSION" != *"-"* ]]; then
             docker manifest create ghcr.io/midnight-ntwrk/proof-server:latest \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
