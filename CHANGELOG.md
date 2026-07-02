@@ -4,6 +4,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Ledger 8.2.0-rc.1
+
+- fix: stream gh-commit file changes to avoid ARG_MAX
+- fix: sync internal dep version requirements on pre-release bumps
+- fix: prepare-release handles workspace versions and the ledger-8 tag
+- fix: pass prepare-release versions via env to prevent shell injection
+
 ## Unreleased
 
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
