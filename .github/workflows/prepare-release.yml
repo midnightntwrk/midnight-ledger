@@ -42,6 +42,13 @@ jobs:
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
+      # Node is needed to regenerate the wasm markdown API docs (typedoc). Docs
+      # generation is node-only - it runs over the committed .d.ts files.
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: 20
+
       - name: Bump crate versions
         # Pass the input via env (not inline ${{ }}) so it cannot inject shell.
         env:
@@ -90,6 +97,10 @@ jobs:
             ' */Cargo.toml
           done
 
+          # Persist the bumped set for later steps (per-crate changelog drafting).
+          # Kept in $RUNNER_TEMP, outside the repo, so `git add -A` never stages it.
+          printf '%s\n' "${BUMPED[@]}" | sort -u > "${RUNNER_TEMP}/bumped-crates.txt"
+
       - name: Refresh Cargo.lock
         run: nix develop .#ci -c cargo metadata --format-version 1 >/dev/null
 
@@ -134,6 +145,38 @@ jobs:
             sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
             printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
           fi
+
+      - name: Draft per-crate changelogs
+        run: |
+          set -euo pipefail
+          [ -f "${RUNNER_TEMP}/bumped-crates.txt" ] || exit 0
+          while read -r dir ver; do
+            [ -n "$dir" ] || continue
+            # storage-core's changelog file uses an underscore; others match the dir.
+            case "$dir" in
+              storage-core) file="CHANGELOG_storage_core.md" ;;
+              *)            file="CHANGELOG_${dir}.md" ;;
+            esac
+            [ -f "$file" ] || continue                            # crate has no dedicated changelog
+            grep -q "^## Version \`${ver}\`" "$file" && continue   # idempotent on re-dispatch
+            BULLETS="$(.github/scripts/draft-release-bullets.sh "$dir" "$dir")"
+            printf '## Version `%s`\n\n%s\n\n' "$ver" "$BULLETS" > "${RUNNER_TEMP}/crate-section.md"
+            # Insert above the first existing "## Version " heading (leaving any
+            # human-curated "## Unreleased" section at the top intact).
+            awk 'FNR==NR{sec = sec $0 "\n"; next} /^## Version /&&!ins{printf "%s", sec; ins=1} {print}' \
+              "${RUNNER_TEMP}/crate-section.md" "$file" > "$file.tmp"
+            mv "$file.tmp" "$file"
+          done < "${RUNNER_TEMP}/bumped-crates.txt"
+
+      # Regenerate the wasm markdown API docs so they land in the reviewable
+      # release PR (via the existing `git add -A` below). Node-only; runs over
+      # the committed .d.ts files - no cargo/nix needed.
+      - name: Regenerate API docs
+        run: |
+          set -euo pipefail
+          for pkg in ledger-wasm onchain-runtime-wasm zkir-wasm; do
+            ( cd "$pkg" && npm install && npm run build:markdown-docs )
+          done
 
       - name: Open release PR
         # TAG via env (not inline ${{ }}) so it cannot inject shell.
