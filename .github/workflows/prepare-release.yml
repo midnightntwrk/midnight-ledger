@@ -128,20 +128,27 @@ jobs:
           TAG: ${{ steps.ver.outputs.tag }}
         run: |
           set -euo pipefail
-          BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+          # Promote the curated "## Unreleased" section into the release heading,
+          # leaving a fresh empty "## Unreleased" - the dev-curated bullets become
+          # the release changelog, matching the manual process. Fall back to a
+          # git-log draft only if there is no "## Unreleased" section.
+          if grep -q "^## Ledger ${DISPLAY}$" CHANGELOG.md; then
+            echo "CHANGELOG.md already has the ${DISPLAY} section - skipping"
+          elif grep -q '^## Unreleased' CHANGELOG.md; then
+            awk -v d="$DISPLAY" '!done && /^## Unreleased/ {print; print ""; printf "## Ledger %s\n", d; done=1; next} {print}' \
+              CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+          else
+            BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+            printf '## Ledger %s\n\n%s\n\n' "$DISPLAY" "$BULLETS" > "${RUNNER_TEMP}/section.md"
+            awk 'FNR==NR{sec = sec $0 "\n"; next} /^## /&&!ins{printf "%s", sec; ins=1} {print}' \
+              "${RUNNER_TEMP}/section.md" CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+          fi
 
-          # Insert a new section above the first existing "## " heading. The
-          # section is read from a file (not awk -v) so embedded newlines are
-          # portable across awk implementations.
-          printf '## Ledger %s\n\n%s\n\n' "$DISPLAY" "$BULLETS" > .release-section.md
-          awk 'FNR==NR{sec = sec $0 "\n"; next} /^## /&&!ins{printf "%s", sec; ins=1} {print}' \
-            .release-section.md CHANGELOG.md > CHANGELOG.md.tmp
-          mv CHANGELOG.md.tmp CHANGELOG.md
-          rm -f .release-section.md
-
-          # Scaffold the release-notes file from the template (idempotent).
+          # Scaffold the release-notes file from the template (idempotent), seeded
+          # with a git-log draft as a starting point for the human-written summary.
           NOTES=".github/release-notes/${TAG}.md"
           if [ ! -f "$NOTES" ]; then
+            BULLETS="$(.github/scripts/draft-release-bullets.sh)"
             sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
             printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
           fi
@@ -159,13 +166,17 @@ jobs:
             esac
             [ -f "$file" ] || continue                            # crate has no dedicated changelog
             grep -q "^## Version \`${ver}\`" "$file" && continue   # idempotent on re-dispatch
-            BULLETS="$(.github/scripts/draft-release-bullets.sh "$dir" "$dir")"
-            printf '## Version `%s`\n\n%s\n\n' "$ver" "$BULLETS" > "${RUNNER_TEMP}/crate-section.md"
-            # Insert above the first existing "## Version " heading (leaving any
-            # human-curated "## Unreleased" section at the top intact).
-            awk 'FNR==NR{sec = sec $0 "\n"; next} /^## Version /&&!ins{printf "%s", sec; ins=1} {print}' \
-              "${RUNNER_TEMP}/crate-section.md" "$file" > "$file.tmp"
-            mv "$file.tmp" "$file"
+            if grep -q '^## Unreleased' "$file"; then
+              # Promote the curated "## Unreleased" bullets into this version.
+              awk -v v="$ver" '!done && /^## Unreleased/ {print; print ""; printf "## Version `%s`\n", v; done=1; next} {print}' \
+                "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            else
+              # No "## Unreleased" section - insert a git-log draft above the first version.
+              BULLETS="$(.github/scripts/draft-release-bullets.sh "$dir" "$dir")"
+              printf '## Version `%s`\n\n%s\n\n' "$ver" "$BULLETS" > "${RUNNER_TEMP}/crate-section.md"
+              awk 'FNR==NR{sec = sec $0 "\n"; next} /^## Version /&&!ins{printf "%s", sec; ins=1} {print}' \
+                "${RUNNER_TEMP}/crate-section.md" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            fi
           done < "${RUNNER_TEMP}/bumped-crates.txt"
 
       # Regenerate the wasm markdown API docs so they land in the reviewable

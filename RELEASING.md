@@ -201,6 +201,16 @@ Special cases (may be revisited):
 
 ### Isolated crate tags
 
+> **Required manual step for pre-releases - not automated.** The Publish workflow
+> only pushes `ledger-<version>`, `onchain-runtime-<version>`, and
+> `zkir-<version>` on the full (non-isolated) release commit. It does **not**
+> create the isolated per-crate tags (`crate-ledger-<version>`,
+> `base-crypto-<version>`, `storage-<version>`, ...). So if a **pre-release** is
+> meant to be consumed from Rust via a `[patch]` (see above), you must craft and
+> push those isolated tags **by hand** after publishing, following the steps
+> below. Pre-releases consumed only as npm/wasm packages do not need this; final
+> releases go to crates.io instead and do not need it either.
+
 These crate tags must be specially crafted: cargo's `git` resolution prefers the
 local dependency spec over the crates.io one, which can duplicate dependencies.
 For example, if a consumer pulls in both `foo` and `bar`, patches them to
