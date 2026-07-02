@@ -3321,7 +3321,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.0-rc.3"
+version = "9.0.0-rc.4"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3726,7 +3726,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3"
-version = "3.0.0-rc.2"
+version = "3.0.0-rc.4"
 dependencies = [
  "actix-rt",
  "anyhow",
