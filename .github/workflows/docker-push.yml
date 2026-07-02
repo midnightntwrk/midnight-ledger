@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   workflow_call:
     secrets:
+      DOCKERHUB_MIDNIGHTNTWRK_USER:
+        required: true
+      DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
+        required: true
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
       GH_USERNAME:
