@@ -37,7 +37,6 @@ use crate::ir_types::{CircuitValue, IrType, IrValue};
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use base_crypto::hash::{HashOutput, persistent_hash};
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::{
@@ -54,6 +53,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
+use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -62,7 +62,6 @@ use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
 use transient_crypto::proofs::{ProofPreimage, ProvingError};
-use transient_crypto::repr::FieldRepr;
 
 /// The raw data prior to proving. Note that this should *not* be considered part of the public
 /// API, and is subject to change at any time. It may be used in combination with
@@ -178,28 +177,6 @@ fn fab_decode_to_bytes_atom(
             ))
         }
     }
-}
-
-fn assemble_bytes(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    bytes: &[AssignedByte<outer::Scalar>],
-) -> Result<AssignedNative<outer::Scalar>, Error> {
-    const BITS: usize = 8;
-    let mut powers = Vec::with_bounded_capacity(bytes.len());
-    powers.push(std.convert(layouter, &bytes[0])?);
-    for (i, byte) in bytes.iter().enumerate().skip(1) {
-        let power = (0..i * BITS)
-            .fold(Fr::from(1), |acc, _| acc * Fr::from(2))
-            .0;
-        let byte = std.convert(layouter, byte)?;
-        powers.push(std.mul_by_constant(layouter, &byte, power)?);
-    }
-    let mut acc = powers[0].clone();
-    for limb in powers[1..].iter() {
-        acc = std.add(layouter, &acc, limb)?;
-    }
-    Ok(acc)
 }
 
 impl IrSource {
@@ -501,16 +478,13 @@ impl IrSource {
                 I::PersistentHash {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 }
                 | I::Keccak256 {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 } => {
-                    if outputs.len() != 2 {
-                        bail!("PersistentHash requires exactly 2 outputs");
-                    }
                     let inputs = inputs
                         .iter()
                         .map(|i| resolve_operand(&memory, i))
@@ -523,18 +497,12 @@ impl IrSource {
                     let mut repr = Vec::new();
                     ValueReprAlignedValue(value).binary_repr(&mut repr);
                     trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash = match ins {
-                        I::PersistentHash { .. } => persistent_hash(&repr),
-                        I::Keccak256 { .. } => HashOutput(Keccak256::digest(&repr).into()),
+                    let hash_output: [u8; 32] = match ins {
+                        I::PersistentHash { .. } => Sha256::digest(&repr).into(),
+                        I::Keccak256 { .. } => Keccak256::digest(&repr).into(),
                         _ => unreachable!(),
                     };
-                    let hash_fields = hash.field_vec();
-                    if hash_fields.len() >= 2 {
-                        memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
-                        memory.insert(outputs[1].clone(), IrValue::Native(hash_fields[1]));
-                    } else {
-                        bail!("PersistentHash did not produce expected output");
-                    }
+                    memory.insert(output.clone(), IrValue::Bytes32(hash_output));
                 }
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
@@ -919,18 +887,13 @@ impl Relation for IrSource {
                 I::PersistentHash {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 }
                 | I::Keccak256 {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of persistent hash instruction".into(),
-                        ));
-                    }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
                         let x = resolve_operand(std, layouter, &memory, inp)?;
@@ -939,19 +902,14 @@ impl Relation for IrSource {
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = match ins {
+                    let hash_output = match ins {
                         I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?,
                         I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?,
                         _ => unreachable!(),
                     };
                     mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(assemble_bytes(std, layouter, &res_bytes[..31])?),
+                        output.clone(),
+                        CircuitValue::Bytes32(hash_output),
                         &mut memory,
                     )?;
                 }

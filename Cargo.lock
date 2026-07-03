@@ -3758,6 +3758,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "serde_repr",
+ "sha2 0.11.0",
  "sha3",
  "tokio",
  "tracing",

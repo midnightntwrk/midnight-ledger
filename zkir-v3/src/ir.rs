@@ -651,26 +651,26 @@ pub enum Instruction {
     /// Calls a long-term hash function on a sequence of items with a given
     /// alignment.
     ///
-    /// Outputs 2 elements for binary format
+    /// Outputs a value of type Bytes32.
     PersistentHash {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Evaluates the Keccak-256 hash function on a sequence of items with
     /// a given alignment.
     ///
-    /// Outputs 2 elements for binary format.
+    /// Outputs a value of type Bytes32.
     Keccak256 {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Tests if `a` and `b` are equal.
     /// Supported on types:

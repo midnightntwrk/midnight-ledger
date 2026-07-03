@@ -255,8 +255,8 @@ mod proof_tests {
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] },
-               { "op": "keccak256", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_3", "%v_4"] }
+               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "output": "%v_1" },
+               { "op": "keccak256", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "output": "%v_2" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
