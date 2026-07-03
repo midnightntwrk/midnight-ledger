@@ -564,6 +564,19 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Reverses the byte order of a `Bytes32` value.
+    ///
+    /// The input must be of type `Bytes32`, otherwise this operation fails. The
+    /// output is a `Bytes32` whose bytes are those of the input in reverse
+    /// order, i.e. the first byte becomes the last and vice versa.
+    ///
+    /// Outputs 1 element, the reversed bytes
+    ReverseBytes {
+        /// The bytes to be reversed
+        bytes: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Decomposes a `Bytes32` value into two `Native` field elements.
     ///
     /// The first output (`low`) encodes the first 31 bytes of the input as a

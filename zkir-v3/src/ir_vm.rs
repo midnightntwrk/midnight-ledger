@@ -593,6 +593,12 @@ impl IrSource {
                     let x = from_bytes32_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
+                I::ReverseBytes { bytes, output } => {
+                    let bytes = resolve_operand(&memory, bytes)?;
+                    let mut bytes: [u8; 32] = bytes.try_into()?;
+                    bytes.reverse();
+                    memory.insert(output.clone(), IrValue::Bytes32(bytes));
+                }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(&memory, bytes)?;
                     let mut bytes: [u8; 32] = bytes.try_into()?;
@@ -1115,6 +1121,12 @@ impl Relation for IrSource {
                     let bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
                     let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
+                }
+                I::ReverseBytes { bytes, output } => {
+                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
+                    let mut bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
+                    bytes.reverse();
+                    memory.insert(output.clone(), CircuitValue::Bytes32(bytes));
                 }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(std, layouter, &memory, bytes)?;
