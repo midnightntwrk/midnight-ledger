@@ -2093,10 +2093,7 @@ impl SystemTransaction {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        annotation::NightAnn,
-        structure::{INITIAL_PARAMETERS, LedgerParameters, SignatureVerifyingKey},
-    };
+    use crate::structure::{INITIAL_PARAMETERS, SignatureVerifyingKey};
 
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
@@ -2104,20 +2101,14 @@ mod tests {
     use zswap::ledger::State;
 
     use crate::dust::DustState;
+    const NETWORK_ID: &str = "local-test";
 
-    #[test]
-    fn simple_bridge_claim() {
-        let mut rng = StdRng::seed_from_u64(0x42);
-
-        let network_id = "a".to_string();
-        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
-        let mut bridge_receiving = Map::new();
-        bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
-        let state = LedgerState {
-            network_id: network_id.clone(),
-            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
+    fn base_ledger() -> LedgerState<InMemoryDB> {
+        LedgerState {
+            network_id: NETWORK_ID.to_string(),
+            parameters: Sp::new(INITIAL_PARAMETERS),
             locked_pool: 0,
-            bridge_receiving,
+            bridge_receiving: Map::new(),
             reserve_pool: 0,
             block_reward_pool: 0,
             unclaimed_block_rewards: Map::new(),
@@ -2127,9 +2118,28 @@ mod tests {
             utxo: Sp::new(UtxoState::default()),
             replay_protection: Sp::new(ReplayProtectionState::new()),
             dust: Sp::new(DustState::default()),
+        }
+    }
+
+    fn sample_event_source(rng: &mut StdRng) -> EventSource {
+        EventSource {
+            transaction_hash: TransactionHash(rng.r#gen()),
+            logical_segment: 0,
+            physical_segment: 0,
+        }
+    }
+
+    #[test]
+    fn simple_bridge_claim() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let state = LedgerState {
+            bridge_receiving: Map::new().insert(UserAddress::from(vk.clone()), MAX_SUPPLY),
+            ..base_ledger()
         };
         let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
-            network_id,
+            network_id: NETWORK_ID.to_string(),
             value: MAX_SUPPLY,
             owner: vk,
             nonce: rng.r#gen(),
@@ -2137,23 +2147,14 @@ mod tests {
             kind: ClaimKind::CardanoBridge,
         };
         let context = BlockContext::default();
-        match claim_unshielded(
-            &state,
-            &rewards,
-            &context,
-            EventSource {
-                transaction_hash: TransactionHash(rng.r#gen()),
-                logical_segment: 0,
-                physical_segment: 0,
-            },
-        ) {
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
             (new_st, TransactionResult::Success(_)) => {
-                if new_st.bridge_receiving != Map::new() {
-                    panic!(
-                        "bridge_receiving should now be empty, but is: {:?}",
-                        new_st.bridge_receiving
-                    )
-                }
+                assert!(
+                    new_st.bridge_receiving.is_empty(),
+                    "bridge_receiving should now be empty, but is: {:?}",
+                    new_st.bridge_receiving
+                );
             }
             (_, e) => panic!("{:?}", e),
         }
@@ -2163,44 +2164,23 @@ mod tests {
     fn bridge_claim_not_enough_available() {
         let mut rng = StdRng::seed_from_u64(0x42);
 
-        let network_id = "a".to_string();
         let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
-        let mut bridge_receiving = Map::new();
-        bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), 1000);
+        let claimable = 1000u128;
         let state = LedgerState {
-            network_id: network_id.clone(),
-            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
-            locked_pool: 10,
-            bridge_receiving,
-            reserve_pool: 10,
-            block_reward_pool: 0,
-            unclaimed_block_rewards: Map::new(),
-            treasury: Map::new(),
-            zswap: Sp::new(State::default()),
-            contract: Map::new(),
-            utxo: Sp::new(UtxoState::default()),
-            replay_protection: Sp::new(ReplayProtectionState::new()),
-            dust: Sp::new(DustState::default()),
+            bridge_receiving: Map::new().insert(UserAddress::from(vk.clone()), claimable),
+            ..base_ledger()
         };
         let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
-            network_id,
-            value: 1001,
+            network_id: NETWORK_ID.to_string(),
+            value: claimable + 1,
             owner: vk,
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::CardanoBridge,
         };
         let context = BlockContext::default();
-        match claim_unshielded(
-            &state,
-            &rewards,
-            &context,
-            EventSource {
-                transaction_hash: TransactionHash(rng.r#gen()),
-                logical_segment: 0,
-                physical_segment: 0,
-            },
-        ) {
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
             (_, TransactionResult::Failure(TransactionInvalid::InsufficientClaimable { .. })) => (),
             (_, TransactionResult::Failure(e)) => {
                 panic!("Expected InsufficientClaimable, but got {e}")
@@ -2215,31 +2195,193 @@ mod tests {
     }
 
     #[test]
+    fn bridge_partial_claim() {
+        // Claiming less than the claimable balance mints a UTXO for the claimed
+        // value and retains the remainder in `bridge_receiving`.
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let address = UserAddress::from(vk.clone());
+        let claimable = 1000u128;
+        let claim_value = 400u128;
+        let state = LedgerState {
+            bridge_receiving: Map::new().insert(address, claimable),
+            // reserve_pool absorbs the rest so total NIGHT == MAX_SUPPLY.
+            reserve_pool: MAX_SUPPLY - claimable,
+            ..base_ledger()
+        };
+        let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
+            network_id: NETWORK_ID.to_string(),
+            value: claim_value,
+            owner: vk,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind: ClaimKind::CardanoBridge,
+        };
+        let context = BlockContext::default();
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
+            (new_st, TransactionResult::Success(_)) => {
+                assert_eq!(
+                    new_st.bridge_receiving.get(&address).copied().unwrap_or(0),
+                    claimable - claim_value,
+                    "remainder should stay claimable"
+                );
+                assert_eq!(
+                    new_st.utxo.utxos.iter().map(|a| a.0.value).sum::<u128>(),
+                    claim_value,
+                    "a single UTXO for the claimed value should be minted"
+                );
+            }
+            (_, e) => panic!("{:?}", e),
+        }
+    }
+
+    #[test]
+    fn bridge_claim_accumulates_multiple_deposits() {
+        // Two `DistributeNight` deposits to the same address accumulate into a
+        // single `bridge_receiving` entry, which one claim drains in full.
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let address = UserAddress::from(vk.clone());
+        let amount: u128 = 10_000_000_000;
+        let deposits: u128 = 2;
+        let total = amount * deposits;
+
+        let mut state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            NETWORK_ID,
+            INITIAL_PARAMETERS,
+            total,
+            MAX_SUPPLY - total,
+            0,
+        )
+        .expect("valid genesis");
+
+        let fee = basis_points_of(
+            INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
+            amount,
+        )
+        .unwrap();
+        let claimable_total = (amount - fee) * deposits;
+
+        for _ in 0..deposits {
+            state = state
+                .apply_system_tx(
+                    &SystemTransaction::DistributeNight(
+                        ClaimKind::CardanoBridge,
+                        vec![OutputInstructionUnshielded {
+                            amount,
+                            target_address: address,
+                            nonce: coin_structure::coin::Nonce(HashOutput(rng.r#gen())),
+                        }],
+                    ),
+                    Timestamp::from_secs(1),
+                )
+                .expect("bridge deposit should succeed")
+                .0;
+        }
+
+        assert_eq!(
+            state.bridge_receiving.get(&address).copied().unwrap_or(0),
+            claimable_total,
+            "deposits should accumulate into one entry"
+        );
+
+        let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
+            network_id: NETWORK_ID.to_string(),
+            value: claimable_total,
+            owner: vk,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind: ClaimKind::CardanoBridge,
+        };
+        let context = BlockContext::default();
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
+            (new_st, TransactionResult::Success(_)) => {
+                assert!(
+                    new_st.bridge_receiving.get(&address).is_none(),
+                    "entry should be removed once fully drained"
+                );
+                assert_eq!(
+                    new_st.utxo.utxos.iter().map(|a| a.0.value).sum::<u128>(),
+                    claimable_total,
+                    "the whole accumulated balance should be minted"
+                );
+            }
+            (_, e) => panic!("{:?}", e),
+        }
+    }
+
+    #[test]
+    fn bridge_duplicate_claim_rejected() {
+        // A fully-drained claim removes the entry; replaying the claim must be
+        // rejected as `InsufficientClaimable` so no double credit is issued.
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let address = UserAddress::from(vk.clone());
+        let claimable = 1000u128;
+        let state = LedgerState {
+            bridge_receiving: Map::new().insert(address, claimable),
+            // reserve_pool absorbs the rest so total NIGHT == MAX_SUPPLY.
+            reserve_pool: MAX_SUPPLY - claimable,
+            ..base_ledger()
+        };
+        let context = BlockContext::default();
+
+        let claim: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
+            network_id: NETWORK_ID.to_string(),
+            value: claimable,
+            owner: vk,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind: ClaimKind::CardanoBridge,
+        };
+        let (state_after, first_result) =
+            claim_unshielded(&state, &claim, &context, sample_event_source(&mut rng));
+
+        assert!(
+            matches!(first_result, TransactionResult::Success(_)),
+            "first claim should succeed"
+        );
+        assert!(
+            state_after.bridge_receiving.get(&address).is_none(),
+            "entry should be removed after full claim"
+        );
+
+        // Replaying the same claim finds nothing left to claim -> no double credit.
+        match claim_unshielded(
+            &state_after,
+            &claim,
+            &context,
+            sample_event_source(&mut rng),
+        ) {
+            (
+                _,
+                TransactionResult::Failure(TransactionInvalid::InsufficientClaimable {
+                    claimable: remaining,
+                    ..
+                }),
+            ) => {
+                assert_eq!(remaining, 0, "nothing should remain claimable");
+            }
+            (_, other) => panic!("expected InsufficientClaimable on replay, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn simple_rewards_claim() {
         let mut rng = StdRng::seed_from_u64(0x42);
 
-        let network_id = "a".to_string();
         let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
-        let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
-        unclaimed_block_rewards =
-            unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
         let state = LedgerState {
-            network_id: network_id.clone(),
-            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
-            locked_pool: 0,
-            bridge_receiving: Map::new(),
-            reserve_pool: 0,
-            block_reward_pool: 0,
-            unclaimed_block_rewards,
-            treasury: Map::new(),
-            zswap: Sp::new(State::default()),
-            contract: Map::new(),
-            utxo: Sp::new(UtxoState::default()),
-            replay_protection: Sp::new(ReplayProtectionState::new()),
-            dust: Sp::new(DustState::default()),
+            unclaimed_block_rewards: Map::new().insert(UserAddress::from(vk.clone()), MAX_SUPPLY),
+            ..base_ledger()
         };
         let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
-            network_id,
+            network_id: NETWORK_ID.to_string(),
             value: MAX_SUPPLY,
             owner: vk,
             nonce: rng.r#gen(),
@@ -2247,23 +2389,14 @@ mod tests {
             kind: ClaimKind::Reward,
         };
         let context = BlockContext::default();
-        match claim_unshielded(
-            &state,
-            &rewards,
-            &context,
-            EventSource {
-                transaction_hash: TransactionHash(rng.r#gen()),
-                logical_segment: 0,
-                physical_segment: 0,
-            },
-        ) {
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
             (new_st, TransactionResult::Success(_)) => {
-                if new_st.unclaimed_block_rewards != Map::new() {
-                    panic!(
-                        "unclaimed_block_rewards should now be empty, but is: {:?}",
-                        new_st.unclaimed_block_rewards
-                    )
-                }
+                assert!(
+                    new_st.unclaimed_block_rewards.is_empty(),
+                    "unclaimed_block_rewards should now be empty, but is: {:?}",
+                    new_st.unclaimed_block_rewards
+                );
             }
             (_, e) => panic!("{:?}", e),
         }
@@ -2273,45 +2406,23 @@ mod tests {
     fn rewards_claim_not_enough_available() {
         let mut rng = StdRng::seed_from_u64(0x42);
 
-        let network_id = "a".to_string();
         let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
-        let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
-        unclaimed_block_rewards =
-            unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), 200000);
+        let claimable = 200_000u128;
         let state = LedgerState {
-            network_id: network_id.clone(),
-            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
-            locked_pool: 10,
-            bridge_receiving: Map::new(),
-            reserve_pool: 10,
-            block_reward_pool: 0,
-            unclaimed_block_rewards,
-            treasury: Map::new(),
-            zswap: Sp::new(State::default()),
-            contract: Map::new(),
-            utxo: Sp::new(UtxoState::default()),
-            replay_protection: Sp::new(ReplayProtectionState::new()),
-            dust: Sp::new(DustState::default()),
+            unclaimed_block_rewards: Map::new().insert(UserAddress::from(vk.clone()), claimable),
+            ..base_ledger()
         };
         let rewards: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
-            network_id,
-            value: 1000001,
+            network_id: NETWORK_ID.to_string(),
+            value: claimable + 1,
             owner: vk,
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::Reward,
         };
         let context = BlockContext::default();
-        match claim_unshielded(
-            &state,
-            &rewards,
-            &context,
-            EventSource {
-                transaction_hash: TransactionHash(rng.r#gen()),
-                logical_segment: 0,
-                physical_segment: 0,
-            },
-        ) {
+
+        match claim_unshielded(&state, &rewards, &context, sample_event_source(&mut rng)) {
             (_, TransactionResult::Failure(TransactionInvalid::InsufficientClaimable { .. })) => (),
             (_, TransactionResult::Failure(e)) => {
                 panic!("Expected InsufficientClaimable, but got {e}")
@@ -2413,7 +2524,7 @@ mod tests {
         let amount: u128 = 10_000_000_000;
 
         let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
-            "test",
+            NETWORK_ID,
             INITIAL_PARAMETERS,
             amount,
             MAX_SUPPLY - amount,
@@ -2471,7 +2582,7 @@ mod tests {
         let amount: u128 = INITIAL_PARAMETERS.c_to_m_bridge_min_amount - 1;
 
         let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
-            "test",
+            NETWORK_ID,
             INITIAL_PARAMETERS,
             amount,
             MAX_SUPPLY - amount,
