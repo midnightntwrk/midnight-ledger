@@ -43,16 +43,12 @@ The same `IrSource` drives two passes:
 
 ### 1.1 `IrSource` (v3)
 
-A v3 circuit is described by this structure (`zkir-v3/src/ir.rs`, serialisation
-tag `ir-source[v3-generic]`):
-
-| Field | Type | Meaning |
-|---|---|---|
-| `version` | `IrMinorVersion` | Minor IR version. v3 currently defines only `V0` (default). |
-| `inputs` | `Vec<TypedIdentifier>` | The circuit's input variables, each a `(name, type)` pair. These are bound in memory before execution, decoded from `ProofPreimage::inputs`. |
-| `outputs` | `Vec<IrType>` | The circuit's return signature — an explicit, positional list of result types. The `Output` terminator is type-checked against this. |
-| `do_communications_commitment` | `bool` | Whether the circuit binds a commitment over its inputs and outputs ([§1.5](#15-communications-commitment)). |
-| `instructions` | `Arc<Vec<Instruction>>` | The instruction list, executed in order. |
+A v3 circuit is described by the following structure:
+* `version`: Major and minor IR version.
+* `inputs`: The circuit's input variables, each a `(name, type)` pair. These are bound in memory before execution, decoded from `ProofPreimage::inputs`.
+* `outputs`: The circuit's return signature - an explicit, positional list of result types. The `Output` terminator is type-checked against this.
+* `do_communications_commitment`: Whether the circuit binds a commitment over its inputs and outputs ([§1.5](#15-communications-commitment)).
+* `instructions`: The instruction list, executed in order.
 
 Note the change from v2's single `num_inputs: u32` to a fully-typed signature
 (`inputs` + `outputs`).
@@ -61,8 +57,9 @@ Note the change from v2's single `num_inputs: u32` to a fully-typed signature
 
 * Memory is a map from **identifier** to **typed value** (`HashMap<Identifier, IrValue>`).
 * It starts populated with the `inputs`, decoded from `ProofPreimage::inputs`.
-  Each input consumes `IrType::encoded_len()` raw field elements (see
-  [§2.1](#21-types-irtype)); a shortfall errors with `Not enough raw inputs`,
+  Values are encoded as native field elements, with IrType::encoded_len()
+  specifying the number of elements required for each type (see §2.1); a 
+  shortfall errors with `Not enough raw inputs`,
   and a leftover with `Expected N raw inputs, received M`.
 * Instructions execute in order. Each producing instruction reads its operands
   and binds its result(s) to the variable name(s) it declares (`output` /
@@ -71,25 +68,6 @@ Note the change from v2's single `num_inputs: u32` to a fully-typed signature
 * Because a name is bound once, an instruction can only reference values
   produced **before** it. The number of values each instruction produces is
   fixed and listed per-instruction below.
-
-### 1.3 The fields and curves
-
-* **Native field (`Fr`)** — the **BLS12-381 scalar field** (`outer::Scalar` in
-  `transient-crypto`). A `Native` value is one native field element.
-* **Embedded curve** — **Jubjub**, whose base field is the BLS12-381 scalar
-  field (which is why Jubjub coordinates fit directly in native field
-  elements). In v3 a curve point is a **first-class typed value**
-  (`JubjubPoint`), not a raw coordinate pair; its raw encoding is two `Native`
-  elements (x, y).
-* **Embedded scalar field** — the Jubjub scalar field (`JubjubScalar`), used as
-  the scalar argument to `EcMul` / `EcMulGenerator`.
-* **Foreign curve** — **Secp256k1** (a.k.a. K256), emulated over the native
-  field. Its point (`Secp256k1Point`), base field (`Secp256k1Base`), and scalar
-  field (`Secp256k1Scalar`) are all first-class types, enabling
-  Ethereum/Bitcoin-style ECDSA-adjacent circuits. These types pull in the
-  `secp256k1` chip of the standard library only when used.
-* **`Bytes32`** — a 32-byte value, used as the bridge between field elements and
-  byte-oriented data (and as the digest type for the byte conversions).
 
 ### 1.4 Public inputs, transcripts, and guards
 
@@ -164,22 +142,25 @@ The top-level loader (`IrSource::load`) accepts only major version `3`, minor
 ### 2.1 Types (`IrType`)
 
 Values are typed. `IrType` (`zkir-v3/src/ir_types.rs`, tag `ir-type[v1]`) has
-**seven** variants. `encoded_len` is the number of raw `Native` (`Fr`) elements
-the type lowers to (used for inputs, transcript reads, and `Encode`):
-
-| `IrType` | Serialised name | `encoded_len` |
-|---|---|---|
-| `Native` | `Scalar<BLS12-381>` | 1 |
-| `Bytes32` | `Bytes<32>` | 2 |
-| `JubjubPoint` | `Point<Jubjub>` | 2 (x, y) |
-| `JubjubScalar` | `Scalar<Jubjub>` | 1 |
-| `Secp256k1Point` | `Point<Secp256k1>` | 5 |
-| `Secp256k1Base` | `Base<Secp256k1>` | 2 |
-| `Secp256k1Scalar` | `Scalar<Secp256k1>` | 2 |
-
-A `Bytes32` is encoded as two field elements: the low 31 bytes and the high
-(32nd) byte. The `Secp256k1*` lengths reflect the native-field limb
-decomposition used to emulate the foreign curve.
+**seven** variants. Each type is represented by a number of native field elements.
+* `Scalar<BLS12-381>` — the BLS12-381 scalar field. This is the native type 
+   for midnight-zk proofs and, therefore, it is represented as a native field element.
+* `Point<Jubjub>` — A point of the embedded curve Jubjub, whose base field 
+  is the BLS12-381 scalar field. Its raw encoding is two native elements (x, y), 
+  representing its coordinates in affine form.
+* `Scalar<Jubjub>` — Jubjub scalar field, used as the scalar argumenti to 
+  `EcMul` / `EcMulGenerator`. Represented as a single native element.
+* `Scalar<Secp256k1>` — SECP256k1 scalar field, emulated over the native
+  field. Its raw encoding is two native elements.
+* `Base<Secp256k1>` — SECP256k1 base field, emulated over the native
+  field. Its raw encoding is two native elements.
+* `Point<Secp256k1>` — A point from the SECP256k1 curve, emulated over the 
+  native field. It is defined by the tuple `(x, y, is_id)`, where `x` and `y` are its
+  coordinates (represented as `Base<Secp256k1>`) and `is_id` is a flag 
+  determining whether the point is the identity or not. Its raw encoding is five 
+  native elements. 
+* **`Bytes32`** — a 32-byte value. Its raw encoding is 32 native elements, 
+  range constrained to `[0, 256)`.
 
 ### 2.2 Operands (`Operand`)
 
@@ -235,13 +216,12 @@ operands.
 
 #### `Mul { a, b, output }`
 * **Operands:** `a`, `b`. **Outputs:** 1 — `a * b`.
-* **Types:** `Native`, `Secp256k1Base`, `Secp256k1Scalar` (field multiplication;
-  scalar·point is `EcMul`, not `Mul`).
+* **Types:** `Native`, `Secp256k1Base`, `Secp256k1Scalar`. Field multiplication.
 
 #### `Neg { a, output }`
 * **Operands:** `a`. **Outputs:** 1 — `-a`.
 * **Types:** `Native`, `JubjubPoint`, `Secp256k1Point`, `Secp256k1Base`,
-  `Secp256k1Scalar` (additive negation; point negation for the point types).
+  `Secp256k1Scalar`. Additive negation (point negation for the point types).
 
 #### `Inv { a, output }`
 * **Operands:** `a`. **Outputs:** 1 — `a⁻¹`.
@@ -252,29 +232,29 @@ operands.
 ### 3.2 Boolean and selection
 
 #### `Not { a, output }`
-* **Operands:** `a` (boolean). **Outputs:** 1 — `!a`.
-* **Precondition:** `a ∈ {0,1}` (runtime-checked as boolean during preprocessing).
+* **Operands:** `a ∈ {0,1}`. **Outputs:** 1 — `!a`.
+* **Errors:** if `a ∉ {0,1}`. In-circuit that case is unsatisfiable.
 
 #### `TestEq { a, b, output }`
 * **Operands:** `a`, `b`. **Outputs:** 1 — boolean `a == b` (a `Native` `0`/`1`).
 * **Types:** `Native`, `JubjubPoint`, `Secp256k1Point`, `Secp256k1Base`,
-  `Secp256k1Scalar`. (Compare with `ConstrainEq`, which *asserts* equality
-  rather than computing a boolean.)
+  `Secp256k1Scalar`. Different from `ConstrainEq`, which *asserts* equality
+  rather than computing a boolean.
 
 #### `CondSelect { bit, a, b, output }`
-* **Operands:** `bit` (boolean), `a`, `b`. **Outputs:** 1.
+* **Operands:** `bit ∈ {0,1}`, `a`, `b`. **Outputs:** 1.
 * **Semantics:** binds `a` if `bit == 1`, else `b`.
 * **Types:** `Native`, `JubjubPoint`, `Secp256k1Point`, `Secp256k1Base`,
   `Secp256k1Scalar`.
-* **UB:** `bit` must be `0` or `1`.
+* **Errors:** if `bit ∉ {0,1}`. In-circuit that case is unsatisfiable.
 
 ### 3.3 Constraints and assertions (bind **no** outputs)
 
 #### `Assert { cond }`
-* **Operands:** `cond` (boolean). **Outputs:** none.
-* **Semantics:** requires `cond == 1`. Fails preprocessing with
-  `Failed direct assertion` otherwise; in-circuit, asserts non-zero.
-* **UB:** `cond` must be `0` or `1`.
+* **Operands:** `cond ∈ {0,1}`. **Outputs:** none.
+* **Semantics:** asserts `cond == 1`.
+* **Errors:** Fails preprocessing with `Failed direct assertion` if 
+  `cond ∉ {0,1}`. In-circuit that case is unsatisfiable.
 
 #### `ConstrainEq { a, b }`
 * **Operands:** `a`, `b`. **Outputs:** none.
@@ -289,8 +269,8 @@ operands.
 #### `ConstrainBits { val, bits }`
 * **Operands:** `val`, `bits: u32`. **Outputs:** none.
 * **Semantics:** constrains `val` to fit in `bits` bits (i.e. `val < 2^bits`).
-* **Precondition:** `bits < FR_BITS` (255). A larger bound errors with
-  `Excessive bit bound`.
+* **Errors:** `bits >= FR_BITS`. A bound larger than FR_BITS errors 
+  with `Excessive bit bound`.
 
 ### 3.4 Bit decomposition and comparison
 
@@ -298,22 +278,20 @@ operands.
 * **Operands:** `val`, `bits: u32`. **Outputs:** 2 — declared in this order:
   1. `val >> bits` (the quotient / high bits)
   2. `val & ((1 << bits) - 1)` (the remainder / low `bits` bits)
-* **Precondition:** exactly 2 output names (`DivModPowerOfTwo requires exactly 2
-  outputs` otherwise); `bits ≤ FR_BYTES_STORED * 8` (248), else `Excessive bit
-  count`.
+* **Errors:** if `bits >= FR_BYTES_STORED * 8`, with `Excessive bit count`.
 
 #### `ReconstituteField { divisor, modulus, bits, output }`
 * **Operands:** `divisor`, `modulus`, `bits: u32`. **Outputs:**
   1 — `(divisor << bits) | modulus`.
 * **Semantics:** inverse of `DivModPowerOfTwo`. Guarantees `modulus < 2^bits`
-  and that the reconstituted value does not overflow the field (errors:
-  `Reconstituted element overflows field`, or `Excessive bit count` if
-  `bits > 248`).
+  and that the reconstituted value does not overflow the field.
+  * **Errors:** if if `bits > 248`, fails with `Reconstituted element overflows field`, 
+    or `Excessive bit count`.
 
 #### `LessThan { a, b, bits, output }`
 * **Operands:** `a`, `b`, `bits: u32`. **Outputs:** 1 — boolean `a < b` (`Native`).
 * **Semantics:** compares `a` and `b` as `bits`-bit unsigned integers.
-* **UB:** `a` and `b` must each fit in `bits` bits.
+* **Errors:** if `a` or `b` do not fit in `bits` bits. In-circuit that case is unsatisfiable.
 
 ### 3.5 Copies
 
@@ -392,25 +370,21 @@ operands.
 
 #### `PersistentHash { alignment, inputs, outputs }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** 2 — the digest in the binary (field-aligned) format (exactly 2
-  output names, else `PersistentHash requires exactly 2 outputs`).
+  **Outputs:** 1 — `Bytes32`.
 * **Semantics:** **SHA-256** hash. Inputs are first parsed according to
   `alignment` into a field-aligned-binary (FAB) byte representation
   ([field-aligned-binary.md](./field-aligned-binary.md)), then SHA-256 is taken
-  over those bytes; the 32-byte digest is returned as 2 field elements (low 31
-  bytes, then the high byte). Errors with `Inputs did not match alignment` if
-  `inputs` don't conform to `alignment`.
+  over those bytes. 
+  * **Errors:** If `inputs` don't conform to `alignment`, errors with 
+    `Inputs did not match alignment`.
 * **Note:** much more expensive in-circuit than `TransientHash` (SHA-256 vs
   Poseidon); use where the digest must be a standard, stable hash across
   contexts (e.g. on-chain identifiers, interop).
 
 #### `Keccak256 { alignment, inputs, outputs }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** 2 — the digest in the binary (field-aligned) format.
+  **Outputs:** 1 — `Bytes32`.
 * **Semantics:** as `PersistentHash`, but computes the **Keccak-256** digest.
-  Useful for EVM / Ethereum-compatible hashing. (`PersistentHash` and
-  `Keccak256` share the same preprocessing / synthesis path, differing only in
-  the hash primitive.)
 
 ### 3.8 Elliptic-curve operations
 
@@ -586,46 +560,6 @@ instruction membership all changed.
 (There is **no `Decode` instruction** in v3; raw-element decoding for inputs and
 transcript reads is handled internally, and typed reconstruction is done by the
 specific conversions in [§3.6](#36-encoding-and-type-conversions).)
-
-## Appendix A — v3 instruction index
-
-The 33 v3 instructions:
-
-| Instruction | Operands | Outputs bound |
-|---|---|---|
-| `Add` | `a, b` | 1 |
-| `Mul` | `a, b` | 1 |
-| `Neg` | `a` | 1 |
-| `Inv` | `a` | 1 |
-| `Not` | `a` (bool) | 1 |
-| `TestEq` | `a, b` | 1 (bool) |
-| `CondSelect` | `bit` (bool), `a, b` | 1 |
-| `Assert` | `cond` (bool) | 0 |
-| `ConstrainEq` | `a, b` | 0 |
-| `ConstrainToBoolean` | `val` | 0 |
-| `ConstrainBits` | `val, bits` | 0 |
-| `DivModPowerOfTwo` | `val, bits` | 2 |
-| `ReconstituteField` | `divisor, modulus, bits` | 1 |
-| `LessThan` | `a, b, bits` | 1 (bool) |
-| `Copy` | `val` | 1 |
-| `Encode` | `input` | `encoded_len` (1–5, per input type) |
-| `IntoCoordinates` | `point` | 2 |
-| `FromCoordinates` | `inputs` (x, y) | 1 (point) |
-| `IntoBytes32` | `input` | 1 (Bytes32) |
-| `FromBytes32` | `bytes, type` | 1 |
-| `Bytes32IntoLowHigh` | `bytes` | 2 |
-| `Bytes32FromLowHigh` | `inputs` (low, high) | 1 (Bytes32) |
-| `JubjubScalarFromNative` | `native` | 1 (JubjubScalar) |
-| `TransientHash` | `inputs[]` | 1 |
-| `PersistentHash` | `alignment, inputs[]` | 2 |
-| `Keccak256` | `alignment, inputs[]` | 2 |
-| `EcMul` | `a, scalar` | 1 (point) |
-| `EcMulGenerator` | `scalar` | 1 (point) |
-| `HashToCurve` | `inputs[]` | 1 (point) |
-| `PublicInput` | `guard?, type` | 1 |
-| `PrivateInput` | `guard?, type` | 1 |
-| `Impact` | `guard, inputs[]` | 0 (declares PIs) |
-| `Output` | `vals[]` | 0 (terminator) |
 
 ## Appendix B — IR v2 (legacy)
 
