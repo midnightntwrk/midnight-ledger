@@ -32,30 +32,25 @@ the v2 → v3 deltas.
 > variable reference (`%name`) or an inline immediate (`0x…`) — not the
 > positional tape indices of v2.
 
-The same `IrSource` drives two passes:
+A ZKIR circuit is consumed in two passes:
 
-1. **Off-circuit preprocessing** (`IrSource::preprocess`, used by both `prove`
-   and `check`) — concretely evaluates the program against a `ProofPreimage` to
-   populate witness values and to derive the public inputs.  This is where
-   most "this is undefined behaviour / this errors" rules are actually
-   enforced at runtime.
-2. **In-circuit synthesis** (`IrSource::circuit`) — emits the PLONK constraints
-   that enforce each instruction, using the `midnight-zk` standard library
-   (`ZkStdLib`).
+1. **Off-circuit preprocessing** (used by both `prove` and `check`) —
+   concretely evaluates the program against a `ProofPreimage` to populate
+   witness values and to derive the public inputs.  This is where most "this is
+   undefined behaviour / this errors" rules are actually enforced at runtime.
+2. **In-circuit synthesis** — emits the PLONK constraints that enforce each
+   instruction, using the `midnight-zk` standard library (`ZkStdLib`).
 
 ## 1. The execution / circuit model
 
-### 1.1 `IrSource` (v3)
+### 1.1 Circuit structure
 
-A v3 circuit is described by the following structure:
+A ZKIR v3 circuit is described by the following fields:
 * `version`: Major and minor IR version.
 * `inputs`: The circuit's input variables, each a `(name, type)` pair. These are bound in memory before execution, decoded from `ProofPreimage::inputs`.
 * `outputs`: The circuit's return signature - an explicit, positional list of result types. The `Output` terminator is type-checked against this.
 * `do_communications_commitment`: Whether the circuit binds a commitment over its inputs and outputs ([§1.5](#15-communications-commitment)).
 * `instructions`: The instruction list, executed in order.
-
-Note the change from v2's single `num_inputs: u32` to a fully-typed signature
-(`inputs` + `outputs`).
 
 ### 1.2 Named memory
 
