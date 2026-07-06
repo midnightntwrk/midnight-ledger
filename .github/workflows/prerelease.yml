@@ -225,9 +225,14 @@ jobs:
 
   docker-push:
     needs: build
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/docker-push.yml
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
       ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
