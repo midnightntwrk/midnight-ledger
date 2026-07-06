@@ -236,3 +236,52 @@ jobs:
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
+
+  publish-proof-server-release:
+    needs: docker-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Download signed build manifest
+        uses: actions/download-artifact@v4
+        with:
+          pattern: proof-server-build-manifest-*
+          path: ./release-assets
+          merge-multiple: true
+
+      - name: Determine tag from signed manifest
+        id: tag
+        run: |
+          VERSION=$(jq -r .version ./release-assets/build-manifest.json)
+          echo "tag=proof-server-${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Attach signed manifest to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi
+
+          ASSETS=(
+            ./release-assets/build-manifest.json
+            ./release-assets/build-manifest.json.asc
+            ./release-assets/midnight-proof-server-public.asc
+          )
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${ASSETS[@]}" --clobber
+          else
+            gh release create "${TAG}" \
+              --title "Midnight Proof Server ${TAG}" \
+              --notes "Signed build manifest for ghcr.io/midnight-ntwrk/proof-server:$(jq -r .version ./release-assets/build-manifest.json). Verify with midnight-proof-server-public.asc." \
+              "${ASSETS[@]}"
+          fi
