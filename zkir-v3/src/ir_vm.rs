@@ -167,7 +167,6 @@ fn fab_decode_to_bytes_atom(
                 bytes_from(res, FR_BYTES_STORED, inputs[chunks - 1 - i].clone())?;
                 *inputs = &inputs[1..];
             }
-            *inputs = &inputs[chunks..];
             res.extend(res_vec);
             Ok(())
         }
