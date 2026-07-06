@@ -1,32 +1,36 @@
 # ZKIR Instruction Set Reference
 
 ZKIR ("zero-knowledge intermediate representation") is the low-level,
-serialisable representation of a Midnight circuit.  The Compact compiler lowers
-each exported circuit to a ZKIR `IrSource`; the proving stack then turns that
-`IrSource` into a concrete PLONK circuit, generates prover / verifier keys, and
-produces proofs.
+serialisable representation of a Midnight circuit.  It has two specified
+serialized forms: a **JSON** representation and a **binary** representation.  The
+Compact compiler lowers each exported circuit to ZKIR JSON; the proving stack
+then loads that ZKIR, turns it into a concrete PLONK circuit, generates
+prover / verifier keys, and produces proofs.  (Internally the `zkir-v3` crate
+deserialises ZKIR into an in-memory `IrSource` value, referenced throughout this
+document, but `IrSource` is a Rust implementation detail rather than the
+interchange format.)
 
 ZKIR sits between Compact and the proof system:
 
 ```
-Compact circuit  ──compile──▶  ZKIR (IrSource)  ──synthesise──▶  PLONK circuit  ──prove──▶  Proof
+Compact circuit  ──compile──▶  ZKIR (JSON / binary)  ──synthesise──▶  PLONK circuit  ──prove──▶  Proof
 ```
 
-This document specifies **IR v3** — the IR defined by the `zkir-v3` crate
-(`midnight-zkir-v3` 3.0.0-rc.2), which is the version integrated into Ledger 9
-(consumed by `proof-server` and published to JS / TS as
-`@midnight-ntwrk/zkir-v3`).  The previous stable IR, **v2** (`zkir` crate —
-`midnight-zkir` 2.2.0), is retained for reference in
+This document specifies **ZKIR version 3.0** — the IR defined by the `zkir-v3`
+crate (`midnight-zkir-v3` 3.0.0-rc.2), which is the version integrated into
+Ledger 9 (consumed by `proof-server` and published to JS / TS as
+`@midnight-ntwrk/zkir-v3`).  The previous stable version, **ZKIR 2.x** (`zkir`
+crate — `midnight-zkir` 2.2.0), is retained for reference in
 [Appendix B](#appendix-b--ir-v2-legacy); [§8](#8-migrating-from-v2) summarises
 the v2 → v3 deltas.
 
-> A ZKIR program is **not** a stack machine and **not** a register machine in
-> the usual sense.  It is a flat list of instructions over a **named memory**
-> of typed values.  Each producing instruction reads its operands and binds
+> A ZKIR v3 program is a language for a **register machine**: a flat list of
+> instructions over a **named memory** of typed values, where the "registers"
+> are named variables.  Each producing instruction reads its operands and binds
 > its output(s) to fresh, explicitly-named variables; a variable is written
 > once and never reassigned (SSA by name).  Operands are therefore either a
-> variable reference (`%name`) or an inline immediate (`0x…`) — not positional
-> tape indices as in v2.
+> variable reference (`%name`) or an inline immediate (`0x…`) — not the
+> positional tape indices of v2.
 
 The same `IrSource` drives two passes:
 
@@ -138,7 +142,7 @@ Values are typed. `IrType` (`zkir-v3/src/ir_types.rs`, tag `ir-type[v1]`) has
 * `Point<Jubjub>` — A point of the embedded curve Jubjub, whose base field 
   is the BLS12-381 scalar field. Its raw encoding is two native elements (x, y), 
   representing its coordinates in affine form.
-* `Scalar<Jubjub>` — Jubjub scalar field, used as the scalar argumenti to 
+* `Scalar<Jubjub>` — Jubjub scalar field, used as the scalar argument to 
   `EcMul` / `EcMulGenerator`. Represented as a single native element.
 * `Scalar<Secp256k1>` — SECP256k1 scalar field, emulated over the native
   field. Its raw encoding is two native elements.
@@ -149,8 +153,11 @@ Values are typed. `IrType` (`zkir-v3/src/ir_types.rs`, tag `ir-type[v1]`) has
   coordinates (represented as `Base<Secp256k1>`) and `is_id` is a flag 
   determining whether the point is the identity or not. Its raw encoding is five 
   native elements. 
-* **`Bytes32`** — a 32-byte value. Its raw encoding is 32 native elements, 
-  range constrained to `[0, 256)`.
+* `Bytes<32>` — a 32-byte value. Its raw encoding is **two** native elements
+  (a `(low, high)` pair: the low 31 bytes packed into one element and the high
+  byte into another, as produced by `Bytes32FromLowHigh`). This is distinct
+  from its **in-circuit** representation, which decomposes the value into 32
+  individual bytes, each range-constrained to `[0, 256)`.
 
 ### 2.2 Operands (`Operand`)
 

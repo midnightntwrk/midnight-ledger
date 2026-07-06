@@ -80,8 +80,10 @@ stage** (§5); `D` is the storage backend (not part of the wire format).
 | `signature` | `S::Signature<ErasedClaimRewardsTransaction>` | authorising signature over `value ‖ owner ‖ nonce` |
 | `kind` | `ClaimKind` | which reward pool is being claimed (tag `claim-kind[v1]`) |
 
-The signed payload is prefixed with the domain separator
-`b"midnight:sig-claim_rewards_transaction:"` (`data_to_sign`).
+The signed payload (`data_to_sign`) is the tagged serialization of the
+`ClaimRewardsTransactionSigningEnvelope` — the transaction with its `signature`
+field erased — so it carries the domain separator
+`midnight:claim-rewards-transaction-signing-envelope[v2]:`.
 
 ## 3. Intents
 
