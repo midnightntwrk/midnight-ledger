@@ -36,9 +36,9 @@ pub enum WorkerPoolError {
 
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 pub enum WorkError {
-    #[error("bad input {0}")]
+    #[error("bad input")]
     BadInput(String),
-    #[error("internal error {0}")]
+    #[error("internal error")]
     InternalError(String),
     #[error("work cancelled unexpectedly")]
     CancelledUnexpectedly,
