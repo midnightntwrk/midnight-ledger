@@ -108,16 +108,6 @@ with its own cursor that **must be fully consumed** by the end of the program
 `PublicInput` / `PrivateInput` consume `val_t.encoded_len()` raw elements per
 (active) read and decode them into a typed value.
 
-**Guards.** `PublicInput` and `PrivateInput` take an optional `guard` operand;
-`Impact` takes a (required) `guard` operand. The guard is a boolean memory
-value. When a guard is present and `false`, the instruction takes its
-"inactive" path: `PublicInput` / `PrivateInput` bind the type's default value
-without advancing their transcript cursor, and `Impact` declares `n` zeros (for
-its `n` inputs) instead of the real values and records a skip. This is how
-conditional (guarded) Impact operations are encoded. In-circuit, the guard does
-**not** add constraints on `PublicInput` / `PrivateInput`; for `Impact` the
-guard is enforced as an in-circuit `select(guard, x, 0)` per input.
-
 ### 1.5 Communications commitment
 
 When `do_communications_commitment` is set, the circuit binds a Poseidon
