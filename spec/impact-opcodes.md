@@ -136,33 +136,44 @@ charge an I/O read cost on the uncached variant.
 ### Stack manipulation and constants
 
 #### `push` (`10`) / `pushs` (`11`)
-* **Stack:** `-{} +{'a}` (`push`) / `-{} +{a}` (`pushs`). **Arg:** `a: StateValue`.
+* **Stack:** `-{} +{'a}` (`push`) / `-{} +{a}` (`pushs`).
+* **Arg:** `a: StateValue`.
 * **Semantics:** push the literal value `a`. `push` makes it **weak**, `pushs`
-  **strong** (persisted). **Gas:** `push_<type>` / `pushs_<type>`.
+  **strong** (persisted).
+* **Gas:** `push_<type>` / `pushs_<type>`.
 
 #### `pop` (`0b`)
-* **Stack:** `-{'a} +{}`. **Semantics:** discard the top value. **Gas:** `pop`.
+* **Stack:** `-{'a} +{}`.
+* **Semantics:** discard the top value.
+* **Gas:** `pop`.
 
 #### `dup n` (`3n`)
-* **Stack:** `-{x*, "a} +{"a, x*, "a}`. **Semantics:** copy the item at depth
-  `n` (top = 0) and push it. **Gas:** `dup_constant + dup_coeff_arg·n`.
+* **Stack:** `-{x*, "a} +{"a, x*, "a}`.
+* **Semantics:** copy the item at depth
+  `n` (top = 0) and push it.
+* **Gas:** `dup_constant + dup_coeff_arg·n`.
 
 #### `swap n` (`4n`)
-* **Stack:** `-{"a, x*, †b} +{†b, x*, "a}`. **Semantics:** swap the top with
-  the item `n+1` below it. **Gas:** `swap_constant + swap_coeff_arg·n`.
+* **Stack:** `-{"a, x*, †b} +{†b, x*, "a}`.
+* **Semantics:** swap the top with
+  the item `n+1` below it.
+* **Gas:** `swap_constant + swap_coeff_arg·n`.
 
 ### Integer arithmetic
 
 64-bit unsigned, alignment `b8`; overflow / underflow → `ArithmeticOverflow`.
 
 #### `add` (`14`) / `sub` (`15`)
-* **Stack:** `-{'a, 'b} +{c}`. **Semantics:** `add` ⇒ `[c] := [a] + [b]`;
+* **Stack:** `-{'a, 'b} +{c}`.
+* **Semantics:** `add` ⇒ `[c] := [a] + [b]`;
   `sub` ⇒ `[c] := [b] − [a]` (i.e. *second-from-top minus top*).
   **Gas:** `add` / `sub`.
 
 #### `addi c` (`0e`) / `subi c` (`0f`)
-* **Stack:** `-{'a} +{b}`. **Arg:** `c: u32` immediate.
-* **Semantics:** `[b] := [a] + c` / `[a] − c`. **Gas:** `addi` / `subi`.
+* **Stack:** `-{'a} +{b}`.
+* **Arg:** `c: u32` immediate.
+* **Semantics:** `[b] := [a] + c` / `[a] − c`.
+* **Gas:** `addi` / `subi`.
 
 ### Comparison and boolean logic
 
@@ -173,28 +184,35 @@ charge an I/O read cost on the uncached variant.
   `b8`.  **Gas:** `lt`.
 
 #### `eq` (`02`)
-* **Stack:** `-{'a, 'b} +{c}`. **Semantics:** `[c] := [a] == [b]`. At least one
-  side must contain ≤ 64 bytes (else `TooLongForEqual`). **Gas:** `eq`.
+* **Stack:** `-{'a, 'b} +{c}`.
+* **Semantics:** `[c] := [a] == [b]`. At least one
+  side must contain ≤ 64 bytes (else `TooLongForEqual`).
+* **Gas:** `eq`.
 
 #### `and` (`06`) / `or` (`07`) / `neg` (`08`)
 * **Stack:** `-{'a, 'b} +{c}` (binary) / `-{'a} +{b}` (`neg`).
 * **Semantics:** boolean `&` / `|` / `!` over operands that must each be `0`
-  or `1`. **Gas:** `and` / `or` / `neg`.
+  or `1`.
+* **Gas:** `and` / `or` / `neg`.
 
 ### Type, size, and construction
 
 #### `type` (`03`)
-* **Stack:** `-{'a} +{b}`. **Semantics:** `[b] := typeof(a)` — `Cell`=0,
+* **Stack:** `-{'a} +{b}`.
+* **Semantics:** `[b] := typeof(a)` — `Cell`=0,
   `Null`=1, `Map`=2, `Array(n)`=`3+n·8`, `BoundedMerkleTree(n)`=`4+(n−1)·8`.
   **Gas:** `type_<kind>`.
 
 #### `size` (`04`)
-* **Stack:** `-{'a} +{b}`. **Semantics:** `[b] := size(a)` — non-null entries
+* **Stack:** `-{'a} +{b}`.
+* **Semantics:** `[b] := size(a)` — non-null entries
   of a `Map`, `n` for `Array(n)`, or height for a `BoundedMerkleTree`.
-  `TypeError` on other types. **Gas:** `size_map` / `size_bmt` / `size_array`.
+  `TypeError` on other types.
+* **Gas:** `size_map` / `size_bmt` / `size_array`.
 
 #### `new` (`05`)
-* **Stack:** `-{'a} +{b}`. **Semantics:** create an empty value of the type
+* **Stack:** `-{'a} +{b}`.
+* **Semantics:** create an empty value of the type
   tag `[a]` (lower 3 bits select the type; for `Array` / `BMT` the upper bits
   give size / height).  Array length > 16 or unknown tag → `InvalidArgs`.
   **Gas:** `new_<kind>`.
@@ -202,7 +220,8 @@ charge an I/O read cost on the uncached variant.
 ### Map / tree / array access
 
 #### `member` (`18`)
-* **Stack:** `-{'a, 'b} +{c}`. **Semantics:** `[c] := has_key(b, a)` — whether
+* **Stack:** `-{'a, 'b} +{c}`.
+* **Semantics:** `[c] := has_key(b, a)` — whether
   key `a` maps to a non-null value in `Map` `b`. `Map`-only.
 * **Gas:**
   `member_constant + member_coeff_key_size·|key| + member_coeff_container_log_size·log₂(size)`
@@ -232,14 +251,16 @@ charge an I/O read cost on the uncached variant.
 * **Gas:** `ins[c]_<kind>_…` per level *(+read on uncached)*.
 
 #### `rem` / `remc` (`19` / `1a`)
-* **Stack:** `-{a, "b} +{"c}`. **Semantics:** `[c] := rem(b, a)` — remove key
+* **Stack:** `-{a, "b} +{"c}`.
+* **Semantics:** `[c] := rem(b, a)` — remove key
   `a` from `Map` / `BMT` `b`.  `remc` requires the node cached.
 * **Gas:** `rem[c]_<kind>_…` *(+read on uncached)*.
 
 ### Concatenation
 
 #### `concat` / `concatc n` (`16` / `17`)
-* **Stack:** `-{'a, 'b} +{c}`. **Arg:** `n: u32` bound.
+* **Stack:** `-{'a, 'b} +{c}`.
+* **Arg:** `n: u32` bound.
 * **Semantics:** `[c] := [b] ++ [a]` (second-from-top followed by top), provided
   `|[a]| + |[b]| ≤ n`; exceeding the cell bound → `CellBoundExceeded`.
   (`concatc`'s `cached` flag has no effect.)
@@ -248,14 +269,16 @@ charge an I/O read cost on the uncached variant.
 ### Merkle trees
 
 #### `root` (`0a`)
-* **Stack:** `-{'a} +{b}`. **Semantics:** `[b] := root(a)` — the Merkle root
+* **Stack:** `-{'a} +{b}`.
+* **Semantics:** `[b] := root(a)` — the Merkle root
   of a `BoundedMerkleTree` (must be rehashed); `TypeError` otherwise.
   **Gas:** `root`.
 
 ### Output, logging, and reads
 
 #### `popeq` / `popeqc` (`0c` / `0d`)
-* **Stack:** `-{'a} +{}`. **Arg:** `result: M::ReadResult` — the expected
+* **Stack:** `-{'a} +{}`.
+* **Arg:** `result: M::ReadResult` — the expected
   value in verifying mode (`AlignedValue`); `()` in gathering mode.
 * **Semantics:** pop a `Cell` and *return* its value as a transcript read. In
   verifying mode it must equal `result` (else `ReadMismatch`); in gathering
@@ -263,7 +286,8 @@ charge an I/O read cost on the uncached variant.
 * **Gas:** `popeq[c]_constant + popeq[c]_coeff_value_size·|value|`.
 
 #### `log` (`09`)
-* **Stack:** `-{'a} +{}`. **Semantics:** emit `a` as an event (subject to
+* **Stack:** `-{'a} +{}`.
+* **Semantics:** emit `a` as an event (subject to
   `MAX_LOG_SIZE`; `LogBoundExceeded` otherwise). Charged as both
   `bytes_written` and `bytes_deleted` (full churn).
 * **Gas:** `log_<kind>_constant + log_<kind>_coeff_value_size·size`.
@@ -271,7 +295,8 @@ charge an I/O read cost on the uncached variant.
 ### Control flow
 
 #### `noop n` (`00`)
-* **Stack:** `-{} +{}`. **Arg:** `n: u21`.
+* **Stack:** `-{} +{}`.
+* **Arg:** `n: u21`.
 * **Gas:** `noop_constant + noop_coeff_arg·n`.
 
 #### `branch n` (`12`) / `jmp n` (`13`)
@@ -284,7 +309,8 @@ charge an I/O read cost on the uncached variant.
   `jmp_constant + jmp_coeff_arg·n`.
 
 #### `ckpt` (`ff`)
-* **Stack:** `-{} +{}`. **Semantics:** no-op marker delimiting internally
+* **Stack:** `-{} +{}`.
+* **Semantics:** no-op marker delimiting internally
   atomic program segments — **jumps must not cross it**.  This is how the
   guaranteed / fallible phase split (Compact's `kernel.checkpoint()`) is
   expressed in a transcript.

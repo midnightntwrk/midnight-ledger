@@ -71,9 +71,12 @@ from the consensus layer that produces it.
   It is a deliberately minimal, proof-free transaction.
 * **Key fields:** `network_id`, `value: u128`, `owner: SignatureVerifyingKey`,
   `nonce: Nonce`, `signature`, `kind: ClaimKind` (`Reward` | `CardanoBridge`).
-* **Who creates it:** the owner of the unclaimed rewards (signs over
-  `value ‖ owner ‖ nonce` with the domain tag
-  `midnight:sig-claim_rewards_transaction:`).
+* **Who creates it:** the owner of the unclaimed rewards. The signature is over
+  the tagged `ClaimRewardsTransactionSigningEnvelope` — i.e. the transaction
+  fields `network_id`, `value`, `owner`, `nonce`, and `kind` (the `signature`
+  field erased) — under the domain separator
+  `midnight:claim-rewards-transaction-signing-envelope[v2]:`. See
+  [transaction-format.md §2.2](./transaction-format.md) for the byte layout.
 * **When it is used:** to claim the balance previously credited to
   `unclaimed_block_rewards` / `bridge_receiving` by a `DistributeNight`
   system transaction (§3).
@@ -162,7 +165,7 @@ Every user transaction is priced and bounded by the active `LedgerParameters`
 | Field | Meaning |
 |---|---|
 | `runtime_cost_model` | the **Impact VM** `CostModel` (per-opcode gas; see the [opcode reference §6](./impact-opcodes.md#6-gas-and-cost-model)) |
-| `baseline_cost` | fixed `RunningCost` floor per transaction (initial: `100 ms` compute) |
+| `baseline_cost` | fixed `RunningCost` floor per transaction (initial: `100 µs` compute) |
 | `validation_factor` | `FixedPoint` multiplier applied to well-formedness/validation compute (initial: `1/4` — the carry-over of the former `parallelism_factor: 4`) |
 | `guaranteed_factor` | `FixedPoint` multiplier on guaranteed-section compute (initial: `1`) |
 | `fallible_factor` | `FixedPoint` multiplier on fallible-section compute (initial: `1`) |
@@ -178,7 +181,7 @@ reads / writes, map / Merkle-tree updates, etc.
 |---|---|---|
 | `transaction_byte_limit` | `1 MiB` | max serialised transaction size (`TransactionTooLarge` otherwise) |
 | `time_to_dismiss_per_byte` | `2 µs` | per-byte component of the dismissal window |
-| `min_time_to_dismiss` | `15 s` | floor on the dismissal window |
+| `min_time_to_dismiss` | `15 ms` | floor on the dismissal window |
 | `block_limits` | 1 s read / 1 s compute / 200k block-usage / 50k written / 1M churned | per-block resource ceiling (`BlockLimitExceeded`) |
 | `block_withdrawal_minimum_multiple` | `1/2` | multiple driving `min_claimable_rewards` (§2.2) |
 | `max_contract_metadata_size` | `50_000` | hard limit on the size of associated contract metadata |

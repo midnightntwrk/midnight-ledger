@@ -24,7 +24,7 @@ Two distinct binary formats are involved, and they should not be conflated:
 
 | Layer | What it serialises | Format | Spec |
 |---|---|---|---|
-| **Container** | the `Transaction` and all its sub-structures (intents, offers, actions) | the **`serialize` crate**: a `midnight:<tag>:` prefix + a length-prefixed binary body, with `[vN]` **type-version tags** | §7.1 |
+| **Container** | the `Transaction` and all its sub-structures (intents, offers, actions) | the **`serialize` crate**: a `midnight:<tag>:` prefix + a **SCALE-style** binary body (compact varints for `u32`+), with `[vN]` **type-version tags** | §7.1 |
 | **Field-Aligned Binary (FAB)** | the leaf `AlignedValue`s *inside* contract state, transcripts, and keys | `Value` / `Alignment` byte form, plus a **field-element** form used for proofs | [field-aligned-binary.md](./field-aligned-binary.md), summarised §7.2 |
 
 In short: the transaction envelope is `serialize`-crate tagged binary; FAB
@@ -146,7 +146,7 @@ pub enum ContractAction<P: ProofKind, D: DB> {
 |---|---|---|
 | `inputs` | `Array<UtxoSpend>` | unshielded UTXOs being spent |
 | `outputs` | `Array<UtxoOutput>` | unshielded UTXOs being created |
-| `signatures` | `Array<S::Signature<SegIntent>>` | signatures over the `(segment_id, erased intent)` pair (§3.4) |
+| `signatures` | `Array<S::Signature<IntentSigningEnvelope>>` | signatures over the `(segment_id, erased intent)` pair (§3.4) |
 
 ### 3.3 `DustActions`
 
@@ -156,15 +156,18 @@ order is valid. Fees are denominated in DUST and accumulated across all
 segments when applying segment `0`. (DUST mechanics are specified in
 [dust.md](./dust.md).)
 
-### 3.4 Intent identity and signing: `SegIntent` / `IntentHash`
+### 3.4 Intent identity and signing: `IntentSigningEnvelope` / `IntentHash`
 
 Signatures and replay protection operate over the **proof-erased** intent
-paired with its segment id:
+paired with its segment id. The signed message is the tagged
+`IntentSigningEnvelope` (tag `intent-signing-envelope[v9]`), produced by
+`erased_intent.data_to_sign(segment_id)`:
 
 ```rust
-type ErasedIntent = Intent<(), (), Pedersen, D>;
-struct SegIntent(u16, ErasedIntent);          // what unshielded-offer signatures sign
-struct IntentHash(HashOutput);                 // tag "intent-hash"
+type ErasedIntent = Intent<(), (), Pedersen, D>;   // structure.rs
+// what unshielded-offer signatures sign (tag "intent-signing-envelope[v9]"):
+struct IntentSigningEnvelope { segment: u16, intent: InnerIntentSigningEnvelope /* erased */ }
+struct IntentHash(HashOutput);                     // tag "intent-hash"
 ```
 
 `IntentHash = persistent_hash(erased_intent.data_to_sign(segment_id))` — i.e.
@@ -280,10 +283,15 @@ midnight:<tag>:<Serializable body>
   bumps its `[vN]`; a derive-time `tag_unique_factor` test
   (`.tag-decompositions/`) ensures a layout change *must* change the tag,
   preventing silent format drift.
-* The **body** is the `Serializable` encoding: fixed-width integers; `Vec` /
-  `Array` and `HashMap` are length-prefixed (`u32` count, maps in sorted-key
-  order); `Option` is a presence byte + payload; enums are a discriminant +
-  variant body; `Sp<T>` serialises as its pointed-to `T`.
+* The **body** is the `Serializable` encoding, which is **SCALE-style**
+  (`serialize/src/util.rs`): `u8`/`u16` (and the signed integers) are
+  fixed-width little-endian, but `u32`/`u64`/`u128` are **SCALE compact
+  varints** (1/2/4/n-byte, `ScaleBigInt`) — *not* fixed-width. `Vec` / `Array`
+  and `HashMap` are length-prefixed by a compact `u32` count (maps in
+  sorted-key order); `Option` is a presence byte + payload; enums are a
+  discriminant + variant body; `Sp<T>` serialises as its pointed-to `T`. Note
+  that `tagged_serialize` itself writes **no length field** after the
+  `midnight:<tag>:` prefix — the body follows immediately.
 
 The current top-level tags for the transaction format are indexed in
 [Appendix A](#appendix-a--type--version-tag-index).

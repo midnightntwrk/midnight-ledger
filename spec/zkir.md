@@ -24,6 +24,13 @@ crate — `midnight-zkir` 2.2.0), is retained for reference in
 [Appendix B](#appendix-b--ir-v2-legacy); [§8](#8-migrating-from-v2) summarises
 the v2 → v3 deltas.
 
+> **Status:** ZKIR 3.0 is not yet frozen. This document describes the behaviour
+> of `midnight-zkir-v3` 3.0.0-rc.2 as released; the authoritative definition of
+> 3.0 is the released crate, not this document. Some details are still in flux
+> in unmerged work (e.g. the hash-instruction output shape, PR #629) and may
+> change before the final 3.0 release. Where this document and the released code
+> disagree, the code wins — please report the discrepancy.
+
 > A ZKIR v3 program is a language for a **register machine**: a flat list of
 > instructions over a **named memory** of typed values, where the "registers"
 > are named variables.  Each producing instruction reads its operands and binds
@@ -185,7 +192,7 @@ authored with an explicit version object, e.g.
 `{"version": {"major": 3, "minor": 0}, "inputs": […], "outputs": […], "do_communications_commitment": false, "instructions": […]}`.
 Examples below use this form.
 
-## 3. Instruction reference (IR v3)
+## 3. Instruction reference (ZKIR 3.0)
 
 There are **33** v3 instructions.  Each entry lists operands, the number of
 values it binds ("outputs"), semantics, the value types it supports, and
@@ -362,21 +369,26 @@ operands.
 
 #### `PersistentHash { alignment, inputs, outputs }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** 1 — `Bytes32`.
+  **Outputs:** exactly 2 — `(low, high)`, both `Native`. The 32-byte SHA-256
+  digest is returned as two field elements (its low/high decomposition, the
+  same packing used by the `Bytes<32>` encoding in [§2.1](#21-types-irtype)),
+  not as a single `Bytes32` value.
 * **Semantics:** **SHA-256** hash. Inputs are first parsed according to
   `alignment` into a field-aligned-binary (FAB) byte representation
   ([field-aligned-binary.md](./field-aligned-binary.md)), then SHA-256 is taken
   over those bytes. 
-  * **Errors:** If `inputs` don't conform to `alignment`, errors with 
-    `Inputs did not match alignment`.
+  * **Errors:** providing any number of outputs other than 2 fails preprocessing
+    with `PersistentHash requires exactly 2 outputs`. If `inputs` don't conform
+    to `alignment`, errors with `Inputs did not match alignment`.
 * **Note:** much more expensive in-circuit than `TransientHash` (SHA-256 vs
   Poseidon); use where the digest must be a standard, stable hash across
   contexts (e.g. on-chain identifiers, interop).
 
 #### `Keccak256 { alignment, inputs, outputs }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** 1 — `Bytes32`.
+  **Outputs:** exactly 2 — `(low, high)`, both `Native` (as `PersistentHash`).
 * **Semantics:** as `PersistentHash`, but computes the **Keccak-256** digest.
+  The same "exactly 2 outputs" rule applies.
 
 ### 3.8 Elliptic-curve operations
 
