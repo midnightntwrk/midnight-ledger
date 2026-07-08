@@ -351,11 +351,16 @@ jobs:
   docker-push:
     needs: build
     if: ${{ github.event.inputs.dry_run != 'true' }}
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/docker-push.yml
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
 
   # No `secrets:` - neither reusable workflow consumes any (GITHUB_TOKEN is
   # always provided), so passing them would violate least privilege.
@@ -568,3 +573,31 @@ jobs:
           TEXT=":rocket: Ledger ${KIND} *${VERSION}* is out. <${RELEASE_URL}|Release notes & artifacts>"
           payload=$(jq -n --arg t "$TEXT" '{text: $t}')
           curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
+
+  attach-proof-server-manifest:
+    needs: [ build, release, docker-push ]
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG_NAME: ${{ needs.build.outputs.tag_name }}
+    steps:
+      - name: Download signed proof-server build manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: proof-server-build-manifest-*
+          path: ./proof-server-release-assets
+          merge-multiple: true
+
+      - name: Attach signed manifest to Ledger release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG_NAME}" \
+            ./proof-server-release-assets/build-manifest.json \
+            ./proof-server-release-assets/build-manifest.json.asc \
+            ./proof-server-release-assets/midnight-proof-server-public.asc \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
