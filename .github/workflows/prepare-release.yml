@@ -146,12 +146,18 @@ jobs:
 
           # Scaffold the release-notes file from the template (idempotent), seeded
           # with a git-log draft as a starting point for the human-written summary.
-          NOTES=".github/release-notes/${TAG}.md"
-          if [ ! -f "$NOTES" ]; then
-            BULLETS="$(.github/scripts/draft-release-bullets.sh)"
-            sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
-            printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
-          fi
+          # Pre-releases don't get curated release notes.
+          case "${DISPLAY}" in
+            *-rc*|*-alpha*|*-beta*|*-performance*) echo "Pre-release detected - skipping release notes scaffold." ;;
+            *)
+              NOTES=".github/release-notes/${TAG}.md"
+              if [ ! -f "$NOTES" ]; then
+                BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+                sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
+                printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
+              fi
+              ;;
+          esac
 
       - name: Draft per-crate changelogs
         run: |
@@ -209,12 +215,19 @@ jobs:
           .github/scripts/gh-commit.sh "$BRANCH" "chore: prepare ${TAG}"
           gh pr create --base "${GITHUB_REF_NAME}" --head "$BRANCH" \
             --title "Prepare ${TAG}" \
-            --body "$(printf '%s\n' \
-              "Automated release prep for \`${TAG}\`." \
-              "" \
-              "- [ ] Versions correct (see \`Cargo.toml\` / \`Cargo.lock\` diff)" \
-              "- [ ] \`CHANGELOG.md\` + per-crate \`CHANGELOG_*.md\` drafts reviewed and edited" \
-              "- [ ] Regenerated \`docs/api/**\` diff looks right" \
-              "- [ ] \`.github/release-notes/${TAG}.md\` prose written" \
-              "" \
-              "After merge, run **Publish Ledger Release** on \`${GITHUB_REF_NAME}\`.")"
+            --body "$(
+              ITEMS=()
+              ITEMS+=("- [ ] Versions correct (see \`Cargo.toml\` / \`Cargo.lock\` diff)")
+              ITEMS+=("- [ ] \`CHANGELOG.md\` + per-crate \`CHANGELOG_*.md\` drafts reviewed and edited")
+              ITEMS+=("- [ ] Regenerated \`docs/api/**\` diff looks right")
+              case "${TAG}" in
+                *-rc*|*-alpha*|*-beta*|*-performance*) ;;
+                *) ITEMS+=("- [ ] \`.github/release-notes/${TAG}.md\` prose written") ;;
+              esac
+              printf '%s\n' \
+                "Automated release prep for \`${TAG}\`." \
+                "" \
+                "${ITEMS[@]}" \
+                "" \
+                "After merge, run **Publish Ledger Release** on \`${GITHUB_REF_NAME}\`."
+            )"
