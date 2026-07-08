@@ -576,6 +576,19 @@ impl<
             .transpose()?;
         Ok(())
     }
+
+    /// Collects proof evidence for all contract calls in this intent.
+    pub fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        let binding_commitment = self.binding_commitment.downgrade();
+        let mut evidence = vec![];
+        for action in self.actions.iter() {
+            evidence.extend(action.collect_proof_evidence(ref_state, binding_commitment)?);
+        }
+        Ok(evidence)
+    }
 }
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
@@ -587,6 +600,29 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
         )
         .then_some(())
         .ok_or(IntentSignatureVerificationFailure)
+    }
+}
+
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    D: DB,
+> StandardTransaction<S, P, B, D>
+{
+    /// Traverses all contract calls in the transaction and collects their proof evidence.
+    ///
+    /// This is the traversal phase of the inverted pipeline: call
+    /// [`ProofKind::batch_proof_verify`] on the result to complete verification.
+    pub fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        let mut evidence = vec![];
+        for segment_intent in self.intents.sorted_iter() {
+            evidence.extend(segment_intent.1.collect_proof_evidence(ref_state)?);
+        }
+        Ok(evidence)
     }
 }
 
@@ -673,6 +709,10 @@ where
                     })
                 })?;
 
+                // Traverse intents with proof verification deferred so that all
+                // contract proofs can be batch-verified in a single pass below.
+                let mut deferred_strictness = strictness;
+                deferred_strictness.verify_contract_proofs = false;
                 for segment_intent in stx.intents.sorted_iter() {
                     if *segment_intent.0 == GUARANTEED_SEGMENT {
                         return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
@@ -680,9 +720,15 @@ where
                     segment_intent.1.well_formed(
                         *segment_intent.0,
                         ref_state,
-                        strictness,
+                        deferred_strictness,
                         tblock,
                     )?;
+                }
+
+                // Verify phase: collect all proof evidence then batch-verify.
+                if strictness.verify_contract_proofs {
+                    let evidence = stx.collect_proof_evidence(ref_state)?;
+                    P::batch_proof_verify(&evidence, strictness.proof_verification_mode)?;
                 }
 
                 debug!("transaction well-formed");
@@ -1811,6 +1857,20 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
             ContractAction::Maintain(upd) => upd.well_formed(ref_state, strictness),
         }
     }
+
+    fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+        binding_commitment: Pedersen,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        match self {
+            ContractAction::Call(call) => Ok(call
+                .collect_proof_evidence(ref_state, binding_commitment)?
+                .into_iter()
+                .collect()),
+            _ => Ok(vec![]),
+        }
+    }
 }
 
 impl<D: DB> MaintenanceUpdate<D> {
@@ -1931,6 +1991,29 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
             })?;
         }
         Ok(())
+    }
+
+    /// Collects proof evidence for this call without verifying.
+    ///
+    /// The `binding_commitment` comes from the parent intent's erased binding commitment
+    /// (i.e. `intent.binding_commitment.downgrade()`). Returns `None` when the contract
+    /// operation is not found in state.
+    pub(crate) fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+        binding_commitment: Pedersen,
+    ) -> Result<Option<P::ProofEvidence>, MalformedTransaction<D>> {
+        let mut result = None;
+        ref_state.op_check(self.address, &self.entry_point, |op| {
+            result = Some(P::collect_proof_evidence(
+                op,
+                &self.proof,
+                self.public_inputs(binding_commitment),
+                self,
+            )?);
+            Ok(())
+        })?;
+        Ok(result)
     }
 
     // NOTE: The proof should receive the following inputs for binding purposes:
@@ -2547,5 +2630,71 @@ mod tests {
             !causality_violation_found,
             "Spurious CausalityConstraintViolation for a valid call ordering"
         );
+    }
+
+    #[test]
+    fn collect_proof_evidence_no_intents() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            None,
+            storage::storage::HashMap::new(),
+        );
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("empty transaction should succeed");
+        assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn collect_proof_evidence_intent_with_no_calls() {
+        use base_crypto::time::Timestamp;
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let mut rng = StdRng::seed_from_u64(0xff);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let intent: Intent<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+            Intent::new(
+                &mut rng,
+                None,
+                None,
+                vec![],
+                vec![],
+                vec![],
+                None,
+                Timestamp::from_secs(3600),
+            );
+        let intents = storage::storage::HashMap::new().insert(1u16, intent);
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new("test", intents, None, storage::storage::HashMap::new());
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("intent without calls should succeed");
+        assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn batch_proof_verify_noop_impl_succeeds() {
+        use crate::structure::ProofPreimageMarker;
+
+        <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
+            &[],
+            ProofVerificationMode::Real,
+        )
+        .expect("no-op batch verify should always succeed");
     }
 }

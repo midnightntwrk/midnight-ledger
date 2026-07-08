@@ -813,3 +813,26 @@ pub type ProvingError = anyhow::Error;
 /// the public API, although it may be assumed to be [`Debug`]` +
 /// `[`Display`](std::fmt::Display).
 pub type VerifyingError = anyhow::Error;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batch_verify_empty_succeeds() {
+        VerifierKey::batch_verify(
+            &PARAMS_VERIFIER,
+            std::iter::empty::<(&VerifierKey, &Proof, std::iter::Empty<Fr>)>(),
+        )
+        .expect("empty batch verify should succeed");
+    }
+
+    #[cfg(feature = "mock-verify")]
+    #[test]
+    fn mock_batch_verify_empty_succeeds() {
+        VerifierKey::mock_batch_verify(
+            std::iter::empty::<(&VerifierKey, &Proof, std::iter::Empty<Fr>)>(),
+        )
+        .expect("empty mock batch verify should succeed");
+    }
+}
