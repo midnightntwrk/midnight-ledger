@@ -564,6 +564,19 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Reverses the byte order of a `Bytes32` value.
+    ///
+    /// The input must be of type `Bytes32`, otherwise this operation fails. The
+    /// output is a `Bytes32` whose bytes are those of the input in reverse
+    /// order, i.e. the first byte becomes the last and vice versa.
+    ///
+    /// Outputs 1 element, the reversed bytes
+    ReverseBytes {
+        /// The bytes to be reversed
+        bytes: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Decomposes a `Bytes32` value into two `Native` field elements.
     ///
     /// The first output (`low`) encodes the first 31 bytes of the input as a
@@ -651,26 +664,26 @@ pub enum Instruction {
     /// Calls a long-term hash function on a sequence of items with a given
     /// alignment.
     ///
-    /// Outputs 2 elements for binary format
+    /// Outputs a value of type Bytes32.
     PersistentHash {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Evaluates the Keccak-256 hash function on a sequence of items with
     /// a given alignment.
     ///
-    /// Outputs 2 elements for binary format.
+    /// Outputs a value of type Bytes32.
     Keccak256 {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Tests if `a` and `b` are equal.
     /// Supported on types:
