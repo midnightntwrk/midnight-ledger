@@ -661,6 +661,111 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
             Ok(())
         }
     }
+
+    /// Collects proof evidence for this dust spend without verifying it immediately.
+    ///
+    /// Mirrors the public-input construction of `well_formed` but calls
+    /// [`ProofKind::collect_proof_evidence`] instead of [`ProofKind::proof_verify`], so
+    /// the resulting evidence can be accumulated across many spends and passed to
+    /// [`ProofKind::batch_proof_verify`] in a single call.
+    #[cfg(not(feature = "proof-verifying"))]
+    pub(crate) fn collect_proof_evidence(
+        &self,
+        _state_ref: &impl StateReference<D>,
+        _segment_id: u16,
+        _binding: Pedersen,
+        _ctime: Timestamp,
+    ) -> Result<Option<P::ProofEvidence>, MalformedTransaction<D>> {
+        Ok(None)
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    pub(crate) fn collect_proof_evidence(
+        &self,
+        state_ref: &impl StateReference<D>,
+        segment_id: u16,
+        binding: Pedersen,
+        ctime: Timestamp,
+    ) -> Result<Option<P::ProofEvidence>, MalformedTransaction<D>> {
+        let mut result = None;
+        state_ref.dust_spend_check(ctime, |params, commitment_root, generation_root| {
+            let mut prog = Vec::new();
+            prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
+                [Key::Value(0u8.into())],
+                false,
+                32,
+                Fr,
+                commitment_root.0
+            ));
+            prog.extend(HistoricMerkleTree_check_root!(
+                [Key::Value(1u8.into())],
+                false,
+                32,
+                Fr,
+                generation_root.0
+            ));
+            prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+            prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+            prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+            prog.extend(Set_insert!(
+                [Key::Value(2u8.into())],
+                false,
+                Fr,
+                self.old_nullifier.0
+            ));
+            prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+            prog.extend(HistoricMerkleTree_insert_hash!(
+                [Key::Value(0u8.into())],
+                false,
+                32,
+                Fr,
+                HashOutput::from(self.new_commitment)
+            ));
+            let mut pis = vec![];
+            pis.push(transient_hash(
+                &(
+                    Fr::from_le_bytes(b"midnight:dust:proof"),
+                    segment_id,
+                    binding,
+                )
+                    .field_vec(),
+            ));
+            for op in with_outputs(
+                prog.into_iter(),
+                [
+                    true.into(),
+                    true.into(),
+                    self.clone().into(),
+                    ctime.into(),
+                    params.into(),
+                    ctime.into(),
+                ]
+                .into_iter(),
+            ) {
+                op.field_repr(&mut pis);
+            }
+            debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
+            let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
+            dust_op.v2 = Some(SPEND_VK.clone());
+            let dust_call = crate::structure::ContractCall {
+                address: coin_structure::contract::ContractAddress::default(),
+                entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
+                guaranteed_transcript: None,
+                fallible_transcript: None,
+                communication_commitment: Fr::default(),
+                proof: self.proof.clone().into(),
+            };
+            result = Some(
+                P::collect_proof_evidence(&dust_op, &self.proof.clone().into(), pis, &dust_call)
+                    .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
+                        declared_time: ctime,
+                        dust_spend: Box::new(self.erase_proofs()),
+                    })?,
+            );
+            Ok(())
+        })?;
+        Ok(result)
+    }
 }
 
 #[derive(Storable, Envelope)]
@@ -864,6 +969,28 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
                 })?;
         }
         Ok(())
+    }
+
+    /// Collects proof evidence for all dust spends in these actions.
+    ///
+    /// Registration signatures carry no ZK proofs and are skipped.
+    /// The returned evidence should be accumulated across all intents and passed
+    /// to [`ProofKind::batch_proof_verify`] together with contract proof evidence.
+    pub(crate) fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+        segment_id: u16,
+        binding: Pedersen,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        let mut evidence = vec![];
+        for spend in self.spends.iter() {
+            if let Some(ev) =
+                spend.collect_proof_evidence(ref_state, segment_id, binding, self.ctime)?
+            {
+                evidence.push(ev);
+            }
+        }
+        Ok(evidence)
     }
 }
 

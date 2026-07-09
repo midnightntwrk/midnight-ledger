@@ -591,15 +591,24 @@ impl<
         Ok(())
     }
 
-    /// Collects proof evidence for all contract calls in this intent.
+    /// Collects proof evidence for all contract calls and dust spends in this intent.
+    ///
+    /// `segment_id` is required to construct the dust spend public inputs, which
+    /// commit to the segment the spend belongs to.
     pub fn collect_proof_evidence(
         &self,
         ref_state: &impl StateReference<D>,
+        segment_id: u16,
     ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
         let binding_commitment = self.binding_commitment.downgrade();
         let mut evidence = vec![];
         for action in self.actions.iter() {
             evidence.extend(action.collect_proof_evidence(ref_state, binding_commitment)?);
+        }
+        if let Some(dust_actions) = self.dust_actions.as_ref() {
+            evidence.extend(
+                dust_actions.collect_proof_evidence(ref_state, segment_id, binding_commitment)?,
+            );
         }
         Ok(evidence)
     }
@@ -634,7 +643,11 @@ impl<
     ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
         let mut evidence = vec![];
         for segment_intent in self.intents.sorted_iter() {
-            evidence.extend(segment_intent.1.collect_proof_evidence(ref_state)?);
+            evidence.extend(
+                segment_intent
+                    .1
+                    .collect_proof_evidence(ref_state, *segment_intent.0)?,
+            );
         }
         Ok(evidence)
     }
@@ -742,9 +755,10 @@ where
                 })?;
 
                 // Traverse intents with proof verification deferred so that all
-                // contract proofs can be batch-verified in a single pass below.
+                // contract and dust proofs can be batch-verified in a single pass below.
                 let mut deferred_strictness = strictness;
                 deferred_strictness.verify_contract_proofs = false;
+                deferred_strictness.verify_native_proofs = false;
                 for segment_intent in stx.intents.sorted_iter() {
                     if *segment_intent.0 == GUARANTEED_SEGMENT {
                         return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
@@ -757,8 +771,8 @@ where
                     )?;
                 }
 
-                // Verify phase: collect all proof evidence then batch-verify.
-                if strictness.verify_contract_proofs {
+                // Verify phase: collect all proof evidence (contract + dust) then batch-verify.
+                if strictness.verify_contract_proofs || strictness.verify_native_proofs {
                     let evidence = stx.collect_proof_evidence(ref_state)?;
                     P::batch_proof_verify(&evidence, strictness.proof_verification_mode)?;
                 }
@@ -2852,5 +2866,141 @@ mod tests {
             all_evidence.is_empty(),
             "transactions with no contract calls produce no proof evidence"
         );
+    }
+
+    /// An intent with dust_actions but no actual spends should contribute zero
+    /// proof evidence — only spends carry ZK proofs, registrations do not.
+    #[test]
+    fn collect_proof_evidence_intent_with_dust_actions_no_spends_is_empty() {
+        use base_crypto::time::Timestamp;
+        use crate::dust::DustActions;
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let mut rng = StdRng::seed_from_u64(0xff);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let dust_actions = DustActions::<Signature, ProofPreimageMarker, InMemoryDB> {
+            spends: vec![].into(),
+            registrations: vec![].into(),
+            ctime: Timestamp::from_secs(0),
+        };
+        let intent = Intent::new(
+            &mut rng,
+            None,
+            None,
+            vec![],
+            vec![],
+            vec![],
+            Some(dust_actions),
+            Timestamp::from_secs(3600),
+        );
+        let intents = storage::storage::HashMap::new().insert(1u16, intent);
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new("test", intents, None, storage::storage::HashMap::new());
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("dust_actions with no spends should produce no evidence");
+        assert!(evidence.is_empty());
+    }
+
+    /// Verifies that the segment_id is correctly threaded through the collection
+    /// chain when multiple intents across different segments are present.
+    #[test]
+    fn collect_proof_evidence_multiple_segments_is_empty_without_calls() {
+        use base_crypto::time::Timestamp;
+        use crate::dust::DustActions;
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let mut rng = StdRng::seed_from_u64(0xdead);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        // Two intents on different segments, each with dust_actions but no spends.
+        let dust = || DustActions::<Signature, ProofPreimageMarker, InMemoryDB> {
+            spends: vec![].into(),
+            registrations: vec![].into(),
+            ctime: Timestamp::from_secs(0),
+        };
+        let intent_a = Intent::new(&mut rng, None, None, vec![], vec![], vec![], Some(dust()), Timestamp::from_secs(3600));
+        let intent_b = Intent::new(&mut rng, None, None, vec![], vec![], vec![], Some(dust()), Timestamp::from_secs(3600));
+        let intents = storage::storage::HashMap::new()
+            .insert(1u16, intent_a)
+            .insert(2u16, intent_b);
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new("test", intents, None, storage::storage::HashMap::new());
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("two segments with dust_actions but no spends should produce no evidence");
+        assert!(evidence.is_empty());
+    }
+
+    /// Demonstrates the cross-transaction batching pattern including dust_actions:
+    /// evidence from contract calls AND dust spends across all transactions is
+    /// accumulated and batch-verified in a single call.
+    #[test]
+    fn cross_transaction_batch_proof_verify_with_dust_actions() {
+        use base_crypto::time::Timestamp;
+        use crate::dust::DustActions;
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let mut rng = StdRng::seed_from_u64(0xbeef);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let strictness = WellFormedStrictness::default();
+
+        let txs: Vec<Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>> =
+            (0..2)
+                .map(|_| {
+                    let dust_actions =
+                        DustActions::<Signature, ProofPreimageMarker, InMemoryDB> {
+                            spends: vec![].into(),
+                            registrations: vec![].into(),
+                            ctime: Timestamp::from_secs(0),
+                        };
+                    let intent = Intent::new(
+                        &mut rng,
+                        None,
+                        None,
+                        vec![],
+                        vec![],
+                        vec![],
+                        Some(dust_actions),
+                        Timestamp::from_secs(3600),
+                    );
+                    let intents = storage::storage::HashMap::new().insert(1u16, intent);
+                    let stx = StandardTransaction::<
+                        Signature,
+                        ProofPreimageMarker,
+                        PedersenRandomness,
+                        InMemoryDB,
+                    >::new("test", intents, None, storage::storage::HashMap::new());
+                    Transaction::Standard(stx)
+                })
+                .collect();
+
+        // Phase 1: collect evidence across all transactions (contract + dust spends).
+        let mut all_evidence: Vec<()> = vec![];
+        for tx in &txs {
+            all_evidence.extend(
+                tx.collect_proof_evidence(&ledger)
+                    .expect("collection should succeed"),
+            );
+        }
+
+        // Phase 2: one batch verify for all accumulated evidence.
+        <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
+            &all_evidence,
+            strictness.proof_verification_mode,
+        )
+        .expect("batch verify across transactions with dust_actions should succeed");
+
+        assert!(all_evidence.is_empty());
     }
 }
