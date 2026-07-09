@@ -2729,4 +2729,128 @@ mod tests {
         )
         .expect("no-op batch verify should always succeed");
     }
+
+    #[test]
+    fn defer_proofs_clears_verify_contract_proofs() {
+        let strictness = WellFormedStrictness::default();
+        assert!(strictness.verify_contract_proofs);
+        let deferred = strictness.defer_proofs();
+        assert!(!deferred.verify_contract_proofs);
+        assert_eq!(deferred.enforce_balancing, strictness.enforce_balancing);
+        assert_eq!(deferred.verify_native_proofs, strictness.verify_native_proofs);
+        assert_eq!(deferred.verify_signatures, strictness.verify_signatures);
+        assert_eq!(deferred.enforce_limits, strictness.enforce_limits);
+    }
+
+    #[test]
+    fn transaction_collect_proof_evidence_standard_no_calls() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            None,
+            storage::storage::HashMap::new(),
+        );
+        let tx = Transaction::Standard(stx);
+        let evidence = tx
+            .collect_proof_evidence(&ledger)
+            .expect("Standard transaction with no calls should succeed");
+        assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn transaction_collect_proof_evidence_claim_rewards_is_empty() {
+        use crate::structure::{ClaimKind, ClaimRewardsTransaction, SignatureVerifyingKey};
+        use coin_structure::coin::Nonce;
+        use transient_crypto::commitment::Pedersen;
+
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let claim = ClaimRewardsTransaction::<(), InMemoryDB> {
+            network_id: "test".into(),
+            value: 0,
+            owner: SignatureVerifyingKey::default(),
+            nonce: Nonce(rng.r#gen()),
+            signature: (),
+            kind: ClaimKind::Reward,
+        };
+        let tx: Transaction<(), (), Pedersen, InMemoryDB> = Transaction::ClaimRewards(claim);
+        let evidence = tx
+            .collect_proof_evidence(&ledger)
+            .expect("ClaimRewards should always produce empty evidence");
+        assert!(evidence.is_empty());
+    }
+
+    /// Demonstrates the cross-transaction batching pattern:
+    /// 1. Traverse each transaction with proof verification deferred
+    /// 2. Accumulate all proof evidence across all transactions
+    /// 3. Call batch_proof_verify once for the entire set
+    ///
+    /// With ProofPreimageMarker the evidence slices are unit `()` no-ops, but the
+    /// accumulation and single-call batch_proof_verify path is exercised in full.
+    #[test]
+    fn cross_transaction_batch_proof_verify() {
+        use base_crypto::time::Timestamp;
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let mut rng = StdRng::seed_from_u64(0xdead);
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let strictness = WellFormedStrictness::default();
+
+        // Build three independent transactions, each with one intent and no contract calls.
+        let txs: Vec<Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>> =
+            (0..3)
+                .map(|_| {
+                    let intent = Intent::new(
+                        &mut rng,
+                        None,
+                        None,
+                        vec![],
+                        vec![],
+                        vec![],
+                        None,
+                        Timestamp::from_secs(3600),
+                    );
+                    let intents = storage::storage::HashMap::new().insert(1u16, intent);
+                    let stx = StandardTransaction::<
+                        Signature,
+                        ProofPreimageMarker,
+                        PedersenRandomness,
+                        InMemoryDB,
+                    >::new("test", intents, None, storage::storage::HashMap::new());
+                    Transaction::Standard(stx)
+                })
+                .collect();
+
+        // Phase 1: collect proof evidence from every transaction, deferring proof
+        // verification so each well_formed call does only structural checks.
+        let mut all_evidence: Vec<()> = vec![];
+        for tx in &txs {
+            let evidence = tx
+                .collect_proof_evidence(&ledger)
+                .expect("collect_proof_evidence should succeed for a valid transaction");
+            all_evidence.extend(evidence);
+        }
+
+        // Phase 2: single batch verify across all accumulated evidence.
+        <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
+            &all_evidence,
+            strictness.proof_verification_mode,
+        )
+        .expect("batch_proof_verify across multiple transactions should succeed");
+
+        assert!(
+            all_evidence.is_empty(),
+            "transactions with no contract calls produce no proof evidence"
+        );
+    }
 }
