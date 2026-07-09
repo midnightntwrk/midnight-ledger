@@ -471,6 +471,20 @@ impl Default for WellFormedStrictness {
     }
 }
 
+impl WellFormedStrictness {
+    /// Returns a copy of this strictness with contract proof verification disabled.
+    ///
+    /// Use this together with [`Transaction::collect_proof_evidence`] and
+    /// [`ProofKind::batch_proof_verify`] to batch-verify proofs across multiple
+    /// transactions in a single pass rather than per-transaction.
+    pub fn defer_proofs(self) -> Self {
+        Self {
+            verify_contract_proofs: false,
+            ..self
+        }
+    }
+}
+
 fn no_duplicates<T>(iter: T) -> bool
 where
     T: IntoIterator,
@@ -635,6 +649,24 @@ impl<
 where
     Transaction<S, P, B, D>: Serializable,
 {
+    /// Traverses all contract calls in this transaction and collects their proof evidence.
+    ///
+    /// Enables cross-transaction proof batching: call this on each transaction after
+    /// passing [`WellFormedStrictness::defer_proofs`] to [`Transaction::well_formed`],
+    /// accumulate the evidence slices, then call [`ProofKind::batch_proof_verify`] once
+    /// across all transactions instead of once per transaction.
+    ///
+    /// `ClaimRewards` transactions carry no contract proofs and always return an empty vec.
+    pub fn collect_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        match self {
+            Transaction::Standard(stx) => stx.collect_proof_evidence(ref_state),
+            Transaction::ClaimRewards(_) => Ok(vec![]),
+        }
+    }
+
     // All checks that can be done without a state.
     #[instrument(skip(self, ref_state), fields(self = ?self.transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
     /// Checks if a transaction is well-formed, performing all checks possible

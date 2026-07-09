@@ -448,7 +448,7 @@ pub enum ContractProofEvidence {
     },
     V3 {
         vk: transient_crypto::proofs::VerifierKey,
-        proof: transient_crypto::proofs::Proof,
+        proof: Proof,
         pis: Vec<Fr>,
     },
 }
@@ -619,15 +619,11 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
         let v2 = evidence.iter().filter_map(|e| match e {
-            ContractProofEvidence::V2 { vk, proof, pis } => {
-                Some((vk, proof, pis.iter().copied()))
-            }
+            ContractProofEvidence::V2 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
             _ => None,
         });
         let v3 = evidence.iter().filter_map(|e| match e {
-            ContractProofEvidence::V3 { vk, proof, pis } => {
-                Some((vk, proof, pis.iter().copied()))
-            }
+            ContractProofEvidence::V3 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
             _ => None,
         });
 
@@ -709,7 +705,10 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    fn batch_proof_verify(_: &[()], _: ProofVerificationMode) -> Result<(), MalformedTransaction<D>> {
+    fn batch_proof_verify(
+        _: &[()],
+        _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
     fn estimated_tx_size<
@@ -758,7 +757,10 @@ impl<D: DB> ProofKind<D> for () {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    fn batch_proof_verify(_: &[()], _: ProofVerificationMode) -> Result<(), MalformedTransaction<D>> {
+    fn batch_proof_verify(
+        _: &[()],
+        _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
     fn estimated_tx_size<
