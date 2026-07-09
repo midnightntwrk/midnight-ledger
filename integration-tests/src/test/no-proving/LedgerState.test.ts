@@ -32,7 +32,7 @@ import {
   unshieldedToken,
   shieldedToken,
   DustState
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { ONE_KB, Random, Static, TestResource, VERSION_HEADER } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';

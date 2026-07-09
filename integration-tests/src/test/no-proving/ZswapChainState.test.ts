@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { LedgerState, ZswapChainState } from '@midnight-ntwrk/ledger';
+import { LedgerState, ZswapChainState } from '@midnightntwrk/ledger';
 import { Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
