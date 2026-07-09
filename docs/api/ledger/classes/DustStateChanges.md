@@ -6,6 +6,35 @@
 
 # Class: DustStateChanges
 
+## Constructors
+
+### Constructor
+
+```ts
+new DustStateChanges(
+   source, 
+   receivedUtxos, 
+   spentUtxos): DustStateChanges;
+```
+
+#### Parameters
+
+##### source
+
+`string`
+
+##### receivedUtxos
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)[]
+
+##### spentUtxos
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)[]
+
+#### Returns
+
+`DustStateChanges`
+
 ## Properties
 
 ### receivedUtxos
@@ -35,3 +64,21 @@ readonly spentUtxos: QualifiedDustOutput[];
 ```
 
 The UTXOs that were spent in this state change
+
+## Methods
+
+### toString()
+
+```ts
+toString(compact?): string;
+```
+
+#### Parameters
+
+##### compact?
+
+`boolean`
+
+#### Returns
+
+`string`

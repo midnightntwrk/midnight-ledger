@@ -14,14 +14,33 @@
 # limitations under the License.
 
 # Draft CHANGELOG bullets from conventional-commit subjects since the last
-# ledger tag. Output is a starting point for a human to edit, not final copy.
+# release tag. Output is a starting point for a human to edit, not final copy.
+#
+# Args (both optional; no args = top-level ledger changelog behavior):
+#   $1  tag prefix   e.g. "onchain-runtime" -> last tag "onchain-runtime-<ver>".
+#                    Defaults to "ledger". The glob is anchored on a digit
+#                    (<prefix>-[0-9]*) so "storage" does not match "storage-core-*".
+#   $2  path filter  e.g. "onchain-runtime" -> only commits touching that dir.
 set -euo pipefail
 
-last_tag=$(git tag --list 'ledger-*' --sort=-v:refname | head -n1 || true)
-range=""
-[ -n "$last_tag" ] && range="${last_tag}..HEAD"
+prefix="${1:-ledger}"
+path="${2:-}"
 
-bullets=$(git log --no-merges --pretty=format:'%s' $range \
+last_tag=$(git tag --list "${prefix}-[0-9]*" --sort=-v:refname | head -n1 || true)
+
+# For a per-crate draft with no tag yet, leave a placeholder rather than dumping
+# the whole history. Only applies when a prefix was passed explicitly; the
+# no-arg (top-level) case keeps the original whole-history fallback.
+if [ -z "$last_tag" ] && [ -n "${1:-}" ]; then
+  echo "- No ${prefix} release tag found - fill in manually."
+  exit 0
+fi
+
+log_args=(--no-merges --pretty=format:'%s')
+[ -n "$last_tag" ] && log_args+=("${last_tag}..HEAD")
+[ -n "$path" ] && log_args+=(-- "${path}/")
+
+bullets=$(git log "${log_args[@]}" \
   | grep -E '^(feat|fix|breaking|perf)(\([^)]*\))?!?:' \
   | sed -E 's/^([a-z]+)(\([^)]*\))?!?:[[:space:]]*/- \1: /' \
   || true)

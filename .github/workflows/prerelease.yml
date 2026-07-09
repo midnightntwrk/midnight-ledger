@@ -98,9 +98,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          # Default token (has contents:write via job permissions) for the
-          # verified docs commit; API commits are signed by GitHub's web-flow key.
-          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -139,20 +136,7 @@ jobs:
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
-            cd ledger-wasm
-            cargo check
-            npm install
-            npm run build:markdown-docs
-
-            if git diff --quiet ../docs; then
-              echo "No changes to the docs"
-            else
-              git add ../docs
-              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
-                "$GITHUB_REF_NAME" "chore: update ledger-wasm docs"
-            fi
-
-            cd ..
+            # Docs are regenerated + reviewed in the Prepare PR, not here.
             nix build .#ledger-wasm
             cd result/lib
             echo "Contents of result/lib:"
@@ -185,9 +169,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          # Default token (has contents:write via job permissions) for the
-          # verified docs commit; API commits are signed by GitHub's web-flow key.
-          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -219,20 +200,7 @@ jobs:
              && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
-            cd onchain-runtime-wasm
-            cargo check
-            npm install
-            npm run build:markdown-docs
-
-            if git diff --quiet ../docs; then
-              echo "No changes to the docs"
-            else
-              git add ../docs
-              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
-                "$GITHUB_REF_NAME" "chore: update onchain-runtime-wasm docs"
-            fi
-
-            cd ..
+            # Docs are regenerated + reviewed in the Prepare PR, not here.
             nix build .#onchain-runtime-wasm
             cd result/lib
             echo "Contents of result/lib:"
@@ -264,9 +232,6 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          # Default token (has contents:write via job permissions) for the
-          # verified docs commit; API commits are signed by GitHub's web-flow key.
-          COMMIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -300,20 +265,7 @@ jobs:
              && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
             echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs - skipping build/publish."
           else
-            cd zkir-wasm
-            cargo check
-            npm install
-            npm run build:markdown-docs
-
-            if git diff --quiet ../docs; then
-              echo "No changes to the docs"
-            else
-              git add ../docs
-              GH_TOKEN="$COMMIT_TOKEN" "${GITHUB_WORKSPACE}/.github/scripts/gh-commit.sh" \
-                "$GITHUB_REF_NAME" "chore: update zkir-wasm docs"
-            fi
-
-            cd ..
+            # Docs are regenerated + reviewed in the Prepare PR, not here.
             nix build .#zkir-wasm
             cd result/lib
             echo "Contents of result/lib:"
@@ -531,13 +483,18 @@ jobs:
           NOTES_FILE="${GITHUB_WORKSPACE}/.github/release-notes/${TAG_NAME}.md"
 
           PRERELEASE_FLAG=""
+          IS_PRERELEASE=false
           case "${VERSION}" in
-            *-rc*|*-alpha*|*-beta*|*-performance*) PRERELEASE_FLAG="--prerelease" ;;
+            *-rc*|*-alpha*|*-beta*|*-performance*) PRERELEASE_FLAG="--prerelease"; IS_PRERELEASE=true ;;
           esac
 
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             echo "Release ${TAG_NAME} exists - refreshing assets."
             gh release upload "${TAG_NAME}" "${STAGING}"/* --clobber
+          elif [ "${IS_PRERELEASE}" = "true" ]; then
+            # Pre-releases always use auto-generated notes.
+            gh release create "${TAG_NAME}" --title "Ledger ${VERSION}" \
+              --generate-notes --prerelease "${STAGING}"/*
           elif [ -f "${NOTES_FILE}" ]; then
             gh release create "${TAG_NAME}" --title "Ledger ${VERSION}" \
               --notes-file "${NOTES_FILE}" ${PRERELEASE_FLAG} "${STAGING}"/*

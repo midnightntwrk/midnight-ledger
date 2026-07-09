@@ -40,26 +40,30 @@ if [ -z "$EXPECTED_OID" ]; then
   echo "::error::branch ${BRANCH} does not exist on the remote"; exit 1
 fi
 
-# Build additions (full new contents, base64) and deletions from the staged set.
-# --no-renames so a rename is a delete + add; quotepath off for safe path bytes.
-additions='[]'; deletions='[]'
+# Build additions (full new contents, base64) and deletions from the staged set,
+# one compact JSON object per line, into temp files. --no-renames so a rename is
+# a delete + add; quotepath off for safe path bytes. Everything flows through
+# files (jq --rawfile/--slurpfile, gh --input) so no potentially large content
+# (e.g. Cargo.lock's base64) is ever passed on argv, which would exceed ARG_MAX.
+adds_file="$(mktemp)"; dels_file="$(mktemp)"; b64_file="$(mktemp)"; body_file="$(mktemp)"
+trap 'rm -f "$adds_file" "$dels_file" "$b64_file" "$body_file"' EXIT
 while IFS=$'\t' read -r status path; do
   if [ "$status" = "D" ]; then
-    deletions=$(jq -c --arg p "$path" '. + [{path:$p}]' <<<"$deletions")
+    jq -cn --arg p "$path" '{path:$p}' >> "$dels_file"
   else
-    b64=$(git show ":0:${path}" | base64 | tr -d '\n')
-    additions=$(jq -c --arg p "$path" --arg c "$b64" '. + [{path:$p,contents:$c}]' <<<"$additions")
+    git show ":0:${path}" | base64 | tr -d '\n' > "$b64_file"
+    jq -cn --arg p "$path" --rawfile c "$b64_file" '{path:$p,contents:$c}' >> "$adds_file"
   fi
 done < <(git -c core.quotepath=false diff --cached --name-status --no-renames "$EXPECTED_OID")
 
-if [ "$additions" = '[]' ] && [ "$deletions" = '[]' ]; then
+if [ ! -s "$adds_file" ] && [ ! -s "$dels_file" ]; then
   echo "No staged changes for ${BRANCH}; nothing to commit."; exit 0
 fi
 
 if [ "${DRY_RUN:-false}" = "true" ]; then
   echo "[dry-run] would commit to ${BRANCH}: \"${MESSAGE}\""
-  jq -n --argjson a "$additions" --argjson d "$deletions" \
-    '{additions:[$a[].path], deletions:[$d[].path]}'
+  echo "  additions:"; jq -r '.path' "$adds_file" | sed 's/^/    /' || true
+  echo "  deletions:"; jq -r '.path' "$dels_file" | sed 's/^/    /' || true
   exit 0
 fi
 
@@ -67,16 +71,18 @@ QUERY='mutation($input: CreateCommitOnBranchInput!) {
   createCommitOnBranch(input: $input) { commit { oid url } }
 }'
 
-NEW_OID=$(jq -n \
+# --slurpfile reads each temp file's JSON-lines into an array (empty file -> []).
+jq -n \
     --arg repo "$GITHUB_REPOSITORY" --arg branch "$BRANCH" --arg msg "$MESSAGE" \
-    --arg oid "$EXPECTED_OID" --argjson adds "$additions" --argjson dels "$deletions" \
-    --arg query "$QUERY" \
+    --arg oid "$EXPECTED_OID" --arg query "$QUERY" \
+    --slurpfile adds "$adds_file" --slurpfile dels "$dels_file" \
     '{query:$query, variables:{input:{
         branch:{repositoryNameWithOwner:$repo, branchName:$branch},
         message:{headline:$msg},
         expectedHeadOid:$oid,
-        fileChanges:{additions:$adds, deletions:$dels}}}}' \
-  | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
+        fileChanges:{additions:$adds, deletions:$dels}}}}' > "$body_file"
+
+NEW_OID=$(gh api graphql --input "$body_file" --jq '.data.createCommitOnBranch.commit.oid')
 
 echo "Committed ${NEW_OID} to ${BRANCH} (verified)."
 # Advance local HEAD to the new commit (so a later tag/commit in this job is
