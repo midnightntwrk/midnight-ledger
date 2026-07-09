@@ -71,7 +71,7 @@ import {
   type AlignedValue,
   sampleContractAddress,
   runtimeCoinCommitment
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import {
   BOOLEAN_HASH_BYTES,
   getQualifiedShieldedCoinInfo,

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import '@/setup-proving';
-import { ContractDeploy, ContractState, Intent, Transaction } from '@midnight-ntwrk/ledger';
+import { ContractDeploy, ContractState, Intent, Transaction } from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 
 describe.concurrent('Ledger API - Intent [@slow][@proving]', () => {

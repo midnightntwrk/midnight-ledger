@@ -22,7 +22,7 @@ import {
   WellFormedStrictness,
   ZswapOffer,
   ZswapOutput
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { Static, getQualifiedShieldedCoinInfo } from '@/test-objects';
 import '@/setup-proving';

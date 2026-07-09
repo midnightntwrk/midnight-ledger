@@ -13,7 +13,7 @@
 
 import { Static, getNewUnshieldedOffer } from '@/test-objects';
 import { assertSerializationSuccess, corruptSignature } from '@/test-utils';
-import type { ContractDeploy } from '@midnight-ntwrk/ledger';
+import type { ContractDeploy } from '@midnightntwrk/ledger';
 import {
   LedgerState,
   WellFormedStrictness,
@@ -21,7 +21,7 @@ import {
   Transaction,
   Intent,
   UnshieldedOffer
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - WellFormedStrictness', () => {

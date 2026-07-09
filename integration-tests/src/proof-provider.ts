@@ -23,7 +23,7 @@ import {
   createCheckPayload,
   parseCheckResult,
   createProvingTransactionPayload
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Cache } from 'cache-ts';
 import { type ChildProcess, exec /* , execSync */ } from 'node:child_process';
 import { createServer } from 'net';

@@ -26,7 +26,7 @@ import {
   type UtxoOutput,
   type UtxoSpend,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {

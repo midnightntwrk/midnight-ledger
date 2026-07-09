@@ -39,7 +39,11 @@ This release note is important for:
 
 ## Breaking changes or required actions for developers
 
-*None in this release.*
+- The npm packages are now published under the `@midnightntwrk` scope
+  (previously `@midnight-ntwrk`). Consumers must update their `package.json`
+  dependencies, e.g. `@midnight-ntwrk/ledger-v8` becomes
+  `@midnightntwrk/ledger-v8`. There are no API changes; only the package name
+  changes.
 
 ## Fixed defect list
 

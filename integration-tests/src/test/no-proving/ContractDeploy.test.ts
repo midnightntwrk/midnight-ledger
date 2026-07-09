@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ContractDeploy, ContractOperation, ContractState } from '@midnight-ntwrk/ledger';
+import { ContractDeploy, ContractOperation, ContractState } from '@midnightntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
 
 describe('Ledger API - ContractDeploy', () => {
