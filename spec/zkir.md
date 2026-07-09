@@ -25,11 +25,11 @@ crate — `midnight-zkir` 2.2.0), is retained for reference in
 the v2 → v3 deltas.
 
 > **Status:** ZKIR 3.0 is not yet frozen. This document describes the behaviour
-> of `midnight-zkir-v3` 3.0.0-rc.2 as released; the authoritative definition of
-> 3.0 is the released crate, not this document. Some details are still in flux
-> in unmerged work (e.g. the hash-instruction output shape, PR #629) and may
-> change before the final 3.0 release. Where this document and the released code
-> disagree, the code wins — please report the discrepancy.
+> of `midnight-zkir-v3` as currently released; the authoritative definition of
+> 3.0 is the released crate, not this document. Some instruction details are
+> still evolving ahead of the final 3.0 release (for example, the hash
+> instructions' output shape has already changed once). Where this document and
+> the released code disagree, the code wins — please report the discrepancy.
 
 > A ZKIR v3 program is a language for a **register machine**: a flat list of
 > instructions over a **named memory** of typed values, where the "registers"
@@ -367,28 +367,24 @@ operands.
   values. Circuit-friendly and cheap in-circuit; use for transient / ephemeral
   hashing.
 
-#### `PersistentHash { alignment, inputs, outputs }`
+#### `PersistentHash { alignment, inputs, output }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** exactly 2 — `(low, high)`, both `Native`. The 32-byte SHA-256
-  digest is returned as two field elements (its low/high decomposition, the
-  same packing used by the `Bytes<32>` encoding in [§2.1](#21-types-irtype)),
-  not as a single `Bytes32` value.
+  **Outputs:** 1 — `Bytes<32>` (the 32-byte SHA-256 digest bound as a single
+  `Bytes32` value).
 * **Semantics:** **SHA-256** hash. Inputs are first parsed according to
   `alignment` into a field-aligned-binary (FAB) byte representation
   ([field-aligned-binary.md](./field-aligned-binary.md)), then SHA-256 is taken
   over those bytes. 
-  * **Errors:** providing any number of outputs other than 2 fails preprocessing
-    with `PersistentHash requires exactly 2 outputs`. If `inputs` don't conform
-    to `alignment`, errors with `Inputs did not match alignment`.
+  * **Errors:** if `inputs` don't conform to `alignment`, errors with
+    `Inputs did not match alignment`.
 * **Note:** much more expensive in-circuit than `TransientHash` (SHA-256 vs
   Poseidon); use where the digest must be a standard, stable hash across
   contexts (e.g. on-chain identifiers, interop).
 
-#### `Keccak256 { alignment, inputs, outputs }`
+#### `Keccak256 { alignment, inputs, output }`
 * **Operands:** `alignment: Alignment`, `inputs: Vec<Operand>` (all `Native`).
-  **Outputs:** exactly 2 — `(low, high)`, both `Native` (as `PersistentHash`).
+  **Outputs:** 1 — `Bytes<32>` (as `PersistentHash`).
 * **Semantics:** as `PersistentHash`, but computes the **Keccak-256** digest.
-  The same "exactly 2 outputs" rule applies.
 
 ### 3.8 Elliptic-curve operations
 
@@ -503,7 +499,7 @@ fails to preprocess (`zkir-v3/src/ir_vm.rs` and the per-instruction modules):
 | `Cannot extract coordinates of the Secp256k1 identity` / coordinates not on curve | `IntoCoordinates` / `FromCoordinates` on the identity or an off-curve pair. |
 | `Bytes32FromLowHigh: low operand must fit in 31 bytes … and high … in a single byte` | `Bytes32FromLowHigh` precondition violated. |
 | `Inputs did not match alignment` | `PersistentHash` / `Keccak256` inputs didn't conform to `alignment`. |
-| `DivModPowerOfTwo requires exactly 2 outputs` / `PersistentHash requires exactly 2 outputs` / `Unexpected output length of encode instruction` | Wrong number of declared output names for the instruction. |
+| `DivModPowerOfTwo requires exactly 2 outputs` / `Unexpected output length of encode instruction` | Wrong number of declared output names for the instruction. |
 | `Failed to decode … as …` | A raw input / transcript value could not be decoded as its declared type. |
 | `Transcripts not fully consumed` | Some transcript stream had leftover values at the end. |
 | `Public transcript input mismatch …` | `Impact` reconciliation: declared PI ≠ transcript value. |
