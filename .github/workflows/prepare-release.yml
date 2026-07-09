@@ -97,6 +97,16 @@ jobs:
             ' */Cargo.toml
           done
 
+          # Sync package.json versions for wasm crates whose Cargo.toml was bumped.
+          for entry in "${BUMPED[@]}"; do
+            read -r bdir bver <<< "$entry"
+            pkg="$bdir/package.json"
+            if [ -f "$pkg" ]; then
+              sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$bver\"/" "$pkg"
+              echo "synced $pkg -> $bver"
+            fi
+          done
+
           # Persist the bumped set for later steps (per-crate changelog drafting).
           # Kept in $RUNNER_TEMP, outside the repo, so `git add -A` never stages it.
           printf '%s\n' "${BUMPED[@]}" | sort -u > "${RUNNER_TEMP}/bumped-crates.txt"
