@@ -390,6 +390,22 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer>;
+    /// Checks zswap offer normalization and balance without verifying proofs.
+    ///
+    /// Use this in the traversal phase when proofs are deferred for batch verification.
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer>;
+    /// Collects zswap proof evidence for batch verification.
+    ///
+    /// Returns evidence for all inputs, outputs, and transients in the offer.
+    /// Pass the accumulated evidence to [`batch_proof_verify`] to verify.
+    #[allow(clippy::result_large_err)]
+    fn zswap_collect_proof_evidence(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Vec<Self::ProofEvidence>, MalformedOffer>;
     fn zswap_claim_well_formed(
         claim: &zswap::AuthorizedClaim<Self::LatestProof>,
     ) -> Result<(), MalformedOffer>;
@@ -466,6 +482,31 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
+    }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed_structural(segment)
+    }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn zswap_collect_proof_evidence(
+        _offer: &zswap::Offer<Self::LatestProof, D>,
+        _segment: u16,
+    ) -> Result<Vec<ContractProofEvidence>, MalformedOffer> {
+        Ok(vec![])
+    }
+    #[cfg(feature = "proof-verifying")]
+    fn zswap_collect_proof_evidence(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Vec<ContractProofEvidence>, MalformedOffer> {
+        offer.collect_proof_evidence(segment).map(|bundles| {
+            bundles
+                .into_iter()
+                .map(|(vk, proof, pis)| ContractProofEvidence::V2 { vk, proof, pis })
+                .collect()
+        })
     }
     fn zswap_claim_well_formed(
         claim: &zswap::AuthorizedClaim<Self::LatestProof>,
@@ -683,6 +724,18 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
     }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed(segment)
+    }
+    fn zswap_collect_proof_evidence(
+        _: &zswap::Offer<Self::LatestProof, D>,
+        _: u16,
+    ) -> Result<Vec<()>, MalformedOffer> {
+        Ok(vec![])
+    }
     fn zswap_claim_well_formed(
         _: &zswap::AuthorizedClaim<Self::LatestProof>,
     ) -> Result<(), MalformedOffer> {
@@ -734,6 +787,18 @@ impl<D: DB> ProofKind<D> for () {
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
+    }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed(segment)
+    }
+    fn zswap_collect_proof_evidence(
+        _: &zswap::Offer<Self::LatestProof, D>,
+        _: u16,
+    ) -> Result<Vec<()>, MalformedOffer> {
+        Ok(vec![])
     }
     fn zswap_claim_well_formed(
         _: &zswap::AuthorizedClaim<Self::LatestProof>,

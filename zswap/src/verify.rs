@@ -214,6 +214,65 @@ impl<D: DB> Input<(), D> {
     }
 }
 
+#[cfg(feature = "proof-verifying")]
+impl<D: DB> Input<Proof, D> {
+    pub fn collect_proof_evidence(
+        &self,
+        segment: u16,
+    ) -> (
+        transient_crypto_old::proofs::VerifierKey,
+        transient_crypto_old::proofs::Proof,
+        Vec<transient_crypto_old::curve::Fr>,
+    ) {
+        let mut prog = Vec::new();
+        prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
+            [Key::Value(0u8.into())],
+            false,
+            32,
+            [u8; 32],
+            self.merkle_tree_root
+        ));
+        prog.extend(Set_insert!(
+            [Key::Value(1u8.into())],
+            false,
+            [u8; 32],
+            self.nullifier
+        ));
+        match &self.contract_address {
+            Some(addr) => prog.extend(Cell_write!(
+                [Key::Value(3u8.into())],
+                false,
+                ContractAddress,
+                *addr.deref()
+            )),
+            None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
+        }
+        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_write!(
+            [Key::Value(2u8.into())],
+            false,
+            (Fr, Fr),
+            self.value_commitment.0
+        ));
+        let mut statement = vec![0.into()];
+        for op in with_outputs(prog.into_iter(), [true.into(), segment.into()].into_iter()) {
+            op.field_repr(&mut statement);
+        }
+        let pis = statement
+            .into_iter()
+            .map(|f| {
+                transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    .expect("Fr round-trip")
+            })
+            .collect();
+        (
+            SPEND_VK.clone(),
+            transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+            pis,
+        )
+    }
+}
+
 impl<D: DB> Output<Proof, D> {
     #[cfg(not(feature = "proof-verifying"))]
     pub fn well_formed(&self, _segment: u16) -> Result<(), MalformedOffer> {
@@ -296,6 +355,73 @@ impl<D: DB> Output<(), D> {
     }
 }
 
+#[cfg(feature = "proof-verifying")]
+impl<D: DB> Output<Proof, D> {
+    pub fn collect_proof_evidence(
+        &self,
+        segment: u16,
+    ) -> Result<
+        (
+            transient_crypto_old::proofs::VerifierKey,
+            transient_crypto_old::proofs::Proof,
+            Vec<transient_crypto_old::curve::Fr>,
+        ),
+        MalformedOffer,
+    > {
+        if let (Some(address), Some(ciphertext)) = (self.contract_address.clone(), &self.ciphertext)
+        {
+            return Err(MalformedOffer::ContractSentCiphertext {
+                address: *address.deref(),
+                ciphertext: Box::new(ciphertext.deref().clone()),
+            });
+        }
+        let mut prog = Vec::new();
+        prog.extend::<[Op<_, InMemoryDB>; 17]>(HistoricMerkleTree_insert_hash!(
+            [Key::Value(0u8.into())],
+            false,
+            32,
+            [u8; 32],
+            self.coin_com
+        ));
+        match &self.contract_address {
+            Some(addr) => prog.extend(Cell_write!(
+                [Key::Value(3u8.into())],
+                false,
+                ContractAddress,
+                addr.deref()
+            )),
+            None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
+        }
+        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_write!(
+            [Key::Value(2u8.into())],
+            false,
+            (Fr, Fr),
+            self.value_commitment.0
+        ));
+        let msg = match &self.ciphertext {
+            Some(ciph) => ciphertext_to_field(ciph),
+            None => 0.into(),
+        };
+        let mut statement = vec![msg];
+        for op in with_outputs(prog.into_iter(), [segment.into()].into_iter()) {
+            op.field_repr(&mut statement);
+        }
+        let pis = statement
+            .into_iter()
+            .map(|f| {
+                transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    .expect("Fr round-trip")
+            })
+            .collect();
+        Ok((
+            OUTPUT_VK.clone(),
+            transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+            pis,
+        ))
+    }
+}
+
 impl<D: DB> Transient<Proof, D> {
     pub fn well_formed(&self, segment: u16) -> Result<(), MalformedOffer> {
         self.as_input().well_formed(segment)?;
@@ -368,6 +494,65 @@ impl<D: DB> Offer<Proof, D> {
             .iter()
             .try_for_each(|t| t.well_formed(segment))?;
         offer_well_formed_common(self, segment)
+    }
+
+    /// Checks normalization and balance without verifying any proofs.
+    ///
+    /// Use this together with [`Offer::collect_proof_evidence`] to defer proof
+    /// verification to a batch pass.
+    pub fn well_formed_structural(&self, segment: u16) -> Result<Pedersen, MalformedOffer> {
+        for output in self.outputs.iter() {
+            if let (Some(address), Some(ciphertext)) =
+                (output.contract_address.clone(), &output.ciphertext)
+            {
+                return Err(MalformedOffer::ContractSentCiphertext {
+                    address: *address.deref(),
+                    ciphertext: Box::new(ciphertext.deref().clone()),
+                });
+            }
+        }
+        for transient in self.transient.iter() {
+            let output = transient.as_output();
+            if let (Some(address), Some(ciphertext)) =
+                (output.contract_address, &output.ciphertext)
+            {
+                return Err(MalformedOffer::ContractSentCiphertext {
+                    address: *address.deref(),
+                    ciphertext: Box::new(ciphertext.deref().clone()),
+                });
+            }
+        }
+        offer_well_formed_common(self, segment)
+    }
+
+    /// Collects proof evidence for all inputs, outputs, and transients in this offer.
+    ///
+    /// Returns `(VK, proof, public_inputs)` triples for each zswap proof, ready for
+    /// batch verification via `transient_crypto_old::proofs::VerifierKey::batch_verify`.
+    #[cfg(feature = "proof-verifying")]
+    pub fn collect_proof_evidence(
+        &self,
+        segment: u16,
+    ) -> Result<
+        Vec<(
+            transient_crypto_old::proofs::VerifierKey,
+            transient_crypto_old::proofs::Proof,
+            Vec<transient_crypto_old::curve::Fr>,
+        )>,
+        MalformedOffer,
+    > {
+        let mut bundles = vec![];
+        for input in self.inputs.iter() {
+            bundles.push(input.collect_proof_evidence(segment));
+        }
+        for output in self.outputs.iter() {
+            bundles.push(output.collect_proof_evidence(segment)?);
+        }
+        for transient in self.transient.iter() {
+            bundles.push(transient.as_input().collect_proof_evidence(segment));
+            bundles.push(transient.as_output().collect_proof_evidence(segment)?);
+        }
+        Ok(bundles)
     }
 }
 

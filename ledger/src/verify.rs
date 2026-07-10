@@ -475,8 +475,8 @@ impl WellFormedStrictness {
     /// Returns a copy of this strictness with contract proof verification disabled.
     ///
     /// Use this together with [`Transaction::collect_proof_evidence`] and
-    /// [`ProofKind::batch_proof_verify`] to batch-verify proofs across multiple
-    /// transactions in a single pass rather than per-transaction.
+    /// [`ProofKind::batch_proof_verify`] to batch-verify contract, dust, and zswap proofs
+    /// across multiple transactions in a single pass rather than per-transaction.
     pub fn defer_proofs(self) -> Self {
         Self {
             verify_contract_proofs: false,
@@ -633,7 +633,8 @@ impl<
     D: DB,
 > StandardTransaction<S, P, B, D>
 {
-    /// Traverses all contract calls in the transaction and collects their proof evidence.
+    /// Traverses all contract calls, dust spends, and zswap offers in the transaction
+    /// and collects their proof evidence.
     ///
     /// This is the traversal phase of the inverted pipeline: call
     /// [`ProofKind::batch_proof_verify`] on the result to complete verification.
@@ -649,6 +650,18 @@ impl<
                     .collect_proof_evidence(ref_state, *segment_intent.0)?,
             );
         }
+        if let Some(offer) = &self.guaranteed_coins {
+            evidence.extend(
+                P::zswap_collect_proof_evidence(offer, GUARANTEED_SEGMENT)
+                    .map_err(MalformedTransaction::<D>::from)?,
+            );
+        }
+        for (segment, offer) in self.fallible_coins.sorted_iter() {
+            evidence.extend(
+                P::zswap_collect_proof_evidence(&offer.clone(), *segment)
+                    .map_err(|e: zswap::error::MalformedOffer| MalformedTransaction::<D>::Zswap(e))?,
+            );
+        }
         Ok(evidence)
     }
 }
@@ -662,14 +675,15 @@ impl<
 where
     Transaction<S, P, B, D>: Serializable,
 {
-    /// Traverses all contract calls in this transaction and collects their proof evidence.
+    /// Traverses all contract calls, dust spends, and zswap offers in this transaction
+    /// and collects their proof evidence.
     ///
     /// Enables cross-transaction proof batching: call this on each transaction after
     /// passing [`WellFormedStrictness::defer_proofs`] to [`Transaction::well_formed`],
     /// accumulate the evidence slices, then call [`ProofKind::batch_proof_verify`] once
     /// across all transactions instead of once per transaction.
     ///
-    /// `ClaimRewards` transactions carry no contract proofs and always return an empty vec.
+    /// `ClaimRewards` transactions carry no proofs and always return an empty vec.
     pub fn collect_proof_evidence(
         &self,
         ref_state: &impl StateReference<D>,
@@ -718,7 +732,7 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(x, GUARANTEED_SEGMENT)
+                            P::zswap_structural_check(x, GUARANTEED_SEGMENT)
                                 .map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
@@ -726,7 +740,7 @@ where
                         if *seg_x_offer.0 == GUARANTEED_SEGMENT {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
-                        P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
+                        P::zswap_structural_check(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
                             .map_err(|e: zswap::error::MalformedOffer| {
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
