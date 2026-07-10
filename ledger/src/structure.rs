@@ -400,7 +400,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     /// Collects zswap proof evidence for batch verification.
     ///
     /// Returns evidence for all inputs, outputs, and transients in the offer.
-    /// Pass the accumulated evidence to [`batch_proof_verify`] to verify.
+    /// Pass the accumulated evidence to [`ProofKind::batch_proof_verify`] to verify.
     #[allow(clippy::result_large_err)]
     fn zswap_collect_proof_evidence(
         offer: &zswap::Offer<Self::LatestProof, D>,
@@ -420,7 +420,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     /// Extracts proof evidence from a contract call without verifying it.
     ///
     /// This is the collection phase of the inverted traverse → verify pipeline.
-    /// Call [`batch_proof_verify`] on the accumulated evidence to verify.
+    /// Call [`ProofKind::batch_proof_verify`] on the accumulated evidence to verify.
     #[allow(clippy::result_large_err)]
     fn collect_proof_evidence(
         op: &ContractOperation,
@@ -428,7 +428,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         pis: Vec<Fr>,
         call: &ContractCall<Self, D>,
     ) -> Result<Self::ProofEvidence, MalformedTransaction<D>>;
-    /// Batch-verifies a set of proof evidence collected via [`collect_proof_evidence`].
+    /// Batch-verifies a set of proof evidence collected via [`ProofKind::collect_proof_evidence`].
     #[allow(clippy::result_large_err)]
     fn batch_proof_verify(
         evidence: &[Self::ProofEvidence],

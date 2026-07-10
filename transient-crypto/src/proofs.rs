@@ -651,7 +651,7 @@ impl Tagged for KeyLocation {
 
 #[derive(Serializable)]
 #[tag = "wrapped-ir"]
-/// A container for just the IR part of [`ProofData`].
+/// A container for just the IR part of `ProofData`.
 pub struct WrappedIr(pub Vec<u8>);
 tag_enforcement_test!(WrappedIr);
 
@@ -830,9 +830,11 @@ mod tests {
     #[cfg(feature = "mock-verify")]
     #[test]
     fn mock_batch_verify_empty_succeeds() {
-        VerifierKey::mock_batch_verify(
-            std::iter::empty::<(&VerifierKey, &Proof, std::iter::Empty<Fr>)>(),
-        )
+        VerifierKey::mock_batch_verify(std::iter::empty::<(
+            &VerifierKey,
+            &Proof,
+            std::iter::Empty<Fr>,
+        )>())
         .expect("empty mock batch verify should succeed");
     }
 }
