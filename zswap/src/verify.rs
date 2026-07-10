@@ -569,3 +569,50 @@ impl<D: DB> Offer<ProofPreimage, D> {
         offer_well_formed_common(self, segment)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use storage::db::InMemoryDB;
+
+    #[test]
+    fn well_formed_structural_empty_offer_succeeds() {
+        let offer = Offer::<Proof, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+        offer
+            .well_formed_structural(1)
+            .expect("empty offer should pass structural check");
+    }
+
+    #[test]
+    fn well_formed_structural_matches_well_formed_for_empty_offer() {
+        let offer = Offer::<Proof, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+        let structural = offer.well_formed_structural(1).expect("structural check");
+        let full = offer.well_formed(1).expect("well_formed");
+        assert_eq!(structural, full, "structural and well_formed should agree on empty offer");
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    #[test]
+    fn collect_proof_evidence_empty_offer_is_empty() {
+        let offer = Offer::<Proof, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+        let evidence = offer
+            .collect_proof_evidence(1)
+            .expect("empty offer should collect without error");
+        assert!(evidence.is_empty());
+    }
+}

@@ -3017,4 +3017,124 @@ mod tests {
 
         assert!(all_evidence.is_empty());
     }
+
+    // --- zswap batch-verification tests ---
+
+    #[test]
+    fn collect_proof_evidence_with_guaranteed_coins_is_empty() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+        use transient_crypto::proofs::ProofPreimage;
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let offer = zswap::Offer::<ProofPreimage, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            Some(offer),
+            storage::storage::HashMap::new(),
+        );
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("collection with guaranteed_coins should succeed");
+        assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn collect_proof_evidence_with_fallible_coins_is_empty() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+        use transient_crypto::proofs::ProofPreimage;
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let offer = zswap::Offer::<ProofPreimage, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+        let fallible_coins = storage::storage::HashMap::new().insert(2u16, offer);
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            None,
+            fallible_coins,
+        );
+        let evidence = stx
+            .collect_proof_evidence(&ledger)
+            .expect("collection with fallible_coins should succeed");
+        assert!(evidence.is_empty());
+    }
+
+    #[test]
+    fn cross_transaction_batch_proof_verify_with_zswap_coins() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+        use transient_crypto::proofs::ProofPreimage;
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let strictness = WellFormedStrictness::default();
+
+        let make_offer = || zswap::Offer::<ProofPreimage, InMemoryDB> {
+            inputs: vec![].into(),
+            outputs: vec![].into(),
+            transient: vec![].into(),
+            deltas: vec![].into(),
+        };
+
+        // Two transactions, each with a guaranteed offer and a different fallible segment.
+        let txs: Vec<Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>> =
+            [2u16, 3u16]
+                .into_iter()
+                .map(|seg| {
+                    let fallible_coins =
+                        storage::storage::HashMap::new().insert(seg, make_offer());
+                    let stx = StandardTransaction::<
+                        Signature,
+                        ProofPreimageMarker,
+                        PedersenRandomness,
+                        InMemoryDB,
+                    >::new(
+                        "test",
+                        storage::storage::HashMap::new(),
+                        Some(make_offer()),
+                        fallible_coins,
+                    );
+                    Transaction::Standard(stx)
+                })
+                .collect();
+
+        // Phase 1: collect across all transactions (contract + dust + zswap).
+        let mut all_evidence: Vec<()> = vec![];
+        for tx in &txs {
+            all_evidence.extend(
+                tx.collect_proof_evidence(&ledger)
+                    .expect("collection should succeed"),
+            );
+        }
+
+        // Phase 2: single batch verify covers all accumulated evidence.
+        <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
+            &all_evidence,
+            strictness.proof_verification_mode,
+        )
+        .expect("batch verify with zswap coins should succeed");
+
+        assert!(all_evidence.is_empty());
+    }
 }
