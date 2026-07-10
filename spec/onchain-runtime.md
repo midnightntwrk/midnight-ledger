@@ -109,11 +109,86 @@ The first entry is always loaded, which contains the cell's length, and the
 rest *can* only be necessary on a `popeq` or `concat` instruction, which
 require specifying if the data is expected to reside in-cache or not.
 
-The full opcode reference — including the **binary encoding**, **per-opcode
-semantics and stack effects**, **error conditions**, **gas / cost model**, and
-**short-hand notation** (`a op b`, `typeof`, `size`, `has_key`, `new`, `get`,
-`rem`, `ins`, `root`) used by it — is in
-[**impact-opcodes.md**](./impact-opcodes.md).
+| Name      | Opcode  | Stack                             | Arguments                       | Cost (unscaled) | Description |
+| :---      | ------: | :-----                            | ------------------------------: | --------------: | ----------- |
+| `noop`    |    `00` | `-{}               +{}`           |                        `n: u21` |             `n` | nothing |
+| `lt`      |    `01` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [a] < [b]` |
+| `eq`      |    `02` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [a] == [b]` |
+| `type`    |    `03` | `-{'a}             +{b}`          |                               - |             `1` | sets `[b] := typeof(a)` |
+| `size`    |    `04` | `-{'a}             +{b}`          |                               - |             `1` | sets `[b] := size(a)` |
+| `new`     |    `05` | `-{'a}             +{b}`          |                               - |             `1` | sets `[b] := new [a]` |
+| `and`     |    `06` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [a] & [b]` |
+| `or`      |    `07` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [a] \| [b]` |
+| `neg`     |    `08` | `-{'a}             +{b}`          |                               - |             `1` | sets `[b] := ![a]` |
+| `log`     |    `09` | `-{'a}             +{}`           |                               - |             `1` | outputs `a` as an event |
+| `root`    |    `0a` | `-{'a}             +{b}`          |                               - |             `1` | sets `[b] := root(a)` |
+| `pop`     |    `0b` | `-{'a}             +{}`           |                               - |             `1` | removes `a` |
+| `popeq`   |    `0c` | `-{'a}             +{}`           |   `a: Adt` only when validating |         `\|a\|` | returns `a` |
+| `popeqc`  |    `0d` | `-{'a}             +{}`           |   `a: Adt` only when validating |         `\|a\|` | returns `a`, which must already be in memory |
+| `addi`    |    `0e` | `-{'a}             +{b}`          |                        `c: Adt` |             `1` | sets `[b] := [a] + c`, where addition is defined below |
+| `subi`    |    `0f` | `-{'a}             +{b}`          |                        `c: Adt` |             `1` | sets `[b] := [a] - c`, where subtraction is defined below |
+| `push`    |    `10` | `-{}               +{'a}`         |                        `a: Adt` |         `\|a\|` | sets `a` |
+| `pushs`   |    `11` | `-{}               +{a}`          |                        `a: Adt` |         `\|a\|` | sets `a` |
+| `branch`  |    `12` | `-{'a}             +{}`           |                        `n: u21` |             `1` | if `a` is non-empty, skip `n` operations. |
+| `jmp`     |    `13` | `-{}               +{}`           |                        `n: u21` |             `1` | skip `n` operations. |
+| `add`     |    `14` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [a] + [b]` |
+| `sub`     |    `15` | `-{'a, 'b}         +{c}`          |                               - |             `1` | sets `[c] := [b] - [a]` |
+| `concat`  |    `16` | `-{'a, 'b}         +{c}`          |                        `n: u21` |             `1` | sets `[c] = [b] ++ [a]`, if `\|[a]\| + \|[b]\| <= n` |
+| `concatc` |    `17` | `-{'a, 'b}         +{c}`          |                        `n: u21` |             `1` | as `concat`, but `a` and `b` must already be in-memory |
+| `member`  |    `18` | `-{'a, 'b}         +{c}`          |                               - |       `size(b)` | sets `[c] := has_key(b, a)` |
+| `rem`     |    `19` | `-{a, "b}          +{"c}`         |                               - |       `size(b)` | sets `c := rem(b, a, false)` |
+| `remc`    |    `1a` | `-{a, "b}          +{"c}`         |                               - |       `size(b)` | sets `c := rem(b, a, true)` |
+| `dup`     |    `3n` | `-{x*, "a}         +{"a, x*, "a}` |                               - |             `1` | duplicates `a`, where `x*` are `n` stack items |
+| `swap`    |    `4n` | `-{"a, x*, †b}     +{†b, x*, "a}` |                               - |             `1` | swaps two stack items, with `n` items `x*` between them |
+| `idx`     |    `5n` | `-{k*, "a}         +{"b}`         |                    `c: path(n)` | `\|c\| + sum size(x_i)` | where `k*` are `m` stack items, `k_1` - `k_{m+1}`, matching the `stack` symbols in `c`. Sets `"x_1 = "a`, `key_j = if c_j == 'stack' then k_{i++} else c_j`, `"x_{j+1} = "x_j.get(key_j, cached)`, `"b = "x_{n+2}`  for `i` initialized to 1, with `cached` set to `false` |
+| `idxc`    |    `6n` | `-{k*, "a}         +{"b}`         |                    `c: path(n)` | `\|c\| + sum size(x_i)` | like `idx`, but with `cached` set to `true` |
+| `idxp`    |    `7n` | `-{k*, "a}         +{"b, pth*}`   |                    `c: path(n)` | `\|c\| + sum size(x_i)` | as `idx`, with `pth*` set to `{key_{n+1}, "x_{n+1}, ..., key_1, "x_1}` |
+| `idxpc`   |    `8n` | `-{k*, "a}         +{"b, pth*}`   |                    `c: path(n)` | `\|c\| + sum size(x_i)` | as `idxp`, but with `cached` set to `true` |
+| `ins`     |    `9n` | `-{"a, pth*}       +{†b}`         |                               - | `sum size(x_i)` | where `pth*` is `{key_{n+1}, x_{n+1}, ..., key_1, x_1}` set `x'_{n+2} = a`, `x'_j = ins(x_j, key_j, cached, x'_{j+1})`, `b = x'_1`. `†` is the weakest modifier of `a` and `x_j`s, and `cached` set to `false` |
+| `insc`    |    `an` | `-{"a, pth*}       +{†b}`         |                               - | `sum size(x_i)` | as `ins`, but with `cached` set to `true` |
+| `ckpt`    |    `ff` | `-{}               +{}`           |                                 |             `1` | denotes boundary between internally atomic program segments. Should not be crossed by jumps. |
+
+In the description above, the following short-hand notations were used. Where
+not specified, result values are placed in a `Cell`, and encoded as FAB values.
+
+* `a + b`, `a - b`, or `a < b` (collectively `a op b`), for applying `op` on
+  the contents of `Cell`s `a` and `b`, interpreted as 64-bit unsigned integers,
+  with alignment `b8`.
+* `a ++ b` is the FAB `AlignedValue` of the concatenation of `a` and `b`.
+* `a == b` for checking two `Cell`s for equality, at least one of which must
+  contain at most 64 bytes of data (sum of all FAB atoms).
+* `a & b`, `a | b`, `!a` are processed as boolean and, or, and not over the
+  contents of `Cell`s `a` and maybe `b`. These must encode 1 or 0.
+* `typeof(a)` returns a tag representing the type of a state value:
+  * `Cell`: 0
+  * `Null`: 1
+  * `Map`: 2
+  * `Array(n)`: 3 + n * 8
+  * `BoundedMerkleTree(n+1)`: 4 + n * 8
+* `size(a)` returns the number of non-null entries is a `Map`, `n` for
+  an `Array(n)` or `BoundedMerkleTree(n)`.
+* `has_key(a, b)` returns `true` if `b` is a key to a non-null value in the
+  `Map` `a`.
+* `new ty` creates a new instance of a state value according to the tag `ty` (as
+  returned by `typeof`):
+  * `Cell`: Containing the empty value.
+  * `Null`: `null`
+  * `Map`: The empty map
+  * `Array(n)`: An array on `n` `Null`s
+  * `BoundedMerkleTree(n)`: A blank Merkle tree
+* `a.get(b, cached)` retrieves the sub-item indexed with `b`. If the
+  sub-item is *not* loaded in memory, *and* `cached` is `true`, this command
+  fails. For different `a`:
+  * `a: Map`, the value stored at the key `b`
+  * `a: Array(n)`, the value at the index `b` < n
+* `rem(a, b, cached)` removes the sub-item indexed (as in `get`) with `b` from `a`. If the
+  sub-item is *not* loaded in memory, *and* `cached` is `true`, this command
+  fails.
+* `ins(a, b, cached, c)` inserts `c` as a sub-item into `a` at index `c`. If
+  the path for this index is *not* loaded in memory, *and* `cached` is `true`,
+  this command fails.
+* `root(a)` outputs the Merkle-tree root of the `BoundedMerkleTree(n)` or
+  `SortedMerkleTree` `a`.
 
 ## Use in Midnight
 
