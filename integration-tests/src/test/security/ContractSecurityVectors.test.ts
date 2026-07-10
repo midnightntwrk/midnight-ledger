@@ -37,7 +37,7 @@ import {
   LedgerState,
   signatureVerifyingKey,
   type PreBinding
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random, Static, TestResource } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
