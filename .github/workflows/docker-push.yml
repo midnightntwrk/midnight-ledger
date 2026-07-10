@@ -205,14 +205,14 @@ jobs:
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> $GITHUB_ENV
 
       - name: Authenticate to GCP (Workload Identity Federation)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
 
       - name: Fetch signing key from Secret Manager
         id: fetch-key
-        uses: google-github-actions/get-secretmanager-secrets@v2
+        uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5 # v2.2.5
         with:
           secrets: |-
             SIGNING_KEY:midnight-proof-server-signing-key/latest
@@ -225,9 +225,23 @@ jobs:
           umask 077
 
           export GNUPGHOME=$(mktemp -d)
+
+          # Runs on every exit path (success or failure) so the imported
+          # signing key never outlives this step. Batch-mode secret-key
+          # deletion requires the full fingerprint, not the key ID.
+          cleanup() {
+            if [[ -n "${KEY_FPR:-}" ]]; then
+              gpg --batch --yes --delete-secret-keys "$KEY_FPR" || true
+            fi
+            rm -rf "$GNUPGHOME"
+          }
+          trap cleanup EXIT
+
           printf '%s' "$SIGNING_KEY" | gpg --batch --import
           KEY_ID=$(gpg --list-secret-keys --with-colons \
             | awk -F: '/^sec:/ {print $5; exit}')
+          KEY_FPR=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^fpr:/ {print $10; exit}')
 
           cat > build-manifest.json <<EOF
           {
@@ -246,11 +260,8 @@ jobs:
 
           gpg --verify build-manifest.json.asc build-manifest.json
 
-          gpg --batch --yes --delete-secret-keys "$KEY_ID" || true
-          rm -rf "$GNUPGHOME"
-
       - name: Upload signed build manifest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: proof-server-build-manifest-${{ env.PROOF_SERVER_VERSION }}
           path: |

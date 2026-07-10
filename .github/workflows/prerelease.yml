@@ -534,7 +534,7 @@ jobs:
   attach-proof-server-manifest:
     needs: [ build, release, docker-push ]
     if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
