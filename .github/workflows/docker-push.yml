@@ -189,7 +189,10 @@ jobs:
 
           docker manifest push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION
 
-          if [[ "$VERSION" != *"-"* ]]; then
+          # Only a final release moves `latest`; a pre-release version contains a
+          # '-' (e.g. 8.2.0-rc.1). ($VERSION was undefined here, so `latest` was
+          # always pushed - guard on the actual proof-server version instead.)
+          if [[ "$PROOF_SERVER_VERSION" != *"-"* ]]; then
             docker manifest create ghcr.io/midnight-ntwrk/proof-server:latest \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
