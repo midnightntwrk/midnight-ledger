@@ -24,9 +24,9 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+base-crypto = { version = "1.1.0", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", package = "midnight-serialize" }
+transient-crypto = { version = "3.0.0", package = "midnight-transient-crypto", features = ["cli"] }
 
 midnight-proofs = { version = "^0.8.1" }
 midnight-circuits = { version = "^7.2.2" }
@@ -67,7 +67,3 @@ pastey = { version = "0.2.1", optional = true }
 proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
 
-[dev-dependencies]
-midnight-zkir = { path = ".", features = ["proptest"] }
-actix-rt = "^2.9.0"
-sha2 = "^0.11.0"
