@@ -901,7 +901,11 @@ tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: None, ir, v3: vk }
+        ContractOperation {
+            v2: None,
+            ir,
+            v3: vk,
+        }
     }
 
     /// Returns the latest (v3) verifier key.
@@ -954,8 +958,10 @@ impl FieldRepr for ContractOperation {
             Some(ref vk) => {
                 writer.write(&[0x01.into()]);
                 let mut bytes: Vec<u8> = Vec::new();
-                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(vk, &mut bytes)
-                    .expect("VerifierKey is serializable");
+                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(
+                    vk, &mut bytes,
+                )
+                .expect("VerifierKey is serializable");
                 bytes.field_repr(writer);
             }
             None => writer.write(&[0x00.into()]),
@@ -966,8 +972,10 @@ impl FieldRepr for ContractOperation {
         match self.v2 {
             Some(ref vk) => {
                 let mut bytes: Vec<u8> = Vec::new();
-                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(vk, &mut bytes)
-                    .expect("VerifierKey is serializable");
+                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(
+                    vk, &mut bytes,
+                )
+                .expect("VerifierKey is serializable");
                 1 + bytes.into_iter().fold(0, |acc, b| acc + b.field_size())
             }
             None => 1,
