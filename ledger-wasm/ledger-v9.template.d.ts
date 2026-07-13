@@ -1226,12 +1226,6 @@ export type ProvingProvider = {
   lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined>;
 };
 
-export type ProvingKeyMaterial = {
-  proverKey: Uint8Array,
-  verifierKey: Uint8Array,
-  ir: Uint8Array,
-};
-
 /**
  * Specifies where something should execute in a transaction.
  *

@@ -6,6 +6,8 @@ on:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
+      GH_USERNAME:
+        required: true
       GH_PASSWORD:
         required: true
 

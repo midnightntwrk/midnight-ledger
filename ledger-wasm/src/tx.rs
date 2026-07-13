@@ -391,7 +391,9 @@ impl Transaction {
                         ))
                     })?
                     .dyn_into::<Promise>()
-                    .map_err(|_| std::io::Error::other("result of 'lookupKey' was not a promise"))?;
+                    .map_err(|_| {
+                        std::io::Error::other("result of 'lookupKey' was not a promise")
+                    })?;
                 let result = JsFuture::from(promise).await.map_err(|e| {
                     std::io::Error::other(format!(
                         "'lookupKey' returned an error: {}",

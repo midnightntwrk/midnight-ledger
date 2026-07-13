@@ -24,11 +24,6 @@
     #  inputs.zkir.follows = "zkir";
     #  inputs.onchain-runtime.follows = "";
     #};
-    zkir = {
-      url = "github:midnightntwrk/midnight-ledger/f227f1e5771c165d829501b830e36b4acbb411ec";
-      # Have the self-recursion just be a fixpoint.
-      inputs.zkir.follows = "zkir";
-    };
   };
 
   outputs = {
@@ -38,7 +33,6 @@
     fenix,
     inclusive,
     #compactc,
-    zkir,
     ...
   }:
     utils.lib.eachDefaultSystem (
@@ -118,7 +112,7 @@
             extraBuildInputs = (if require-artifacts then
               [
                 self.packages.${system}.local-params
-                zkir.packages.${system}.zkir
+                self.packages.${system}.zkir
               ] else []);
           };
         mkLedger = {
@@ -154,10 +148,13 @@
                 then "${self.packages.${system}.test-artifacts}"
                 else "";
               RUST_BACKTRACE = "full";
+              # ZK proving overflows the 2 MiB default thread stack; the test
+              # harness threads need a larger stack (see .cargo/config.toml).
+              RUST_MIN_STACK = "67108864";
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
-                  zkir.packages.${system}.zkir
+                  self.packages.${system}.zkir
                   rust-build
                   pkgs.chez
                 ];
@@ -316,8 +313,10 @@
             MIDNIGHT_PP = "${packages.public-params}";
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
+              pkgs.jq
               packages.public-params
-              zkir.packages.${system}.zkir
+              self.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -329,7 +328,12 @@
                 mv "$contract" "$contract-tmp"
                 mkdir -p "$contract/keys"
                 mv $contract-tmp "$contract/zkir"
-                zkir compile-many "$contract/zkir" "$contract/keys"
+                VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
+                if [[ "$VERSION" == "2" ]]; then
+                  ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                elif [[ "$VERSION" == "3" ]]; then
+                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                fi
               done
             '';
             installPhase = ''
@@ -352,7 +356,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              zkir.packages.${system}.zkir
+              self.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -563,7 +567,7 @@
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_104
+              pkgs.wasm-bindgen-cli_0_2_108
             ];
             buildInputs = [packages.public-params];
 
