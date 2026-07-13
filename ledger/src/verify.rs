@@ -607,9 +607,11 @@ impl<
             evidence.extend(action.collect_proof_evidence(ref_state, binding_commitment)?);
         }
         if let Some(dust_actions) = self.dust_actions.as_ref() {
-            evidence.extend(
-                dust_actions.collect_proof_evidence(ref_state, segment_id, binding_commitment)?,
-            );
+            evidence.extend(dust_actions.collect_proof_evidence(
+                ref_state,
+                segment_id,
+                binding_commitment,
+            )?);
         }
         Ok(evidence)
     }
@@ -659,8 +661,9 @@ impl<
         }
         for (segment, offer) in self.fallible_coins.sorted_iter() {
             evidence.extend(
-                P::zswap_collect_proof_evidence(&offer.clone(), *segment)
-                    .map_err(|e: zswap::error::MalformedOffer| MalformedTransaction::<D>::Zswap(e))?,
+                P::zswap_collect_proof_evidence(&offer.clone(), *segment).map_err(
+                    |e: zswap::error::MalformedOffer| MalformedTransaction::<D>::Zswap(e),
+                )?,
             );
         }
         Ok(evidence)
@@ -743,8 +746,8 @@ where
                         }
                         P::zswap_structural_check(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
                             .map_err(|e: zswap::error::MalformedOffer| {
-                                MalformedTransaction::<D>::Zswap(e)
-                            })?;
+                            MalformedTransaction::<D>::Zswap(e)
+                        })?;
                     }
                     stx.disjoint_check()?;
                     stx.effects_check()?;
@@ -2718,8 +2721,8 @@ mod tests {
 
     #[test]
     fn collect_proof_evidence_intent_with_no_calls() {
-        use base_crypto::time::Timestamp;
         use crate::structure::ProofPreimageMarker;
+        use base_crypto::time::Timestamp;
         use transient_crypto::commitment::PedersenRandomness;
 
         let mut rng = StdRng::seed_from_u64(0xff);
@@ -2766,7 +2769,10 @@ mod tests {
         let deferred = strictness.defer_proofs();
         assert!(!deferred.verify_contract_proofs);
         assert_eq!(deferred.enforce_balancing, strictness.enforce_balancing);
-        assert_eq!(deferred.verify_native_proofs, strictness.verify_native_proofs);
+        assert_eq!(
+            deferred.verify_native_proofs,
+            strictness.verify_native_proofs
+        );
         assert_eq!(deferred.verify_signatures, strictness.verify_signatures);
         assert_eq!(deferred.enforce_limits, strictness.enforce_limits);
     }
@@ -2827,8 +2833,8 @@ mod tests {
     /// accumulation and single-call batch_proof_verify path is exercised in full.
     #[test]
     fn cross_transaction_batch_proof_verify() {
-        use base_crypto::time::Timestamp;
         use crate::structure::ProofPreimageMarker;
+        use base_crypto::time::Timestamp;
         use transient_crypto::commitment::PedersenRandomness;
 
         let mut rng = StdRng::seed_from_u64(0xdead);
@@ -2855,7 +2861,9 @@ mod tests {
                         ProofPreimageMarker,
                         PedersenRandomness,
                         InMemoryDB,
-                    >::new("test", intents, None, storage::storage::HashMap::new());
+                    >::new(
+                        "test", intents, None, storage::storage::HashMap::new()
+                    );
                     Transaction::Standard(stx)
                 })
                 .collect();
@@ -2887,9 +2895,9 @@ mod tests {
     /// proof evidence — only spends carry ZK proofs, registrations do not.
     #[test]
     fn collect_proof_evidence_intent_with_dust_actions_no_spends_is_empty() {
-        use base_crypto::time::Timestamp;
         use crate::dust::DustActions;
         use crate::structure::ProofPreimageMarker;
+        use base_crypto::time::Timestamp;
         use transient_crypto::commitment::PedersenRandomness;
 
         let mut rng = StdRng::seed_from_u64(0xff);
@@ -2926,9 +2934,9 @@ mod tests {
     /// chain when multiple intents across different segments are present.
     #[test]
     fn collect_proof_evidence_multiple_segments_is_empty_without_calls() {
-        use base_crypto::time::Timestamp;
         use crate::dust::DustActions;
         use crate::structure::ProofPreimageMarker;
+        use base_crypto::time::Timestamp;
         use transient_crypto::commitment::PedersenRandomness;
 
         let mut rng = StdRng::seed_from_u64(0xdead);
@@ -2939,8 +2947,26 @@ mod tests {
             registrations: vec![].into(),
             ctime: Timestamp::from_secs(0),
         };
-        let intent_a = Intent::new(&mut rng, None, None, vec![], vec![], vec![], Some(dust()), Timestamp::from_secs(3600));
-        let intent_b = Intent::new(&mut rng, None, None, vec![], vec![], vec![], Some(dust()), Timestamp::from_secs(3600));
+        let intent_a = Intent::new(
+            &mut rng,
+            None,
+            None,
+            vec![],
+            vec![],
+            vec![],
+            Some(dust()),
+            Timestamp::from_secs(3600),
+        );
+        let intent_b = Intent::new(
+            &mut rng,
+            None,
+            None,
+            vec![],
+            vec![],
+            vec![],
+            Some(dust()),
+            Timestamp::from_secs(3600),
+        );
         let intents = storage::storage::HashMap::new()
             .insert(1u16, intent_a)
             .insert(2u16, intent_b);
@@ -2961,9 +2987,9 @@ mod tests {
     /// accumulated and batch-verified in a single call.
     #[test]
     fn cross_transaction_batch_proof_verify_with_dust_actions() {
-        use base_crypto::time::Timestamp;
         use crate::dust::DustActions;
         use crate::structure::ProofPreimageMarker;
+        use base_crypto::time::Timestamp;
         use transient_crypto::commitment::PedersenRandomness;
 
         let mut rng = StdRng::seed_from_u64(0xbeef);
@@ -2973,12 +2999,11 @@ mod tests {
         let txs: Vec<Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>> =
             (0..2)
                 .map(|_| {
-                    let dust_actions =
-                        DustActions::<Signature, ProofPreimageMarker, InMemoryDB> {
-                            spends: vec![].into(),
-                            registrations: vec![].into(),
-                            ctime: Timestamp::from_secs(0),
-                        };
+                    let dust_actions = DustActions::<Signature, ProofPreimageMarker, InMemoryDB> {
+                        spends: vec![].into(),
+                        registrations: vec![].into(),
+                        ctime: Timestamp::from_secs(0),
+                    };
                     let intent = Intent::new(
                         &mut rng,
                         None,
@@ -2995,7 +3020,9 @@ mod tests {
                         ProofPreimageMarker,
                         PedersenRandomness,
                         InMemoryDB,
-                    >::new("test", intents, None, storage::storage::HashMap::new());
+                    >::new(
+                        "test", intents, None, storage::storage::HashMap::new()
+                    );
                     Transaction::Standard(stx)
                 })
                 .collect();
@@ -3103,8 +3130,7 @@ mod tests {
             [2u16, 3u16]
                 .into_iter()
                 .map(|seg| {
-                    let fallible_coins =
-                        storage::storage::HashMap::new().insert(seg, make_offer());
+                    let fallible_coins = storage::storage::HashMap::new().insert(seg, make_offer());
                     let stx = StandardTransaction::<
                         Signature,
                         ProofPreimageMarker,
