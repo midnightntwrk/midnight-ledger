@@ -24,11 +24,6 @@
     #  inputs.zkir.follows = "zkir";
     #  inputs.onchain-runtime.follows = "";
     #};
-    zkir = {
-      url = "github:midnightntwrk/midnight-ledger/aace4f8f664314f967e440d88fa7a88b617c3684";
-      # Have the self-recursion just be a fixpoint.
-      inputs.zkir.follows = "zkir";
-    };
   };
 
   outputs = {
@@ -38,7 +33,6 @@
     fenix,
     inclusive,
     #compactc,
-    zkir,
     ...
   }:
     utils.lib.eachDefaultSystem (
@@ -118,7 +112,7 @@
             extraBuildInputs = (if require-artifacts then
               [
                 self.packages.${system}.local-params
-                zkir.packages.${system}.zkir
+                self.packages.${system}.zkir
               ] else []);
           };
         mkLedger = {
@@ -160,7 +154,7 @@
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
-                  zkir.packages.${system}.zkir
+                  self.packages.${system}.zkir
                   rust-build
                   pkgs.chez
                 ];
@@ -321,8 +315,8 @@
             nativeBuildInputs = [
               pkgs.jq
               packages.public-params
-              zkir.packages.${system}.zkir
-              zkir.packages.${system}.zkir-v3
+              self.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -336,9 +330,9 @@
                 mv $contract-tmp "$contract/zkir"
                 VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
                 if [[ "$VERSION" == "2" ]]; then
-                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 fi
               done
             '';
@@ -362,7 +356,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              zkir.packages.${system}.zkir
+              self.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -573,7 +567,7 @@
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_104
+              pkgs.wasm-bindgen-cli_0_2_108
             ];
             buildInputs = [packages.public-params];
 
