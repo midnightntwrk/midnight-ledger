@@ -480,6 +480,7 @@ impl WellFormedStrictness {
     pub fn defer_proofs(self) -> Self {
         Self {
             verify_contract_proofs: false,
+            verify_native_proofs: false,
             ..self
         }
     }
