@@ -684,9 +684,31 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 )
                 .map_err(|e| anyhow::anyhow!("v1 batch verification: {e}"))
                 .map_err(MalformedTransaction::<D>::InvalidProof)?;
-                transient_crypto::proofs::VerifierKey::batch_verify(&PARAMS_VERIFIER, v3)
-                    .map_err(|_| anyhow::anyhow!("v2 batch verification"))
-                    .map_err(MalformedTransaction::<D>::InvalidProof)?;
+                // Positions of the V3 items within `evidence`, so failing batch
+                // indices (which are relative to the filtered V3 subsequence) can
+                // be reported relative to the full proof-evidence sequence.
+                let v3_positions: Vec<usize> = evidence
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, e)| {
+                        matches!(e, ContractProofEvidence::V3 { .. }).then_some(i)
+                    })
+                    .collect();
+                transient_crypto::proofs::VerifierKey::batch_verify_with_strategy(
+                    &PARAMS_VERIFIER,
+                    v3,
+                    transient_crypto::proofs::BatchStrategy::ReusePrepare,
+                )
+                .map_err(|e| match e {
+                    transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
+                        let failed_indices =
+                            batch_indices.into_iter().map(|i| v3_positions[i]).collect();
+                        MalformedTransaction::<D>::InvalidProofBatch { failed_indices }
+                    }
+                    transient_crypto::proofs::BatchVerifyError::Unlocalized(e) => {
+                        MalformedTransaction::<D>::InvalidProof(e)
+                    }
+                })?;
             }
         }
         Ok(())

@@ -26,6 +26,35 @@ use midnight_proofs::{
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
+// Re-exported so downstream crates (e.g. the ledger) can select a batch
+// verification strategy without depending on `midnight-zk-stdlib` directly.
+pub use midnight_zk_stdlib::BatchStrategy;
+
+/// Error returned by [`VerifierKey::batch_verify_with_strategy`].
+#[derive(Debug)]
+pub enum BatchVerifyError {
+    /// One or more proofs in the batch were invalid. The vector holds their
+    /// ascending indices into the verified sequence. Only populated when a
+    /// recovery [`BatchStrategy`] is used; empty/unavailable with
+    /// [`BatchStrategy::NoRecovery`].
+    InvalidProofs(Vec<usize>),
+    /// Verification failed without localising which proof(s) were invalid
+    /// (e.g. malformed inputs, or the no-recovery strategy).
+    Unlocalized(VerifyingError),
+}
+
+impl std::fmt::Display for BatchVerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BatchVerifyError::InvalidProofs(indices) => {
+                write!(f, "invalid proof(s) at batch index(es) {indices:?}")
+            }
+            BatchVerifyError::Unlocalized(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for BatchVerifyError {}
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -576,7 +605,13 @@ impl VerifierKey {
         crate::mock_verify::mock_verify_for(pi_len)
     }
 
-    /// Checks a sequence of proofs against their corresponding statements and verifier keys
+    /// Checks a sequence of proofs against their corresponding statements and verifier keys.
+    ///
+    /// Uses [`BatchStrategy::ReusePrepare`]: the accept/reject decision is identical
+    /// to a plain no-recovery batch check (so consensus behaviour is unchanged), but
+    /// on rejection the error names the batch indices of the offending proofs. To pick
+    /// a different strategy (e.g. [`BatchStrategy::NoRecovery`] for the cheapest happy
+    /// path), call [`Self::batch_verify_with_strategy`] directly.
     pub fn batch_verify<
         'a,
         F: Iterator<Item = Fr>,
@@ -585,7 +620,26 @@ impl VerifierKey {
         params: &ParamsVerifier,
         parts: V,
     ) -> Result<(), VerifyingError> {
-        use midnight_zk_stdlib::batch_verify;
+        Self::batch_verify_with_strategy(params, parts, BatchStrategy::ReusePrepare)
+            .map_err(anyhow::Error::from)
+    }
+
+    /// Like [`Self::batch_verify`] but with a caller-chosen [`BatchStrategy`].
+    ///
+    /// On failure with a recovery strategy ([`BatchStrategy::ReusePrepare`] or
+    /// [`BatchStrategy::ReusePrepareMsm`]) the returned [`BatchVerifyError`] is
+    /// [`BatchVerifyError::InvalidProofs`], carrying the batch indices of the
+    /// invalid proofs; otherwise it is [`BatchVerifyError::Unlocalized`].
+    pub fn batch_verify_with_strategy<
+        'a,
+        F: Iterator<Item = Fr>,
+        V: Iterator<Item = (&'a VerifierKey, &'a Proof, F)>,
+    >(
+        params: &ParamsVerifier,
+        parts: V,
+        strategy: BatchStrategy,
+    ) -> Result<(), BatchVerifyError> {
+        use midnight_zk_stdlib::batch_verify_with_strategy;
 
         let mut vks = vec![];
         let mut pis = vec![];
@@ -593,14 +647,19 @@ impl VerifierKey {
 
         for (vk, proof, stmt) in parts.into_iter() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
-            let vk = vk.force_init()?;
+            let vk = vk.force_init().map_err(BatchVerifyError::Unlocalized)?;
             vks.push(vk);
             pis.push(pi);
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        batch_verify_with_strategy::<TranscriptHash>(&params.0, &vks, &pis, &proofs, strategy)
+            .map_err(|e| match e {
+                midnight_proofs::plonk::Error::BatchOpening(indices) => {
+                    BatchVerifyError::InvalidProofs(indices)
+                }
+                _ => BatchVerifyError::Unlocalized(anyhow::anyhow!("Invalid proof")),
+            })
     }
 
     /// Mocks the checking of a sequence of proofs against a statement

@@ -499,6 +499,12 @@ pub enum MalformedTransaction<D: DB> {
     },
     ContractNotPresent(ContractAddress),
     InvalidProof(VerifyingError),
+    /// A batch proof check failed and the invalid proofs were localised.
+    /// `failed_indices` holds their positions within the transaction's
+    /// collected proof-evidence sequence (see `collect_proof_evidence`).
+    InvalidProofBatch {
+        failed_indices: Vec<usize>,
+    },
     BindingCommitmentOpeningInvalid,
     NotNormalized,
     FallibleWithoutCheckpoint,
@@ -885,6 +891,10 @@ impl<D: DB> Display for MalformedTransaction<D> {
                 write!(formatter, "failed to verify proof: ")?;
                 err.fmt(formatter)
             }
+            InvalidProofBatch { failed_indices } => write!(
+                formatter,
+                "failed to verify proof(s) at evidence index(es) {failed_indices:?}",
+            ),
             TransactionTooLarge { tx_size, limit } => write!(
                 formatter,
                 "transaction too large (size: {tx_size}, limit: {limit})"
