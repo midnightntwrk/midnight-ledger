@@ -250,6 +250,23 @@ impl IrSource {
             })
         };
 
+        let resolve_bool_list = |memory: &HashMap<Identifier, IrValue>,
+                                 operands: &[Operand]|
+         -> Result<Vec<bool>, anyhow::Error> {
+            if operands.is_empty() {
+                bail!("Boolean gate requires at least one input");
+            }
+            operands
+                .iter()
+                .map(|op| {
+                    let val = resolve_operand(memory, op)?;
+                    let t = val.get_type();
+                    bool::try_from(val)
+                        .map_err(|_| anyhow!("Boolean gate expects Bool inputs, found {t:?}"))
+                })
+                .collect()
+        };
+
         let resolve_operand_bits =
             |memory: &HashMap<Identifier, IrValue>, operand: &Operand, constrain: Option<u32>| {
                 resolve_operand(memory, operand).and_then(|val| {
@@ -322,6 +339,20 @@ impl IrSource {
                 I::Not { a, output } => {
                     let result = IrValue::Native((!resolve_operand_bool(&memory, a)?).into());
                     memory.insert(output.clone(), result);
+                }
+                I::And { inputs, output } => {
+                    let result = resolve_bool_list(&memory, inputs)?.into_iter().all(|b| b);
+                    memory.insert(output.clone(), IrValue::Bool(result));
+                }
+                I::Or { inputs, output } => {
+                    let result = resolve_bool_list(&memory, inputs)?.into_iter().any(|b| b);
+                    memory.insert(output.clone(), IrValue::Bool(result));
+                }
+                I::Xor { inputs, output } => {
+                    let result = resolve_bool_list(&memory, inputs)?
+                        .into_iter()
+                        .fold(false, |acc, b| acc ^ b);
+                    memory.insert(output.clone(), IrValue::Bool(result));
                 }
                 I::ConstrainEq { a, b } => {
                     let a = resolve_operand(&memory, a)?;
@@ -758,6 +789,26 @@ impl Relation for IrSource {
             }
         }
 
+        fn resolve_bit_list(
+            std: &ZkStdLib,
+            layouter: &mut impl Layouter<outer::Scalar>,
+            memory: &HashMap<Identifier, CircuitValue>,
+            operands: &[Operand],
+        ) -> Result<Vec<AssignedBit<outer::Scalar>>, Error> {
+            if operands.is_empty() {
+                return Err(Error::Synthesis(
+                    "Boolean gate requires at least one input".into(),
+                ));
+            }
+            operands
+                .iter()
+                .map(|op| {
+                    let val = resolve_operand(std, layouter, memory, op)?;
+                    AssignedBit::try_from(val)
+                })
+                .collect()
+        }
+
         let mem_insert = |id: Identifier,
                           cell: CircuitValue,
                           mem: &mut HashMap<Identifier, CircuitValue>|
@@ -954,6 +1005,21 @@ impl Relation for IrSource {
                     let bit: AssignedBit<_> = std.convert(layouter, &a)?;
                     let neg_bit = std.not(layouter, &bit)?;
                     let result = CircuitValue::Native(std.convert(layouter, &neg_bit)?);
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::And { inputs, output } => {
+                    let bits = resolve_bit_list(std, layouter, &memory, inputs)?;
+                    let result = CircuitValue::Bool(std.and(layouter, &bits)?);
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::Or { inputs, output } => {
+                    let bits = resolve_bit_list(std, layouter, &memory, inputs)?;
+                    let result = CircuitValue::Bool(std.or(layouter, &bits)?);
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::Xor { inputs, output } => {
+                    let bits = resolve_bit_list(std, layouter, &memory, inputs)?;
+                    let result = CircuitValue::Bool(std.xor(layouter, &bits)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::LessThan { a, b, bits, output } => {

@@ -1575,4 +1575,421 @@ mod proof_tests {
         vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
     }
+
+    #[actix_rt::test]
+    async fn test_bool_ops() {
+        // Exercises the Bool type end-to-end in a single proof: Bool inputs
+        // (assign), neg (logical NOT), cond_select between two Bools,
+        // constrain_eq and test_eq on Bools. Expected results are checked
+        // against Bool private inputs so every op is actively constrained.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%b0",  "type": "Bool" },
+              { "name": "%b1",  "type": "Bool" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "neg", "a": "%b0", "output": "%nb0" },
+               { "op": "neg", "a": "%nb0", "output": "%b0_again" },
+               { "op": "constrain_eq", "a": "%b0_again", "b": "%b0" },
+               { "op": "cond_select", "bit": "%bit", "a": "%b0", "b": "%b1", "output": "%sel" },
+               { "op": "private_input", "type": "Bool", "guard": null, "output": "%sel_exp" },
+               { "op": "constrain_eq", "a": "%sel", "b": "%sel_exp" },
+               { "op": "private_input", "type": "Bool", "guard": null, "output": "%nb0_exp" },
+               { "op": "constrain_eq", "a": "%nb0", "b": "%nb0_exp" },
+               { "op": "test_eq", "a": "%b0", "b": "%sel", "output": "%b0_eq_sel" },
+               { "op": "assert", "cond": "%b0_eq_sel" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // b0 = true, b1 = false, bit = 1 (selects a == b0).
+        // => nb0 = !b0 = false, b0_again = !nb0 = true == b0, sel = b0 = true.
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Bool(true)),
+            encode(IrValue::Bool(false)),
+            vec![1.into()],
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Bool(true)),  // %sel_exp
+            encode(IrValue::Bool(false)), // %nb0_exp
+        ]
+        .concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_constrain_eq_fails_on_unequal() {
+        // constrain_eq on two different Bools must make proving fail.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%b0", "type": "Bool" },
+              { "name": "%b1", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_eq", "a": "%b0", "b": "%b1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // b0 = true, b1 = false: constrain_eq should fail.
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Bool(true)), encode(IrValue::Bool(false))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "constrain_eq on unequal Bools should fail"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_gates() {
+        // Exercises the `and`, `or` and `xor` boolean gates over lists of Bool
+        // values (varying arity), checking each result against the constant
+        // Bool inputs %t (true) and %f (false).
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" },
+              { "name": "%f", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": ["%t", "%t", "%t"], "output": "%and_ttt" },
+               { "op": "and", "inputs": ["%t", "%f"],       "output": "%and_tf"  },
+               { "op": "and", "inputs": ["%t"],             "output": "%and_t"   },
+               { "op": "or",  "inputs": ["%f", "%f"],       "output": "%or_ff"   },
+               { "op": "or",  "inputs": ["%f", "%t"],       "output": "%or_ft"   },
+               { "op": "xor", "inputs": ["%t", "%t"],       "output": "%xor_tt"  },
+               { "op": "xor", "inputs": ["%t", "%f"],       "output": "%xor_tf"  },
+               { "op": "xor", "inputs": ["%t", "%t", "%t"], "output": "%xor_ttt" },
+               { "op": "constrain_eq", "a": "%and_ttt", "b": "%t" },
+               { "op": "constrain_eq", "a": "%and_tf",  "b": "%f" },
+               { "op": "constrain_eq", "a": "%and_t",   "b": "%t" },
+               { "op": "constrain_eq", "a": "%or_ff",   "b": "%f" },
+               { "op": "constrain_eq", "a": "%or_ft",   "b": "%t" },
+               { "op": "constrain_eq", "a": "%xor_tt",  "b": "%f" },
+               { "op": "constrain_eq", "a": "%xor_tf",  "b": "%t" },
+               { "op": "constrain_eq", "a": "%xor_ttt", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // %t = true, %f = false.
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Bool(true)), encode(IrValue::Bool(false))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_gate_wrong_result_fails() {
+        // and(true, false) == false, so constraining it to equal true must
+        // make proving fail.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" },
+              { "name": "%f", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": ["%t", "%f"], "output": "%r" },
+               { "op": "constrain_eq", "a": "%r", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Bool(true)), encode(IrValue::Bool(false))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(result.is_err(), "and(true, false) == true should fail");
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_gate_empty_inputs_fails() {
+        // A boolean gate over an empty input list must be rejected (the
+        // underlying gadget has no identity element wired up here). The
+        // off-circuit preprocess pass (`check`) surfaces this as a clean error.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": [], "output": "%r" },
+               { "op": "constrain_eq", "a": "%r", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let err = preimage
+            .check(&ir)
+            .expect_err("boolean gate with empty inputs should be rejected");
+        assert!(
+            err.to_string().contains("at least one input"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_byte_ops() {
+        // Exercises the Byte type end-to-end in a single proof: Byte inputs
+        // (assign), cond_select between two Bytes, constrain_eq and test_eq on
+        // Bytes, and a Byte private input. `neg` is intentionally not supported
+        // for Byte.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%a",   "type": "Byte" },
+              { "name": "%b",   "type": "Byte" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "cond_select", "bit": "%bit", "a": "%a", "b": "%b", "output": "%sel" },
+               { "op": "constrain_eq", "a": "%sel", "b": "%a" },
+               { "op": "private_input", "type": "Byte", "guard": null, "output": "%a_priv" },
+               { "op": "constrain_eq", "a": "%a", "b": "%a_priv" },
+               { "op": "test_eq", "a": "%a", "b": "%sel", "output": "%a_eq_sel" },
+               { "op": "assert", "cond": "%a_eq_sel" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // a = 7, b = 200, bit = 1 (selects a) => sel = a = 7.
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Byte(7)),
+            encode(IrValue::Byte(200)),
+            vec![1.into()],
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = encode(IrValue::Byte(7));
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_byte_constrain_eq_fails_on_unequal() {
+        // constrain_eq on two different Bytes must make proving fail.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%a", "type": "Byte" },
+              { "name": "%b", "type": "Byte" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_eq", "a": "%a", "b": "%b" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+        // a = 7, b = 8: constrain_eq should fail.
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Byte(7)), encode(IrValue::Byte(8))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(result.is_err(), "constrain_eq on unequal Bytes should fail");
+    }
 }

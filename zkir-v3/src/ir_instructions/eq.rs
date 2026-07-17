@@ -24,6 +24,8 @@ use crate::{
 /// Tests off-circuit whether the given inputs are equal.
 /// Equality testing is supported on:
 ///   - `Native`
+///   - `Bool`
+///   - `Byte`
 ///   - `Bytes32`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
@@ -37,6 +39,8 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
     use IrValue::*;
     match (a, b) {
         (Native(x), Native(y)) => Ok(x == y),
+        (Bool(a), Bool(b)) => Ok(a == b),
+        (Byte(a), Byte(b)) => Ok(a == b),
         (Bytes32(xs), Bytes32(ys)) => Ok(xs == ys),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(p == q),
 
@@ -55,6 +59,8 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 /// Tests in-circuit whether the given inputs are equal.
 /// Equality testing is supported on:
 ///   - `Native`
+///   - `Bool`
+///   - `Byte`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -72,6 +78,10 @@ pub fn test_eq_incircuit(
     use CircuitValue::*;
     match (a, b) {
         (Native(x), Native(y)) => std_lib.is_equal(layouter, x, y),
+
+        (Bool(x), Bool(y)) => std_lib.is_equal(layouter, x, y),
+
+        (Byte(x), Byte(y)) => std_lib.is_equal(layouter, x, y),
 
         (Bytes32(xs), Bytes32(ys)) => {
             let pair_wise_eqs = (xs.iter().zip(ys.iter()))
@@ -113,6 +123,15 @@ mod tests {
         use IrValue::*;
         let x = Fr(F::random(OsRng));
         assert!(test_eq_offcircuit(&Native(x), &Native(x)).unwrap());
+
+        assert!(test_eq_offcircuit(&Bool(true), &Bool(true)).unwrap());
+        assert!(test_eq_offcircuit(&Bool(false), &Bool(false)).unwrap());
+        assert!(!test_eq_offcircuit(&Bool(true), &Bool(false)).unwrap());
+        assert!(test_eq_offcircuit(&Native(x), &Bool(true)).is_err());
+
+        assert!(test_eq_offcircuit(&Byte(7), &Byte(7)).unwrap());
+        assert!(!test_eq_offcircuit(&Byte(7), &Byte(8)).unwrap());
+        assert!(test_eq_offcircuit(&Native(x), &Byte(7)).is_err());
 
         let bytes: [u8; 32] = std::array::from_fn(|_| rand::thread_rng().r#gen());
         assert!(test_eq_offcircuit(&Bytes32(bytes), &Bytes32(bytes)).unwrap());
