@@ -80,6 +80,55 @@ async fn native_via_copy() {
 }
 
 #[actix_rt::test]
+async fn bool_identity() {
+    // Output a Bool input directly. Exercises the Bool arm of
+    // encode_incircuit / encode_offcircuit and the Bool input assignment.
+    for b in [true, false] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Bool" }
+               ],
+               "outputs": ["Bool"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "output", "vals": ["%b"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Bool(b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
+async fn bool_via_neg() {
+    // Output the logical negation of a Bool input, exercising `neg` on a Bool
+    // (which yields a Bool) followed by encoding it as a typed output.
+    for b in [true, false] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Bool" }
+               ],
+               "outputs": ["Bool"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "neg", "a": "%b", "output": "%nb" },
+                   { "op": "output", "vals": ["%nb"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Bool(!b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
 async fn multi_output_native_pair() {
     // Two Native outputs from the same input. Exercises the per-position
     // arity & type loop in the Output arm.
