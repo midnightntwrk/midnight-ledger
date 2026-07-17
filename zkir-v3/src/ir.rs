@@ -627,6 +627,39 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Extracts the byte at position `index` of a `Bytes(n)` value, returning a
+    /// `Byte`.
+    ///
+    /// `index` is a compile-time constant that must lie in the range `0..n`,
+    /// where `n` is the length of the input byte string.
+    ///
+    /// # Errors
+    ///
+    /// Errors off-circuit (and fails synthesis in-circuit) if the input is not a
+    /// `Bytes(n)` value, or if `index >= n`. Imposes no in-circuit constraints:
+    /// it simply selects a fixed wire.
+    Nth {
+        /// The byte string to index into
+        bytes: Operand,
+        /// The (constant) position of the byte to extract, in `0..n`
+        index: u32,
+        /// The output variable name (a `Byte`)
+        output: Identifier,
+    },
+    /// Concatenates a non-empty sequence of `Byte` and/or `Bytes(m)` values into
+    /// a single `Bytes(n)` value, where `n` is the sum of the input lengths (a
+    /// `Byte` contributes 1, a `Bytes(m)` contributes `m`).
+    ///
+    /// # Errors
+    ///
+    /// Errors if `inputs` is empty, if any input is neither a `Byte` nor a
+    /// `Bytes` value, or if the resulting length exceeds `MAX_BYTES_LEN`.
+    Concat {
+        /// The `Byte`/`Bytes` values to concatenate, in order
+        inputs: Vec<Operand>,
+        /// The output variable name (a `Bytes(n)`)
+        output: Identifier,
+    },
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`

@@ -32,7 +32,7 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
-use crate::ir_types::{CircuitValue, IrType, IrValue};
+use crate::ir_types::{CircuitValue, IrType, IrValue, MAX_BYTES_LEN};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -677,6 +677,41 @@ impl IrSource {
                     out_bytes[31] = bytes_high[0];
                     memory.insert(output.clone(), IrValue::Bytes(out_bytes.to_vec()));
                 }
+                I::Nth {
+                    bytes,
+                    index,
+                    output,
+                } => {
+                    let bs: Vec<u8> = resolve_operand(&memory, bytes)?.try_into()?;
+                    let k = *index as usize;
+                    if k >= bs.len() {
+                        bail!("nth out of bounds: index {k} into Bytes<{}>", bs.len());
+                    }
+                    memory.insert(output.clone(), IrValue::Byte(bs[k]));
+                }
+                I::Concat { inputs, output } => {
+                    let mut bytes = vec![];
+                    for op in inputs {
+                        match resolve_operand(&memory, op)? {
+                            IrValue::Byte(b) => bytes.push(b),
+                            IrValue::Bytes(bs) => bytes.extend(bs),
+                            other => bail!(
+                                "Concat expects Byte or Bytes inputs, found {:?}",
+                                other.get_type()
+                            ),
+                        }
+                    }
+                    if bytes.is_empty() {
+                        bail!("Concat requires at least one byte of input");
+                    }
+                    if bytes.len() > MAX_BYTES_LEN as usize {
+                        bail!(
+                            "Concat result length {} exceeds MAX_BYTES_LEN ({MAX_BYTES_LEN})",
+                            bytes.len()
+                        );
+                    }
+                    memory.insert(output.clone(), IrValue::Bytes(bytes));
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1237,6 +1272,49 @@ impl Relation for IrSource {
                     let mut out_bytes = bytes_low;
                     out_bytes[31] = std.convert(layouter, &high)?;
                     memory.insert(output.clone(), CircuitValue::Bytes(out_bytes.to_vec()));
+                }
+                I::Nth {
+                    bytes,
+                    index,
+                    output,
+                } => {
+                    let bs: Vec<AssignedByte<outer::Scalar>> =
+                        resolve_operand(std, layouter, &memory, bytes)?.try_into()?;
+                    let k = *index as usize;
+                    if k >= bs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "nth out of bounds: index {k} into Bytes<{}>",
+                            bs.len()
+                        )));
+                    }
+                    mem_insert(output.clone(), CircuitValue::Byte(bs[k].clone()), &mut memory)?;
+                }
+                I::Concat { inputs, output } => {
+                    let mut bytes = vec![];
+                    for op in inputs {
+                        match resolve_operand(std, layouter, &memory, op)? {
+                            CircuitValue::Byte(b) => bytes.push(b),
+                            CircuitValue::Bytes(bs) => bytes.extend(bs),
+                            other => {
+                                return Err(Error::Synthesis(format!(
+                                    "Concat expects Byte or Bytes inputs, found {:?}",
+                                    other.get_type()
+                                )));
+                            }
+                        }
+                    }
+                    if bytes.is_empty() {
+                        return Err(Error::Synthesis(
+                            "Concat requires at least one byte of input".into(),
+                        ));
+                    }
+                    if bytes.len() > MAX_BYTES_LEN as usize {
+                        return Err(Error::Synthesis(format!(
+                            "Concat result length {} exceeds MAX_BYTES_LEN ({MAX_BYTES_LEN})",
+                            bytes.len()
+                        )));
+                    }
+                    mem_insert(output.clone(), CircuitValue::Bytes(bytes), &mut memory)?;
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
