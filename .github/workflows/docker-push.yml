@@ -10,6 +10,10 @@ on:
         required: true
       GH_PASSWORD:
         required: true
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SIGNING_SERVICE_ACCOUNT:
+        required: true
 
 jobs:
   docker-amd64:
@@ -128,6 +132,9 @@ jobs:
   docker-manifest:
     runs-on: ubuntu-latest
     needs: [docker-amd64, docker-arm64]
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Setup api.github.com credentials
@@ -174,6 +181,7 @@ jobs:
       - name: Create and push manifest
         run: |
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          echo "PROOF_SERVER_VERSION=$PROOF_SERVER_VERSION" >> $GITHUB_ENV
 
           docker manifest create ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
             ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
@@ -190,3 +198,74 @@ jobs:
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
             docker manifest push ghcr.io/midnight-ntwrk/proof-server:latest
           fi
+
+          IMAGE_DIGEST=$(docker buildx imagetools inspect \
+            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
+            --format '{{.Manifest.Digest}}')
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> $GITHUB_ENV
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
+
+      - name: Fetch signing key from Secret Manager
+        id: fetch-key
+        uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5 # v2.2.5
+        with:
+          secrets: |-
+            SIGNING_KEY:midnight-proof-server-signing-key/latest
+
+      - name: Sign proof-server build manifest
+        env:
+          SIGNING_KEY: ${{ steps.fetch-key.outputs.SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          export GNUPGHOME=$(mktemp -d)
+
+          # Runs on every exit path (success or failure) so the imported
+          # signing key never outlives this step. Batch-mode secret-key
+          # deletion requires the full fingerprint, not the key ID.
+          cleanup() {
+            if [[ -n "${KEY_FPR:-}" ]]; then
+              gpg --batch --yes --delete-secret-keys "$KEY_FPR" || true
+            fi
+            rm -rf "$GNUPGHOME"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$SIGNING_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^sec:/ {print $5; exit}')
+          KEY_FPR=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^fpr:/ {print $10; exit}')
+
+          cat > build-manifest.json <<EOF
+          {
+            "version": "${PROOF_SERVER_VERSION}",
+            "image": "ghcr.io/midnight-ntwrk/proof-server:${PROOF_SERVER_VERSION}",
+            "image_digest": "${IMAGE_DIGEST}",
+            "git_commit": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF}",
+            "workflow_run": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "signed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+          gpg --batch --yes --armor --local-user "$KEY_ID" \
+            --detach-sign --output build-manifest.json.asc build-manifest.json
+
+          gpg --verify build-manifest.json.asc build-manifest.json
+
+      - name: Upload signed build manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: proof-server-build-manifest-${{ env.PROOF_SERVER_VERSION }}
+          path: |
+            build-manifest.json
+            build-manifest.json.asc
+            proof-server/midnight-proof-server-public.asc
+          if-no-files-found: error
