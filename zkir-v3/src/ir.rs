@@ -771,6 +771,42 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Boolean AND gate over a non-empty list of `Bool` values.
+    ///
+    /// All `inputs` must be of type `Bool`. Results in an error if the input
+    /// list is empty or if any input is not a `Bool`.
+    ///
+    /// One `Bool` output, the conjunction of all `inputs`
+    And {
+        /// The boolean values to combine
+        inputs: Vec<Operand>,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Boolean OR gate over a non-empty list of `Bool` values.
+    ///
+    /// All `inputs` must be of type `Bool`. Results in an error if the input
+    /// list is empty or if any input is not a `Bool`.
+    ///
+    /// One `Bool` output, the disjunction of all `inputs`
+    Or {
+        /// The boolean values to combine
+        inputs: Vec<Operand>,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Boolean XOR gate over a non-empty list of `Bool` values.
+    ///
+    /// All `inputs` must be of type `Bool`. Results in an error if the input
+    /// list is empty or if any input is not a `Bool`.
+    ///
+    /// One `Bool` output, the exclusive-or (parity) of all `inputs`
+    Xor {
+        /// The boolean values to combine
+        inputs: Vec<Operand>,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Checks if `a` < `b`, interpreting both as `bits`-bit unsigned
     /// integers. UB if `a` or `b` exceed `bits`.
     ///

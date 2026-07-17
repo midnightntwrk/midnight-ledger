@@ -1710,4 +1710,164 @@ mod proof_tests {
             "constrain_eq on unequal Bools should fail"
         );
     }
+
+    #[actix_rt::test]
+    async fn test_bool_gates() {
+        // Exercises the `and`, `or` and `xor` boolean gates over lists of Bool
+        // values (varying arity), checking each result against the constant
+        // Bool inputs %t (true) and %f (false).
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" },
+              { "name": "%f", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": ["%t", "%t", "%t"], "output": "%and_ttt" },
+               { "op": "and", "inputs": ["%t", "%f"],       "output": "%and_tf"  },
+               { "op": "and", "inputs": ["%t"],             "output": "%and_t"   },
+               { "op": "or",  "inputs": ["%f", "%f"],       "output": "%or_ff"   },
+               { "op": "or",  "inputs": ["%f", "%t"],       "output": "%or_ft"   },
+               { "op": "xor", "inputs": ["%t", "%t"],       "output": "%xor_tt"  },
+               { "op": "xor", "inputs": ["%t", "%f"],       "output": "%xor_tf"  },
+               { "op": "xor", "inputs": ["%t", "%t", "%t"], "output": "%xor_ttt" },
+               { "op": "constrain_eq", "a": "%and_ttt", "b": "%t" },
+               { "op": "constrain_eq", "a": "%and_tf",  "b": "%f" },
+               { "op": "constrain_eq", "a": "%and_t",   "b": "%t" },
+               { "op": "constrain_eq", "a": "%or_ff",   "b": "%f" },
+               { "op": "constrain_eq", "a": "%or_ft",   "b": "%t" },
+               { "op": "constrain_eq", "a": "%xor_tt",  "b": "%f" },
+               { "op": "constrain_eq", "a": "%xor_tf",  "b": "%t" },
+               { "op": "constrain_eq", "a": "%xor_ttt", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // %t = true, %f = false.
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Bool(true)), encode(IrValue::Bool(false))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_gate_wrong_result_fails() {
+        // and(true, false) == false, so constraining it to equal true must
+        // make proving fail.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" },
+              { "name": "%f", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": ["%t", "%f"], "output": "%r" },
+               { "op": "constrain_eq", "a": "%r", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+        let inputs: Vec<transient_crypto::curve::Fr> =
+            [encode(IrValue::Bool(true)), encode(IrValue::Bool(false))].concat();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(result.is_err(), "and(true, false) == true should fail");
+    }
+
+    #[actix_rt::test]
+    async fn test_bool_gate_empty_inputs_fails() {
+        // A boolean gate over an empty input list must be rejected (the
+        // underlying gadget has no identity element wired up here). The
+        // off-circuit preprocess pass (`check`) surfaces this as a clean error.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%t", "type": "Bool" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "and", "inputs": [], "output": "%r" },
+               { "op": "constrain_eq", "a": "%r", "b": "%t" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let err = preimage
+            .check(&ir)
+            .expect_err("boolean gate with empty inputs should be rejected");
+        assert!(
+            err.to_string().contains("at least one input"),
+            "unexpected error: {err}"
+        );
+    }
 }
