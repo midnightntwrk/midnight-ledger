@@ -564,17 +564,38 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Reverses the byte order of a `Bytes32` value.
+    /// Reverses the byte order of a `Bytes(n)` value.
     ///
-    /// The input must be of type `Bytes32`, otherwise this operation fails. The
-    /// output is a `Bytes32` whose bytes are those of the input in reverse
+    /// The input must be of type `Bytes(n)`, otherwise this operation fails. The
+    /// output is a `Bytes(n)` whose bytes are those of the input in reverse
     /// order, i.e. the first byte becomes the last and vice versa.
     ///
     /// Outputs 1 element, the reversed bytes
-    ReverseBytes {
+    Reverse {
         /// The bytes to be reversed
         bytes: Operand,
         /// The output variable name
+        output: Identifier,
+    },
+    /// Extracts a contiguous sub-slice of a `Bytes(n)` value, returning a
+    /// `Bytes(len)`.
+    ///
+    /// `start` and `len` are compile-time constants; the slice covers positions
+    /// `start .. start + len`. `len` must be at least 1.
+    ///
+    /// # Errors
+    ///
+    /// Errors off-circuit (and fails synthesis in-circuit) if the input is not a
+    /// `Bytes(n)` value, if `len == 0`, or if `start + len > n`. Imposes no
+    /// in-circuit constraints: it selects a fixed range of wires.
+    Slice {
+        /// The byte string to slice
+        bytes: Operand,
+        /// The (constant) start position of the slice
+        start: u32,
+        /// The (constant) length of the slice (`>= 1`)
+        len: u32,
+        /// The output variable name (a `Bytes(len)`)
         output: Identifier,
     },
     /// Decomposes a `Bytes32` value into two `Native` field elements.

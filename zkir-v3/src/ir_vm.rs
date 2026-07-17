@@ -648,11 +648,33 @@ impl IrSource {
                     let x = from_bytes32_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
-                I::ReverseBytes { bytes, output } => {
+                I::Reverse { bytes, output } => {
                     let bytes = resolve_operand(&memory, bytes)?;
                     let mut bytes: Vec<u8> = bytes.try_into()?;
                     bytes.reverse();
                     memory.insert(output.clone(), IrValue::Bytes(bytes));
+                }
+                I::Slice {
+                    bytes,
+                    start,
+                    len,
+                    output,
+                } => {
+                    let bs: Vec<u8> = resolve_operand(&memory, bytes)?.try_into()?;
+                    let (s, l) = (*start as usize, *len as usize);
+                    if l == 0 {
+                        bail!("slice length must be at least 1");
+                    }
+                    let end = s
+                        .checked_add(l)
+                        .filter(|end| *end <= bs.len())
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "slice out of bounds: {s}..{s}+{l} into Bytes<{}>",
+                                bs.len()
+                            )
+                        })?;
+                    memory.insert(output.clone(), IrValue::Bytes(bs[s..end].to_vec()));
                 }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(&memory, bytes)?;
@@ -1247,11 +1269,35 @@ impl Relation for IrSource {
                     let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
-                I::ReverseBytes { bytes, output } => {
+                I::Reverse { bytes, output } => {
                     let bytes = resolve_operand(std, layouter, &memory, bytes)?;
                     let mut bytes: Vec<AssignedByte<outer::Scalar>> = bytes.try_into()?;
                     bytes.reverse();
                     memory.insert(output.clone(), CircuitValue::Bytes(bytes));
+                }
+                I::Slice {
+                    bytes,
+                    start,
+                    len,
+                    output,
+                } => {
+                    let bs: Vec<AssignedByte<outer::Scalar>> =
+                        resolve_operand(std, layouter, &memory, bytes)?.try_into()?;
+                    let (s, l) = (*start as usize, *len as usize);
+                    if l == 0 {
+                        return Err(Error::Synthesis("slice length must be at least 1".into()));
+                    }
+                    let end = s.checked_add(l).filter(|end| *end <= bs.len()).ok_or_else(|| {
+                        Error::Synthesis(format!(
+                            "slice out of bounds: {s}..{s}+{l} into Bytes<{}>",
+                            bs.len()
+                        ))
+                    })?;
+                    mem_insert(
+                        output.clone(),
+                        CircuitValue::Bytes(bs[s..end].to_vec()),
+                        &mut memory,
+                    )?;
                 }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(std, layouter, &memory, bytes)?;
