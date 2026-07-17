@@ -129,6 +129,30 @@ async fn bool_via_neg() {
 }
 
 #[actix_rt::test]
+async fn byte_identity() {
+    // Output a Byte input directly. Exercises the Byte arm of
+    // encode_incircuit / encode_offcircuit and the Byte input assignment.
+    for b in [0u8, 1, 42, 255] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Byte" }
+               ],
+               "outputs": ["Byte"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "output", "vals": ["%b"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Byte(b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
 async fn multi_output_native_pair() {
     // Two Native outputs from the same input. Exercises the per-position
     // arity & type loop in the Output arm.

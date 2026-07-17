@@ -71,6 +71,10 @@ pub fn assign_incircuit(
             .assign_many(layouter, &convert_values::<bool>(values)?)
             .map(|bs| bs.into_iter().map(CircuitValue::Bool).collect()),
 
+        IrType::Byte => std_lib
+            .assign_many(layouter, &convert_values::<u8>(values)?)
+            .map(|bs| bs.into_iter().map(CircuitValue::Byte).collect()),
+
         IrType::Bytes32 => {
             let mut byte32_chunks = vec![];
             for chunk in convert_values::<[u8; 32]>(values)? {

@@ -16,8 +16,8 @@ use midnight_circuits::{
     field::foreign::params::MultiEmulationParams as MEP,
     instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
-        AssignedBigUint, AssignedBit, AssignedField, AssignedForeignPoint, AssignedNative,
-        AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
+        AssignedBigUint, AssignedBit, AssignedByte, AssignedField, AssignedForeignPoint,
+        AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
     },
 };
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
@@ -36,6 +36,7 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
     let encoded = match value {
         IrValue::Native(x) => AssignedNative::<F>::as_public_input(&x.0),
         IrValue::Bool(b) => AssignedBit::<F>::as_public_input(b),
+        IrValue::Byte(b) => AssignedByte::<F>::as_public_input(b),
         IrValue::Bytes32(bs) => {
             let mut low: [u8; 32] = *bs;
             low[31] = 0;
@@ -79,6 +80,7 @@ pub fn encode_incircuit(
     let encoded = match value {
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
         CircuitValue::Bool(b) => std_lib.as_public_input(layouter, b),
+        CircuitValue::Byte(b) => std_lib.as_public_input(layouter, b),
         CircuitValue::Bytes32(bs) => Ok(vec![
             std_lib.assigned_from_le_bytes(layouter, &bs[..31])?,
             bs[31].clone().into(),
@@ -121,6 +123,8 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
             .map(IrValue::Native),
 
         IrType::Bool => AssignedBit::<F>::from_public_input(&encoded).map(IrValue::Bool),
+
+        IrType::Byte => AssignedByte::<F>::from_public_input(&encoded).map(IrValue::Byte),
 
         IrType::Bytes32 => {
             if encoded.len() != 2 {
@@ -201,6 +205,21 @@ mod tests {
             // A Bool encodes to a single native field element.
             assert_eq!(encoded.len(), IrType::Bool.encoded_len());
             let decoded = decode_offcircuit(&encoded, &IrType::Bool).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn encode_decode_byte_roundtrip() {
+        for b in [0u8, 1, 42, 255] {
+            let value = IrValue::Byte(b);
+            let encoded: Vec<Fr> = encode_offcircuit(&value)
+                .into_iter()
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            // A Byte encodes to a single native field element.
+            assert_eq!(encoded.len(), IrType::Byte.encoded_len());
+            let decoded = decode_offcircuit(&encoded, &IrType::Byte).unwrap();
             assert_eq!(decoded, value);
         }
     }
