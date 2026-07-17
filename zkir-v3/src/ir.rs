@@ -684,6 +684,9 @@ pub enum Instruction {
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`
+    ///
+    /// **Deprecated:** this instruction is slated for removal and should not be
+    /// used in new circuits.
     DivModPowerOfTwo {
         /// The variable to divide
         val: Operand,
@@ -696,6 +699,9 @@ pub enum Instruction {
     /// `divisor << bits | modulus`, guaranteeing that the result does not
     /// overflow the field size, and that `modulus < (1 << bits)`. Inverse of
     /// `DivModPowerOfTwo`.
+    ///
+    /// **Deprecated:** this instruction is slated for removal and should not be
+    /// used in new circuits.
     ReconstituteField {
         /// The divisor of the reconstituted field element
         divisor: Operand,
