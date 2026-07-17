@@ -22,20 +22,36 @@ use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256};
 use midnight_proofs::{circuit::Value, plonk::Error};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serialize::{Deserializable, Serializable, Tagged};
 use transient_crypto::curve::{Fr, outer};
 
 type F = outer::Scalar;
 
-/// Type of IR values
+/// Number of bytes packed into a single native field element when encoding a
+/// `Bytes(n)` value. 31 bytes (248 bits) fit safely below the BLS12-381 scalar
+/// field modulus (~254 bits), so each chunk is canonical.
+pub(crate) const BYTES_PER_FIELD_ELEMENT: usize = 31;
+
+/// Maximum length `n` allowed for a `Bytes(n)` type (inclusive). Lengths are
+/// bounded to keep encoded sizes and allocations sane; `2^24` bytes (16 MiB) is
+/// far beyond any practical circuit input. This matches the bound Compact
+/// imposes on byte-string lengths.
+pub const MAX_BYTES_LEN: u32 = 1 << 24;
+
+/// Type of IR values.
+///
+/// The serde (JSON) representation is a canonical string, e.g.
+/// `"Scalar<BLS12-381>"` or `"Bytes<32>"`. It is implemented manually (see the
+/// `Serialize`/`Deserialize` impls below) rather than through
+/// `#[serde(rename)]`, so that the parametrized `Bytes<n>` form is supported
+/// for every `n >= 1`.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[derive(Clone, Debug, PartialEq, Serializable)]
 #[tag = "ir-type[v1]"]
 pub enum IrType {
     /// Element of the BLS12-381 scalar field, a.k.a. the native field.
     /// This is also the base field of Jubjub.
-    #[serde(rename = "Scalar<BLS12-381>")]
     Native,
 
     /// Boolean (true or false).
@@ -44,28 +60,26 @@ pub enum IrType {
     /// A single byte.
     Byte,
 
-    /// 32 bytes.
-    #[serde(rename = "Bytes<32>")]
-    Bytes32,
+    /// A byte string of length `n` (`1 <= n <= `[`MAX_BYTES_LEN`]).
+    ///
+    /// Serializes as `"Bytes<n>"`; `Bytes(32)` is the former `Bytes32` type.
+    /// `u32` (rather than `usize`) so the binary encoding is platform
+    /// independent, matching the `u32` convention used for bit widths.
+    Bytes(#[cfg_attr(feature = "proptest", proptest(strategy = "1u32..=1024u32"))] u32),
 
     /// Point of the Jubjub elliptic curve.
-    #[serde(rename = "Point<Jubjub>")]
     JubjubPoint,
 
     /// Element of the scalar field of Jubjub.
-    #[serde(rename = "Scalar<Jubjub>")]
     JubjubScalar,
 
     /// Point of the Secp256k1 elliptic curve, also known as K256.
-    #[serde(rename = "Point<Secp256k1>")]
     Secp256k1Point,
 
     /// Element of the base field of Secp256k1.
-    #[serde(rename = "Base<Secp256k1>")]
     Secp256k1Base,
 
     /// Element of the scalar field of Secp256k1.
-    #[serde(rename = "Scalar<Secp256k1>")]
     Secp256k1Scalar,
 }
 
@@ -76,7 +90,7 @@ impl IrType {
             IrType::Native => 1,
             IrType::Bool => 1,
             IrType::Byte => 1,
-            IrType::Bytes32 => 2,
+            IrType::Bytes(n) => (*n as usize).div_ceil(BYTES_PER_FIELD_ELEMENT),
             IrType::JubjubPoint => 2,
             IrType::JubjubScalar => 1,
 
@@ -84,6 +98,67 @@ impl IrType {
             IrType::Secp256k1Base => 2,
             IrType::Secp256k1Scalar => 2,
         }
+    }
+
+    /// Canonical string representation used in the serde (JSON) encoding.
+    fn to_type_string(&self) -> String {
+        match self {
+            IrType::Native => "Scalar<BLS12-381>".to_string(),
+            IrType::Bool => "Bool".to_string(),
+            IrType::Byte => "Byte".to_string(),
+            IrType::Bytes(n) => format!("Bytes<{n}>"),
+            IrType::JubjubPoint => "Point<Jubjub>".to_string(),
+            IrType::JubjubScalar => "Scalar<Jubjub>".to_string(),
+            IrType::Secp256k1Point => "Point<Secp256k1>".to_string(),
+            IrType::Secp256k1Base => "Base<Secp256k1>".to_string(),
+            IrType::Secp256k1Scalar => "Scalar<Secp256k1>".to_string(),
+        }
+    }
+
+    /// Parses the canonical string representation. Returns `None` for unknown
+    /// or non-canonical strings, including `Bytes<0>`, non-canonical integer
+    /// forms (e.g. leading zeros), and lengths outside `1..=`[`MAX_BYTES_LEN`].
+    fn from_type_string(s: &str) -> Option<Self> {
+        Some(match s {
+            "Scalar<BLS12-381>" => IrType::Native,
+            "Bool" => IrType::Bool,
+            "Byte" => IrType::Byte,
+            "Point<Jubjub>" => IrType::JubjubPoint,
+            "Scalar<Jubjub>" => IrType::JubjubScalar,
+            "Point<Secp256k1>" => IrType::Secp256k1Point,
+            "Base<Secp256k1>" => IrType::Secp256k1Base,
+            "Scalar<Secp256k1>" => IrType::Secp256k1Scalar,
+            other => {
+                let inner = other.strip_prefix("Bytes<")?.strip_suffix('>')?;
+                // Reject non-canonical integers: empty, non-digits, or a
+                // leading zero (which also rules out "0" itself).
+                let canonical = !inner.is_empty()
+                    && inner.bytes().all(|b| b.is_ascii_digit())
+                    && !inner.starts_with('0');
+                if !canonical {
+                    return None;
+                }
+                let n: u32 = inner.parse().ok()?;
+                if n > MAX_BYTES_LEN {
+                    return None;
+                }
+                IrType::Bytes(n)
+            }
+        })
+    }
+}
+
+impl Serialize for IrType {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_type_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for IrType {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = <String as Deserialize>::deserialize(deserializer)?;
+        IrType::from_type_string(&s)
+            .ok_or_else(|| de::Error::custom(format!("invalid IR type: {s:?}")))
     }
 }
 
@@ -99,8 +174,8 @@ pub enum IrValue {
     /// A single byte.
     Byte(u8),
 
-    /// 32 Bytes.
-    Bytes32([u8; 32]),
+    /// A byte string of length `n`.
+    Bytes(Vec<u8>),
 
     /// Jubjub point.
     JubjubPoint(JubjubSubgroup),
@@ -124,7 +199,7 @@ impl IrValue {
             IrValue::Native(_) => IrType::Native,
             IrValue::Bool(_) => IrType::Bool,
             IrValue::Byte(_) => IrType::Byte,
-            IrValue::Bytes32(_) => IrType::Bytes32,
+            IrValue::Bytes(bs) => IrType::Bytes(bs.len() as u32),
             IrValue::JubjubPoint(_) => IrType::JubjubPoint,
             IrValue::JubjubScalar(_) => IrType::JubjubScalar,
 
@@ -139,7 +214,7 @@ impl IrValue {
             IrType::Native => IrValue::Native(Fr::default()),
             IrType::Bool => IrValue::Bool(bool::default()),
             IrType::Byte => IrValue::Byte(u8::default()),
-            IrType::Bytes32 => IrValue::Bytes32([u8::default(); 32]),
+            IrType::Bytes(n) => IrValue::Bytes(vec![u8::default(); *n as usize]),
             IrType::JubjubPoint => IrValue::JubjubPoint(JubjubSubgroup::default()),
             IrType::JubjubScalar => IrValue::JubjubScalar(JubjubFr::default()),
 
@@ -159,7 +234,7 @@ pub enum CircuitValue {
     Native(AssignedNative<F>),
     Bool(AssignedBit<F>),
     Byte(AssignedByte<F>),
-    Bytes32([AssignedByte<F>; 32]),
+    Bytes(Vec<AssignedByte<F>>),
     JubjubPoint(AssignedNativePoint<JubjubExtended>),
     JubjubScalar(AssignedScalarOfNativeCurve<JubjubExtended>),
 
@@ -174,9 +249,9 @@ impl CircuitValue {
             CircuitValue::Native(x) => x.value().cloned().map(|x| IrValue::Native(Fr(x))),
             CircuitValue::Bool(b) => b.value().map(IrValue::Bool),
             CircuitValue::Byte(b) => b.value().map(IrValue::Byte),
-            CircuitValue::Bytes32(bs) => Value::<Vec<u8>>::from_iter(bs.iter().map(|b| b.value()))
-                .map(|b| b.try_into().unwrap())
-                .map(IrValue::Bytes32),
+            CircuitValue::Bytes(bs) => {
+                Value::<Vec<u8>>::from_iter(bs.iter().map(|b| b.value())).map(IrValue::Bytes)
+            }
             CircuitValue::JubjubPoint(p) => p.value().map(IrValue::JubjubPoint),
             CircuitValue::JubjubScalar(s) => s.value().map(IrValue::JubjubScalar),
 
@@ -191,7 +266,7 @@ impl CircuitValue {
             CircuitValue::Native(_) => IrType::Native,
             CircuitValue::Bool(_) => IrType::Bool,
             CircuitValue::Byte(_) => IrType::Byte,
-            CircuitValue::Bytes32(_) => IrType::Bytes32,
+            CircuitValue::Bytes(bs) => IrType::Bytes(bs.len() as u32),
             CircuitValue::JubjubPoint(_) => IrType::JubjubPoint,
             CircuitValue::JubjubScalar(_) => IrType::JubjubScalar,
 
@@ -240,7 +315,7 @@ impl_enum_from_try_from!(IrValue, anyhow::Error, anyhow::Error::msg;
     Native => Fr,
     Bool => bool,
     Byte => u8,
-    Bytes32 => [u8; 32],
+    Bytes => Vec<u8>,
     JubjubPoint => JubjubSubgroup,
     JubjubScalar => JubjubFr,
 
@@ -256,7 +331,7 @@ impl_enum_from_try_from!(CircuitValue, Error, Error::Synthesis;
     Native => AssignedNative<F>,
     Bool => AssignedBit<F>,
     Byte => AssignedByte<F>,
-    Bytes32 => [AssignedByte<F>; 32],
+    Bytes => Vec<AssignedByte<F>>,
     JubjubPoint => AssignedNativePoint<JubjubExtended>,
     JubjubScalar => AssignedScalarOfNativeCurve<JubjubExtended>,
 
@@ -264,3 +339,70 @@ impl_enum_from_try_from!(CircuitValue, Error, Error::Synthesis;
     Secp256k1Base => AssignedField<F, k256::Fp, MEP>,
     Secp256k1Scalar => AssignedField<F, k256::Fq, MEP>,
 );
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bytes_type_serde_roundtrip() {
+        // MAX_BYTES_LEN is the inclusive upper bound.
+        for n in [1u32, 2, 31, 32, 48, 1000, MAX_BYTES_LEN] {
+            let t = IrType::Bytes(n);
+            let s = serde_json::to_string(&t).unwrap();
+            assert_eq!(s, format!("\"Bytes<{n}>\""));
+            let back: IrType = serde_json::from_str(&s).unwrap();
+            assert_eq!(back, t);
+        }
+    }
+
+    #[test]
+    fn bytes_type_length_bound_enforced() {
+        // The bound is inclusive: 2^24 is accepted, 2^24 + 1 is rejected.
+        let at_bound = format!(r#""Bytes<{}>""#, MAX_BYTES_LEN);
+        assert_eq!(
+            serde_json::from_str::<IrType>(&at_bound).unwrap(),
+            IrType::Bytes(MAX_BYTES_LEN)
+        );
+        let over_bound = format!(r#""Bytes<{}>""#, MAX_BYTES_LEN + 1);
+        assert!(serde_json::from_str::<IrType>(&over_bound).is_err());
+        // Values exceeding u32 are rejected as well.
+        assert!(serde_json::from_str::<IrType>(r#""Bytes<99999999999>""#).is_err());
+    }
+
+    #[test]
+    fn bytes_type_rejects_non_canonical() {
+        // n = 0, leading zeros, whitespace, empty, and non-digits are all rejected.
+        for s in [
+            r#""Bytes<0>""#,
+            r#""Bytes<00>""#,
+            r#""Bytes<01>""#,
+            r#""Bytes< 1>""#,
+            r#""Bytes<1 >""#,
+            r#""Bytes<>""#,
+            r#""Bytes<-1>""#,
+            r#""Bytes<1a>""#,
+        ] {
+            assert!(
+                serde_json::from_str::<IrType>(s).is_err(),
+                "should reject {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_bytes32_string_parses_as_bytes_32() {
+        let t: IrType = serde_json::from_str(r#""Bytes<32>""#).unwrap();
+        assert_eq!(t, IrType::Bytes(32));
+        assert_eq!(serde_json::to_string(&t).unwrap(), r#""Bytes<32>""#);
+    }
+
+    #[test]
+    fn other_types_serde_unchanged() {
+        assert_eq!(
+            serde_json::to_string(&IrType::Native).unwrap(),
+            r#""Scalar<BLS12-381>""#
+        );
+        assert_eq!(serde_json::to_string(&IrType::Byte).unwrap(), r#""Byte""#);
+    }
+}

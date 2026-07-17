@@ -1348,7 +1348,7 @@ mod proof_tests {
             encode(IrValue::Native(native_val)),
             encode(IrValue::Secp256k1Base(base_val)),
             encode(IrValue::Secp256k1Scalar(scalar_val)),
-            encode(IrValue::Bytes32(raw_bytes)),
+            encode(IrValue::Bytes(raw_bytes.to_vec())),
         ]
         .concat();
 
@@ -1428,7 +1428,7 @@ mod proof_tests {
                 .collect()
         };
 
-        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes32(bytes));
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes(bytes.to_vec()));
 
         // Compute expected lo and hi using the same logic as the off-circuit VM.
         let mut lo_bytes = bytes;
@@ -1502,9 +1502,9 @@ mod proof_tests {
                 .collect()
         };
 
-        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes32(bytes));
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes(bytes.to_vec()));
         let private_transcript: Vec<transient_crypto::curve::Fr> =
-            encode(IrValue::Bytes32(rev_bytes));
+            encode(IrValue::Bytes(rev_bytes.to_vec()));
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
@@ -1991,5 +1991,60 @@ mod proof_tests {
             )
             .await;
         assert!(result.is_err(), "constrain_eq on unequal Bytes should fail");
+    }
+
+    #[actix_rt::test]
+    async fn test_bytes_n_proof() {
+        // Exercises a Bytes(n) value with n != 32 (spanning two 31-byte chunks)
+        // end-to-end: assign, test_eq (asserted), and constrain_eq against a
+        // Bytes(48) private input.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%b", "type": "Bytes<48>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "test_eq", "a": "%b", "b": "%b", "output": "%eq" },
+               { "op": "assert", "cond": "%eq" },
+               { "op": "private_input", "type": "Bytes<48>", "guard": null, "output": "%bp" },
+               { "op": "constrain_eq", "a": "%b", "b": "%bp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+        let bytes: Vec<u8> = (0..48u8).collect();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: encode(IrValue::Bytes(bytes.clone())),
+            private_transcript: encode(IrValue::Bytes(bytes)),
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
     }
 }
