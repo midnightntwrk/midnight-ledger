@@ -167,7 +167,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
             .create(true)
             .truncate(true)
             .open(&mutex_file_path)
-            .unwrap_or_else(|e| panic!("can't open .mutex file {:?}: {e}", &mutex_file_path));
+            .unwrap_or_else(|e| panic!("can't open .mutex file {:?}: {e}", mutex_file_path));
         if exclusive {
             fs2::FileExt::try_lock_exclusive(&lock_file)
                 .expect("can't get exclusive lock with existing locks active");

@@ -56,9 +56,9 @@ impl ContractDeploy {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -104,9 +104,9 @@ impl ContractCallPrototype {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -222,23 +222,23 @@ impl ContractCall {
         match &self.0 {
             ProvenContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -276,9 +276,9 @@ impl ReplaceAuthority {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -320,9 +320,9 @@ impl ContractOperationVersion {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -381,9 +381,9 @@ impl ContractOperationVersionedVerifierKey {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -417,9 +417,9 @@ impl VerifierKeyRemove {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -453,9 +453,9 @@ impl VerifierKeyInsert {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -515,9 +515,9 @@ impl MaintenanceUpdate {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 

@@ -215,7 +215,7 @@ jobs:
         uses: google-github-actions/get-secretmanager-secrets@2b5f97c5a4b9c105e64646762ad4fc3f5128e6f5 # v2.2.5
         with:
           secrets: |-
-            SIGNING_KEY:midnight-proof-server-signing-key/latest
+            SIGNING_KEY:projects/mnf-federated-node-operator/secrets/midnight-proof-server-signing-key/versions/latest
 
       - name: Sign proof-server build manifest
         env:
