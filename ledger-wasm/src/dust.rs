@@ -144,23 +144,23 @@ impl DustSpend {
         match &self.0 {
             ProvenDustSpend(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenDustSpend(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedDustSpend(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -308,16 +308,16 @@ impl DustRegistration {
         match &self.0 {
             Signature(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             SignatureErased(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -700,44 +700,44 @@ impl DustActions {
         match &self.0 {
             UnprovenWithSignature(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenWithSignatureErased(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignature(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignatureErased(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedWithSignature(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedWithSignatureErased(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -997,9 +997,9 @@ impl DustParameters {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -1077,9 +1077,9 @@ impl DustUtxoState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -1111,9 +1111,9 @@ impl DustGenerationState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -1142,9 +1142,9 @@ impl DustState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -1531,9 +1531,9 @@ impl DustLocalState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -1704,9 +1704,9 @@ impl DustGenerationTreeInsertionPath {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -1767,9 +1767,9 @@ impl DustStateMerkleTreeCollapsedUpdate {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
