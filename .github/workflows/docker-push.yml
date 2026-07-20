@@ -14,6 +14,8 @@ on:
         required: true
       GCP_SIGNING_SERVICE_ACCOUNT:
         required: true
+      PROOF_SERVER_SIGNING_KEY_PASSPHRASE:
+        required: true
 
 jobs:
   docker-amd64:
@@ -220,11 +222,20 @@ jobs:
       - name: Sign proof-server build manifest
         env:
           SIGNING_KEY: ${{ steps.fetch-key.outputs.SIGNING_KEY }}
+          SIGNING_KEY_PASSPHRASE: ${{ secrets.PROOF_SERVER_SIGNING_KEY_PASSPHRASE }}
         run: |
           set -euo pipefail
           umask 077
 
           export GNUPGHOME=$(mktemp -d)
+
+          # CI runners have no TTY, so gpg-agent can't launch an interactive
+          # pinentry to collect the key passphrase (it would fail with
+          # "Inappropriate ioctl for device"). Configure loopback pinentry so
+          # the passphrase is fed directly on stdin instead. Written before the
+          # first gpg call so the agent picks it up on launch.
+          printf 'pinentry-mode loopback\n' > "$GNUPGHOME/gpg.conf"
+          printf 'allow-loopback-pinentry\n' > "$GNUPGHOME/gpg-agent.conf"
 
           # Runs on every exit path (success or failure) so the imported
           # signing key never outlives this step. Batch-mode secret-key
@@ -255,8 +266,13 @@ jobs:
           }
           EOF
 
-          gpg --batch --yes --armor --local-user "$KEY_ID" \
-            --detach-sign --output build-manifest.json.asc build-manifest.json
+          # --passphrase-fd 0 reads the passphrase from stdin (not argv, which
+          # would leak it via the process list); loopback keeps gpg from
+          # prompting.
+          printf '%s' "$SIGNING_KEY_PASSPHRASE" \
+            | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                --armor --local-user "$KEY_ID" \
+                --detach-sign --output build-manifest.json.asc build-manifest.json
 
           gpg --verify build-manifest.json.asc build-manifest.json
 

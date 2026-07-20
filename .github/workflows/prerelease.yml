@@ -313,6 +313,7 @@ jobs:
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
       GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
       GCP_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
+      PROOF_SERVER_SIGNING_KEY_PASSPHRASE: ${{ secrets.PROOF_SERVER_SIGNING_KEY_PASSPHRASE }}
 
   # No `secrets:` - neither reusable workflow consumes any (GITHUB_TOKEN is
   # always provided), so passing them would violate least privilege.
