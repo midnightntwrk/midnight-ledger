@@ -910,7 +910,7 @@ impl ProofServerProvider<'_> {
                 .resolve_key(preimage.key_location().clone())
                 .await?
                 .ok_or_else(|| {
-                    anyhow::anyhow!("failed to find key '{}'", &preimage.key_location().0)
+                    anyhow::anyhow!("failed to find key '{}'", preimage.key_location().0)
                 })?;
             Some(WrappedIr(data.ir_source))
         };
@@ -950,7 +950,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             .await?;
         println!("    Check request: {} bytes", ser.len());
         let resp = Client::new()
-            .post(format!("{}/check", &self.base_url))
+            .post(format!("{}/check", self.base_url))
             .body(ser)
             .send()
             .await?;
@@ -979,7 +979,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             .await?;
         println!("    Proving request: {} bytes", ser.len());
         let resp = Client::new()
-            .post(format!("{}/prove", &self.base_url))
+            .post(format!("{}/prove", self.base_url))
             .body(ser)
             .send()
             .await?;
