@@ -73,9 +73,9 @@ impl StateMap {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -165,9 +165,9 @@ impl StateBoundedMerkleTree {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -197,9 +197,9 @@ impl ChargedState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -339,9 +339,9 @@ impl StateValue {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -467,9 +467,9 @@ impl ContractState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -522,9 +522,9 @@ impl ContractOperation {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -612,9 +612,9 @@ impl ContractMaintenanceAuthority {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }

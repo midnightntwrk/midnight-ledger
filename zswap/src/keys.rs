@@ -245,7 +245,7 @@ mod tests {
             println!("  seed:                  {:?}", entry.seed.0);
             println!(
                 "  intermediate bytes:    {:?}",
-                &entry.encryption.secretKeyIntermediateBytes.0
+                entry.encryption.secretKeyIntermediateBytes.0
             );
             println!(
                 "  intermediate computed: {:?}",
