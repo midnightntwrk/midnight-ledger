@@ -697,7 +697,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 transient_crypto::proofs::VerifierKey::batch_verify_with_strategy(
                     &PARAMS_VERIFIER,
                     v3,
-                    transient_crypto::proofs::BatchStrategy::ReusePrepare,
+                    true,
                 )
                 .map_err(|e| match e {
                     transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {

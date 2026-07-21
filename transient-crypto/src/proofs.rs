@@ -26,20 +26,16 @@ use midnight_proofs::{
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
-// Re-exported so downstream crates (e.g. the ledger) can select a batch
-// verification strategy without depending on `midnight-zk-stdlib` directly.
-pub use midnight_zk_stdlib::BatchStrategy;
 
 /// Error returned by [`VerifierKey::batch_verify_with_strategy`].
 #[derive(Debug)]
 pub enum BatchVerifyError {
     /// One or more proofs in the batch were invalid. The vector holds their
-    /// ascending indices into the verified sequence. Only populated when a
-    /// recovery [`BatchStrategy`] is used; empty/unavailable with
-    /// [`BatchStrategy::NoRecovery`].
+    /// ascending indices into the verified sequence. Only populated when
+    /// `identify_failures` is `true`.
     InvalidProofs(Vec<usize>),
     /// Verification failed without localising which proof(s) were invalid
-    /// (e.g. malformed inputs, or the no-recovery strategy).
+    /// (e.g. malformed inputs, or `identify_failures` set to `false`).
     Unlocalized(VerifyingError),
 }
 
@@ -607,11 +603,9 @@ impl VerifierKey {
 
     /// Checks a sequence of proofs against their corresponding statements and verifier keys.
     ///
-    /// Uses [`BatchStrategy::ReusePrepare`]: the accept/reject decision is identical
-    /// to a plain no-recovery batch check (so consensus behaviour is unchanged), but
-    /// on rejection the error names the batch indices of the offending proofs. To pick
-    /// a different strategy (e.g. [`BatchStrategy::NoRecovery`] for the cheapest happy
-    /// path), call [`Self::batch_verify_with_strategy`] directly.
+    /// Runs with `identify_failures: true`: on rejection the error names the batch indices
+    /// of the offending proofs. Call [`Self::batch_verify_with_strategy`] with
+    /// `identify_failures: false` for the cheaper no-recovery path.
     pub fn batch_verify<
         'a,
         F: Iterator<Item = Fr>,
@@ -620,16 +614,15 @@ impl VerifierKey {
         params: &ParamsVerifier,
         parts: V,
     ) -> Result<(), VerifyingError> {
-        Self::batch_verify_with_strategy(params, parts, BatchStrategy::ReusePrepare)
+        Self::batch_verify_with_strategy(params, parts, true)
             .map_err(anyhow::Error::from)
     }
 
-    /// Like [`Self::batch_verify`] but with a caller-chosen [`BatchStrategy`].
+    /// Like [`Self::batch_verify`] but with a caller-chosen `identify_failures` flag.
     ///
-    /// On failure with a recovery strategy ([`BatchStrategy::ReusePrepare`] or
-    /// [`BatchStrategy::ReusePrepareMsm`]) the returned [`BatchVerifyError`] is
-    /// [`BatchVerifyError::InvalidProofs`], carrying the batch indices of the
-    /// invalid proofs; otherwise it is [`BatchVerifyError::Unlocalized`].
+    /// When `identify_failures` is `true` the returned [`BatchVerifyError`] on failure is
+    /// [`BatchVerifyError::InvalidProofs`], carrying the batch indices of the invalid proofs;
+    /// when `false` it is [`BatchVerifyError::Unlocalized`].
     pub fn batch_verify_with_strategy<
         'a,
         F: Iterator<Item = Fr>,
@@ -637,9 +630,9 @@ impl VerifierKey {
     >(
         params: &ParamsVerifier,
         parts: V,
-        strategy: BatchStrategy,
+        identify_failures: bool,
     ) -> Result<(), BatchVerifyError> {
-        use midnight_zk_stdlib::batch_verify_with_strategy;
+        use midnight_zk_stdlib::batch_verify;
 
         let mut vks = vec![];
         let mut pis = vec![];
@@ -653,7 +646,7 @@ impl VerifierKey {
             proofs.push(proof.0.clone());
         }
 
-        batch_verify_with_strategy::<TranscriptHash>(&params.0, &vks, &pis, &proofs, strategy)
+        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs, identify_failures)
             .map_err(|e| match e {
                 midnight_proofs::plonk::Error::BatchOpening(indices) => {
                     BatchVerifyError::InvalidProofs(indices)
