@@ -1,0 +1,36 @@
+name: Check Agda
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'formal/**'
+      - '.github/workflows/agda.yml'
+  push:
+    branches:
+      - 'ledger-*'
+    paths:
+      - 'formal/**'
+      - '.github/workflows/agda.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Typecheck Agda
+        run: |
+          cd formal/src
+          nix run .#agda -- zkir-v2/Main.agda
