@@ -27,6 +27,8 @@ use crate::{
 ///   - `Native`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -49,6 +51,12 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
             .ok_or_else(zero_err)
             .map(Secp256k1Scalar),
 
+        P256Base(s) => Option::from(s.invert()).ok_or_else(zero_err).map(P256Base),
+
+        P256Scalar(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(P256Scalar),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported inversion of {:?}",
             x.get_type(),
@@ -61,6 +69,8 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Native`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -86,6 +96,15 @@ pub fn inv_incircuit(
             Ok(Secp256k1Scalar(r))
         }
 
+        P256Base(a) => {
+            let r = (std_lib.p256().base_field_chip()).inv(layouter, a)?;
+            Ok(P256Base(r))
+        }
+        P256Scalar(a) => {
+            let r = (std_lib.p256().scalar_field_chip()).inv(layouter, a)?;
+            Ok(P256Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported inversion of {:?}",
             x.get_type(),
@@ -96,7 +115,7 @@ pub fn inv_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::k256;
+    use midnight_curves::{k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -122,6 +141,18 @@ mod tests {
         assert_eq!(
             inv_offcircuit(&Secp256k1Scalar(x)).unwrap(),
             Secp256k1Scalar(x.invert().unwrap())
+        );
+
+        let x = p256::Fp::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&P256Base(x)).unwrap(),
+            P256Base(x.invert().unwrap())
+        );
+
+        let x = p256::Fq::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&P256Scalar(x)).unwrap(),
+            P256Scalar(x.invert().unwrap())
         );
     }
 }

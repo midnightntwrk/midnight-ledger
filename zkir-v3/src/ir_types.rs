@@ -18,7 +18,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, InnerValue,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256, p256};
 use midnight_proofs::{circuit::Value, plonk::Error};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
@@ -61,6 +61,18 @@ pub enum IrType {
     /// Element of the scalar field of Secp256k1.
     #[serde(rename = "Scalar<Secp256k1>")]
     Secp256k1Scalar,
+
+    /// Point of the P256 elliptic curve, also known as Secp256r1.
+    #[serde(rename = "Point<P256>")]
+    P256Point,
+
+    /// Element of the base field of P256.
+    #[serde(rename = "Base<P256>")]
+    P256Base,
+
+    /// Element of the scalar field of P256.
+    #[serde(rename = "Scalar<P256>")]
+    P256Scalar,
 }
 
 impl IrType {
@@ -75,6 +87,10 @@ impl IrType {
             IrType::Secp256k1Point => 5,
             IrType::Secp256k1Base => 2,
             IrType::Secp256k1Scalar => 2,
+
+            IrType::P256Point => 5,
+            IrType::P256Base => 2,
+            IrType::P256Scalar => 2,
         }
     }
 }
@@ -102,6 +118,15 @@ pub enum IrValue {
 
     /// Secp256k1 scalar field value.
     Secp256k1Scalar(k256::Fq),
+
+    /// P256 point.
+    P256Point(p256::P256),
+
+    /// P256 base field value.
+    P256Base(p256::Fp),
+
+    /// P256 scalar field value.
+    P256Scalar(p256::Fq),
 }
 
 impl IrValue {
@@ -115,6 +140,10 @@ impl IrValue {
             IrValue::Secp256k1Point(_) => IrType::Secp256k1Point,
             IrValue::Secp256k1Base(_) => IrType::Secp256k1Base,
             IrValue::Secp256k1Scalar(_) => IrType::Secp256k1Scalar,
+
+            IrValue::P256Point(_) => IrType::P256Point,
+            IrValue::P256Base(_) => IrType::P256Base,
+            IrValue::P256Scalar(_) => IrType::P256Scalar,
         }
     }
 
@@ -128,6 +157,10 @@ impl IrValue {
             IrType::Secp256k1Point => IrValue::Secp256k1Point(k256::K256::default()),
             IrType::Secp256k1Base => IrValue::Secp256k1Base(k256::Fp::default()),
             IrType::Secp256k1Scalar => IrValue::Secp256k1Scalar(k256::Fq::default()),
+
+            IrType::P256Point => IrValue::P256Point(p256::P256::default()),
+            IrType::P256Base => IrValue::P256Base(p256::Fp::default()),
+            IrType::P256Scalar => IrValue::P256Scalar(p256::Fq::default()),
         }
     }
 }
@@ -146,6 +179,10 @@ pub enum CircuitValue {
     Secp256k1Point(AssignedForeignPoint<F, k256::K256, MEP>),
     Secp256k1Base(AssignedField<F, k256::Fp, MEP>),
     Secp256k1Scalar(AssignedField<F, k256::Fq, MEP>),
+
+    P256Point(AssignedForeignPoint<F, p256::P256, MEP>),
+    P256Base(AssignedField<F, p256::Fp, MEP>),
+    P256Scalar(AssignedField<F, p256::Fq, MEP>),
 }
 
 impl CircuitValue {
@@ -161,6 +198,10 @@ impl CircuitValue {
             CircuitValue::Secp256k1Point(p) => p.value().map(IrValue::Secp256k1Point),
             CircuitValue::Secp256k1Scalar(s) => s.value().map(IrValue::Secp256k1Scalar),
             CircuitValue::Secp256k1Base(s) => s.value().map(IrValue::Secp256k1Base),
+
+            CircuitValue::P256Point(p) => p.value().map(IrValue::P256Point),
+            CircuitValue::P256Scalar(s) => s.value().map(IrValue::P256Scalar),
+            CircuitValue::P256Base(s) => s.value().map(IrValue::P256Base),
         }
     }
 
@@ -174,6 +215,10 @@ impl CircuitValue {
             CircuitValue::Secp256k1Point(_) => IrType::Secp256k1Point,
             CircuitValue::Secp256k1Base(_) => IrType::Secp256k1Base,
             CircuitValue::Secp256k1Scalar(_) => IrType::Secp256k1Scalar,
+
+            CircuitValue::P256Point(_) => IrType::P256Point,
+            CircuitValue::P256Base(_) => IrType::P256Base,
+            CircuitValue::P256Scalar(_) => IrType::P256Scalar,
         }
     }
 }
@@ -221,6 +266,10 @@ impl_enum_from_try_from!(IrValue, anyhow::Error, anyhow::Error::msg;
     Secp256k1Point => k256::K256,
     Secp256k1Base => k256::Fp,
     Secp256k1Scalar => k256::Fq,
+
+    P256Point => p256::P256,
+    P256Base => p256::Fp,
+    P256Scalar => p256::Fq,
 );
 
 // Derives implementations, for every basic type T:
@@ -235,4 +284,8 @@ impl_enum_from_try_from!(CircuitValue, Error, Error::Synthesis;
     Secp256k1Point => AssignedForeignPoint<F, k256::K256, MEP>,
     Secp256k1Base => AssignedField<F, k256::Fp, MEP>,
     Secp256k1Scalar => AssignedField<F, k256::Fq, MEP>,
+
+    P256Point => AssignedForeignPoint<F, p256::P256, MEP>,
+    P256Base => AssignedField<F, p256::Fp, MEP>,
+    P256Scalar => AssignedField<F, p256::Fq, MEP>,
 );

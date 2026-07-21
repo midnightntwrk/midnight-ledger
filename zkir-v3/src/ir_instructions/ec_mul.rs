@@ -24,6 +24,7 @@ use crate::{
 /// Supported on:
 ///   - `JubjubPoint x JubjubScalar`
 ///   - `Secp256k1Point x Secp256k1Scalar`
+///   - `P256Point x P256Scalar`
 ///
 /// # Errors
 ///
@@ -33,6 +34,7 @@ pub fn ec_mul_offcircuit(point: &IrValue, scalar: &IrValue) -> Result<IrValue, a
     match (point, scalar) {
         (JubjubPoint(p), JubjubScalar(s)) => Ok(JubjubPoint(p * s)),
         (Secp256k1Point(p), Secp256k1Scalar(s)) => Ok(Secp256k1Point(*p * s)),
+        (P256Point(p), P256Scalar(s)) => Ok(P256Point(*p * s)),
         _ => Err(anyhow::anyhow!(
             "Unsupported EC multiplication: {:?} x {:?}",
             point.get_type(),
@@ -45,6 +47,7 @@ pub fn ec_mul_offcircuit(point: &IrValue, scalar: &IrValue) -> Result<IrValue, a
 /// Supported on:
 ///   - `JubjubPoint x JubjubScalar`
 ///   - `Secp256k1Point x Secp256k1Scalar`
+///   - `P256Point x P256Scalar`
 ///
 /// # Errors
 ///
@@ -69,6 +72,12 @@ pub fn ec_mul_incircuit(
             )?;
             Ok(Secp256k1Point(r))
         }
+        (P256Point(p), P256Scalar(s)) => {
+            let r = std_lib
+                .p256()
+                .msm(layouter, std::slice::from_ref(s), std::slice::from_ref(p))?;
+            Ok(P256Point(r))
+        }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported EC multiplication: {:?} x {:?}",
             point.get_type(),
@@ -81,7 +90,7 @@ pub fn ec_mul_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256};
+    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256, p256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -112,6 +121,22 @@ mod tests {
         assert_eq!(
             result.unwrap_err().to_string(),
             "Unsupported EC multiplication: JubjubPoint x Secp256k1Scalar"
+        );
+
+        let q = p256::P256::random(OsRng);
+        let r = p256::Fq::random(OsRng);
+
+        assert_eq!(
+            ec_mul_offcircuit(&P256Point(q), &P256Scalar(r)).unwrap(),
+            P256Point(q * r)
+        );
+
+        // Negative test: multiplying by a scalar of another curve should fail
+        let result = ec_mul_offcircuit(&P256Point(q), &JubjubScalar(s));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Unsupported EC multiplication: P256Point x JubjubScalar"
         );
     }
 }

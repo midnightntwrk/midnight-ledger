@@ -30,6 +30,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Point`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -43,6 +46,10 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
         Secp256k1Point(p) => Ok(Secp256k1Point(-p)),
         Secp256k1Base(s) => Ok(Secp256k1Base(-s)),
         Secp256k1Scalar(s) => Ok(Secp256k1Scalar(-s)),
+
+        P256Point(p) => Ok(P256Point(-p)),
+        P256Base(s) => Ok(P256Base(-*s)),
+        P256Scalar(s) => Ok(P256Scalar(-*s)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported negation of {:?}",
@@ -58,6 +65,9 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Point`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -91,6 +101,19 @@ pub fn neg_incircuit(
             Ok(Secp256k1Scalar(r))
         }
 
+        P256Point(p) => {
+            let r = std_lib.p256().negate(layouter, p)?;
+            Ok(P256Point(r))
+        }
+        P256Base(a) => {
+            let r = (std_lib.p256().base_field_chip()).neg(layouter, a)?;
+            Ok(P256Base(r))
+        }
+        P256Scalar(a) => {
+            let r = (std_lib.p256().scalar_field_chip()).neg(layouter, a)?;
+            Ok(P256Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported negation of {:?}",
             x.get_type(),
@@ -111,7 +134,7 @@ impl Neg for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -133,5 +156,12 @@ mod tests {
         assert_eq!(-Secp256k1Point(p), Secp256k1Point(-p));
         assert_eq!(-Secp256k1Base(x), Secp256k1Base(-x));
         assert_eq!(-Secp256k1Scalar(r), Secp256k1Scalar(-r));
+
+        let p = p256::P256::random(OsRng);
+        let x = p256::Fp::random(OsRng);
+        let r = p256::Fq::random(OsRng);
+        assert_eq!(-P256Point(p), P256Point(-p));
+        assert_eq!(-P256Base(x), P256Base(-x));
+        assert_eq!(-P256Scalar(r), P256Scalar(-r));
     }
 }

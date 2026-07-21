@@ -14,7 +14,7 @@
 use group::cofactor::CofactorGroup;
 use midnight_circuits::{ecc::curves::CircuitCurve, instructions::EccInstructions};
 
-use midnight_curves::{JubjubExtended, JubjubSubgroup, k256};
+use midnight_curves::{JubjubExtended, JubjubSubgroup, k256, p256};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 
@@ -27,6 +27,7 @@ use crate::{
 /// Supported on:
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
+///   - `(P256Base, P256Base)` -> `P256Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -51,6 +52,14 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
                 "Cannot build a Secp256k1Point point from ({x:?}, {y:?})",
             )),
 
+        (P256Base(x), P256Base(y)) => {
+            p256::P256::from_xy(*x, *y)
+                .map(P256Point)
+                .ok_or(anyhow::anyhow!(
+                    "Cannot build a P256Point point from ({x:?}, {y:?})",
+                ))
+        }
+
         (x, y) => Err(anyhow::anyhow!(
             "Unsupported `from_coordinates` on ({:?}, {:?})",
             x.get_type(),
@@ -63,6 +72,7 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
 /// Supported on:
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
+///   - `(P256Base, P256Base)` -> `P256Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -88,6 +98,11 @@ pub fn from_coordinates_incircuit(
             .point_from_coordinates(layouter, x, y)
             .map(Secp256k1Point),
 
+        (P256Base(x), P256Base(y)) => std_lib
+            .p256()
+            .point_from_coordinates(layouter, x, y)
+            .map(P256Point),
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported `from_coordinates` on ({:?}, {:?})",
             x.get_type(),
@@ -99,7 +114,7 @@ pub fn from_coordinates_incircuit(
 #[cfg(test)]
 mod tests {
     use group::Group;
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -125,5 +140,15 @@ mod tests {
 
         assert!(from_coordinates_offcircuit(&Native(0.into()), &Secp256k1Base(y)).is_err());
         assert!(from_coordinates_offcircuit(&Native(0.into()), &Native(0.into())).is_err());
+
+        let p = p256::P256::random(OsRng);
+        let (x, y) = p.coordinates().unwrap();
+        assert_eq!(
+            from_coordinates_offcircuit(&P256Base(x), &P256Base(y)).unwrap(),
+            P256Point(p)
+        );
+
+        // (x, y) not on the P256 curve.
+        assert!(from_coordinates_offcircuit(&P256Base(x), &P256Base(x)).is_err());
     }
 }

@@ -32,6 +32,8 @@ use crate::{
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
+///  - P256Base
+///  - P256Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -55,6 +57,10 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 
         IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(from_le_bytes_with_reduction(bytes))),
 
+        IrType::P256Base => Ok(P256Base(from_le_bytes_with_reduction(bytes))),
+
+        IrType::P256Scalar => Ok(P256Scalar(from_le_bytes_with_reduction(bytes))),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
         )),
@@ -66,6 +72,8 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
+///  - P256Base
+///  - P256Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -98,6 +106,18 @@ pub fn from_bytes32_incircuit(
             .assigned_from_le_bytes(layouter, bytes)
             .map(Secp256k1Scalar),
 
+        IrType::P256Base => std_lib
+            .p256()
+            .base_field_chip()
+            .assigned_from_le_bytes(layouter, bytes)
+            .map(P256Base),
+
+        IrType::P256Scalar => std_lib
+            .p256()
+            .scalar_field_chip()
+            .assigned_from_le_bytes(layouter, bytes)
+            .map(P256Scalar),
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported from_bytes32 for {val_t:?}",
         ))),
@@ -116,7 +136,7 @@ pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8; 32]) ->
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::k256;
+    use midnight_curves::{k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -148,6 +168,18 @@ mod tests {
         let y = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
+
+        let x = P256Base(p256::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::P256Base, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+
+        let x = P256Scalar(p256::Fq::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::P256Scalar, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
     }
 
     // Non-canonical (out-of-range) bytes are accepted and reduced modulo
@@ -167,6 +199,14 @@ mod tests {
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap(),
             IrValue::Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::P256Base, &bytes).unwrap(),
+            IrValue::P256Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::P256Scalar, &bytes).unwrap(),
+            IrValue::P256Scalar(from_le_bytes_with_reduction(&bytes))
         );
     }
 }

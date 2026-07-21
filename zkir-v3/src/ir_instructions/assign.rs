@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::instructions::AssignmentInstructions;
-use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256, p256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -102,5 +102,22 @@ pub fn assign_incircuit(
             .scalar_field_chip()
             .assign_many(layouter, &convert_values::<k256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Scalar).collect()),
+
+        IrType::P256Point => std_lib
+            .p256()
+            .assign_many(layouter, &convert_values::<p256::P256>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::P256Point).collect()),
+
+        IrType::P256Base => std_lib
+            .p256()
+            .base_field_chip()
+            .assign_many(layouter, &convert_values::<p256::Fp>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::P256Base).collect()),
+
+        IrType::P256Scalar => std_lib
+            .p256()
+            .scalar_field_chip()
+            .assign_many(layouter, &convert_values::<p256::Fq>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::P256Scalar).collect()),
     }
 }

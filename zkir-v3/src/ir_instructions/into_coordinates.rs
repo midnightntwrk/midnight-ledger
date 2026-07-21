@@ -31,6 +31,7 @@ use crate::{
 /// point as a pair of base field values. Supported on:
 ///   - `JubjubPoint`    -> `(Native, Native)`
 ///   - `Secp256k1Point` -> `(Secp256k1Base, Secp256k1Base)`
+///   - `P256Point`      -> `(P256Base, P256Base)`
 ///
 /// # Errors
 ///
@@ -53,6 +54,15 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
             let (x, y) = p.coordinates().unwrap();
             Ok((Secp256k1Base(x), Secp256k1Base(y)))
         }
+        P256Point(p) => {
+            if bool::from(p.is_identity()) {
+                return Err(anyhow::anyhow!(
+                    "Cannot extract coordinates of the P256 identity"
+                ));
+            }
+            let (x, y) = p.coordinates().unwrap();
+            Ok((P256Base(x), P256Base(y)))
+        }
         _ => Err(anyhow::anyhow!(
             "Unsupported coordinate extraction of {:?}",
             point.get_type(),
@@ -64,6 +74,7 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
 /// point as a pair of assigned base field values. Supported on:
 ///   - `JubjubPoint`    -> `(Native, Native)`
 ///   - `Secp256k1Point` -> `(Secp256k1Base, Secp256k1Base)`
+///   - `P256Point`      -> `(P256Base, P256Base)`
 ///
 /// For Weierstrass curves this constrains the point to not be the identity
 /// (which has no affine coordinates), making the circuit unsatisfiable on the
@@ -94,6 +105,14 @@ pub fn into_coordinates_incircuit(
                 Secp256k1Base(curve.y_coordinate(p)),
             ))
         }
+        P256Point(p) => {
+            let curve = std_lib.p256();
+            curve.assert_non_zero(layouter, p)?;
+            Ok((
+                P256Base(curve.x_coordinate(p)),
+                P256Base(curve.y_coordinate(p)),
+            ))
+        }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported coordinate extraction of {:?}",
             point.get_type(),
@@ -103,7 +122,7 @@ pub fn into_coordinates_incircuit(
 
 #[cfg(test)]
 mod tests {
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, k256, p256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -128,6 +147,16 @@ mod tests {
 
         // The Secp256k1 identity has no affine coordinates.
         assert!(into_coordinates_offcircuit(&Secp256k1Point(k256::K256::identity())).is_err());
+
+        let p = p256::P256::random(OsRng);
+        let (x, y) = p.coordinates().unwrap();
+        assert_eq!(
+            into_coordinates_offcircuit(&P256Point(p)).unwrap(),
+            (P256Base(x), P256Base(y))
+        );
+
+        // The P256 identity has no affine coordinates.
+        assert!(into_coordinates_offcircuit(&P256Point(p256::P256::identity())).is_err());
 
         // Coordinate extraction on a scalar is unsupported.
         assert!(into_coordinates_offcircuit(&Native(Fr::from(1))).is_err());

@@ -30,6 +30,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Point`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -43,6 +46,10 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
         (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(*p + q)),
         (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(*s + r)),
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(s + r)),
+
+        (P256Point(p), P256Point(q)) => Ok(P256Point(*p + q)),
+        (P256Base(s), P256Base(r)) => Ok(P256Base(*s + r)),
+        (P256Scalar(s), P256Scalar(r)) => Ok(P256Scalar(s + r)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported addition: {:?} + {:?}",
@@ -59,6 +66,9 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `P256Point`
+///   - `P256Base`
+///   - `P256Scalar`
 ///
 /// # Errors
 ///
@@ -93,6 +103,19 @@ pub fn add_incircuit(
             Ok(Secp256k1Scalar(r))
         }
 
+        (P256Point(p), P256Point(q)) => {
+            let r = std_lib.p256().add(layouter, p, q)?;
+            Ok(P256Point(r))
+        }
+        (P256Base(a), P256Base(b)) => {
+            let r = (std_lib.p256().base_field_chip()).add(layouter, a, b)?;
+            Ok(P256Base(r))
+        }
+        (P256Scalar(a), P256Scalar(b)) => {
+            let r = (std_lib.p256().scalar_field_chip()).add(layouter, a, b)?;
+            Ok(P256Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported addition: {:?} + {:?}",
             x.get_type(),
@@ -114,7 +137,7 @@ impl Add for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -146,6 +169,21 @@ mod tests {
         assert_eq!(
             Secp256k1Scalar(r) + Secp256k1Scalar(s),
             Secp256k1Scalar(r + s)
+        );
+
+        let [p, q] = core::array::from_fn(|_| p256::P256::random(OsRng));
+        let [x, y] = core::array::from_fn(|_| p256::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| p256::Fq::random(OsRng));
+        assert_eq!(P256Point(p) + P256Point(q), P256Point(p + q));
+        assert_eq!(P256Base(x) + P256Base(y), P256Base(x + y));
+        assert_eq!(P256Scalar(r) + P256Scalar(s), P256Scalar(r + s));
+
+        // Negative test: adding same-role values of different curves should fail
+        let result = add_offcircuit(&P256Base(x), &Secp256k1Base(k256::Fp::ZERO));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Unsupported addition: P256Base + Secp256k1Base"
         );
     }
 }
