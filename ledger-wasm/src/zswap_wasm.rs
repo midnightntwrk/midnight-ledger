@@ -123,23 +123,23 @@ impl ZswapTransient {
         match &self.0 {
             ProvenTransient(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenTransient(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedTransient(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -311,23 +311,23 @@ impl ZswapOutput {
         match &self.0 {
             ProvenOutput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenOutput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedOutput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -445,23 +445,23 @@ impl ZswapInput {
         match &self.0 {
             ProvenInput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenInput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedInput(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -779,23 +779,23 @@ impl ZswapOffer {
         match &self.0 {
             ProvenOffer(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenOffer(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedOffer(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -876,9 +876,9 @@ impl LedgerParameters {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -921,9 +921,9 @@ impl TransactionCostModel {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -1050,23 +1050,23 @@ impl AuthorizedClaim {
         match &self.0 {
             ProvenAuthorizedClaim(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenAuthorizedClaim(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedAuthorizedClaim(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
