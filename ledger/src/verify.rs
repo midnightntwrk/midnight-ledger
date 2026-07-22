@@ -2766,13 +2766,11 @@ mod tests {
     fn defer_proofs_clears_verify_contract_proofs() {
         let strictness = WellFormedStrictness::default();
         assert!(strictness.verify_contract_proofs);
+        assert!(strictness.verify_native_proofs);
         let deferred = strictness.defer_proofs();
         assert!(!deferred.verify_contract_proofs);
+        assert!(!deferred.verify_native_proofs);
         assert_eq!(deferred.enforce_balancing, strictness.enforce_balancing);
-        assert_eq!(
-            deferred.verify_native_proofs,
-            strictness.verify_native_proofs
-        );
         assert_eq!(deferred.verify_signatures, strictness.verify_signatures);
         assert_eq!(deferred.enforce_limits, strictness.enforce_limits);
     }

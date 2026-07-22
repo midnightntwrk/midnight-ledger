@@ -690,11 +690,9 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 let v3_positions: Vec<usize> = evidence
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, e)| {
-                        matches!(e, ContractProofEvidence::V3 { .. }).then_some(i)
-                    })
+                    .filter_map(|(i, e)| matches!(e, ContractProofEvidence::V3 { .. }).then_some(i))
                     .collect();
-                transient_crypto::proofs::VerifierKey::batch_verify_with_strategy(
+                transient_crypto::proofs::VerifierKey::batch_verify_with_failures(
                     &PARAMS_VERIFIER,
                     v3,
                     true,
