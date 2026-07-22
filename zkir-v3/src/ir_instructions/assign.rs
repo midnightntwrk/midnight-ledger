@@ -119,5 +119,9 @@ pub fn assign_incircuit(
             .scalar_field_chip()
             .assign_many(layouter, &convert_values::<p256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256r1Scalar).collect()),
+
+        IrType::Curve25519Point | IrType::Curve25519Base | IrType::Curve25519Scalar => Err(
+            Error::Synthesis(format!("Assignment of {t:?} is not yet implemented")),
+        ),
     }
 }

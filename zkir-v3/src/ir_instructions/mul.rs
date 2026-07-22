@@ -113,7 +113,7 @@ impl Mul for IrValue {
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::{k256, p256};
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -156,6 +156,15 @@ mod tests {
         assert_eq!(
             result.unwrap_err().to_string(),
             "Unsupported multiplication: Secp256r1Base x Secp256r1Scalar"
+        );
+
+        let [x, y] = core::array::from_fn(|_| curve25519::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| <curve25519::Scalar as Field>::random(OsRng));
+
+        assert_eq!(Curve25519Base(x) * Curve25519Base(y), Curve25519Base(x * y));
+        assert_eq!(
+            Curve25519Scalar(r) * Curve25519Scalar(s),
+            Curve25519Scalar(r * s)
         );
     }
 }

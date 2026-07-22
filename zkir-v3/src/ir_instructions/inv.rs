@@ -115,7 +115,7 @@ pub fn inv_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::{k256, p256};
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -153,6 +153,18 @@ mod tests {
         assert_eq!(
             inv_offcircuit(&Secp256r1Scalar(x)).unwrap(),
             Secp256r1Scalar(x.invert().unwrap())
+        );
+
+        let x = curve25519::Fp::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Curve25519Base(x)).unwrap(),
+            Curve25519Base(x.invert().unwrap())
+        );
+
+        let x = <curve25519::Scalar as Field>::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Curve25519Scalar(x)).unwrap(),
+            Curve25519Scalar(Field::invert(&x).unwrap())
         );
     }
 }

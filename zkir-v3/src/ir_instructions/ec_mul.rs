@@ -90,7 +90,7 @@ pub fn ec_mul_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256, p256};
+    use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -137,6 +137,22 @@ mod tests {
         assert_eq!(
             result.unwrap_err().to_string(),
             "Unsupported EC multiplication: Secp256r1Point x JubjubScalar"
+        );
+
+        let q = curve25519::Curve25519Subgroup::random(OsRng);
+        let r = <curve25519::Scalar as Field>::random(OsRng);
+
+        assert_eq!(
+            ec_mul_offcircuit(&Curve25519Point(q), &Curve25519Scalar(r)).unwrap(),
+            Curve25519Point(q * r)
+        );
+
+        // Negative test: multiplying by a scalar of another curve should fail
+        let result = ec_mul_offcircuit(&Curve25519Point(q), &JubjubScalar(s));
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Unsupported EC multiplication: Curve25519Point x JubjubScalar"
         );
     }
 }

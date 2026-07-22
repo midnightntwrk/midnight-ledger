@@ -114,7 +114,7 @@ pub fn from_coordinates_incircuit(
 #[cfg(test)]
 mod tests {
     use group::Group;
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -150,5 +150,15 @@ mod tests {
 
         // (x, y) not on the Secp256r1 curve.
         assert!(from_coordinates_offcircuit(&Secp256r1Base(x), &Secp256r1Base(x)).is_err());
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let (x, y) = Into::<curve25519::Curve25519>::into(p).coordinates().unwrap();
+        assert_eq!(
+            from_coordinates_offcircuit(&Curve25519Base(x), &Curve25519Base(y)).unwrap(),
+            Curve25519Point(p)
+        );
+
+        // (x, y) not on the Curve25519 curve.
+        assert!(from_coordinates_offcircuit(&Curve25519Base(x), &Curve25519Base(x)).is_err());
     }
 }

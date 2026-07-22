@@ -136,7 +136,7 @@ pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8; 32]) ->
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::{k256, p256};
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -180,6 +180,18 @@ mod tests {
         let y = from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
+
+        let x = Curve25519Base(curve25519::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Curve25519Base, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+
+        let x = Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
     }
 
     // Non-canonical (out-of-range) bytes are accepted and reduced modulo
@@ -207,6 +219,14 @@ mod tests {
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap(),
             IrValue::Secp256r1Scalar(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Curve25519Base, &bytes).unwrap(),
+            IrValue::Curve25519Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap(),
+            IrValue::Curve25519Scalar(from_le_bytes_with_reduction(&bytes))
         );
     }
 }

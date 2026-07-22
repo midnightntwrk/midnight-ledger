@@ -137,7 +137,7 @@ impl Add for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -184,6 +184,19 @@ mod tests {
         assert_eq!(
             result.unwrap_err().to_string(),
             "Unsupported addition: Secp256r1Base + Secp256k1Base"
+        );
+
+        let [p, q] = core::array::from_fn(|_| curve25519::Curve25519Subgroup::random(OsRng));
+        let [x, y] = core::array::from_fn(|_| curve25519::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| <curve25519::Scalar as Field>::random(OsRng));
+        assert_eq!(
+            Curve25519Point(p) + Curve25519Point(q),
+            Curve25519Point(p + q)
+        );
+        assert_eq!(Curve25519Base(x) + Curve25519Base(y), Curve25519Base(x + y));
+        assert_eq!(
+            Curve25519Scalar(r) + Curve25519Scalar(s),
+            Curve25519Scalar(r + s)
         );
     }
 }

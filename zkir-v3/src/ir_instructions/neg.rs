@@ -134,7 +134,7 @@ impl Neg for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -163,5 +163,12 @@ mod tests {
         assert_eq!(-Secp256r1Point(p), Secp256r1Point(-p));
         assert_eq!(-Secp256r1Base(x), Secp256r1Base(-x));
         assert_eq!(-Secp256r1Scalar(r), Secp256r1Scalar(-r));
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let x = curve25519::Fp::random(OsRng);
+        let r = <curve25519::Scalar as Field>::random(OsRng);
+        assert_eq!(-Curve25519Point(p), Curve25519Point(-p));
+        assert_eq!(-Curve25519Base(x), Curve25519Base(-x));
+        assert_eq!(-Curve25519Scalar(r), Curve25519Scalar(-r));
     }
 }

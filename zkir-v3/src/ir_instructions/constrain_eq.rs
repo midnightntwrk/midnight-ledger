@@ -114,7 +114,7 @@ pub fn constrain_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
@@ -149,5 +149,14 @@ mod tests {
         assert!(constrain_eq_offcircuit(&Secp256r1Scalar(r), &Secp256r1Scalar(r)).is_ok());
         assert!(constrain_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(-p)).is_err());
         assert!(constrain_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Scalar(r)).is_err());
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let s = curve25519::Fp::random(OsRng);
+        let r = <curve25519::Scalar as Field>::random(OsRng);
+        assert!(constrain_eq_offcircuit(&Curve25519Point(p), &Curve25519Point(p)).is_ok());
+        assert!(constrain_eq_offcircuit(&Curve25519Base(s), &Curve25519Base(s)).is_ok());
+        assert!(constrain_eq_offcircuit(&Curve25519Scalar(r), &Curve25519Scalar(r)).is_ok());
+        assert!(constrain_eq_offcircuit(&Curve25519Point(p), &Curve25519Point(-p)).is_err());
+        assert!(constrain_eq_offcircuit(&Curve25519Base(s), &Curve25519Scalar(r)).is_err());
     }
 }
