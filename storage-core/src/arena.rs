@@ -1075,6 +1075,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
 /// deserialization, and some `Loader` consumers (in particular
 /// `Node::from_binary_repr`) have optional sanity checks that are only enabled
 /// for strict `Sp`s.
+#[allow(clippy::type_complexity)]
 pub(crate) struct IrLoader<'a, D: DB> {
     arena: &'a Arena<D>,
     all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,

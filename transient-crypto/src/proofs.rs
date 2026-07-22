@@ -614,8 +614,7 @@ impl VerifierKey {
         params: &ParamsVerifier,
         parts: V,
     ) -> Result<(), VerifyingError> {
-        Self::batch_verify_with_strategy(params, parts, true)
-            .map_err(anyhow::Error::from)
+        Self::batch_verify_with_strategy(params, parts, true).map_err(anyhow::Error::from)
     }
 
     /// Like [`Self::batch_verify`] but with a caller-chosen `identify_failures` flag.
@@ -646,13 +645,14 @@ impl VerifierKey {
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs, identify_failures)
-            .map_err(|e| match e {
+        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs, identify_failures).map_err(
+            |e| match e {
                 midnight_proofs::plonk::Error::BatchOpening(indices) => {
                     BatchVerifyError::InvalidProofs(indices)
                 }
                 _ => BatchVerifyError::Unlocalized(anyhow::anyhow!("Invalid proof")),
-            })
+            },
+        )
     }
 
     /// Mocks the checking of a sequence of proofs against a statement
@@ -805,7 +805,7 @@ impl ProofPreimage {
             .await?
             .ok_or(anyhow::Error::msg(format!(
                 "failed to find proving key for '{}'",
-                &self.key_location.0
+                self.key_location.0
             )))?;
         let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;
