@@ -458,7 +458,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
 
         match proof {
             ProofVersioned::V2(_) => {
-                eprintln!("V2");
                 let vk = op.v2_vk().ok_or_else(|| {
                     warn!("missing v1 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
@@ -488,7 +487,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 }
             }
             ProofVersioned::V3(_) => {
-                eprintln!("V3");
                 let vk = op.v3_vk().ok_or_else(|| {
                     warn!("missing v2 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
