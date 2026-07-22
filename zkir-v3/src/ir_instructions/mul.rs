@@ -30,6 +30,8 @@ use crate::{
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -43,6 +45,9 @@ pub fn mul_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
 
         (Secp256r1Base(s), Secp256r1Base(r)) => Ok(Secp256r1Base(*s * *r)),
         (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(Secp256r1Scalar(*s * *r)),
+
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(Curve25519Base(*s * *r)),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(Curve25519Scalar(*s * *r)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported multiplication: {:?} x {:?}",
@@ -59,6 +64,8 @@ pub fn mul_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -91,6 +98,15 @@ pub fn mul_incircuit(
         (Secp256r1Scalar(a), Secp256r1Scalar(b)) => {
             let r = (std_lib.p256().scalar_field_chip()).mul(layouter, a, b, None)?;
             Ok(Secp256r1Scalar(r))
+        }
+
+        (Curve25519Base(a), Curve25519Base(b)) => {
+            let r = (std_lib.curve25519().base_field_chip()).mul(layouter, a, b, None)?;
+            Ok(Curve25519Base(r))
+        }
+        (Curve25519Scalar(a), Curve25519Scalar(b)) => {
+            let r = (std_lib.curve25519().scalar_field_chip()).mul(layouter, a, b, None)?;
+            Ok(Curve25519Scalar(r))
         }
 
         _ => Err(plonk::Error::Synthesis(format!(

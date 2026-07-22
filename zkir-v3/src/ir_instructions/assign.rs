@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::instructions::AssignmentInstructions;
-use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256, p256};
+use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, curve25519, k256, p256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -120,8 +120,24 @@ pub fn assign_incircuit(
             .assign_many(layouter, &convert_values::<p256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256r1Scalar).collect()),
 
-        IrType::Curve25519Point | IrType::Curve25519Base | IrType::Curve25519Scalar => Err(
-            Error::Synthesis(format!("Assignment of {t:?} is not yet implemented")),
-        ),
+        IrType::Curve25519Point => std_lib
+            .curve25519()
+            .assign_many(
+                layouter,
+                &convert_values::<curve25519::Curve25519Subgroup>(values)?,
+            )
+            .map(|xs| xs.into_iter().map(CircuitValue::Curve25519Point).collect()),
+
+        IrType::Curve25519Base => std_lib
+            .curve25519()
+            .base_field_chip()
+            .assign_many(layouter, &convert_values::<curve25519::Fp>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::Curve25519Base).collect()),
+
+        IrType::Curve25519Scalar => std_lib
+            .curve25519()
+            .scalar_field_chip()
+            .assign_many(layouter, &convert_values::<curve25519::Scalar>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::Curve25519Scalar).collect()),
     }
 }

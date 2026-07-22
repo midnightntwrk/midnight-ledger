@@ -25,6 +25,7 @@ use crate::{
 ///   - `JubjubPoint x JubjubScalar`
 ///   - `Secp256k1Point x Secp256k1Scalar`
 ///   - `Secp256r1Point x Secp256r1Scalar`
+///   - `Curve25519Point x Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -35,6 +36,7 @@ pub fn ec_mul_offcircuit(point: &IrValue, scalar: &IrValue) -> Result<IrValue, a
         (JubjubPoint(p), JubjubScalar(s)) => Ok(JubjubPoint(p * s)),
         (Secp256k1Point(p), Secp256k1Scalar(s)) => Ok(Secp256k1Point(*p * s)),
         (Secp256r1Point(p), Secp256r1Scalar(s)) => Ok(Secp256r1Point(*p * s)),
+        (Curve25519Point(p), Curve25519Scalar(s)) => Ok(Curve25519Point(*p * s)),
         _ => Err(anyhow::anyhow!(
             "Unsupported EC multiplication: {:?} x {:?}",
             point.get_type(),
@@ -48,6 +50,7 @@ pub fn ec_mul_offcircuit(point: &IrValue, scalar: &IrValue) -> Result<IrValue, a
 ///   - `JubjubPoint x JubjubScalar`
 ///   - `Secp256k1Point x Secp256k1Scalar`
 ///   - `Secp256r1Point x Secp256r1Scalar`
+///   - `Curve25519Point x Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -77,6 +80,14 @@ pub fn ec_mul_incircuit(
                 .p256()
                 .msm(layouter, std::slice::from_ref(s), std::slice::from_ref(p))?;
             Ok(Secp256r1Point(r))
+        }
+        (Curve25519Point(p), Curve25519Scalar(s)) => {
+            let r = std_lib.curve25519().msm(
+                layouter,
+                std::slice::from_ref(s),
+                std::slice::from_ref(p),
+            )?;
+            Ok(Curve25519Point(r))
         }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported EC multiplication: {:?} x {:?}",

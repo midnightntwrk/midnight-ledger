@@ -14,7 +14,7 @@
 use group::cofactor::CofactorGroup;
 use midnight_circuits::{ecc::curves::CircuitCurve, instructions::EccInstructions};
 
-use midnight_curves::{JubjubExtended, JubjubSubgroup, k256, p256};
+use midnight_curves::{JubjubExtended, JubjubSubgroup, curve25519, k256, p256};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 
@@ -28,6 +28,7 @@ use crate::{
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
 ///   - `(Secp256r1Base, Secp256r1Base)` -> `Secp256r1Point`
+///   - `(Curve25519Base, Curve25519Base)` -> `Curve25519Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -60,6 +61,13 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
                 ))
         }
 
+        (Curve25519Base(x), Curve25519Base(y)) => curve25519::Curve25519::from_xy(*x, *y)
+            .and_then(|p| curve25519::Curve25519Subgroup::from_edwards(p.0))
+            .map(Curve25519Point)
+            .ok_or(anyhow::anyhow!(
+                "Cannot build a Curve25519Point point from ({x:?}, {y:?})",
+            )),
+
         (x, y) => Err(anyhow::anyhow!(
             "Unsupported `from_coordinates` on ({:?}, {:?})",
             x.get_type(),
@@ -73,6 +81,7 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
 ///   - `(Secp256r1Base, Secp256r1Base)` -> `Secp256r1Point`
+///   - `(Curve25519Base, Curve25519Base)` -> `Curve25519Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -102,6 +111,11 @@ pub fn from_coordinates_incircuit(
             .p256()
             .point_from_coordinates(layouter, x, y)
             .map(Secp256r1Point),
+
+        (Curve25519Base(x), Curve25519Base(y)) => std_lib
+            .curve25519()
+            .point_from_coordinates(layouter, x, y)
+            .map(Curve25519Point),
 
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported `from_coordinates` on ({:?}, {:?})",

@@ -33,6 +33,9 @@ use crate::{
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -50,6 +53,10 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
         (Secp256r1Point(p), Secp256r1Point(q)) => Ok(Secp256r1Point(*p + q)),
         (Secp256r1Base(s), Secp256r1Base(r)) => Ok(Secp256r1Base(*s + r)),
         (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(Secp256r1Scalar(s + r)),
+
+        (Curve25519Point(p), Curve25519Point(q)) => Ok(Curve25519Point(*p + q)),
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(Curve25519Base(*s + r)),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(Curve25519Scalar(s + r)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported addition: {:?} + {:?}",
@@ -69,6 +76,9 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -114,6 +124,19 @@ pub fn add_incircuit(
         (Secp256r1Scalar(a), Secp256r1Scalar(b)) => {
             let r = (std_lib.p256().scalar_field_chip()).add(layouter, a, b)?;
             Ok(Secp256r1Scalar(r))
+        }
+
+        (Curve25519Point(p), Curve25519Point(q)) => {
+            let r = std_lib.curve25519().add(layouter, p, q)?;
+            Ok(Curve25519Point(r))
+        }
+        (Curve25519Base(a), Curve25519Base(b)) => {
+            let r = (std_lib.curve25519().base_field_chip()).add(layouter, a, b)?;
+            Ok(Curve25519Base(r))
+        }
+        (Curve25519Scalar(a), Curve25519Scalar(b)) => {
+            let r = (std_lib.curve25519().scalar_field_chip()).add(layouter, a, b)?;
+            Ok(Curve25519Scalar(r))
         }
 
         _ => Err(plonk::Error::Synthesis(format!(

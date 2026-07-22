@@ -32,6 +32,9 @@ use crate::{
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -51,6 +54,10 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
         (Secp256r1Base(s), Secp256r1Base(r)) => Ok(s == r),
         (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(s == r),
 
+        (Curve25519Point(p), Curve25519Point(q)) => Ok(p == q),
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(s == r),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(s == r),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
@@ -69,6 +76,9 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -106,6 +116,14 @@ pub fn test_eq_incircuit(
         }
         (Secp256r1Scalar(s), Secp256r1Scalar(r)) => {
             (std_lib.p256().scalar_field_chip()).is_equal(layouter, s, r)
+        }
+
+        (Curve25519Point(p), Curve25519Point(q)) => std_lib.curve25519().is_equal(layouter, p, q),
+        (Curve25519Base(s), Curve25519Base(r)) => {
+            (std_lib.curve25519().base_field_chip()).is_equal(layouter, s, r)
+        }
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => {
+            (std_lib.curve25519().scalar_field_chip()).is_equal(layouter, s, r)
         }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported test_eq: {:?} == {:?}",

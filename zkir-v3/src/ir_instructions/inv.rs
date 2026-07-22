@@ -29,6 +29,8 @@ use crate::{
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -57,6 +59,16 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
             .ok_or_else(zero_err)
             .map(Secp256r1Scalar),
 
+        Curve25519Base(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(Curve25519Base),
+
+        // Nb. dalek's inherent `Scalar::invert` (which is not a `CtOption`)
+        // would shadow `Field::invert` here, hence the qualified call.
+        Curve25519Scalar(s) => Option::from(Field::invert(s))
+            .ok_or_else(zero_err)
+            .map(Curve25519Scalar),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported inversion of {:?}",
             x.get_type(),
@@ -71,6 +83,8 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -103,6 +117,15 @@ pub fn inv_incircuit(
         Secp256r1Scalar(a) => {
             let r = (std_lib.p256().scalar_field_chip()).inv(layouter, a)?;
             Ok(Secp256r1Scalar(r))
+        }
+
+        Curve25519Base(a) => {
+            let r = (std_lib.curve25519().base_field_chip()).inv(layouter, a)?;
+            Ok(Curve25519Base(r))
+        }
+        Curve25519Scalar(a) => {
+            let r = (std_lib.curve25519().scalar_field_chip()).inv(layouter, a)?;
+            Ok(Curve25519Scalar(r))
         }
 
         _ => Err(plonk::Error::Synthesis(format!(

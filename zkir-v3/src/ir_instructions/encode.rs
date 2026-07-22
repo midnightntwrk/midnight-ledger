@@ -124,12 +124,13 @@ pub fn encode_incircuit(
             (std_lib.p256().scalar_field_chip()).as_public_input(layouter, s)
         }
 
-        CircuitValue::Curve25519Point(_)
-        | CircuitValue::Curve25519Base(_)
-        | CircuitValue::Curve25519Scalar(_) => Err(Error::Synthesis(format!(
-            "In-circuit encoding of {:?} is not yet implemented",
-            value.get_type(),
-        ))),
+        CircuitValue::Curve25519Point(p) => std_lib.curve25519().as_public_input(layouter, p),
+        CircuitValue::Curve25519Base(s) => {
+            (std_lib.curve25519().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Curve25519Scalar(s) => {
+            (std_lib.curve25519().scalar_field_chip()).as_public_input(layouter, s)
+        }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
 }

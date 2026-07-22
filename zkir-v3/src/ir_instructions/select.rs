@@ -33,6 +33,9 @@ use crate::{
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -60,6 +63,9 @@ pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue,
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -94,6 +100,16 @@ pub fn select_incircuit(
         )),
         (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(Secp256r1Scalar(
             (std_lib.p256().scalar_field_chip()).select(layouter, bit, s, r)?,
+        )),
+
+        (Curve25519Point(p), Curve25519Point(q)) => Ok(Curve25519Point(
+            std_lib.curve25519().select(layouter, bit, p, q)?,
+        )),
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(Curve25519Base(
+            (std_lib.curve25519().base_field_chip()).select(layouter, bit, s, r)?,
+        )),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(Curve25519Scalar(
+            (std_lib.curve25519().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 
         _ => Err(plonk::Error::Synthesis(format!(
