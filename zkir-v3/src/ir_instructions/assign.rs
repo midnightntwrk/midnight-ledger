@@ -103,21 +103,21 @@ pub fn assign_incircuit(
             .assign_many(layouter, &convert_values::<k256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Scalar).collect()),
 
-        IrType::P256Point => std_lib
+        IrType::Secp256r1Point => std_lib
             .p256()
             .assign_many(layouter, &convert_values::<p256::P256>(values)?)
-            .map(|xs| xs.into_iter().map(CircuitValue::P256Point).collect()),
+            .map(|xs| xs.into_iter().map(CircuitValue::Secp256r1Point).collect()),
 
-        IrType::P256Base => std_lib
+        IrType::Secp256r1Base => std_lib
             .p256()
             .base_field_chip()
             .assign_many(layouter, &convert_values::<p256::Fp>(values)?)
-            .map(|xs| xs.into_iter().map(CircuitValue::P256Base).collect()),
+            .map(|xs| xs.into_iter().map(CircuitValue::Secp256r1Base).collect()),
 
-        IrType::P256Scalar => std_lib
+        IrType::Secp256r1Scalar => std_lib
             .p256()
             .scalar_field_chip()
             .assign_many(layouter, &convert_values::<p256::Fq>(values)?)
-            .map(|xs| xs.into_iter().map(CircuitValue::P256Scalar).collect()),
+            .map(|xs| xs.into_iter().map(CircuitValue::Secp256r1Scalar).collect()),
     }
 }

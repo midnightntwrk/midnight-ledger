@@ -1577,20 +1577,20 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_p256_proof() {
-        // Single circuit exercising all three P256 types.
+    async fn test_secp256r1_proof() {
+        // Single circuit exercising all three Secp256r1 types.
         // Base, Scalar and Point values are typed inputs; arithmetic results
         // are checked via private inputs.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%id", "type": "Point<P256>"  },
-              { "name": "%p0", "type": "Point<P256>"  },
-              { "name": "%p1", "type": "Point<P256>"  },
-              { "name": "%b0", "type": "Base<P256>"   },
-              { "name": "%b1", "type": "Base<P256>"   },
-              { "name": "%s0", "type": "Scalar<P256>" },
-              { "name": "%s1", "type": "Scalar<P256>" }
+              { "name": "%id", "type": "Point<Secp256r1>"  },
+              { "name": "%p0", "type": "Point<Secp256r1>"  },
+              { "name": "%p1", "type": "Point<Secp256r1>"  },
+              { "name": "%b0", "type": "Base<Secp256r1>"   },
+              { "name": "%b1", "type": "Base<Secp256r1>"   },
+              { "name": "%s0", "type": "Scalar<Secp256r1>" },
+              { "name": "%s1", "type": "Scalar<Secp256r1>" }
            ],
            "outputs": [],
            "do_communications_commitment": false,
@@ -1605,14 +1605,14 @@ mod proof_tests {
                { "op": "neg", "a": "%s0", "output": "%s0_neg" },
                { "op": "inv", "a": "%b0", "output": "%b0_inv" },
                { "op": "inv", "a": "%s0", "output": "%s0_inv" },
-               { "op": "private_input", "type": "Point<P256>",  "guard": null, "output": "%p2_priv"     },
-               { "op": "private_input", "type": "Base<P256>",   "guard": null, "output": "%b_prod_priv" },
-               { "op": "private_input", "type": "Scalar<P256>", "guard": null, "output": "%s_prod_priv" },
-               { "op": "private_input", "type": "Point<P256>",  "guard": null, "output": "%p0_neg_priv" },
-               { "op": "private_input", "type": "Base<P256>",   "guard": null, "output": "%b0_neg_priv" },
-               { "op": "private_input", "type": "Scalar<P256>", "guard": null, "output": "%s0_neg_priv" },
-               { "op": "private_input", "type": "Base<P256>",   "guard": null, "output": "%b0_inv_priv" },
-               { "op": "private_input", "type": "Scalar<P256>", "guard": null, "output": "%s0_inv_priv" },
+               { "op": "private_input", "type": "Point<Secp256r1>",  "guard": null, "output": "%p2_priv"     },
+               { "op": "private_input", "type": "Base<Secp256r1>",   "guard": null, "output": "%b_prod_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256r1>", "guard": null, "output": "%s_prod_priv" },
+               { "op": "private_input", "type": "Point<Secp256r1>",  "guard": null, "output": "%p0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256r1>",   "guard": null, "output": "%b0_neg_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256r1>", "guard": null, "output": "%s0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256r1>",   "guard": null, "output": "%b0_inv_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256r1>", "guard": null, "output": "%s0_inv_priv" },
                { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
                { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
                { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" },
@@ -1644,25 +1644,25 @@ mod proof_tests {
         };
 
         let inputs: Vec<transient_crypto::curve::Fr> = [
-            encode(IrValue::P256Point(id)),
-            encode(IrValue::P256Point(p0)),
-            encode(IrValue::P256Point(p1)),
-            encode(IrValue::P256Base(b0)),
-            encode(IrValue::P256Base(b1)),
-            encode(IrValue::P256Scalar(s0)),
-            encode(IrValue::P256Scalar(s1)),
+            encode(IrValue::Secp256r1Point(id)),
+            encode(IrValue::Secp256r1Point(p0)),
+            encode(IrValue::Secp256r1Point(p1)),
+            encode(IrValue::Secp256r1Base(b0)),
+            encode(IrValue::Secp256r1Base(b1)),
+            encode(IrValue::Secp256r1Scalar(s0)),
+            encode(IrValue::Secp256r1Scalar(s1)),
         ]
         .concat();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> = [
-            encode(IrValue::P256Point(p0 + p1)),
-            encode(IrValue::P256Base(b0 * b1)),
-            encode(IrValue::P256Scalar(s0 * s1)),
-            encode(IrValue::P256Point(-p0)),
-            encode(IrValue::P256Base(-b0)),
-            encode(IrValue::P256Scalar(-s0)),
-            encode(IrValue::P256Base(Option::from(b0.invert()).unwrap())),
-            encode(IrValue::P256Scalar(Option::from(s0.invert()).unwrap())),
+            encode(IrValue::Secp256r1Point(p0 + p1)),
+            encode(IrValue::Secp256r1Base(b0 * b1)),
+            encode(IrValue::Secp256r1Scalar(s0 * s1)),
+            encode(IrValue::Secp256r1Point(-p0)),
+            encode(IrValue::Secp256r1Base(-b0)),
+            encode(IrValue::Secp256r1Scalar(-s0)),
+            encode(IrValue::Secp256r1Base(Option::from(b0.invert()).unwrap())),
+            encode(IrValue::Secp256r1Scalar(Option::from(s0.invert()).unwrap())),
         ]
         .concat();
 
@@ -1693,20 +1693,20 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_p256_ec_mul_proof() {
-        // Proves p0 * s0 via in-circuit ec_mul on Point<P256>; the result is
+    async fn test_secp256r1_ec_mul_proof() {
+        // Proves p0 * s0 via in-circuit ec_mul on Point<Secp256r1>; the result is
         // checked against a private input carrying the off-circuit product.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0", "type": "Point<P256>"  },
-              { "name": "%s0", "type": "Scalar<P256>" }
+              { "name": "%p0", "type": "Point<Secp256r1>"  },
+              { "name": "%s0", "type": "Scalar<Secp256r1>" }
            ],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
-               { "op": "private_input", "type": "Point<P256>", "guard": null, "output": "%p1_priv" },
+               { "op": "private_input", "type": "Point<Secp256r1>", "guard": null, "output": "%p1_priv" },
                { "op": "constrain_eq", "a": "%p1", "b": "%p1_priv" }
            ]
         }"#;
@@ -1723,13 +1723,13 @@ mod proof_tests {
         };
 
         let inputs: Vec<transient_crypto::curve::Fr> = [
-            encode(IrValue::P256Point(p0)),
-            encode(IrValue::P256Scalar(s0)),
+            encode(IrValue::Secp256r1Point(p0)),
+            encode(IrValue::Secp256r1Scalar(s0)),
         ]
         .concat();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> =
-            encode(IrValue::P256Point(p0 * s0));
+            encode(IrValue::Secp256r1Point(p0 * s0));
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
@@ -1758,9 +1758,9 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_p256_coordinates_proof() {
-        // P256 counterpart of test_coordinates_proof: extracts affine
-        // coordinates of a Point<P256>, checks them against private inputs
+    async fn test_secp256r1_coordinates_proof() {
+        // Secp256r1 counterpart of test_coordinates_proof: extracts affine
+        // coordinates of a Point<Secp256r1>, checks them against private inputs
         // carrying the expected values, then reconstructs the point from the
         // extracted coordinates and compares it to the original.
         use midnight_zkir_v3::ir_instructions::into_coordinates::into_coordinates_offcircuit;
@@ -1768,14 +1768,14 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%pp", "type": "Point<P256>" }
+              { "name": "%pp", "type": "Point<Secp256r1>" }
            ],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "into_coordinates", "point": "%pp", "outputs": ["%px", "%py"] },
-               { "op": "private_input", "type": "Base<P256>", "guard": null, "output": "%px_exp" },
-               { "op": "private_input", "type": "Base<P256>", "guard": null, "output": "%py_exp" },
+               { "op": "private_input", "type": "Base<Secp256r1>", "guard": null, "output": "%px_exp" },
+               { "op": "private_input", "type": "Base<Secp256r1>", "guard": null, "output": "%py_exp" },
                { "op": "constrain_eq", "a": "%px", "b": "%px_exp" },
                { "op": "constrain_eq", "a": "%py", "b": "%py_exp" },
                { "op": "from_coordinates", "inputs": ["%px", "%py"], "output": "%pp_reconstructed" },
@@ -1793,9 +1793,9 @@ mod proof_tests {
                 .collect()
         };
 
-        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::P256Point(pp));
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Secp256r1Point(pp));
 
-        let (px, py) = into_coordinates_offcircuit(&IrValue::P256Point(pp)).unwrap();
+        let (px, py) = into_coordinates_offcircuit(&IrValue::Secp256r1Point(pp)).unwrap();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> =
             [encode(px), encode(py)].concat();
@@ -1827,9 +1827,9 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_p256_bytes32_proof() {
-        // P256 counterpart of test_bytes32_proof, exercising into_bytes32 /
-        // from_bytes32 on P256Base and P256Scalar:
+    async fn test_secp256r1_bytes32_proof() {
+        // Secp256r1 counterpart of test_bytes32_proof, exercising into_bytes32 /
+        // from_bytes32 on Secp256r1Base and Secp256r1Scalar:
         //   1. Round-trips a typed value through into_bytes32 then
         //      from_bytes32 and checks it matches the original.
         //   2. Converts a fixed, non-canonical 32-byte string (all 0xff,
@@ -1843,27 +1843,27 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p256_base",   "type": "Base<P256>"   },
-              { "name": "%p256_scalar", "type": "Scalar<P256>" },
+              { "name": "%secp256r1_base",   "type": "Base<Secp256r1>"   },
+              { "name": "%secp256r1_scalar", "type": "Scalar<Secp256r1>" },
               { "name": "%raw",         "type": "Bytes<32>"    }
            ],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "into_bytes32", "input": "%p256_base",   "output": "%base_bytes"   },
-               { "op": "into_bytes32", "input": "%p256_scalar", "output": "%scalar_bytes" },
+               { "op": "into_bytes32", "input": "%secp256r1_base",   "output": "%base_bytes"   },
+               { "op": "into_bytes32", "input": "%secp256r1_scalar", "output": "%scalar_bytes" },
 
-               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<P256>",   "output": "%base_back"   },
-               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<P256>", "output": "%scalar_back" },
+               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<Secp256r1>",   "output": "%base_back"   },
+               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<Secp256r1>", "output": "%scalar_back" },
 
-               { "op": "constrain_eq", "a": "%base_back",   "b": "%p256_base"   },
-               { "op": "constrain_eq", "a": "%scalar_back", "b": "%p256_scalar" },
+               { "op": "constrain_eq", "a": "%base_back",   "b": "%secp256r1_base"   },
+               { "op": "constrain_eq", "a": "%scalar_back", "b": "%secp256r1_scalar" },
 
-               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<P256>",   "output": "%raw_base"   },
-               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<P256>", "output": "%raw_scalar" },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<Secp256r1>",   "output": "%raw_base"   },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<Secp256r1>", "output": "%raw_scalar" },
 
-               { "op": "private_input", "type": "Base<P256>",   "guard": null, "output": "%raw_base_exp"   },
-               { "op": "private_input", "type": "Scalar<P256>", "guard": null, "output": "%raw_scalar_exp" },
+               { "op": "private_input", "type": "Base<Secp256r1>",   "guard": null, "output": "%raw_base_exp"   },
+               { "op": "private_input", "type": "Scalar<Secp256r1>", "guard": null, "output": "%raw_scalar_exp" },
 
                { "op": "constrain_eq", "a": "%raw_base",   "b": "%raw_base_exp"   },
                { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" }
@@ -1883,14 +1883,14 @@ mod proof_tests {
         };
 
         let inputs: Vec<transient_crypto::curve::Fr> = [
-            encode(IrValue::P256Base(base_val)),
-            encode(IrValue::P256Scalar(scalar_val)),
+            encode(IrValue::Secp256r1Base(base_val)),
+            encode(IrValue::Secp256r1Scalar(scalar_val)),
             encode(IrValue::Bytes32(raw_bytes)),
         ]
         .concat();
 
-        let raw_base_exp = from_bytes32_offcircuit(&IrType::P256Base, &raw_bytes).unwrap();
-        let raw_scalar_exp = from_bytes32_offcircuit(&IrType::P256Scalar, &raw_bytes).unwrap();
+        let raw_base_exp = from_bytes32_offcircuit(&IrType::Secp256r1Base, &raw_bytes).unwrap();
+        let raw_scalar_exp = from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &raw_bytes).unwrap();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> =
             [encode(raw_base_exp), encode(raw_scalar_exp)].concat();
@@ -1922,12 +1922,12 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_p256_point_constrain_eq_fails_on_unequal() {
+    async fn test_secp256r1_point_constrain_eq_fails_on_unequal() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0", "type": "Point<P256>" },
-              { "name": "%p1", "type": "Point<P256>" }
+              { "name": "%p0", "type": "Point<Secp256r1>" },
+              { "name": "%p1", "type": "Point<Secp256r1>" }
            ],
            "outputs": [
            ],
@@ -1956,8 +1956,8 @@ mod proof_tests {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: [
-                encode(IrValue::P256Point(p)),
-                encode(IrValue::P256Point(q)),
+                encode(IrValue::Secp256r1Point(p)),
+                encode(IrValue::Secp256r1Point(q)),
             ]
             .concat(),
             private_transcript: vec![],
@@ -1978,7 +1978,7 @@ mod proof_tests {
             .await;
         assert!(
             result.is_err(),
-            "constrain_eq on different P256 points should fail"
+            "constrain_eq on different Secp256r1 points should fail"
         );
     }
 }

@@ -27,8 +27,8 @@ use crate::{
 ///   - `Native`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -51,11 +51,11 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
             .ok_or_else(zero_err)
             .map(Secp256k1Scalar),
 
-        P256Base(s) => Option::from(s.invert()).ok_or_else(zero_err).map(P256Base),
+        Secp256r1Base(s) => Option::from(s.invert()).ok_or_else(zero_err).map(Secp256r1Base),
 
-        P256Scalar(s) => Option::from(s.invert())
+        Secp256r1Scalar(s) => Option::from(s.invert())
             .ok_or_else(zero_err)
-            .map(P256Scalar),
+            .map(Secp256r1Scalar),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported inversion of {:?}",
@@ -69,8 +69,8 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Native`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -96,13 +96,13 @@ pub fn inv_incircuit(
             Ok(Secp256k1Scalar(r))
         }
 
-        P256Base(a) => {
+        Secp256r1Base(a) => {
             let r = (std_lib.p256().base_field_chip()).inv(layouter, a)?;
-            Ok(P256Base(r))
+            Ok(Secp256r1Base(r))
         }
-        P256Scalar(a) => {
+        Secp256r1Scalar(a) => {
             let r = (std_lib.p256().scalar_field_chip()).inv(layouter, a)?;
-            Ok(P256Scalar(r))
+            Ok(Secp256r1Scalar(r))
         }
 
         _ => Err(plonk::Error::Synthesis(format!(
@@ -145,14 +145,14 @@ mod tests {
 
         let x = p256::Fp::random(OsRng);
         assert_eq!(
-            inv_offcircuit(&P256Base(x)).unwrap(),
-            P256Base(x.invert().unwrap())
+            inv_offcircuit(&Secp256r1Base(x)).unwrap(),
+            Secp256r1Base(x.invert().unwrap())
         );
 
         let x = p256::Fq::random(OsRng);
         assert_eq!(
-            inv_offcircuit(&P256Scalar(x)).unwrap(),
-            P256Scalar(x.invert().unwrap())
+            inv_offcircuit(&Secp256r1Scalar(x)).unwrap(),
+            Secp256r1Scalar(x.invert().unwrap())
         );
     }
 }

@@ -30,9 +30,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -47,9 +47,9 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
         Secp256k1Base(s) => Ok(Secp256k1Base(-s)),
         Secp256k1Scalar(s) => Ok(Secp256k1Scalar(-s)),
 
-        P256Point(p) => Ok(P256Point(-p)),
-        P256Base(s) => Ok(P256Base(-*s)),
-        P256Scalar(s) => Ok(P256Scalar(-*s)),
+        Secp256r1Point(p) => Ok(Secp256r1Point(-p)),
+        Secp256r1Base(s) => Ok(Secp256r1Base(-*s)),
+        Secp256r1Scalar(s) => Ok(Secp256r1Scalar(-*s)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported negation of {:?}",
@@ -65,9 +65,9 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -101,17 +101,17 @@ pub fn neg_incircuit(
             Ok(Secp256k1Scalar(r))
         }
 
-        P256Point(p) => {
+        Secp256r1Point(p) => {
             let r = std_lib.p256().negate(layouter, p)?;
-            Ok(P256Point(r))
+            Ok(Secp256r1Point(r))
         }
-        P256Base(a) => {
+        Secp256r1Base(a) => {
             let r = (std_lib.p256().base_field_chip()).neg(layouter, a)?;
-            Ok(P256Base(r))
+            Ok(Secp256r1Base(r))
         }
-        P256Scalar(a) => {
+        Secp256r1Scalar(a) => {
             let r = (std_lib.p256().scalar_field_chip()).neg(layouter, a)?;
-            Ok(P256Scalar(r))
+            Ok(Secp256r1Scalar(r))
         }
 
         _ => Err(plonk::Error::Synthesis(format!(
@@ -160,8 +160,8 @@ mod tests {
         let p = p256::P256::random(OsRng);
         let x = p256::Fp::random(OsRng);
         let r = p256::Fq::random(OsRng);
-        assert_eq!(-P256Point(p), P256Point(-p));
-        assert_eq!(-P256Base(x), P256Base(-x));
-        assert_eq!(-P256Scalar(r), P256Scalar(-r));
+        assert_eq!(-Secp256r1Point(p), Secp256r1Point(-p));
+        assert_eq!(-Secp256r1Base(x), Secp256r1Base(-x));
+        assert_eq!(-Secp256r1Scalar(r), Secp256r1Scalar(-r));
     }
 }

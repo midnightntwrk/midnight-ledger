@@ -63,9 +63,9 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
         IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
 
-        IrValue::P256Point(p) => AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p),
-        IrValue::P256Base(s) => AssignedField::<F, p256::Fp, MEP>::as_public_input(s),
-        IrValue::P256Scalar(s) => AssignedField::<F, p256::Fq, MEP>::as_public_input(s),
+        IrValue::Secp256r1Point(p) => AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p),
+        IrValue::Secp256r1Base(s) => AssignedField::<F, p256::Fp, MEP>::as_public_input(s),
+        IrValue::Secp256r1Scalar(s) => AssignedField::<F, p256::Fq, MEP>::as_public_input(s),
     };
     encoded
         .into_iter()
@@ -107,11 +107,11 @@ pub fn encode_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).as_public_input(layouter, s)
         }
 
-        CircuitValue::P256Point(p) => std_lib.p256().as_public_input(layouter, p),
-        CircuitValue::P256Base(s) => {
+        CircuitValue::Secp256r1Point(p) => std_lib.p256().as_public_input(layouter, p),
+        CircuitValue::Secp256r1Base(s) => {
             (std_lib.p256().base_field_chip()).as_public_input(layouter, s)
         }
-        CircuitValue::P256Scalar(s) => {
+        CircuitValue::Secp256r1Scalar(s) => {
             (std_lib.p256().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
@@ -166,16 +166,16 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
         IrType::Secp256k1Scalar => AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
             .map(IrValue::Secp256k1Scalar),
 
-        IrType::P256Point => {
+        IrType::Secp256r1Point => {
             AssignedForeignPoint::<F, p256::P256, MEP>::from_public_input(&encoded)
-                .map(IrValue::P256Point)
+                .map(IrValue::Secp256r1Point)
         }
 
-        IrType::P256Base => AssignedField::<F, p256::Fp, MEP>::from_public_input(&encoded)
-            .map(IrValue::P256Base),
+        IrType::Secp256r1Base => AssignedField::<F, p256::Fp, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Base),
 
-        IrType::P256Scalar => AssignedField::<F, p256::Fq, MEP>::from_public_input(&encoded)
-            .map(IrValue::P256Scalar),
+        IrType::Secp256r1Scalar => AssignedField::<F, p256::Fq, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Scalar),
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
 }

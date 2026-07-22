@@ -28,9 +28,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -62,9 +62,9 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -94,11 +94,11 @@ pub fn constrain_eq_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).assert_equal(layouter, s, r)
         }
 
-        (P256Point(p), P256Point(q)) => std_lib.p256().assert_equal(layouter, p, q),
-        (P256Base(s), P256Base(r)) => {
+        (Secp256r1Point(p), Secp256r1Point(q)) => std_lib.p256().assert_equal(layouter, p, q),
+        (Secp256r1Base(s), Secp256r1Base(r)) => {
             (std_lib.p256().base_field_chip()).assert_equal(layouter, s, r)
         }
-        (P256Scalar(s), P256Scalar(r)) => {
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => {
             (std_lib.p256().scalar_field_chip()).assert_equal(layouter, s, r)
         }
 
@@ -144,10 +144,10 @@ mod tests {
         let p = p256::P256::random(OsRng);
         let s = p256::Fp::random(OsRng);
         let r = p256::Fq::random(OsRng);
-        assert!(constrain_eq_offcircuit(&P256Point(p), &P256Point(p)).is_ok());
-        assert!(constrain_eq_offcircuit(&P256Base(s), &P256Base(s)).is_ok());
-        assert!(constrain_eq_offcircuit(&P256Scalar(r), &P256Scalar(r)).is_ok());
-        assert!(constrain_eq_offcircuit(&P256Point(p), &P256Point(-p)).is_err());
-        assert!(constrain_eq_offcircuit(&P256Base(s), &P256Scalar(r)).is_err());
+        assert!(constrain_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(p)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Base(s)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256r1Scalar(r), &Secp256r1Scalar(r)).is_ok());
+        assert!(constrain_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(-p)).is_err());
+        assert!(constrain_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Scalar(r)).is_err());
     }
 }

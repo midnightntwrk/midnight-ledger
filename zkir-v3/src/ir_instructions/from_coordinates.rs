@@ -27,7 +27,7 @@ use crate::{
 /// Supported on:
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
-///   - `(P256Base, P256Base)` -> `P256Point`
+///   - `(Secp256r1Base, Secp256r1Base)` -> `Secp256r1Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -52,11 +52,11 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
                 "Cannot build a Secp256k1Point point from ({x:?}, {y:?})",
             )),
 
-        (P256Base(x), P256Base(y)) => {
+        (Secp256r1Base(x), Secp256r1Base(y)) => {
             p256::P256::from_xy(*x, *y)
-                .map(P256Point)
+                .map(Secp256r1Point)
                 .ok_or(anyhow::anyhow!(
-                    "Cannot build a P256Point point from ({x:?}, {y:?})",
+                    "Cannot build a Secp256r1Point point from ({x:?}, {y:?})",
                 ))
         }
 
@@ -72,7 +72,7 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
 /// Supported on:
 ///   - `(Native, Native)` -> `JubjubPoint`
 ///   - `(Secp256k1Base, Secp256k1Base)` -> `Secp256k1Point`
-///   - `(P256Base, P256Base)` -> `P256Point`
+///   - `(Secp256r1Base, Secp256r1Base)` -> `Secp256r1Point`
 ///
 /// NB: In Weierstrass curves, the identity point cannot be constructed through
 /// this function.
@@ -98,10 +98,10 @@ pub fn from_coordinates_incircuit(
             .point_from_coordinates(layouter, x, y)
             .map(Secp256k1Point),
 
-        (P256Base(x), P256Base(y)) => std_lib
+        (Secp256r1Base(x), Secp256r1Base(y)) => std_lib
             .p256()
             .point_from_coordinates(layouter, x, y)
-            .map(P256Point),
+            .map(Secp256r1Point),
 
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported `from_coordinates` on ({:?}, {:?})",
@@ -144,11 +144,11 @@ mod tests {
         let p = p256::P256::random(OsRng);
         let (x, y) = p.coordinates().unwrap();
         assert_eq!(
-            from_coordinates_offcircuit(&P256Base(x), &P256Base(y)).unwrap(),
-            P256Point(p)
+            from_coordinates_offcircuit(&Secp256r1Base(x), &Secp256r1Base(y)).unwrap(),
+            Secp256r1Point(p)
         );
 
-        // (x, y) not on the P256 curve.
-        assert!(from_coordinates_offcircuit(&P256Base(x), &P256Base(x)).is_err());
+        // (x, y) not on the Secp256r1 curve.
+        assert!(from_coordinates_offcircuit(&Secp256r1Base(x), &Secp256r1Base(x)).is_err());
     }
 }

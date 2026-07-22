@@ -30,9 +30,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -57,9 +57,9 @@ pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue,
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -88,11 +88,11 @@ pub fn select_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 
-        (P256Point(p), P256Point(q)) => Ok(P256Point(std_lib.p256().select(layouter, bit, p, q)?)),
-        (P256Base(s), P256Base(r)) => Ok(P256Base(
+        (Secp256r1Point(p), Secp256r1Point(q)) => Ok(Secp256r1Point(std_lib.p256().select(layouter, bit, p, q)?)),
+        (Secp256r1Base(s), Secp256r1Base(r)) => Ok(Secp256r1Base(
             (std_lib.p256().base_field_chip()).select(layouter, bit, s, r)?,
         )),
-        (P256Scalar(s), P256Scalar(r)) => Ok(P256Scalar(
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(Secp256r1Scalar(
             (std_lib.p256().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 

@@ -1250,7 +1250,7 @@ impl Relation for IrSource {
                 IrType::Secp256k1Base,
                 IrType::Secp256k1Scalar,
             ]),
-            p256: involves_types(&[IrType::P256Point, IrType::P256Base, IrType::P256Scalar]),
+            p256: involves_types(&[IrType::Secp256r1Point, IrType::Secp256r1Base, IrType::Secp256r1Scalar]),
             bls12_381: false,
             curve25519: false,
             base64: false,

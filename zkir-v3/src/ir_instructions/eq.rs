@@ -29,9 +29,9 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -47,9 +47,9 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
         (Secp256k1Base(s), Secp256k1Base(r)) => Ok(s == r),
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(s == r),
 
-        (P256Point(p), P256Point(q)) => Ok(p == q),
-        (P256Base(s), P256Base(r)) => Ok(s == r),
-        (P256Scalar(s), P256Scalar(r)) => Ok(s == r),
+        (Secp256r1Point(p), Secp256r1Point(q)) => Ok(p == q),
+        (Secp256r1Base(s), Secp256r1Base(r)) => Ok(s == r),
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(s == r),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
@@ -66,9 +66,9 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
-///   - `P256Point`
-///   - `P256Base`
-///   - `P256Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
 ///
 /// # Errors
 ///
@@ -100,11 +100,11 @@ pub fn test_eq_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).is_equal(layouter, s, r)
         }
 
-        (P256Point(p), P256Point(q)) => std_lib.p256().is_equal(layouter, p, q),
-        (P256Base(s), P256Base(r)) => {
+        (Secp256r1Point(p), Secp256r1Point(q)) => std_lib.p256().is_equal(layouter, p, q),
+        (Secp256r1Base(s), Secp256r1Base(r)) => {
             (std_lib.p256().base_field_chip()).is_equal(layouter, s, r)
         }
-        (P256Scalar(s), P256Scalar(r)) => {
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => {
             (std_lib.p256().scalar_field_chip()).is_equal(layouter, s, r)
         }
         _ => Err(plonk::Error::Synthesis(format!(
@@ -149,9 +149,9 @@ mod tests {
         let p = p256::P256::random(OsRng);
         let s = p256::Fp::random(OsRng);
         let r = p256::Fq::random(OsRng);
-        assert!(test_eq_offcircuit(&P256Point(p), &P256Point(p)).unwrap());
-        assert!(test_eq_offcircuit(&P256Base(s), &P256Base(s)).unwrap());
-        assert!(test_eq_offcircuit(&P256Scalar(r), &P256Scalar(r)).unwrap());
-        assert!(test_eq_offcircuit(&P256Point(p), &Secp256k1Point(k256::K256::random(OsRng))).is_err());
+        assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(p)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Base(s)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Scalar(r), &Secp256r1Scalar(r)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256k1Point(k256::K256::random(OsRng))).is_err());
     }
 }

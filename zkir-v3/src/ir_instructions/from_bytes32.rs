@@ -32,8 +32,8 @@ use crate::{
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
-///  - P256Base
-///  - P256Scalar
+///  - Secp256r1Base
+///  - Secp256r1Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -57,9 +57,9 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 
         IrType::Secp256k1Scalar => Ok(Secp256k1Scalar(from_le_bytes_with_reduction(bytes))),
 
-        IrType::P256Base => Ok(P256Base(from_le_bytes_with_reduction(bytes))),
+        IrType::Secp256r1Base => Ok(Secp256r1Base(from_le_bytes_with_reduction(bytes))),
 
-        IrType::P256Scalar => Ok(P256Scalar(from_le_bytes_with_reduction(bytes))),
+        IrType::Secp256r1Scalar => Ok(Secp256r1Scalar(from_le_bytes_with_reduction(bytes))),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
@@ -72,8 +72,8 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
-///  - P256Base
-///  - P256Scalar
+///  - Secp256r1Base
+///  - Secp256r1Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -106,17 +106,17 @@ pub fn from_bytes32_incircuit(
             .assigned_from_le_bytes(layouter, bytes)
             .map(Secp256k1Scalar),
 
-        IrType::P256Base => std_lib
+        IrType::Secp256r1Base => std_lib
             .p256()
             .base_field_chip()
             .assigned_from_le_bytes(layouter, bytes)
-            .map(P256Base),
+            .map(Secp256r1Base),
 
-        IrType::P256Scalar => std_lib
+        IrType::Secp256r1Scalar => std_lib
             .p256()
             .scalar_field_chip()
             .assigned_from_le_bytes(layouter, bytes)
-            .map(P256Scalar),
+            .map(Secp256r1Scalar),
 
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported from_bytes32 for {val_t:?}",
@@ -169,15 +169,15 @@ mod tests {
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
 
-        let x = P256Base(p256::Fp::random(OsRng));
+        let x = Secp256r1Base(p256::Fp::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
-        let y = from_bytes32_offcircuit(&IrType::P256Base, &bytes).unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Secp256r1Base, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
 
-        let x = P256Scalar(p256::Fq::random(OsRng));
+        let x = Secp256r1Scalar(p256::Fq::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
-        let y = from_bytes32_offcircuit(&IrType::P256Scalar, &bytes).unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
     }
@@ -201,12 +201,12 @@ mod tests {
             IrValue::Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))
         );
         assert_eq!(
-            from_bytes32_offcircuit(&IrType::P256Base, &bytes).unwrap(),
-            IrValue::P256Base(from_le_bytes_with_reduction(&bytes))
+            from_bytes32_offcircuit(&IrType::Secp256r1Base, &bytes).unwrap(),
+            IrValue::Secp256r1Base(from_le_bytes_with_reduction(&bytes))
         );
         assert_eq!(
-            from_bytes32_offcircuit(&IrType::P256Scalar, &bytes).unwrap(),
-            IrValue::P256Scalar(from_le_bytes_with_reduction(&bytes))
+            from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap(),
+            IrValue::Secp256r1Scalar(from_le_bytes_with_reduction(&bytes))
         );
     }
 }
