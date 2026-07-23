@@ -696,6 +696,29 @@ pub trait ProvingProvider {
     fn resolver(&self) -> &impl Resolver;
 }
 
+/// An inner proof handed to an `InnerProof` instruction as a witness.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serializable,
+    Hash,
+    Storable,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
+#[storable(base)]
+#[tag = "inner-proof-witness"]
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+pub enum InnerProofWitness {
+    /// The inner proof's bytes.
+    Direct(Vec<u8>),
+}
+tag_enforcement_test!(InnerProofWitness);
+
 /// Everything necessary to produce a proof.
 #[derive(
     Clone,
@@ -722,6 +745,9 @@ pub struct ProofPreimage {
     pub public_transcript_inputs: Vec<Fr>,
     /// A public statement vector encoding statement call results in the IR.
     pub public_transcript_outputs: Vec<Fr>,
+    /// Prover-supplied inner proofs consumed positionally by `VerifyProof`
+    /// instructions — one per `VerifyProof`, in instruction order.
+    pub proof_witnesses: Vec<InnerProofWitness>,
     /// An arbitrary input to be bound to in the proof.
     pub binding_input: Fr,
     /// The communications commitment that will be checked, and its randomness.

@@ -71,6 +71,7 @@ mod proof_tests {
                     pi_skips: vec![],
                     binding_input: 0.into(),
                     comm_comm: None,
+                    inner_proof_witnesses: vec![],
                 },
             )
             .await;
@@ -109,6 +110,7 @@ mod proof_tests {
         dbg!(pk_fmt == format!("{:#?}", pk));
         dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into()],
@@ -164,6 +166,7 @@ mod proof_tests {
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
@@ -221,6 +224,7 @@ mod proof_tests {
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
@@ -271,6 +275,7 @@ mod proof_tests {
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![(42).into()],
@@ -338,6 +343,7 @@ mod proof_tests {
         let p = EmbeddedGroupAffine::generator();
         let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![p.x().unwrap(), p.y().unwrap(), (-1).into(), 63.into()],
@@ -397,6 +403,7 @@ mod proof_tests {
         dbg!(pk_fmt == format!("{:#?}", pk));
         dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![20.into()],
@@ -471,6 +478,7 @@ mod proof_tests {
 
         // Test with v_0 = 10, v_1 = 15
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![10.into(), 15.into()],
@@ -519,6 +527,7 @@ mod proof_tests {
 
         // v_0 = 5, v_1 = 6
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 99.into(),
             communications_commitment: None,
             inputs: vec![5.into(), 6.into()],
@@ -564,6 +573,7 @@ mod proof_tests {
 
         // Input must be 0x42 = 66 for proof to succeed
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 123.into(),
             communications_commitment: None,
             inputs: vec![66.into()],
@@ -613,6 +623,7 @@ mod proof_tests {
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 48.into(),
             communications_commitment: None,
             inputs: vec![0.into(), 42.into()],
@@ -666,6 +677,7 @@ mod proof_tests {
         // The impact is guarded off, so nothing is contributed to the public
         // transcript inputs.
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 48.into(),
             communications_commitment: None,
             inputs: vec![0.into(), 42.into()],
@@ -710,6 +722,7 @@ mod proof_tests {
 
         // v_0 must be 256 (little-endian interpretation of 0x0001)
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 77.into(),
             communications_commitment: None,
             inputs: vec![256.into()],
@@ -750,6 +763,7 @@ mod proof_tests {
 
         // v_0 must be 1 (little-endian interpretation of 0x0100)
         let preimage2 = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 88.into(),
             communications_commitment: None,
             inputs: vec![1.into()],
@@ -807,6 +821,7 @@ mod proof_tests {
         let p = EmbeddedGroupAffine::generator();
         let neg_p: EmbeddedGroupAffine = (-JubjubSubgroup::generator()).into();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
@@ -861,6 +876,7 @@ mod proof_tests {
         let p = EmbeddedGroupAffine::generator();
         let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
@@ -913,6 +929,7 @@ mod proof_tests {
         let p = EmbeddedGroupAffine::generator();
         let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage_fail = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
@@ -969,6 +986,7 @@ mod proof_tests {
 
         // bit=0 selects p1 (!=p0), constrain_eq(p2, p0) should fail
         let preimage_fail = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
@@ -1172,6 +1190,7 @@ mod proof_tests {
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs,
@@ -1256,6 +1275,7 @@ mod proof_tests {
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs,
@@ -1365,6 +1385,7 @@ mod proof_tests {
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs,
@@ -1443,6 +1464,7 @@ mod proof_tests {
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs,
@@ -1508,6 +1530,7 @@ mod proof_tests {
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs,
@@ -1552,6 +1575,7 @@ mod proof_tests {
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![7.into()],
