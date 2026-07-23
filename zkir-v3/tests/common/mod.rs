@@ -98,6 +98,7 @@ impl ParamsProverProvider for TestParams {
 /// commitment (e.g. negative-conformance tests) pass `None`.
 fn make_preimage(inputs: Vec<Fr>, communications_commitment: Option<(Fr, Fr)>) -> ProofPreimage {
     ProofPreimage {
+        proof_witnesses: vec![],
         binding_input: BINDING.into(),
         communications_commitment,
         inputs,

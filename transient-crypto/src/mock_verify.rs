@@ -242,6 +242,7 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
         let mut rng = OsRng;
         let inp = (0..size).map(|_| rng.r#gen()).collect::<Vec<_>>();
         let preimage = ProofPreimage {
+            proof_witnesses: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: inp.clone(),

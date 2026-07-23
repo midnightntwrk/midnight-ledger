@@ -559,6 +559,7 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
         let binding_input = 0u8.into();
 
         let proof = ProofPreimage {
+            proof_witnesses: vec![],
             inputs,
             private_transcript,
             public_transcript_inputs,

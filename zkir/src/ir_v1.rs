@@ -565,6 +565,7 @@ fn preimage_from_v1(
         transient_crypto::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     };
     transient_crypto::proofs::ProofPreimage {
+        proof_witnesses: vec![],
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
         private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
         public_transcript_inputs: p
