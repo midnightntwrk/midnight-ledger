@@ -80,7 +80,7 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+    pub static ref SPEND_VK: transient_crypto::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
             .expect("Dust Spend VK should be valid");
 }
@@ -636,18 +636,18 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
                 let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
-                dust_op.v2 = Some(SPEND_VK.clone());
+                dust_op.v3 = Some(SPEND_VK.clone());
                 let dust_call = crate::structure::ContractCall {
                     address: coin_structure::contract::ContractAddress::default(),
                     entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
                     guaranteed_transcript: None,
                     fallible_transcript: None,
                     communication_commitment: Fr::default(),
-                    proof: self.proof.clone().into(),
+                    proof: P::wrap_latest_proof(self.proof.clone()),
                 };
                 P::proof_verify(
                     &dust_op,
-                    &self.proof.clone().into(),
+                    &P::wrap_latest_proof(self.proof.clone()),
                     pis,
                     &dust_call,
                     strictness.proof_verification_mode,
@@ -746,21 +746,26 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
             }
             debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
             let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
-            dust_op.v2 = Some(SPEND_VK.clone());
+            dust_op.v3 = Some(SPEND_VK.clone());
             let dust_call = crate::structure::ContractCall {
                 address: coin_structure::contract::ContractAddress::default(),
                 entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
                 guaranteed_transcript: None,
                 fallible_transcript: None,
                 communication_commitment: Fr::default(),
-                proof: self.proof.clone().into(),
+                proof: P::wrap_latest_proof(self.proof.clone()),
             };
             result = Some(
-                P::collect_proof_evidence(&dust_op, &self.proof.clone().into(), pis, &dust_call)
-                    .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
-                        declared_time: ctime,
-                        dust_spend: Box::new(self.erase_proofs()),
-                    })?,
+                P::collect_proof_evidence(
+                    &dust_op,
+                    &P::wrap_latest_proof(self.proof.clone()),
+                    pis,
+                    &dust_call,
+                )
+                .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
+                    declared_time: ctime,
+                    dust_spend: Box::new(self.erase_proofs()),
+                })?,
             );
             Ok(())
         })?;

@@ -372,7 +372,7 @@
               mkdir -p dust/zkir
               mkdir -p dust/keys
               cp zkir-precompiles/dust/* dust/zkir
-              zkir compile-many dust/zkir dust/keys
+              ${self.packages.${system}.zkir-v3}/bin/zkir compile-many dust/zkir dust/keys
               #compactc --no-communications-commitment ledger/dust.compact dust
               for file in dust/keys/* dust/zkir/*; do
                 sha256sum "$file" > "$file.sha256"

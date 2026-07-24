@@ -999,7 +999,7 @@ async fn batch_verification_inner(mode: TestMode) {
             mode.capture("tx8", balanced)
         })
         .await;
-    dbg!(&tx);
+    // dbg!(&tx);
     let evidence = tx.collect_proof_evidence(&state.ledger).unwrap();
     dbg!(evidence.len());
     // assert_eq!(evidence.len(), 2);

@@ -386,6 +386,17 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         + Into<Self::Proof>;
     /// Unit of proof evidence collected during traversal for batch verification.
     type ProofEvidence;
+    /// Wraps a freshly-produced "latest" proof into the versioned proof enum,
+    /// tagging it with the current proof-system version for this proof kind.
+    ///
+    /// The default preserves the legacy behaviour (`LatestProof: Into<Proof>`),
+    /// which resolves to `ProofVersioned::V2`. Proof kinds whose latest proof is
+    /// a newer version override this. This is the single seam that decides the
+    /// on-wire proof version for subsystems (e.g. Dust) that store a raw
+    /// `LatestProof` and only wrap it at verification time.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        proof.into()
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
@@ -477,6 +488,13 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     type Proof = ProofVersioned;
     type LatestProof = Proof;
     type ProofEvidence = ContractProofEvidence;
+    /// For real (proven) transactions the latest proof system is V3 (zk-stdlib v2).
+    /// Overrides the trait default (which would tag proofs V2) so that subsystems
+    /// wrapping a raw `Proof` at verify time — notably Dust — land in the V3
+    /// verifier/batch path.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        ProofVersioned::V3(proof)
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
