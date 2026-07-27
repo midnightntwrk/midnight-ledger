@@ -32,7 +32,8 @@
   },
   "dependencies": {
     "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v9",
-    "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2"
+    "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2",
+    "@midnight-ntwrk/zkir-v3": "link:../result/lib/node_modules/@midnightntwrk/zkir-v3"
   },
   "devDependencies": {
     "@d2t/vitest-ctrf-json-reporter": "1.2.0",
