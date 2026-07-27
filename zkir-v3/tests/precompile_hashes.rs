@@ -101,7 +101,6 @@ async fn precompile_key_hashes_pinned() {
     let root = precompiles_root();
     let files = enumerate_zkir(&root);
     assert!(!files.is_empty(), "no .zkir files found under {root:?}");
-    dbg!(&files);
 
     let mut mismatches: Vec<String> = Vec::new();
 
