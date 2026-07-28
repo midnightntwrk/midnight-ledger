@@ -33,7 +33,7 @@ This document specifies ZKIR v2: its abstract syntax, the witness-population (*p
 4. [Preprocess semantics](#4-preprocess-semantics)
 5. [Circuit semantics](#5-circuit-semantics)
 6. [Properties](#6-properties)
-7. [Limitations and motivation for v3](#7-limitations-and-motivation-for-v3)
+7. [Limitations](#7-limitations)
 8. [Appendix A — Glossary](#appendix-a--glossary)
 
 ---
@@ -62,7 +62,7 @@ Like all ZK circuits, a ZKIR source has **two semantics that must agree**:
 
 The prover succeeds if and only if witness generation succeeds, i.e. iff `R(x, w)` holds for the supplied `(x, w)`. That this *iff* holds is **Property P5** (§6.2) — the faithfulness bridge and the load-bearing theorem of the mechanisation.
 
-ZKIR is deliberately minimal: the instruction set is a straight-line, untyped sequence of 26 primitive operations over a single register file of elements of `Fr` (the scalar field of BLS12-381), with no structured control flow and single-assignment semantics. This is what makes the two-semantics correspondence tractable to formalise and verify.
+ZKIR is deliberately minimal: the instruction set is a straight-line, unityped sequence of 26 primitive operations over a single register file of elements of `Fr` (the scalar field of BLS12-381), with no structured control flow and single-assignment semantics. This is what makes the two-semantics correspondence tractable to formalise and verify.
 
 ZKIR sits between the Compact compiler and the proof backend: the `zkir` binary compiles a `.zkir` (JSON) or `.bzkir` (tagged binary) source into a prover/verifier key pair; at runtime the protocol layer (Zswap, Dust, the contract runtime) supplies the preimage, the prover runs preprocess and hands the witness to Halo2, and the verifier reconstructs the public-input vector from the public transcript. *(informative)*
 
@@ -70,10 +70,10 @@ ZKIR sits between the Compact compiler and the proof backend: the `zkir` binary 
 
 ZKIR v2 takes a deliberately minimal, register-machine view of circuits. Four commitments shape the semantics:
 
-- **Untyped, single-assignment.** Every value is a BLS12-381 scalar (`Fr`). Operands are non-negative indices into a *memory* whose i-th cell is bound exactly once by the instruction that produced it. No named variables, no type annotations, no scopes.
+- **Unityped, single-assignment.** Every value is a BLS12-381 scalar (`Fr`). Operands are non-negative indices into a *memory* whose i-th cell is bound exactly once by the instruction that produced it. No named variables, no type annotations, no scopes.
 - **No structured control flow.** The instruction stream is straight-line. Conditional behaviour is expressed by computing a boolean and threading it through `CondSelect`, guarded transcript reads, and guarded `PiSkip` markers.
 - **UB as unsatisfiability.** Instructions whose precondition implies undefined behaviour (UB) are not a separate failure mode at the language level — they merely make the resulting constraint system unsatisfiable on inputs that would have triggered them in preprocess. This is what makes the two semantics comparable in the first place.
-- **Thin layer over `ZkStdLib`.** Each instruction corresponds, roughly, to one chip call in the `midnight-zk` standard library; each such chip call is in turn compiled to polynomial constraints by the Halo2 backend. The soundness of those polynomial constraint encodings is part of the trust base (§6.2). ZKIR exposes only a subset of the available chips; widening this surface motivates v3 (§7).
+- **Thin layer over `ZkStdLib`.** Each instruction corresponds, roughly, to one chip call in the `midnight-zk` standard library; each such chip call is in turn compiled to polynomial constraints by the Halo2 backend. The soundness of those polynomial constraint encodings is part of the trust base (§6.2). ZKIR exposes only a subset of the available chips (§7).
 
 ---
 
@@ -900,11 +900,11 @@ The **forward** direction (`preprocess accepts ⇒ constraints satisfied`) is es
 
 ---
 
-## 7. Limitations and motivation for v3 *(informative)*
+## 7. Limitations *(informative)*
 
-The limitations below motivate the v3 redesign described in [0021-ZKIR-redesign.md](../types-proposal/0021-ZKIR-redesign.md). They are *features of the language as currently specified*, not bugs.
+The limitations below are *features of the language as currently specified*, not bugs.
 
-- **Untyped.** Every cell is `Fr`; booleans, bits, integers, EC coordinates, hash outputs are all field elements, with type discipline enforced only by convention and `constrain_*`. The proof system (`midnight-zk`) tracks finer types (`AssignedBit`, `AssignedByte`, `AssignedNativePoint`, …) that ZKIR v2 erases; v3 reintroduces them.
+- **Unityped.** Every cell is `Fr`; booleans, bits, integers, EC coordinates, hash outputs are all field elements, with type discipline enforced only by convention and `constrain_*`. The proof system (`midnight-zk`) tracks finer types (`AssignedBit`, `AssignedByte`, `AssignedNativePoint`, …) that ZKIR v2 erases.
 - **No structured control flow.** No `if`/`while`/functions; both branches of every conditional are always evaluated and contribute to circuit size. `pi_skip` is the only construct that recovers size, and only at the verifier side.
 - **Narrow `ZkStdLib` surface.** Jubjub but not secp256k1/BLS12-381 as embedded curves; Poseidon and SHA-256 but not SHA-512/SHA3/Keccak/Blake2b/Base64; no automaton chip; no foreign-field arithmetic.
 - **Opaque embedding.** No documented mapping from Compact source constructs to ZKIR instruction patterns, which affects auditability.
