@@ -615,6 +615,26 @@ impl<
         }
         Ok(evidence)
     }
+
+    /// Collects proof evidence for all dust spends in this intent.
+    ///
+    /// `segment_id` is required to construct the dust spend public inputs, which
+    /// commit to the segment the spend belongs to.
+    pub fn collect_dust_proof_evidence(
+        &self,
+        ref_state: &impl StateReference<D>,
+        segment_id: u16,
+    ) -> Result<Vec<P::ProofEvidence>, MalformedTransaction<D>> {
+        let mut evidence = vec![];
+        if let Some(dust_actions) = self.dust_actions.as_ref() {
+            evidence.extend(dust_actions.collect_proof_evidence(
+                ref_state,
+                segment_id,
+                self.binding_commitment.downgrade(),
+            )?);
+        }
+        Ok(evidence)
+    }
 }
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {

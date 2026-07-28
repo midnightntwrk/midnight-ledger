@@ -659,6 +659,17 @@ async fn batch_verification_inner(mode: TestMode) {
         })
         .await;
     // dbg!(&tx);
+    /*let mut dust_evidence = vec![];
+    let mut sorted_segments = tx.intents().collect::<Vec<(_, _)>>();
+    sorted_segments.sort_by_key(|a| a.0);
+    for (segment_id, intent) in sorted_segments.into_iter() {
+        dust_evidence.extend(
+            intent
+                .collect_dust_proof_evidence(&state.ledger, segment_id)
+                .unwrap(),
+        );
+    }*/
+
     let evidence = tx.collect_proof_evidence(&state.ledger).unwrap();
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
