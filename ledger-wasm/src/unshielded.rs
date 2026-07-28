@@ -156,16 +156,16 @@ impl UnshieldedOffer {
         match &self.0 {
             Signature(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             SignatureErased(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }

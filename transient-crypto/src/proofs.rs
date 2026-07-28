@@ -26,6 +26,31 @@ use midnight_proofs::{
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
+
+/// Error returned by [`VerifierKey::batch_verify_with_failures`].
+#[derive(Debug)]
+pub enum BatchVerifyError {
+    /// One or more proofs in the batch were invalid. The vector holds their
+    /// ascending indices into the verified sequence. Only populated when
+    /// `identify_failures` is `true`.
+    InvalidProofs(Vec<usize>),
+    /// Verification failed without localising which proof(s) were invalid
+    /// (e.g. malformed inputs, or `identify_failures` set to `false`).
+    Unlocalized(VerifyingError),
+}
+
+impl std::fmt::Display for BatchVerifyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BatchVerifyError::InvalidProofs(indices) => {
+                write!(f, "invalid proof(s) at batch index(es) {indices:?}")
+            }
+            BatchVerifyError::Unlocalized(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for BatchVerifyError {}
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -576,7 +601,11 @@ impl VerifierKey {
         crate::mock_verify::mock_verify_for(pi_len)
     }
 
-    /// Checks a sequence of proofs against their corresponding statements and verifier keys
+    /// Checks a sequence of proofs against their corresponding statements and verifier keys.
+    ///
+    /// Runs with `identify_failures: true`: on rejection the error names the batch indices
+    /// of the offending proofs. Call [`Self::batch_verify_with_failures`] with
+    /// `identify_failures: false` for the cheaper no-recovery path.
     pub fn batch_verify<
         'a,
         F: Iterator<Item = Fr>,
@@ -585,6 +614,23 @@ impl VerifierKey {
         params: &ParamsVerifier,
         parts: V,
     ) -> Result<(), VerifyingError> {
+        Self::batch_verify_with_failures(params, parts, true).map_err(anyhow::Error::from)
+    }
+
+    /// Like [`Self::batch_verify`] but with a caller-chosen `identify_failures` flag.
+    ///
+    /// When `identify_failures` is `true` the returned [`BatchVerifyError`] on failure is
+    /// [`BatchVerifyError::InvalidProofs`], carrying the batch indices of the invalid proofs;
+    /// when `false` it is [`BatchVerifyError::Unlocalized`].
+    pub fn batch_verify_with_failures<
+        'a,
+        F: Iterator<Item = Fr>,
+        V: Iterator<Item = (&'a VerifierKey, &'a Proof, F)>,
+    >(
+        params: &ParamsVerifier,
+        parts: V,
+        identify_failures: bool,
+    ) -> Result<(), BatchVerifyError> {
         use midnight_zk_stdlib::batch_verify;
 
         let mut vks = vec![];
@@ -593,14 +639,20 @@ impl VerifierKey {
 
         for (vk, proof, stmt) in parts.into_iter() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
-            let vk = vk.force_init()?;
+            let vk = vk.force_init().map_err(BatchVerifyError::Unlocalized)?;
             vks.push(vk);
             pis.push(pi);
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs, identify_failures).map_err(
+            |e| match e {
+                midnight_proofs::plonk::Error::BatchOpening(indices) => {
+                    BatchVerifyError::InvalidProofs(indices)
+                }
+                _ => BatchVerifyError::Unlocalized(anyhow::anyhow!("Invalid proof")),
+            },
+        )
     }
 
     /// Mocks the checking of a sequence of proofs against a statement
@@ -753,7 +805,7 @@ impl ProofPreimage {
             .await?
             .ok_or(anyhow::Error::msg(format!(
                 "failed to find proving key for '{}'",
-                &self.key_location.0
+                self.key_location.0
             )))?;
         let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;

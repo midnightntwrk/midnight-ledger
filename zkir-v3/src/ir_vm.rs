@@ -1244,6 +1244,7 @@ impl Relation for IrSource {
             keccak_256: involves_instructions(&|op| matches!(op, I::Keccak256 { .. })),
             sha3_256: false,
             blake2b: false,
+            nb_arith_cols: 5,
             nr_pow2range_cols: 4,
             secp256k1: involves_types(&[
                 IrType::Secp256k1Point,

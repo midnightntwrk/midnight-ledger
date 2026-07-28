@@ -20,8 +20,8 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
-use std::io::{self, Read};
+use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_serialize};
+use std::io::{self, Read, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
@@ -53,6 +53,7 @@ tag_enforcement_test!(ProverKey<IrSource>);
 
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(
+    Copy,
     Clone,
     Debug,
     Default,
@@ -881,6 +882,22 @@ impl IrSource {
     pub fn model(&self) -> Model {
         Model {
             model: midnight_zk_stdlib::cost_model(self, None),
+        }
+    }
+
+    /// Writes out with tag.
+    pub fn serialize_to_tagged<W: Write>(&self, writer: W) -> io::Result<()> {
+        tagged_serialize(self, writer)
+    }
+
+    /// Writes out a prover key with tag.
+    pub fn serialize_prover_key_to_tagged<W: Write>(
+        version: IrMinorVersion,
+        pk: &ProverKey<Self>,
+        writer: W,
+    ) -> io::Result<()> {
+        match version {
+            IrMinorVersion::V0 => tagged_serialize(pk, writer),
         }
     }
 

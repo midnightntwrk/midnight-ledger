@@ -386,6 +386,17 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         + Into<Self::Proof>;
     /// Unit of proof evidence collected during traversal for batch verification.
     type ProofEvidence;
+    /// Wraps a freshly-produced "latest" proof into the versioned proof enum,
+    /// tagging it with the current proof-system version for this proof kind.
+    ///
+    /// The default preserves the legacy behaviour (`LatestProof: Into<Proof>`),
+    /// which resolves to `ProofVersioned::V2`. Proof kinds whose latest proof is
+    /// a newer version override this. This is the single seam that decides the
+    /// on-wire proof version for subsystems (e.g. Dust) that store a raw
+    /// `LatestProof` and only wrap it at verification time.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        proof.into()
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
@@ -477,6 +488,13 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     type Proof = ProofVersioned;
     type LatestProof = Proof;
     type ProofEvidence = ContractProofEvidence;
+    /// For real (proven) transactions the latest proof system is V3 (zk-stdlib v2).
+    /// Overrides the trait default (which would tag proofs V2) so that subsystems
+    /// wrapping a raw `Proof` at verify time — notably Dust — land in the V3
+    /// verifier/batch path.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        ProofVersioned::V3(proof)
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
@@ -684,9 +702,29 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 )
                 .map_err(|e| anyhow::anyhow!("v1 batch verification: {e}"))
                 .map_err(MalformedTransaction::<D>::InvalidProof)?;
-                transient_crypto::proofs::VerifierKey::batch_verify(&PARAMS_VERIFIER, v3)
-                    .map_err(|_| anyhow::anyhow!("v2 batch verification"))
-                    .map_err(MalformedTransaction::<D>::InvalidProof)?;
+                // Positions of the V3 items within `evidence`, so failing batch
+                // indices (which are relative to the filtered V3 subsequence) can
+                // be reported relative to the full proof-evidence sequence.
+                let v3_positions: Vec<usize> = evidence
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, e)| matches!(e, ContractProofEvidence::V3 { .. }).then_some(i))
+                    .collect();
+                transient_crypto::proofs::VerifierKey::batch_verify_with_failures(
+                    &PARAMS_VERIFIER,
+                    v3,
+                    true,
+                )
+                .map_err(|e| match e {
+                    transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
+                        let failed_indices =
+                            batch_indices.into_iter().map(|i| v3_positions[i]).collect();
+                        MalformedTransaction::<D>::InvalidProofBatch { failed_indices }
+                    }
+                    transient_crypto::proofs::BatchVerifyError::Unlocalized(e) => {
+                        MalformedTransaction::<D>::InvalidProof(e)
+                    }
+                })?;
             }
         }
         Ok(())

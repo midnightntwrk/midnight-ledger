@@ -875,6 +875,7 @@ impl Relation for IrSource {
             sha3_256: false,
             keccak_256: false,
             blake2b: false,
+            nb_arith_cols: 5,
             nr_pow2range_cols,
             secp256k1: false,
             p256: false,

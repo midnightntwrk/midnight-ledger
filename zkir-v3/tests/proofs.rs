@@ -100,14 +100,14 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let pk_fmt = format!("{:#?}", pk);
+        let vk_fmt = format!("{:#?}", vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
         vk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        dbg!(vk_fmt == format!("{:#?}", &vk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
+        dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -159,10 +159,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -216,10 +216,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -266,10 +266,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -323,18 +323,18 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let mut pk_data = Vec::new();
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let p = EmbeddedGroupAffine::generator();
         let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
@@ -388,14 +388,14 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let pk_fmt = format!("{:#?}", pk);
+        let vk_fmt = format!("{:#?}", vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
         vk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        dbg!(vk_fmt == format!("{:#?}", &vk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
+        dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,

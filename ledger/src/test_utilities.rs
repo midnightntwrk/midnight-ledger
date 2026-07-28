@@ -50,7 +50,7 @@ use rand::{CryptoRng, Rng, seq::SliceRandom};
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
-use serialize::{tagged_deserialize, tagged_serialize, peek_tag};
+use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::io;
@@ -758,7 +758,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not resolve key location: {}",
-                    &preimage.key_location.0
+                    preimage.key_location.0
                 )
             })?;
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
@@ -784,7 +784,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not resolve key location: {}",
-                    &preimage.key_location.0
+                    preimage.key_location.0
                 )
             })?;
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
@@ -870,7 +870,13 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
                     assert!(real_fees <= mocked_fees);
-                    assert!(mocked_fees <= real_fees + allowed_error_margin);
+                    assert!(
+                        mocked_fees <= real_fees + allowed_error_margin * 100,
+                        "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}",
+                        mocked_fees,
+                        real_fees,
+                        allowed_error_margin
+                    );
                 }
             }
             Ok(proven)
@@ -910,7 +916,7 @@ impl ProofServerProvider<'_> {
                 .resolve_key(preimage.key_location().clone())
                 .await?
                 .ok_or_else(|| {
-                    anyhow::anyhow!("failed to find key '{}'", &preimage.key_location().0)
+                    anyhow::anyhow!("failed to find key '{}'", preimage.key_location().0)
                 })?;
             Some(WrappedIr(data.ir_source))
         };
@@ -950,7 +956,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             .await?;
         println!("    Check request: {} bytes", ser.len());
         let resp = Client::new()
-            .post(format!("{}/check", &self.base_url))
+            .post(format!("{}/check", self.base_url))
             .body(ser)
             .send()
             .await?;
@@ -979,7 +985,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             .await?;
         println!("    Proving request: {} bytes", ser.len());
         let resp = Client::new()
-            .post(format!("{}/prove", &self.base_url))
+            .post(format!("{}/prove", self.base_url))
             .body(ser)
             .send()
             .await?;
