@@ -226,6 +226,7 @@ async fn batch_verification_inner(mode: TestMode) {
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
         balanced_strictness.proof_verification_mode,
+        true,
     )
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -295,6 +296,7 @@ async fn batch_verification_inner(mode: TestMode) {
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
         balanced_strictness.proof_verification_mode,
+        true,
     )
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -484,6 +486,7 @@ async fn batch_verification_inner(mode: TestMode) {
         <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &evidence,
             balanced_strictness.proof_verification_mode,
+            true,
         )
         .unwrap();
         tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -599,6 +602,7 @@ async fn batch_verification_inner(mode: TestMode) {
         <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &evidence,
             balanced_strictness.proof_verification_mode,
+            true,
         )
         .unwrap();
         tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -674,6 +678,7 @@ async fn batch_verification_inner(mode: TestMode) {
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
         balanced_strictness.proof_verification_mode,
+        true,
     )
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -792,6 +797,7 @@ async fn batch_verification_inner(mode: TestMode) {
         <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &evidence,
             balanced_strictness.proof_verification_mode,
+            true,
         )
         .unwrap();
         tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -864,6 +870,7 @@ async fn batch_verification_inner(mode: TestMode) {
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
         balanced_strictness.proof_verification_mode,
+        true,
     )
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
@@ -1017,6 +1024,7 @@ async fn batch_verification_inner(mode: TestMode) {
     <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
         &evidence,
         balanced_strictness.proof_verification_mode,
+        true,
     )
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
