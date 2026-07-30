@@ -365,16 +365,25 @@ pub enum Instruction {
     /// value of the input type:
     ///
     ///  - Native:       1 output
+    ///  - Bytes32:      2 outputs (low 31 bytes, high byte)
     ///  - JubjubPoint:  2 outputs (x and y coordinates)
     ///  - JubjubScalar: 1 output
     ///
-    ///  - Secp256k1Point:  8 outputs (4 for x and 4 for y)
-    ///  - Secp256k1Base:   4 outputs (64-bits LE limbs)
-    ///  - Secp256k1Scalar: 4 outputs (64-bits LE limbs)
+    /// Foreign-field elements encode as 2 limbs (midnight-circuits'
+    /// public-input encoding); points as x and y coordinates (2 limbs each)
+    /// followed, on Weierstrass curves only, by an is-identity flag:
     ///
-    ///  - Secp256r1Point:  8 outputs (4 for x and 4 for y)
-    ///  - Secp256r1Base:   4 outputs (64-bits LE limbs)
-    ///  - Secp256r1Scalar: 4 outputs (64-bits LE limbs)
+    ///  - Secp256k1Point:  5 outputs
+    ///  - Secp256k1Base:   2 outputs
+    ///  - Secp256k1Scalar: 2 outputs
+    ///
+    ///  - Secp256r1Point:  5 outputs
+    ///  - Secp256r1Base:   2 outputs
+    ///  - Secp256r1Scalar: 2 outputs
+    ///
+    ///  - Curve25519Point:  4 outputs
+    ///  - Curve25519Base:   2 outputs
+    ///  - Curve25519Scalar: 2 outputs
     Encode {
         /// The value to encode
         input: Operand,
@@ -398,6 +407,9 @@ pub enum Instruction {
     ///  - Secp256r1Point
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// Outputs one element, identical to `a` or `b`
     CondSelect {
@@ -429,6 +441,9 @@ pub enum Instruction {
     ///  - Secp256r1Point
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// No outputs
     ConstrainEq {
@@ -476,6 +491,7 @@ pub enum Instruction {
     ///  - `JubjubPoint x JubjubScalar`
     ///  - `Secp256k1Point x Secp256k1Scalar`
     ///  - `Secp256r1Point x Secp256r1Scalar`
+    ///  - `Curve25519Point x Curve25519Scalar`
     ///
     /// This operation will result in an error if the input types are not
     /// supported.
@@ -519,6 +535,7 @@ pub enum Instruction {
     /// * JubjubPoint
     /// * Secp256k1Point
     /// * Secp256r1Point
+    /// * Curve25519Point
     ///
     /// Outputs 2 elements, the coordinates (x, y)
     IntoCoordinates {
@@ -535,6 +552,7 @@ pub enum Instruction {
     /// * (Native, Native):               producing a JubjubPoint
     /// * (Secp256k1Base, Secp256k1Base): producing a Secp256k1Point
     /// * (Secp256r1Base, Secp256r1Base): producing a Secp256r1Point
+    /// * (Curve25519Base, Curve25519Base): producing a Curve25519Point
     ///
     /// Outputs 1 element, the point
     FromCoordinates {
@@ -551,6 +569,8 @@ pub enum Instruction {
     /// * Secp256k1Scalar
     /// * Secp256r1Base
     /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
     ///
     /// In all the above prime fields, the 32-byte representation is the little-endian
     /// byte encoding of the underlying (canonical) integer.
@@ -568,6 +588,8 @@ pub enum Instruction {
     /// * Secp256k1Scalar
     /// * Secp256r1Base
     /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
     ///
     /// In all the above prime fields, the 32-byte representation is the little-endian
     /// byte encoding of the underlying (canonical) integer.
@@ -714,6 +736,9 @@ pub enum Instruction {
     ///  - Secp256r1Point
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One boolean output, `a == b`
     TestEq {
@@ -734,6 +759,9 @@ pub enum Instruction {
     ///  - Secp256r1Point
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `a + b`
     Add {
@@ -751,6 +779,8 @@ pub enum Instruction {
     ///  - Secp256k1Scalar
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `a * b`
     Mul {
@@ -771,6 +801,9 @@ pub enum Instruction {
     ///  - Secp256r1Point
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `-a`
     Neg {
@@ -786,6 +819,8 @@ pub enum Instruction {
     ///  - Secp256k1Scalar
     ///  - Secp256r1Base
     ///  - Secp256r1Scalar
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `a^(-1)`
     Inv {
