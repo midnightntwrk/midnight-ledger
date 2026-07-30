@@ -812,7 +812,7 @@ where
                 // Verify phase: collect all proof evidence (contract + dust) then batch-verify.
                 if strictness.verify_contract_proofs || strictness.verify_native_proofs {
                     let evidence = stx.collect_proof_evidence(ref_state)?;
-                    P::batch_proof_verify(&evidence, strictness.proof_verification_mode)?;
+                    P::batch_proof_verify(&evidence, strictness.proof_verification_mode, false)?;
                 }
 
                 debug!("transaction well-formed");
@@ -2778,6 +2778,7 @@ mod tests {
         <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &[],
             ProofVerificationMode::Real,
+            true,
         )
         .expect("no-op batch verify should always succeed");
     }
@@ -2900,6 +2901,7 @@ mod tests {
         <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &all_evidence,
             strictness.proof_verification_mode,
+            true,
         )
         .expect("batch_proof_verify across multiple transactions should succeed");
 
@@ -3058,6 +3060,7 @@ mod tests {
         <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &all_evidence,
             strictness.proof_verification_mode,
+            true,
         )
         .expect("batch verify across transactions with dust_actions should succeed");
 
@@ -3177,6 +3180,7 @@ mod tests {
         <ProofPreimageMarker as ProofKind<InMemoryDB>>::batch_proof_verify(
             &all_evidence,
             strictness.proof_verification_mode,
+            true,
         )
         .expect("batch verify with zswap coins should succeed");
 

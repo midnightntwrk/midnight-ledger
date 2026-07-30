@@ -444,6 +444,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     fn batch_proof_verify(
         evidence: &[Self::ProofEvidence],
         mode: ProofVerificationMode,
+        linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
@@ -667,6 +668,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn batch_proof_verify(
         _evidence: &[ContractProofEvidence],
         _mode: ProofVerificationMode,
+        _linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
@@ -674,6 +676,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn batch_proof_verify(
         evidence: &[ContractProofEvidence],
         mode: ProofVerificationMode,
+        linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
@@ -713,7 +716,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 transient_crypto::proofs::VerifierKey::batch_verify_with_failures(
                     &PARAMS_VERIFIER,
                     v3,
-                    true,
+                    linear_revalidation,
                 )
                 .map_err(|e| match e {
                     transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
@@ -799,6 +802,7 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     fn batch_proof_verify(
         _: &[()],
         _: ProofVerificationMode,
+        _: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
@@ -863,6 +867,7 @@ impl<D: DB> ProofKind<D> for () {
     fn batch_proof_verify(
         _: &[()],
         _: ProofVerificationMode,
+        _: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
