@@ -18,7 +18,7 @@ mod common;
 mod proof_tests {
     use super::common::{TestParams, TestResolver};
     use group::{Group, ff::Field};
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use midnight_zkir_v3::{
         Identifier, IrSource, Preprocessed, ir_instructions::encode::encode_offcircuit,
         ir_types::IrValue,
@@ -1979,6 +1979,414 @@ mod proof_tests {
         assert!(
             result.is_err(),
             "constrain_eq on different Secp256r1 points should fail"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_curve25519_proof() {
+        // Single circuit exercising all three Curve25519 types.
+        // Base, Scalar and Point values are typed inputs; arithmetic results
+        // are checked via private inputs.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%id", "type": "Point<Curve25519>"  },
+              { "name": "%p0", "type": "Point<Curve25519>"  },
+              { "name": "%p1", "type": "Point<Curve25519>"  },
+              { "name": "%b0", "type": "Base<Curve25519>"   },
+              { "name": "%b1", "type": "Base<Curve25519>"   },
+              { "name": "%s0", "type": "Scalar<Curve25519>" },
+              { "name": "%s1", "type": "Scalar<Curve25519>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "add", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "add", "a": "%b0", "b": "%b1", "output": "%b2" },
+               { "op": "add", "a": "%s0", "b": "%s1", "output": "%s2" },
+               { "op": "mul", "a": "%b0", "b": "%b1", "output": "%b_prod" },
+               { "op": "mul", "a": "%s0", "b": "%s1", "output": "%s_prod" },
+               { "op": "neg", "a": "%p0", "output": "%p0_neg" },
+               { "op": "neg", "a": "%b0", "output": "%b0_neg" },
+               { "op": "neg", "a": "%s0", "output": "%s0_neg" },
+               { "op": "inv", "a": "%b0", "output": "%b0_inv" },
+               { "op": "inv", "a": "%s0", "output": "%s0_inv" },
+               { "op": "private_input", "type": "Point<Curve25519>",  "guard": null, "output": "%p2_priv"     },
+               { "op": "private_input", "type": "Base<Curve25519>",   "guard": null, "output": "%b_prod_priv" },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%s_prod_priv" },
+               { "op": "private_input", "type": "Point<Curve25519>",  "guard": null, "output": "%p0_neg_priv" },
+               { "op": "private_input", "type": "Base<Curve25519>",   "guard": null, "output": "%b0_neg_priv" },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%s0_neg_priv" },
+               { "op": "private_input", "type": "Base<Curve25519>",   "guard": null, "output": "%b0_inv_priv" },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%s0_inv_priv" },
+               { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
+               { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
+               { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" },
+               { "op": "constrain_eq", "a": "%b0_neg", "b": "%b0_neg_priv" },
+               { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
+               { "op": "assert",       "cond": "%sp_eq" },
+               { "op": "test_eq",      "a": "%s0_neg", "b": "%s0_neg_priv", "output": "%sn_eq" },
+               { "op": "assert",       "cond": "%sn_eq" },
+               { "op": "constrain_eq", "a": "%b0_inv", "b": "%b0_inv_priv" },
+               { "op": "test_eq",      "a": "%s0_inv", "b": "%s0_inv_priv", "output": "%si_eq" },
+               { "op": "assert",       "cond": "%si_eq" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let id = curve25519::Curve25519Subgroup::identity();
+        let p0 = curve25519::Curve25519Subgroup::random(OsRng);
+        let p1 = curve25519::Curve25519Subgroup::random(OsRng);
+        let b0 = curve25519::Fp::random(OsRng);
+        let b1 = curve25519::Fp::random(OsRng);
+        let s0 = <curve25519::Scalar as Field>::random(OsRng);
+        let s1 = <curve25519::Scalar as Field>::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Curve25519Point(id)),
+            encode(IrValue::Curve25519Point(p0)),
+            encode(IrValue::Curve25519Point(p1)),
+            encode(IrValue::Curve25519Base(b0)),
+            encode(IrValue::Curve25519Base(b1)),
+            encode(IrValue::Curve25519Scalar(s0)),
+            encode(IrValue::Curve25519Scalar(s1)),
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Curve25519Point(p0 + p1)),
+            encode(IrValue::Curve25519Base(b0 * b1)),
+            encode(IrValue::Curve25519Scalar(s0 * s1)),
+            encode(IrValue::Curve25519Point(-p0)),
+            encode(IrValue::Curve25519Base(-b0)),
+            encode(IrValue::Curve25519Scalar(-s0)),
+            encode(IrValue::Curve25519Base(Option::from(b0.invert()).unwrap())),
+            encode(IrValue::Curve25519Scalar(Field::invert(&s0).unwrap())),
+        ]
+        .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_curve25519_ec_mul_proof() {
+        // Proves p0 * s0 via in-circuit ec_mul on Point<Curve25519>; the
+        // result is checked against a private input carrying the off-circuit
+        // product.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Curve25519>"  },
+              { "name": "%s0", "type": "Scalar<Curve25519>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
+               { "op": "private_input", "type": "Point<Curve25519>", "guard": null, "output": "%p1_priv" },
+               { "op": "constrain_eq", "a": "%p1", "b": "%p1_priv" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let p0 = curve25519::Curve25519Subgroup::random(OsRng);
+        let s0 = <curve25519::Scalar as Field>::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Curve25519Point(p0)),
+            encode(IrValue::Curve25519Scalar(s0)),
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            encode(IrValue::Curve25519Point(p0 * s0));
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_curve25519_coordinates_proof() {
+        // Curve25519 counterpart of test_coordinates_proof: extracts affine
+        // coordinates of a Point<Curve25519>, checks them against private
+        // inputs carrying the expected values, then reconstructs the point
+        // from the extracted coordinates and compares it to the original.
+        use midnight_zkir_v3::ir_instructions::into_coordinates::into_coordinates_offcircuit;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%pp", "type": "Point<Curve25519>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_coordinates", "point": "%pp", "outputs": ["%px", "%py"] },
+               { "op": "private_input", "type": "Base<Curve25519>", "guard": null, "output": "%px_exp" },
+               { "op": "private_input", "type": "Base<Curve25519>", "guard": null, "output": "%py_exp" },
+               { "op": "constrain_eq", "a": "%px", "b": "%px_exp" },
+               { "op": "constrain_eq", "a": "%py", "b": "%py_exp" },
+               { "op": "from_coordinates", "inputs": ["%px", "%py"], "output": "%pp_reconstructed" },
+               { "op": "constrain_eq", "a": "%pp_reconstructed", "b": "%pp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let pp = curve25519::Curve25519Subgroup::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Curve25519Point(pp));
+
+        let (px, py) = into_coordinates_offcircuit(&IrValue::Curve25519Point(pp)).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(px), encode(py)].concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_curve25519_bytes32_proof() {
+        // Curve25519 counterpart of test_bytes32_proof, exercising
+        // into_bytes32 / from_bytes32 on Curve25519Base and Curve25519Scalar:
+        //   1. Round-trips a typed value through into_bytes32 then
+        //      from_bytes32 and checks it matches the original.
+        //   2. Converts a fixed, non-canonical 32-byte string (all 0xff,
+        //      which exceeds both fields' moduli) via from_bytes32 and checks
+        //      the in-circuit result against the off-circuit reference
+        //      implementation, exercising the modular-reduction behavior
+        //      documented on the instruction.
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%c25519_base",   "type": "Base<Curve25519>"   },
+              { "name": "%c25519_scalar", "type": "Scalar<Curve25519>" },
+              { "name": "%raw",           "type": "Bytes<32>"          }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_bytes32", "input": "%c25519_base",   "output": "%base_bytes"   },
+               { "op": "into_bytes32", "input": "%c25519_scalar", "output": "%scalar_bytes" },
+
+               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<Curve25519>",   "output": "%base_back"   },
+               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<Curve25519>", "output": "%scalar_back" },
+
+               { "op": "constrain_eq", "a": "%base_back",   "b": "%c25519_base"   },
+               { "op": "constrain_eq", "a": "%scalar_back", "b": "%c25519_scalar" },
+
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<Curve25519>",   "output": "%raw_base"   },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<Curve25519>", "output": "%raw_scalar" },
+
+               { "op": "private_input", "type": "Base<Curve25519>",   "guard": null, "output": "%raw_base_exp"   },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%raw_scalar_exp" },
+
+               { "op": "constrain_eq", "a": "%raw_base",   "b": "%raw_base_exp"   },
+               { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let base_val = curve25519::Fp::random(OsRng);
+        let scalar_val = <curve25519::Scalar as Field>::random(OsRng);
+        let raw_bytes = [0xffu8; 32];
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Curve25519Base(base_val)),
+            encode(IrValue::Curve25519Scalar(scalar_val)),
+            encode(IrValue::Bytes32(raw_bytes)),
+        ]
+        .concat();
+
+        let raw_base_exp = from_bytes32_offcircuit(&IrType::Curve25519Base, &raw_bytes).unwrap();
+        let raw_scalar_exp =
+            from_bytes32_offcircuit(&IrType::Curve25519Scalar, &raw_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(raw_base_exp), encode(raw_scalar_exp)].concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_curve25519_point_constrain_eq_fails_on_unequal() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Curve25519>" },
+              { "name": "%p1", "type": "Point<Curve25519>" }
+           ],
+           "outputs": [
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_eq", "a": "%p0", "b": "%p1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // Different points: constrain_eq should fail
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let q = curve25519::Curve25519Subgroup::random(OsRng);
+        assert_ne!(p, q);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let preimage_fail = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: [
+                encode(IrValue::Curve25519Point(p)),
+                encode(IrValue::Curve25519Point(q)),
+            ]
+            .concat(),
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage_fail
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "constrain_eq on different Curve25519 points should fail"
         );
     }
 }

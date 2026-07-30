@@ -29,6 +29,8 @@ use crate::{
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -57,6 +59,16 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
             .ok_or_else(zero_err)
             .map(Secp256r1Scalar),
 
+        Curve25519Base(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(Curve25519Base),
+
+        // Nb. dalek's inherent `Scalar::invert` (which is not a `CtOption`)
+        // would shadow `Field::invert` here, hence the qualified call.
+        Curve25519Scalar(s) => Option::from(Field::invert(s))
+            .ok_or_else(zero_err)
+            .map(Curve25519Scalar),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported inversion of {:?}",
             x.get_type(),
@@ -71,6 +83,8 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Secp256k1Scalar`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -105,6 +119,15 @@ pub fn inv_incircuit(
             Ok(Secp256r1Scalar(r))
         }
 
+        Curve25519Base(a) => {
+            let r = (std_lib.curve25519().base_field_chip()).inv(layouter, a)?;
+            Ok(Curve25519Base(r))
+        }
+        Curve25519Scalar(a) => {
+            let r = (std_lib.curve25519().scalar_field_chip()).inv(layouter, a)?;
+            Ok(Curve25519Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported inversion of {:?}",
             x.get_type(),
@@ -115,7 +138,7 @@ pub fn inv_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::{k256, p256};
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -153,6 +176,18 @@ mod tests {
         assert_eq!(
             inv_offcircuit(&Secp256r1Scalar(x)).unwrap(),
             Secp256r1Scalar(x.invert().unwrap())
+        );
+
+        let x = curve25519::Fp::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Curve25519Base(x)).unwrap(),
+            Curve25519Base(x.invert().unwrap())
+        );
+
+        let x = <curve25519::Scalar as Field>::random(OsRng);
+        assert_eq!(
+            inv_offcircuit(&Curve25519Scalar(x)).unwrap(),
+            Curve25519Scalar(Field::invert(&x).unwrap())
         );
     }
 }

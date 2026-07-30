@@ -33,6 +33,9 @@ use crate::{
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -51,6 +54,10 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
         Secp256r1Base(s) => Ok(Secp256r1Base(-*s)),
         Secp256r1Scalar(s) => Ok(Secp256r1Scalar(-*s)),
 
+        Curve25519Point(p) => Ok(Curve25519Point(-p)),
+        Curve25519Base(s) => Ok(Curve25519Base(-*s)),
+        Curve25519Scalar(s) => Ok(Curve25519Scalar(-*s)),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported negation of {:?}",
             x.get_type(),
@@ -68,6 +75,9 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 ///   - `Secp256r1Point`
 ///   - `Secp256r1Base`
 ///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -114,6 +124,19 @@ pub fn neg_incircuit(
             Ok(Secp256r1Scalar(r))
         }
 
+        Curve25519Point(p) => {
+            let r = std_lib.curve25519().negate(layouter, p)?;
+            Ok(Curve25519Point(r))
+        }
+        Curve25519Base(a) => {
+            let r = (std_lib.curve25519().base_field_chip()).neg(layouter, a)?;
+            Ok(Curve25519Base(r))
+        }
+        Curve25519Scalar(a) => {
+            let r = (std_lib.curve25519().scalar_field_chip()).neg(layouter, a)?;
+            Ok(Curve25519Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported negation of {:?}",
             x.get_type(),
@@ -134,7 +157,7 @@ impl Neg for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256, p256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -163,5 +186,12 @@ mod tests {
         assert_eq!(-Secp256r1Point(p), Secp256r1Point(-p));
         assert_eq!(-Secp256r1Base(x), Secp256r1Base(-x));
         assert_eq!(-Secp256r1Scalar(r), Secp256r1Scalar(-r));
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let x = curve25519::Fp::random(OsRng);
+        let r = <curve25519::Scalar as Field>::random(OsRng);
+        assert_eq!(-Curve25519Point(p), Curve25519Point(-p));
+        assert_eq!(-Curve25519Base(x), Curve25519Base(-x));
+        assert_eq!(-Curve25519Scalar(r), Curve25519Scalar(-r));
     }
 }
