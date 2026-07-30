@@ -34,6 +34,8 @@ use crate::{
 ///  - Secp256k1Scalar
 ///  - Secp256r1Base
 ///  - Secp256r1Scalar
+///  - Curve25519Base
+///  - Curve25519Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -61,6 +63,10 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 
         IrType::Secp256r1Scalar => Ok(Secp256r1Scalar(from_le_bytes_with_reduction(bytes))),
 
+        IrType::Curve25519Base => Ok(Curve25519Base(from_le_bytes_with_reduction(bytes))),
+
+        IrType::Curve25519Scalar => Ok(Curve25519Scalar(from_le_bytes_with_reduction(bytes))),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported from_bytes32 for type {val_t:?}",
         )),
@@ -74,6 +80,8 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
 ///  - Secp256k1Scalar
 ///  - Secp256r1Base
 ///  - Secp256r1Scalar
+///  - Curve25519Base
+///  - Curve25519Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -118,6 +126,18 @@ pub fn from_bytes32_incircuit(
             .assigned_from_le_bytes(layouter, bytes)
             .map(Secp256r1Scalar),
 
+        IrType::Curve25519Base => std_lib
+            .curve25519()
+            .base_field_chip()
+            .assigned_from_le_bytes(layouter, bytes)
+            .map(Curve25519Base),
+
+        IrType::Curve25519Scalar => std_lib
+            .curve25519()
+            .scalar_field_chip()
+            .assigned_from_le_bytes(layouter, bytes)
+            .map(Curve25519Scalar),
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported from_bytes32 for {val_t:?}",
         ))),
@@ -136,7 +156,7 @@ pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8; 32]) ->
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::{k256, p256};
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -180,6 +200,18 @@ mod tests {
         let y = from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
+
+        let x = Curve25519Base(curve25519::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Curve25519Base, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+
+        let x = Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
     }
 
     // Non-canonical (out-of-range) bytes are accepted and reduced modulo
@@ -207,6 +239,14 @@ mod tests {
         assert_eq!(
             from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap(),
             IrValue::Secp256r1Scalar(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Curve25519Base, &bytes).unwrap(),
+            IrValue::Curve25519Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap(),
+            IrValue::Curve25519Scalar(from_le_bytes_with_reduction(&bytes))
         );
     }
 }
