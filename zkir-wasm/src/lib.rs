@@ -218,7 +218,7 @@ pub async fn prove(
         .ok_or_else(|| {
             JsError::new(&format!(
                 "failed to resolve key location: {}",
-                &preimage.key_location.0
+                preimage.key_location.0
             ))
         })?
         .verifier_key;
@@ -273,7 +273,7 @@ pub async fn check(ser_preimage: Uint8Array, provider: JsValue) -> Result<Vec<Js
         _ => {
             return Err(JsError::new(&format!(
                 "unsupported ZKIR minor version: {:?}",
-                &ir.version
+                ir.version
             )));
         }
     };

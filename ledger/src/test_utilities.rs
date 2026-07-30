@@ -758,7 +758,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not resolve key location: {}",
-                    &preimage.key_location.0
+                    preimage.key_location.0
                 )
             })?;
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
@@ -784,7 +784,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "could not resolve key location: {}",
-                    &preimage.key_location.0
+                    preimage.key_location.0
                 )
             })?;
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
