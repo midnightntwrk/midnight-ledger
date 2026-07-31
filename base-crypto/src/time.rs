@@ -157,7 +157,7 @@ impl Duration {
 
     /// Gets the `Duration` from a number of hours
     pub const fn from_hours(h: i128) -> Self {
-        Duration::from_secs(h * 60 * 60)
+        Duration::from_secs(h.saturating_mul(3600))
     }
 
     /// Returns the duration's raw value in seconds.

@@ -129,25 +129,33 @@ impl<K: Deserializable + PartialOrd + Hash + Eq, V: Deserializable> Deserializab
     fn deserialize(reader: &mut impl Read, mut recursion_depth: u32) -> std::io::Result<Self> {
         Self::check_rec(&mut recursion_depth)?;
         let len = <u32 as Deserializable>::deserialize(reader, recursion_depth)?;
-        let mut result = HashMap::new();
+        let mut result = Vec::with_bounded_capacity(len as usize);
         for _ in 0..len {
             let k = <K as Deserializable>::deserialize(reader, recursion_depth)?;
             let v = <V as Deserializable>::deserialize(reader, recursion_depth)?;
-            result.insert(k, v);
+            result.push((k, v));
         }
-        Ok(result)
+        if result.iter().is_sorted_by_key(|(k, _)| k) && result.windows(2).all(|window| window[0].0 != window[1].0) {
+            Ok(result.into_iter().collect())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "HashMap not normalized (not sorted or duplicate keys)"))
+        }
     }
 }
 
-impl<T: Deserializable + Hash + Eq> Deserializable for HashSet<T> {
+impl<T: Deserializable + PartialOrd + Hash + Eq> Deserializable for HashSet<T> {
     fn deserialize(reader: &mut impl Read, mut recursion_depth: u32) -> std::io::Result<Self> {
         Self::check_rec(&mut recursion_depth)?;
         let len = <u32 as Deserializable>::deserialize(reader, recursion_depth)?;
-        let mut result = HashSet::new();
+        let mut result = Vec::with_bounded_capacity(len as usize);
         for _ in 0..len {
-            result.insert(<T as Deserializable>::deserialize(reader, recursion_depth)?);
+            result.push(<T as Deserializable>::deserialize(reader, recursion_depth)?);
         }
-        Ok(result)
+        if result.iter().is_sorted() && result.windows(2).all(|window| window[0] != window[1]) {
+            Ok(result.into_iter().collect())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "HashSet not normalized (not sorted or duplicate entries)"))
+        }
     }
 }
 
@@ -194,7 +202,8 @@ impl<T: ?Sized> Deserializable for PhantomData<T> {
 }
 
 impl<T: Deserializable> Deserializable for Box<T> {
-    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<Self> {
+    fn deserialize(reader: &mut impl Read, mut recursion_depth: u32) -> std::io::Result<Self> {
+        Self::check_rec(&mut recursion_depth)?;
         T::deserialize(reader, recursion_depth).map(Box::new)
     }
 }
