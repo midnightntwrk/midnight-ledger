@@ -25,7 +25,12 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
+use midnight_circuits::types::Instantiable;
+use midnight_circuits::verifier::{
+    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, SelfEmulation,
+};
 use midnight_zk_stdlib::{MidnightVK, Relation};
+use std::collections::BTreeMap;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -359,6 +364,61 @@ impl<T: Zkir> Deserializable for ProverKey<T> {
     }
 }
 
+/// Self-emulation used for in-circuit BLS12-381 proof verification, and for
+/// reconstructing/finalizing the accumulators such proofs leave in the public
+/// inputs.
+pub type S = BlstrsEmulation;
+
+/// Number of public-input field elements occupied by one fully-collapsed,
+/// single-point-per-side accumulator (as produced by the ZKIR `verify_proof`
+/// instruction).
+fn accumulator_pi_len() -> usize {
+    <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(
+        &Accumulator::<S>::trivial(&[]),
+    )
+    .len()
+}
+
+/// Reconstructs a single-point-per-side accumulator from its public-input
+/// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`). 
+fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<S>> {
+    if fields.len() % 2 != 0 || fields.len() < 4 {
+        return None;
+    }
+    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<S>> {
+        let (point_fields, scalar) = side.split_at(side.len() - 1);
+        let base = <<S as SelfEmulation>::AssignedPoint as Instantiable<outer::Scalar>>::from_public_input(
+            point_fields,
+        )?;
+        Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
+    };
+    let half = fields.len() / 2;
+    let lhs = reconstruct_side(&fields[..half])?;
+    let rhs = reconstruct_side(&fields[half..])?;
+    Some(Accumulator::new(lhs, rhs))
+}
+
+/// Reconstructs the deferred accumulators of a verified proof from its public
+/// inputs: for each recorded public-input offset, rebuild the single-point
+/// accumulator.
+fn extract_accumulators(
+    offsets: &[usize],
+    pi: &[outer::Scalar],
+) -> Result<Vec<Accumulator<S>>, VerifyingError> {
+    let mut accumulators = Vec::new();
+    let acc_len = accumulator_pi_len();
+    for &offset in offsets {
+        let fields = pi
+            .get(offset..offset + acc_len)
+            .ok_or_else(|| anyhow::anyhow!("accumulator offset out of range"))?;
+        let acc = reconstruct_accumulator(fields)
+            .ok_or_else(|| anyhow::anyhow!("malformed accumulator in public inputs"))?;
+        accumulators.push(acc);
+    }
+
+    Ok(accumulators)
+}
+
 /// A verifier key, used for checking proofs.
 #[derive(Debug, Storable)]
 #[storable(base)]
@@ -388,10 +448,41 @@ impl Distribution<VerifierKey> for Standard {
 
 impl From<MidnightVK> for VerifierKey {
     fn from(vk: MidnightVK) -> Self {
+        Self::from_vk_with_accumulator_offsets(vk, &[])
+    }
+}
+
+impl VerifierKey {
+    /// Builds a verifying key that additionally records the public-input
+    /// offsets of the inner-proof accumulators exposed by the circuit's
+    /// `verify_proof` instructions.
+    pub fn from_vk_with_accumulator_offsets(vk: MidnightVK, offsets: &[usize]) -> Self {
         let mut raw = Vec::new();
         vk.write(&mut raw, SerdeFormat::Processed)
             .expect("in-memory serialize");
-        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))))
+        
+        raw.extend_from_slice(&(offsets.len() as u32).to_le_bytes());
+        for &offset in offsets {
+            raw.extend_from_slice(&(offset as u32).to_le_bytes());
+        }
+
+        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized {
+            vk,
+            accumulator_offsets: offsets.to_vec(),
+            raw,
+        })))
+    }
+
+    /// The public-input offsets at which inner-proof accumulators are exposed.
+    fn accumulator_offsets(&self) -> Result<Vec<usize>, VerifyingError> {
+        self.force_init()?;
+        match &*self.0.lock().expect("mutex is not poisoned") {
+            InnerVerifierKey::Initialized {
+                accumulator_offsets,
+                ..
+            } => Ok(accumulator_offsets.clone()),
+            _ => Err(anyhow::anyhow!("verifier key not initialized after force_init")),
+        }
     }
 }
 
@@ -401,8 +492,13 @@ impl From<MidnightVK> for VerifierKey {
 pub(crate) enum InnerVerifierKey {
     Uninitialized(Vec<u8>),
     Invalid(Vec<u8>),
-    /// Initialized VK with the original raw bytes preserved.
-    Initialized(MidnightVK, Vec<u8>),
+    /// Initialized VK, the inner-proof accumulator offsets, 
+    /// and the original raw bytes preserved.
+    Initialized {
+        vk: MidnightVK,
+        accumulator_offsets: Vec<usize>,
+        raw: Vec<u8>,
+    },
 }
 
 impl Clone for VerifierKey {
@@ -518,8 +614,8 @@ impl VerifierKey {
     pub(crate) fn force_init(&self) -> Result<MidnightVK, VerifyingError> {
         let mut mutex = self.0.lock().expect("mutex is not poisoned");
         let data = match &*mutex {
-            InnerVerifierKey::Initialized(key, _) => {
-                return Ok(key.clone());
+            InnerVerifierKey::Initialized { vk, .. } => {
+                return Ok(vk.clone());
             }
             InnerVerifierKey::Invalid(_) => {
                 return Err(anyhow::anyhow!("known invalid verifier key"));
@@ -529,7 +625,25 @@ impl VerifierKey {
         let reader = &mut &data[..];
         let vk = MidnightVK::read(reader, SerdeFormat::Processed)
             .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
-        *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
+        
+        let mut count_buf = [0u8; 4];
+        reader.read_exact(&mut count_buf)
+            .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
+        let count = u32::from_le_bytes(count_buf) as usize;
+        
+        let mut offsets = Vec::with_capacity(count);
+        for _ in 0..count {
+            let mut buf = [0u8; 4];
+            reader.read_exact(&mut buf)
+                .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
+            offsets.push(u32::from_le_bytes(buf) as usize);
+        }
+
+        *mutex = InnerVerifierKey::Initialized {
+            vk: vk.clone(),
+            accumulator_offsets: offsets,
+            raw: data,
+        };
         Ok(vk)
     }
 
@@ -538,7 +652,18 @@ impl VerifierKey {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
                 writer.write_all(data)
             }
-            InnerVerifierKey::Initialized(key, _) => key.write(&mut writer, SerdeFormat::Processed),
+            InnerVerifierKey::Initialized {
+                vk,
+                accumulator_offsets,
+                ..
+            } => {
+                vk.write(&mut writer, SerdeFormat::Processed)?;
+                writer.write_all(&(accumulator_offsets.len() as u32).to_le_bytes())?;
+                for &offset in accumulator_offsets {
+                    writer.write_all(&(offset as u32).to_le_bytes())?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -546,7 +671,7 @@ impl VerifierKey {
     pub fn original_bytes(&self) -> Vec<u8> {
         match &*self.0.lock().expect("mutex is not poisoned") {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => data.clone(),
-            InnerVerifierKey::Initialized(_, original) => original.clone(),
+            InnerVerifierKey::Initialized { raw, .. } => raw.clone(),
         }
     }
 
@@ -563,7 +688,16 @@ impl VerifierKey {
         midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash>(
             &params.0, &vk, &pi, None, &proof.0,
         )
-        .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        .map_err(|_| anyhow::anyhow!("Invalid outer proof"))?;
+    
+        let accumulators = extract_accumulators(&self.accumulator_offsets()?, &pi)?;
+        for acc in accumulators {
+            if !acc.check(&params.0, &BTreeMap::new()) {
+                return Err(anyhow::anyhow!("inner-proof accumulator failed pairing check"));
+            }
+        }
+
+        Ok(())
     }
 
     /// Mocks the checking of a proof against a statement
@@ -590,9 +724,11 @@ impl VerifierKey {
         let mut vks = vec![];
         let mut pis = vec![];
         let mut proofs = vec![];
+        let mut offsets = vec![];
 
         for (vk, proof, stmt) in parts.into_iter() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
+            offsets.push(vk.accumulator_offsets()?);
             let vk = vk.force_init()?;
             vks.push(vk);
             pis.push(pi);
@@ -600,7 +736,18 @@ impl VerifierKey {
         }
 
         batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+            .map_err(|_| anyhow::anyhow!("Invalid proof"))?;
+
+        // Check the accumulators.
+        for (offsets, pi) in offsets.iter().zip(pis.iter()) {
+            let accumulators = extract_accumulators(offsets, pi)?;
+            for acc in accumulators {
+                if !acc.check(&params.0, &BTreeMap::new()) {
+                    return Err(anyhow::anyhow!("inner-proof accumulator failed pairing check"));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Mocks the checking of a sequence of proofs against a statement
