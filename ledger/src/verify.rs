@@ -1975,8 +1975,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn sparse_signature_offer_rejected_by_well_formed() {
         let mut rng = OsRng;
-        let signer = SigningKey::sample(&mut rng);
-        let victim = SigningKey::sample(&mut rng);
+        let signer = SigningKey::sample(rng);
+        let victim = SigningKey::sample(rng);
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
@@ -2032,8 +2032,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn malformed_sparse_signature_array_rejected_on_deserialize() {
         let mut rng = OsRng;
-        let signer = SigningKey::sample(&mut rng);
-        let victim = SigningKey::sample(&mut rng);
+        let signer = SigningKey::sample(rng);
+        let victim = SigningKey::sample(rng);
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
@@ -2086,8 +2086,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn dense_signature_array_round_trips_and_validates() {
         let mut rng = OsRng;
-        let signer_0 = SigningKey::sample(&mut rng);
-        let signer_1 = SigningKey::sample(&mut rng);
+        let signer_0 = SigningKey::sample(rng);
+        let signer_1 = SigningKey::sample(rng);
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
