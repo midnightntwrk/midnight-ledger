@@ -29,6 +29,12 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -43,6 +49,14 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
         (Secp256k1Point(p), Secp256k1Point(q)) => Ok(p == q),
         (Secp256k1Base(s), Secp256k1Base(r)) => Ok(s == r),
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(s == r),
+
+        (Secp256r1Point(p), Secp256r1Point(q)) => Ok(p == q),
+        (Secp256r1Base(s), Secp256r1Base(r)) => Ok(s == r),
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(s == r),
+
+        (Curve25519Point(p), Curve25519Point(q)) => Ok(p == q),
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(s == r),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(s == r),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
@@ -59,6 +73,12 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -89,6 +109,22 @@ pub fn test_eq_incircuit(
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => {
             (std_lib.secp256k1().scalar_field_chip()).is_equal(layouter, s, r)
         }
+
+        (Secp256r1Point(p), Secp256r1Point(q)) => std_lib.p256().is_equal(layouter, p, q),
+        (Secp256r1Base(s), Secp256r1Base(r)) => {
+            (std_lib.p256().base_field_chip()).is_equal(layouter, s, r)
+        }
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => {
+            (std_lib.p256().scalar_field_chip()).is_equal(layouter, s, r)
+        }
+
+        (Curve25519Point(p), Curve25519Point(q)) => std_lib.curve25519().is_equal(layouter, p, q),
+        (Curve25519Base(s), Curve25519Base(r)) => {
+            (std_lib.curve25519().base_field_chip()).is_equal(layouter, s, r)
+        }
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => {
+            (std_lib.curve25519().scalar_field_chip()).is_equal(layouter, s, r)
+        }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
@@ -101,7 +137,7 @@ pub fn test_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
@@ -127,5 +163,21 @@ mod tests {
         assert!(test_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).unwrap());
         assert!(test_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).unwrap());
         assert!(test_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).unwrap());
+
+        let p = p256::P256::random(OsRng);
+        let s = p256::Fp::random(OsRng);
+        let r = p256::Fq::random(OsRng);
+        assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(p)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Base(s)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Scalar(r), &Secp256r1Scalar(r)).unwrap());
+        assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256k1Point(k256::K256::random(OsRng))).is_err());
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let s = curve25519::Fp::random(OsRng);
+        let r = <curve25519::Scalar as Field>::random(OsRng);
+        assert!(test_eq_offcircuit(&Curve25519Point(p), &Curve25519Point(p)).unwrap());
+        assert!(test_eq_offcircuit(&Curve25519Base(s), &Curve25519Base(s)).unwrap());
+        assert!(test_eq_offcircuit(&Curve25519Scalar(r), &Curve25519Scalar(r)).unwrap());
+        assert!(test_eq_offcircuit(&Curve25519Point(p), &JubjubPoint(JubjubSubgroup::random(OsRng))).is_err());
     }
 }
