@@ -1,8 +1,8 @@
-**@midnight/ledger v2.2.0-rc.3**
+**@midnight/ledger v2.2.0-rc.4**
 
 ***
 
-# @midnight/ledger v2.2.0-rc.3
+# @midnight/ledger v2.2.0-rc.4
 
 ## Classes
 
