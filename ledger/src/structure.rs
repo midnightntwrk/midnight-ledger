@@ -384,10 +384,39 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         + Storable<D>
         + Tagged
         + Into<Self::Proof>;
+    /// Unit of proof evidence collected during traversal for batch verification.
+    type ProofEvidence;
+    /// Wraps a freshly-produced "latest" proof into the versioned proof enum,
+    /// tagging it with the current proof-system version for this proof kind.
+    ///
+    /// The default preserves the legacy behaviour (`LatestProof: Into<Proof>`),
+    /// which resolves to `ProofVersioned::V2`. Proof kinds whose latest proof is
+    /// a newer version override this. This is the single seam that decides the
+    /// on-wire proof version for subsystems (e.g. Dust) that store a raw
+    /// `LatestProof` and only wrap it at verification time.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        proof.into()
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer>;
+    /// Checks zswap offer normalization and balance without verifying proofs.
+    ///
+    /// Use this in the traversal phase when proofs are deferred for batch verification.
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer>;
+    /// Collects zswap proof evidence for batch verification.
+    ///
+    /// Returns evidence for all inputs, outputs, and transients in the offer.
+    /// Pass the accumulated evidence to [`ProofKind::batch_proof_verify`] to verify.
+    #[allow(clippy::result_large_err)]
+    fn zswap_collect_proof_evidence(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Vec<Self::ProofEvidence>, MalformedOffer>;
     fn zswap_claim_well_formed(
         claim: &zswap::AuthorizedClaim<Self::LatestProof>,
     ) -> Result<(), MalformedOffer>;
@@ -398,6 +427,24 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         pis: Vec<Fr>,
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>>;
+    /// Extracts proof evidence from a contract call without verifying it.
+    ///
+    /// This is the collection phase of the inverted traverse → verify pipeline.
+    /// Call [`ProofKind::batch_proof_verify`] on the accumulated evidence to verify.
+    #[allow(clippy::result_large_err)]
+    fn collect_proof_evidence(
+        op: &ContractOperation,
+        proof: &Self::Proof,
+        pis: Vec<Fr>,
+        call: &ContractCall<Self, D>,
+    ) -> Result<Self::ProofEvidence, MalformedTransaction<D>>;
+    /// Batch-verifies a set of proof evidence collected via [`ProofKind::collect_proof_evidence`].
+    #[allow(clippy::result_large_err)]
+    fn batch_proof_verify(
+        evidence: &[Self::ProofEvidence],
+        mode: ProofVerificationMode,
+        linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
@@ -417,15 +464,68 @@ impl From<Proof> for ProofVersioned {
     }
 }
 
+/// Proof evidence for a single contract call, partitioned by proof version.
+///
+/// Collected during traversal and consumed by [`ProofKind::batch_proof_verify`].
+#[cfg(feature = "proof-verifying")]
+pub enum ContractProofEvidence {
+    V2 {
+        vk: transient_crypto_old::proofs::VerifierKey,
+        proof: transient_crypto_old::proofs::Proof,
+        pis: Vec<transient_crypto_old::curve::Fr>,
+    },
+    V3 {
+        vk: transient_crypto::proofs::VerifierKey,
+        proof: Proof,
+        pis: Vec<Fr>,
+    },
+}
+
+#[cfg(not(feature = "proof-verifying"))]
+pub struct ContractProofEvidence;
+
 impl<D: DB> ProofKind<D> for ProofMarker {
     type Pedersen = PureGeneratorPedersen;
     type Proof = ProofVersioned;
     type LatestProof = Proof;
+    type ProofEvidence = ContractProofEvidence;
+    /// For real (proven) transactions the latest proof system is V3 (zk-stdlib v2).
+    /// Overrides the trait default (which would tag proofs V2) so that subsystems
+    /// wrapping a raw `Proof` at verify time — notably Dust — land in the V3
+    /// verifier/batch path.
+    fn wrap_latest_proof(proof: Self::LatestProof) -> Self::Proof {
+        ProofVersioned::V3(proof)
+    }
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
+    }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed_structural(segment)
+    }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn zswap_collect_proof_evidence(
+        _offer: &zswap::Offer<Self::LatestProof, D>,
+        _segment: u16,
+    ) -> Result<Vec<ContractProofEvidence>, MalformedOffer> {
+        Ok(vec![])
+    }
+    #[cfg(feature = "proof-verifying")]
+    fn zswap_collect_proof_evidence(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Vec<ContractProofEvidence>, MalformedOffer> {
+        offer.collect_proof_evidence(segment).map(|bundles| {
+            bundles
+                .into_iter()
+                .map(|(vk, proof, pis)| ContractProofEvidence::V2 { vk, proof, pis })
+                .collect()
+        })
     }
     fn zswap_claim_well_formed(
         claim: &zswap::AuthorizedClaim<Self::LatestProof>,
@@ -506,6 +606,132 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         }
     }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn collect_proof_evidence(
+        _op: &ContractOperation,
+        _proof: &Self::Proof,
+        _pis: Vec<Fr>,
+        _call: &ContractCall<Self, D>,
+    ) -> Result<ContractProofEvidence, MalformedTransaction<D>> {
+        Ok(ContractProofEvidence)
+    }
+    #[cfg(feature = "proof-verifying")]
+    fn collect_proof_evidence(
+        op: &ContractOperation,
+        proof: &Self::Proof,
+        pis: Vec<Fr>,
+        call: &ContractCall<Self, D>,
+    ) -> Result<ContractProofEvidence, MalformedTransaction<D>> {
+        let inner_proof = match proof {
+            ProofVersioned::V2(p) | ProofVersioned::V3(p) => p,
+        };
+        match proof {
+            ProofVersioned::V2(_) => {
+                let vk = op.v2_vk().ok_or_else(|| {
+                    warn!("missing v1 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
+                let old_pis = pis
+                    .into_iter()
+                    .map(|f| {
+                        transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                            .expect("Fr round-trip")
+                    })
+                    .collect();
+                Ok(ContractProofEvidence::V2 {
+                    vk: vk.clone(),
+                    proof: old_proof,
+                    pis: old_pis,
+                })
+            }
+            ProofVersioned::V3(_) => {
+                let vk = op.v3_vk().ok_or_else(|| {
+                    warn!("missing v2 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                Ok(ContractProofEvidence::V3 {
+                    vk: vk.clone(),
+                    proof: inner_proof.clone(),
+                    pis,
+                })
+            }
+        }
+    }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn batch_proof_verify(
+        _evidence: &[ContractProofEvidence],
+        _mode: ProofVerificationMode,
+        _linear_revalidation: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    #[cfg(feature = "proof-verifying")]
+    fn batch_proof_verify(
+        evidence: &[ContractProofEvidence],
+        mode: ProofVerificationMode,
+        linear_revalidation: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
+        use transient_crypto::proofs::PARAMS_VERIFIER;
+
+        let v2 = evidence.iter().filter_map(|e| match e {
+            ContractProofEvidence::V2 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
+            _ => None,
+        });
+        let v3 = evidence.iter().filter_map(|e| match e {
+            ContractProofEvidence::V3 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
+            _ => None,
+        });
+
+        match mode {
+            #[cfg(feature = "mock-verify")]
+            ProofVerificationMode::CalibratedMock => {
+                transient_crypto_old::proofs::VerifierKey::mock_batch_verify(v2)
+                    .map_err(|e| anyhow::anyhow!("v1 mock batch verification: {e}"))
+                    .map_err(MalformedTransaction::<D>::InvalidProof)?;
+                transient_crypto::proofs::VerifierKey::mock_batch_verify(v3)
+                    .map_err(MalformedTransaction::<D>::InvalidProof)?;
+            }
+            _ => {
+                transient_crypto_old::proofs::VerifierKey::batch_verify(
+                    &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                    v2,
+                )
+                .map_err(|e| anyhow::anyhow!("v1 batch verification: {e}"))
+                .map_err(MalformedTransaction::<D>::InvalidProof)?;
+                // Positions of the V3 items within `evidence`, so failing batch
+                // indices (which are relative to the filtered V3 subsequence) can
+                // be reported relative to the full proof-evidence sequence.
+                let v3_positions: Vec<usize> = evidence
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, e)| matches!(e, ContractProofEvidence::V3 { .. }).then_some(i))
+                    .collect();
+                transient_crypto::proofs::VerifierKey::batch_verify_with_failures(
+                    &PARAMS_VERIFIER,
+                    v3,
+                    linear_revalidation,
+                )
+                .map_err(|e| match e {
+                    transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
+                        let failed_indices =
+                            batch_indices.into_iter().map(|i| v3_positions[i]).collect();
+                        MalformedTransaction::<D>::InvalidProofBatch { failed_indices }
+                    }
+                    transient_crypto::proofs::BatchVerifyError::Unlocalized(e) => {
+                        MalformedTransaction::<D>::InvalidProof(e)
+                    }
+                })?;
+            }
+        }
+        Ok(())
+    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -532,11 +758,24 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     type Pedersen = PedersenRandomness;
     type Proof = ProofPreimageVersioned;
     type LatestProof = ProofPreimage;
+    type ProofEvidence = ();
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
+    }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed(segment)
+    }
+    fn zswap_collect_proof_evidence(
+        _: &zswap::Offer<Self::LatestProof, D>,
+        _: u16,
+    ) -> Result<Vec<()>, MalformedOffer> {
+        Ok(vec![])
     }
     fn zswap_claim_well_formed(
         _: &zswap::AuthorizedClaim<Self::LatestProof>,
@@ -549,6 +788,21 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
         _: Vec<Fr>,
         _: &ContractCall<Self, D>,
         _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn collect_proof_evidence(
+        _: &ContractOperation,
+        _: &Self::Proof,
+        _: Vec<Fr>,
+        _: &ContractCall<Self, D>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn batch_proof_verify(
+        _: &[()],
+        _: ProofVerificationMode,
+        _: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
@@ -569,11 +823,24 @@ impl<D: DB> ProofKind<D> for () {
     type Pedersen = Pedersen;
     type Proof = ();
     type LatestProof = ();
+    type ProofEvidence = ();
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
         segment: u16,
     ) -> Result<Pedersen, MalformedOffer> {
         offer.well_formed(segment)
+    }
+    fn zswap_structural_check(
+        offer: &zswap::Offer<Self::LatestProof, D>,
+        segment: u16,
+    ) -> Result<Pedersen, MalformedOffer> {
+        offer.well_formed(segment)
+    }
+    fn zswap_collect_proof_evidence(
+        _: &zswap::Offer<Self::LatestProof, D>,
+        _: u16,
+    ) -> Result<Vec<()>, MalformedOffer> {
+        Ok(vec![])
     }
     fn zswap_claim_well_formed(
         _: &zswap::AuthorizedClaim<Self::LatestProof>,
@@ -586,6 +853,21 @@ impl<D: DB> ProofKind<D> for () {
         _: Vec<Fr>,
         _: &ContractCall<Self, D>,
         _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn collect_proof_evidence(
+        _: &ContractOperation,
+        _: &Self::Proof,
+        _: Vec<Fr>,
+        _: &ContractCall<Self, D>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn batch_proof_verify(
+        _: &[()],
+        _: ProofVerificationMode,
+        _: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }

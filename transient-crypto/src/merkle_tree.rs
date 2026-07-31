@@ -1193,7 +1193,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, ..)
     }
 
-    /// Acts as [`find_path_for_leaf`], but limits search to a specified range.
+    /// Acts as [`MerkleTree::find_path_for_leaf`], but limits search to a specified range.
     pub fn find_path_for_leaf_within_range<T: BinaryHashRepr>(
         &self,
         leaf: T,
@@ -1202,7 +1202,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, range)
     }
 
-    /// Acts as [`find_path_for_leaf_within_range`], but takes the leaf to be pre-hashed.
+    /// Acts as [`MerkleTree::find_path_for_leaf_within_range`], but takes the leaf to be pre-hashed.
     pub fn find_path_for_hashed_leaf_within_range(
         &self,
         leaf_hash: HashOutput,

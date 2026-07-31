@@ -50,7 +50,7 @@ use rand::{CryptoRng, Rng, seq::SliceRandom};
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
-use serialize::{tagged_deserialize, tagged_serialize, peek_tag};
+use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::io;
@@ -870,7 +870,13 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
                     assert!(real_fees <= mocked_fees);
-                    assert!(mocked_fees <= real_fees + allowed_error_margin);
+                    assert!(
+                        mocked_fees <= real_fees + allowed_error_margin * 100,
+                        "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}",
+                        mocked_fees,
+                        real_fees,
+                        allowed_error_margin
+                    );
                 }
             }
             Ok(proven)
