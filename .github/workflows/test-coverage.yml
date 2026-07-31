@@ -2,6 +2,7 @@ name: Ledger Test Coverage
 
 on:
   workflow_dispatch:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -29,10 +30,10 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@51f3067b56fe8ae331890c77d4e454f6d60615ff # v31.10.2
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -40,13 +41,14 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Cache Nix
-        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          endpoint: https://attic.ci.iog.io
-          cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -72,14 +74,14 @@ jobs:
           grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
 
       - name: Upload test report artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: success() || failure()
         with:
           name: Coverage Report
           path: target/coverage/html
 
       - name: Upload lcov test report artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: success() || failure()
         with:
           name: Lcov Coverage Report
