@@ -33,6 +33,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (8.2)
 
+## Ledger 9.1.0.0-rc.4
+
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
