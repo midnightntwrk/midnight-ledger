@@ -47,6 +47,10 @@ pub struct IrSource {
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
+    /// Full verifying keys for the circuit's `VerifyProof` instructions, in
+    /// instruction order (the i-th `VerifyProof` uses the i-th blob).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify_proof_vks: Vec<Vec<u8>>,
 }
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
@@ -111,10 +115,11 @@ impl Zkir for IrSource {
         params: &impl ParamsProverProvider,
     ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(transient_crypto::proofs::VerifierKey::from(setup_vk(
-            params.get_params(self.k()).await?.as_ref(),
-            self,
-        )))
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        Ok(transient_crypto::proofs::VerifierKey::from_vk_with_accumulator_offsets(
+            vk,
+            &self.accumulator_offsets(),
+        ))
     }
 
     async fn keygen(
@@ -126,7 +131,10 @@ impl Zkir for IrSource {
         let pk = setup_pk(self, &vk);
         Ok((
             ProverKey::from_raw(pk),
-            transient_crypto::proofs::VerifierKey::from(vk),
+            transient_crypto::proofs::VerifierKey::from_vk_with_accumulator_offsets(
+                vk,
+                &self.accumulator_offsets(),
+            ),
         ))
     }
 
@@ -915,6 +923,28 @@ pub enum Instruction {
     Output {
         /// The values returned, one per `IrSource::outputs[i]`.
         vals: Vec<Operand>,
+    },
+    /// Verifies an inner Plonk proof in-circuit. The resulting accumulator 
+    /// is exposed as public inputs (its in-circuit value is constrained 
+    /// equal to them). The final pairing check on that accumulator is 
+    /// deferred to the outer verifier.
+    /// 
+    /// The inner proof itself is *not* part of the instruction: it is a
+    /// prover-supplied witness, consumed positionally from
+    /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage)
+    /// (the i-th `VerifyProof` takes the i-th blob).
+    ///
+    /// The VK is fixed circuit data. The `vk_hash` binds which VK the 
+    /// circuit was compiled against; keygen/proving check that the 
+    /// resolved blob hashes to it.
+    ///
+    /// No outputs.
+    VerifyProof {
+        /// Hash of the inner proof verifying key. 
+        #[serde(with = "const_hex::serde")]
+        vk_hash: Vec<u8>,
+        /// The inner proof's public inputs (each of type `Native`).
+        instance: Vec<Operand>,
     },
 }
 tag_enforcement_test!(Instruction);

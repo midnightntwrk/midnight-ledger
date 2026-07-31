@@ -32,6 +32,9 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
+use crate::ir_instructions::verify_proof::{
+    accumulator_pi_len, verify_proof_incircuit, verify_proof_offcircuit,
+};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -74,6 +77,9 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
+    /// The prover-supplied inner-proof witnesses. Used to run the 
+    /// in-circuit verifier.
+    pub inner_proof_witnesses: Vec<Vec<u8>>,
 }
 
 fn fab_decode_to_bytes(
@@ -180,6 +186,31 @@ fn fab_decode_to_bytes_atom(
 }
 
 impl IrSource {
+    /// The public-input offsets at which each `verify_proof` instruction's
+    /// (fully-collapsed, single-point) accumulator is exposed, in instruction
+    /// order. This mirrors exactly the public-input counter of the `circuit`
+    /// and `preprocess` runs, so it is witness-independent and can be computed
+    /// at keygen time.
+    pub fn accumulator_offsets(&self) -> Vec<usize> {
+        let acc_len = accumulator_pi_len();
+        
+        // The public-input vector starts with the binding input, optionally
+        // followed by the communications commitment.
+        let mut pi = 1 + usize::from(self.do_communications_commitment);
+        let mut offsets = Vec::new();
+        for instruction in self.instructions.iter() {
+            match instruction {
+                I::Impact { inputs, .. } => pi += inputs.len(),
+                I::VerifyProof { .. } => {
+                    offsets.push(pi);
+                    pi += acc_len;
+                }
+                _ => {}
+            }
+        }
+        offsets
+    }
+
     /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
     /// to produce a public input vector, and public input skip information.
     pub(crate) fn preprocess(
@@ -223,6 +254,7 @@ impl IrSource {
         let mut public_transcript_inputs_idx: usize = 0;
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
+        let mut nb_verify_proof_calls: usize = 0;
         let mut outputs = Vec::new();
         let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
             let res = memory
@@ -642,6 +674,34 @@ impl IrSource {
                         outputs.push(value);
                     }
                 }
+                I::VerifyProof { vk_hash, instance } => {
+                    let instance = instance
+                        .iter()
+                        .map(|op| resolve_operand(&memory, op))
+                        .map(|r| r.and_then(|v| Ok::<_, anyhow::Error>(Fr::try_from(v)?.0)))
+                        .collect::<Result<Vec<outer::Scalar>, _>>()?;
+
+                    let idx = nb_verify_proof_calls;
+                    nb_verify_proof_calls += 1;
+
+                    // The inner proof is taken from the preimage.
+                    let proof = preimage.proof_witnesses.get(idx).ok_or_else(|| {
+                        anyhow!("missing proof witness for VerifyProof #{idx}")
+                    })?;
+
+                    // Check the provided VK matches the hash in the IR.
+                    let vk_blob = self.verify_proof_vks.get(idx).ok_or_else(|| {
+                        anyhow!("missing verifying key for VerifyProof #{idx}")
+                    })?;
+                    if Sha256::digest(vk_blob).to_vec() != *vk_hash {
+                        bail!("verifying key for VerifyProof #{idx} does not match its vk_hash");
+                    }
+
+                    let acc_pis = verify_proof_offcircuit(vk_blob, &instance, proof)?;
+                    for f in acc_pis {
+                        pis.push(Fr(f));
+                    }
+                }
             }
         }
         trace!(?outputs, "Finished instructions with output");
@@ -658,6 +718,20 @@ impl IrSource {
                 ?private_transcript_outputs_idx,
                 "Transcripts not fully consumed");
             bail!("Transcripts not fully consumed");
+        }
+        if preimage.proof_witnesses.len() != nb_verify_proof_calls {
+            bail!(
+                "Expected {} proof witnesses (one per VerifyProof), received {}",
+                nb_verify_proof_calls,
+                preimage.proof_witnesses.len()
+            );
+        }
+        if self.verify_proof_vks.len() != nb_verify_proof_calls {
+            bail!(
+                "Expected {} verifying keys (one per VerifyProof), received {}",
+                nb_verify_proof_calls,
+                self.verify_proof_vks.len()
+            );
         }
         if self.do_communications_commitment {
             let comm_comm = preimage
@@ -687,6 +761,7 @@ impl IrSource {
             comm_comm: preimage
                 .communications_commitment
                 .map(|(comm, rand)| (comm.0, rand.0)),
+            inner_proof_witnesses: preimage.proof_witnesses.clone(),
         })
     }
 }
@@ -780,10 +855,14 @@ impl Relation for IrSource {
             Ok(())
         };
 
-        let pi_push = |cell: AssignedNative<outer::Scalar>,
-                       pis: &mut Vec<AssignedNative<outer::Scalar>>|
+        // Constrains `cell` as the next public input, in order, so that
+        // `ZkStdLib::verify_proof` can read each accumulator's offset from the
+        // running public-input counter.
+        let pi_push = |layouter: &mut _,
+                       pi_idx: &mut usize,
+                       cell: AssignedNative<outer::Scalar>|
          -> Result<(), Error> {
-            let idx = pis.len();
+            let idx = *pi_idx;
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
@@ -794,14 +873,15 @@ impl Relation for IrSource {
                         false
                     }
                 })?;
-            pis.push(cell);
+            std.constrain_as_public_input(layouter, &cell)?;
+            *pi_idx += 1;
             Ok(())
         };
 
-        let mut public_inputs = vec![];
-        pi_push(binding_input, &mut public_inputs)?;
+        let mut pi_idx: usize = 0;
+        pi_push(layouter, &mut pi_idx, binding_input)?;
 
-        if self.do_communications_commitment {
+        let comm_pi = if self.do_communications_commitment {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
@@ -810,9 +890,13 @@ impl Relation for IrSource {
                 .unwrap()
                 .0
             });
-            let comm_comm = std.assign(layouter, comm_comm_value)?;
-            pi_push(comm_comm, &mut public_inputs)?;
-        }
+            let comm_comm: AssignedNative<outer::Scalar> = std.assign(layouter, comm_comm_value)?;
+            pi_push(layouter, &mut pi_idx, comm_comm.clone())?;
+            Some(comm_comm)
+        } else {
+            None
+        };
+        let mut verify_proof_idx: usize = 0;
         for ins in self.instructions.iter() {
             match ins {
                 I::Encode { input, outputs } => {
@@ -877,7 +961,7 @@ impl Relation for IrSource {
                         let val_assigned = resolve_operand(std, layouter, &memory, input)?;
                         let x: AssignedNative<_> = val_assigned.try_into()?;
                         let guarded_x = std.select(layouter, &guard, &x, &zero)?;
-                        pi_push(guarded_x, &mut public_inputs)?;
+                        pi_push(layouter, &mut pi_idx, guarded_x)?;
                     }
                 }
                 I::TransientHash { inputs, output } => {
@@ -1168,6 +1252,42 @@ impl Relation for IrSource {
                         outputs.push(value);
                     }
                 }
+                I::VerifyProof {
+                    vk_hash,
+                    instance,
+                } => {
+                    let mut assigned_instance = Vec::new();
+                    for op in instance {
+                        let v = resolve_operand(std, layouter, &memory, op)?;
+                        let x: AssignedNative<_> = v.try_into()?;
+                        assigned_instance.push(x);
+                    }
+
+                    // The inner proof is taken from the preimage.
+                    let idx = verify_proof_idx;
+                    verify_proof_idx += 1;
+                    let proof_value: Value<Vec<u8>> =
+                        witness.as_ref().map(|w| w.inner_proof_witnesses[idx].clone());
+
+                    // Check the provided VK matches the hash in the IR.
+                    let vk_blob = self.verify_proof_vks.get(idx).ok_or_else(|| {
+                        Error::Synthesis(format!("missing verifying key for VerifyProof #{idx}"))
+                    })?;
+                    if Sha256::digest(vk_blob).to_vec() != *vk_hash {
+                        return Err(Error::Synthesis(format!(
+                            "verifying key for VerifyProof #{idx} does not match its vk_hash"
+                        )));
+                    }
+
+                    verify_proof_incircuit(
+                        std,
+                        layouter,
+                        vk_blob,
+                        &[assigned_instance.as_slice()],
+                        proof_value,
+                    )?;
+                    pi_idx += accumulator_pi_len();
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1199,14 +1319,15 @@ impl Relation for IrSource {
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;
-            // Nb. The communications commitment is the second public input
-            // by convention
-            std.assert_equal(layouter, &comm_comm, &public_inputs[1])?;
+            // Assert the recomputed commitment equals the cell we exposed as the
+            // second public input above.
+            let comm_pi = comm_pi
+                .as_ref()
+                .expect("comm_pi is Some when do_communications_commitment");
+            std.assert_equal(layouter, &comm_comm, comm_pi)?;
         }
 
-        public_inputs
-            .iter()
-            .try_for_each(|x| std.constrain_as_public_input(layouter, x))
+        Ok(())
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
@@ -1237,7 +1358,10 @@ impl Relation for IrSource {
                 || involves_instructions(&|op| matches!(op, I::HashToCurve { .. })),
             poseidon: self.do_communications_commitment
                 || involves_instructions(&|op| {
-                    matches!(op, I::TransientHash { .. } | I::HashToCurve { .. })
+                    matches!(
+                        op,
+                        I::TransientHash { .. } | I::HashToCurve { .. } | I::VerifyProof { .. }
+                    )
                 }),
             sha2_256: involves_instructions(&|op| matches!(op, I::PersistentHash { .. })),
             sha2_512: false,
@@ -1251,7 +1375,7 @@ impl Relation for IrSource {
                 IrType::Secp256k1Scalar,
             ]),
             p256: involves_types(&[IrType::Secp256r1Point, IrType::Secp256r1Base, IrType::Secp256r1Scalar]),
-            bls12_381: false,
+            bls12_381: involves_instructions(&|op| matches!(op, I::VerifyProof { .. })),
             curve25519: involves_types(&[
                 IrType::Curve25519Point,
                 IrType::Curve25519Base,
