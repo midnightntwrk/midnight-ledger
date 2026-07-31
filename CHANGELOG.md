@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Ledger 8.1.1
+
+- fix: clear clippy::useless_borrows_in_formatting across workspace
+- fix: drop redundant refs in AlignedValue format! args
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.

@@ -24,7 +24,7 @@ onchain-runtime = { version = "3.1.0", path = "../onchain-runtime", package = "m
 zswap = { version = "8.1.1", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
-storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+storage = { version = "1.2.1", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 

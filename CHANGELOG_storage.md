@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `1.2.1`
+
+- fix: clear clippy::useless_borrows_in_formatting across workspace
+
 ## Version `2.0.1`
 
 - fix: Using `BTreeMap` instead of `HashMap` in `rcmap` in order to have deterministic orderings
