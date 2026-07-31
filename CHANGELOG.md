@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 8.1.0.0-rc.4
+
 ## Ledger 8.2.0-rc.1
 
 - note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly

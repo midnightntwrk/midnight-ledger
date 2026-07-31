@@ -2964,7 +2964,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.2.0-rc.1"
+version = "9.0.0-rc.6"
 dependencies = [
  "anyhow",
  "criterion",
@@ -3017,7 +3017,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "8.2.0-rc.1"
+version = "1.0.0-rc.4"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "3.1.0"
+version = "4.0.0-rc.4"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3143,7 +3143,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.2.0-rc.1"
+version = "9.0.0-rc.6"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.3"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3453,7 +3453,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3-wasm"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.3"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3470,7 +3470,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-wasm"
-version = "2.1.0"
+version = "2.2.0-rc.4"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3495,7 +3495,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.2.0-rc.1"
+version = "9.0.0-rc.6"
 dependencies = [
  "criterion",
  "derive-where",
