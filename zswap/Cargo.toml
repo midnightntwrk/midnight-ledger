@@ -14,7 +14,7 @@ proof-verifying = []
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
-storage = { version = "1.2.1", path = "../storage", package = "midnight-storage" }
+storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-onchain-runtime = { version = "3.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }

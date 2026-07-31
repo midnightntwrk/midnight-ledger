@@ -1,24 +1,33 @@
 # Ledger 8.1.1 Release Notes
 
 **Version:** 8.1.1
-**Date:** <YYYY-MM-DD>
+**Date:** 2026-07-31
 
 ## High-level summary
 
-<One or two paragraphs: what kind of release this is and the headline changes.>
+Ledger 8.1.1 is a patch release on 8.1.0. It adds test coverage for array
+handling. The
+release also includes clippy 1.97 lint cleanups and the current ledger-8
+CI/release automation. There are no protocol, serialization, or API behaviour
+changes for well-formed transactions.
 
 ## Audience
 
 This release note is important for:
 
-- <e.g. Node developers>
-- <e.g. Developers using the ledger WASM bindings>
+- Node developers
+- Developers using the ledger WASM bindings
 
 ## Summary of updates
 
-### <Component or area> Updates
+### Ledger Updates
 
-- <feat/fix/breaking bullet>
+- test: additional array test coverage
+
+### Housekeeping
+
+- fix: clippy 1.97 `useless_borrows_in_formatting` cleanups across the
+  workspace, including `AlignedValue` format arguments in `base-crypto`.
 
 ## New features requiring configuration updates
 
@@ -36,8 +45,4 @@ This release note is important for:
 
 | **Component** | **Description** |
 |---------------|-----------------|
-| <component>   | <description>   |
-
-<!-- Draft bullets from commits since the last tag: -->
-- fix: clear clippy::useless_borrows_in_formatting across workspace
-- fix: drop redundant refs in AlignedValue format! args
+| ledger        | Array handling improvements. |

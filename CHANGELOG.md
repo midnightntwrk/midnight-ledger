@@ -6,8 +6,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Ledger 8.1.1
 
-- fix: clear clippy::useless_borrows_in_formatting across workspace
-- fix: drop redundant refs in AlignedValue format! args
+- add array tests
 
 ## 8.1.0
 

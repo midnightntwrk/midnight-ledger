@@ -1,6 +1,6 @@
 # `storage` Changelog
 
-## Version `1.2.1`
+## Version `2.0.2`
 
 - fix: clear clippy::useless_borrows_in_formatting across workspace
 
