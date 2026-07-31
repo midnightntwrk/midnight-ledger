@@ -282,7 +282,7 @@ pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Anno
 #[derive_where(Ord; T: Ord, A: Ord)]
 #[allow(clippy::type_complexity)]
 #[cfg(not(feature = "public-internal-structure"))]
-pub(crate) enum Node<
+pub enum Node<
     T: Storable<D> + 'static,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<T> = SizeAnn,
@@ -1457,14 +1457,14 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
     ) -> Result<Node<T, D, A>, std::io::Error> {
         let disc = u8::deserialize(reader, 0)?;
 
-        match disc {
-            0 => Ok(Node::Empty),
+        let node = match disc {
+            0 => Node::Empty,
             1 => {
                 let ann = A::deserialize(reader, 0)?;
-                Ok(Node::Leaf {
+                Node::Leaf {
                     ann,
                     value: loader.get_next(child_hashes)?,
-                })
+                }
             }
             2 => {
                 let ann = A::deserialize(reader, 0)?;
@@ -1476,10 +1476,10 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                     unreachable!("iterator must be of expected length")
                 };
 
-                Ok(Node::Branch {
+                Node::Branch {
                     ann,
                     children: Box::new(children),
-                })
+                }
             }
             3 => {
                 let ann = A::deserialize(reader, 0)?;
@@ -1487,23 +1487,33 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 let path =
                     expand_nibbles(&std::vec::Vec::<u8>::deserialize(reader, 0)?, len as usize);
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
-                Ok(Node::Extension {
+                Node::Extension {
                     ann,
                     compressed_path: path,
                     child,
-                })
+                }
             }
             4 => {
                 let ann = A::deserialize(reader, 0)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
-                Ok(Node::MidBranchLeaf { ann, value, child })
+                Node::MidBranchLeaf { ann, value, child }
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Unrecognised discriminant",
-            )),
-        }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Unrecognised discriminant",
+                ));
+            },
+        };
+
+        // Enforce structural node invariants when loading from an untrusted
+        // source. `do_check` is a no-op for trusted back-end loaders and runs
+        // `check_invariant` for wire loaders, rejecting malformed node shapes
+        // (e.g. a `MidBranchLeaf` whose child is not a `Branch`/`Extension`)
+        // that would otherwise let the size annotation diverge from the set of
+        // canonically-indexed entries reachable by `get`.
+        loader.do_check(node)
     }
 }
 
