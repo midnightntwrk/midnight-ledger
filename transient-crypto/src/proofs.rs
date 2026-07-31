@@ -17,6 +17,7 @@
 
 use crate::curve::{Fr, outer};
 use base_crypto::hash::{HashOutput, persistent_hash};
+use derive_where::derive_where;
 use lazy_static::lazy_static;
 use lru::LruCache;
 use midnight_curves::Bls12;
@@ -51,7 +52,6 @@ use storage_core::arena::ArenaKey;
 use storage_core::db::DB;
 use storage_core::storable::Loader;
 use zeroize::{Zeroize, ZeroizeOnDrop};
-use derive_where::derive_where;
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {
@@ -318,9 +318,7 @@ impl<T: Zkir> ProverKey<T> {
                 writer.write_all(data)?;
                 Ok(())
             }
-            InnerProverKey::Initialized(key) => {
-                T::write_raw_pk(&mut writer, key)
-            }
+            InnerProverKey::Initialized(key) => T::write_raw_pk(&mut writer, key),
         }
     }
 }
@@ -391,7 +389,8 @@ impl Distribution<VerifierKey> for Standard {
 impl From<MidnightVK> for VerifierKey {
     fn from(vk: MidnightVK) -> Self {
         let mut raw = Vec::new();
-        vk.write(&mut raw, SerdeFormat::Processed).expect("in-memory serialize");
+        vk.write(&mut raw, SerdeFormat::Processed)
+            .expect("in-memory serialize");
         VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))))
     }
 }
@@ -546,9 +545,7 @@ impl VerifierKey {
     /// Returns the original raw bytes, preserved even after initialization.
     pub fn original_bytes(&self) -> Vec<u8> {
         match &*self.0.lock().expect("mutex is not poisoned") {
-            InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
-                data.clone()
-            }
+            InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => data.clone(),
             InnerVerifierKey::Initialized(_, original) => original.clone(),
         }
     }
@@ -756,7 +753,7 @@ impl ProofPreimage {
             .await?
             .ok_or(anyhow::Error::msg(format!(
                 "failed to find proving key for '{}'",
-                &self.key_location.0
+                self.key_location.0
             )))?;
         let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;

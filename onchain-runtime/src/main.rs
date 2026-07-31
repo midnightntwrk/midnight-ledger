@@ -37,7 +37,7 @@ fn main() {
                 0,
             )
             .unwrap();
-        println!("Input state: {:#?}", &state_in);
+        println!("Input state: {:#?}", state_in);
         let prog_in: Vec<Op<ResultModeGather, DefaultDB>> = {
             let mut prog = Vec::new();
             let mut file = BufReader::new(File::open(&args[2]).unwrap());
@@ -46,7 +46,7 @@ fn main() {
             }
             prog
         };
-        println!("Input program: {:#?}", &prog_in);
+        println!("Input program: {:#?}", prog_in);
 
         match run_program(
             &[VmValue::new(ValueStrength::Strong, state_in)],
@@ -55,9 +55,9 @@ fn main() {
             &INITIAL_COST_MODEL,
         ) {
             Ok(res) => {
-                println!("Result stack: {:#?}", &res.stack);
-                println!("Events output: {:#?}", &res.events);
-                println!("Gas cost: {:#?}", &res.gas_cost);
+                println!("Result stack: {:#?}", res.stack);
+                println!("Events output: {:#?}", res.events);
+                println!("Gas cost: {:#?}", res.gas_cost);
 
                 if args.len() == 4 {
                     Serializable::serialize(

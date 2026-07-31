@@ -142,10 +142,10 @@ impl AuthorizedClaim<Proof> {
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
                 &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
-                statement.into_iter().map(|f|
+                statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
-                ),
+                }),
             )
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
@@ -198,10 +198,10 @@ impl<D: DB> Input<Proof, D> {
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
                 &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
-                statement.into_iter().map(|f|
+                statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
-                ),
+                }),
             )
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
@@ -273,10 +273,10 @@ impl<D: DB> Output<Proof, D> {
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
                 &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
-                statement.into_iter().map(|f|
+                statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
-                ),
+                }),
             )
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
