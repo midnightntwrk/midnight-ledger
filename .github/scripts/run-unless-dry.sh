@@ -13,8 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-mkdir -p ./.cargo
-rm -f ./.cargo/config.toml
-echo "[net]" >> ./.cargo/config.toml
-echo "git-fetch-with-cli = true" >> ./.cargo/config.toml
-cat ./.cargo/config.toml
+# Run the given command, unless DRY_RUN=true, in which case just log it.
+# Used to gate irreversible release actions (npm publish, git push, ...).
+set -euo pipefail
+
+if [ "${DRY_RUN:-false}" = "true" ]; then
+  echo "[dry-run] skipping: $*"
+  exit 0
+fi
+exec "$@"

@@ -16,13 +16,35 @@ jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
+      - name: Setup api.github.com credentials
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
+        with:
+          machine: api.github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Setup github.com credentials
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Configure git rewrite
+        run: |
+          mkdir -p "$HOME/.config/git"
+          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
+          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+
       - name: Get the rust toolchain
         uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
         with:
           components: rustfmt
 
       - name: Checkout workflow branch for patch tool
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
         with:
           ref: ${{ github.ref }}
 
@@ -34,7 +56,7 @@ jobs:
           cp target/release/hardfork_version_patch "$HOME/tools/"
 
       - name: Checkout repository at tag
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
         with:
           ref: ${{ github.event.inputs.tag }}
 

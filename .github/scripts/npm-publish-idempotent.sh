@@ -3,7 +3,7 @@
 #
 # Re-runs are safe: if the version already exists on the target registry,
 # the publish is skipped (exit 0). Optionally, when FORCE=true, the version
-# is deleted from GH Packages before publishing — public npm cannot be
+# is deleted from GH Packages before publishing - public npm cannot be
 # overwritten so FORCE on registry.npmjs.org errors out.
 #
 # Args:
@@ -77,7 +77,7 @@ if [ "${FORCE:-false}" = "true" ]; then
 fi
 
 if is_published; then
-  echo "Already published: $PKG@$VER on $REG_HOST — skipping"
+  echo "Already published: $PKG@$VER on $REG_HOST - skipping"
   exit 0
 fi
 
