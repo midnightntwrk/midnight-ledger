@@ -631,3 +631,395 @@ pub const INPUT_PROOF_SIZE: usize = 4_832;
 pub const OUTPUT_PIS: usize = 77;
 pub const OUTPUT_PROOF_SIZE: usize = 4_832;
 pub const AUTHORIZED_CLAIM_PIS: usize = 13;
+
+// -----------------------------------------------------------------------------
+// Proptest generators.
+//
+// These sample proof-erased (`P = ()`) zswap structures. The `Offer` generator
+// produces a value in *normal form* (sorted inputs/outputs/transient; deltas
+// strictly increasing by token type with non-zero values) so it is accepted by
+// `Offer::<(), D>::well_formed` by construction — the property tests then perturb
+// it adversarially for the rejection cases.
+// -----------------------------------------------------------------------------
+#[cfg(feature = "proptest")]
+mod proptest_generators {
+    use super::*;
+    use rand::distributions::{Distribution, Standard};
+
+    impl Distribution<CoinCiphertext> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> CoinCiphertext {
+            CoinCiphertext {
+                c: rng.r#gen(),
+                ciph: rng.r#gen(),
+            }
+        }
+    }
+
+    impl Distribution<Delta> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Delta {
+            // Non-zero value: a zero delta is rejected by `well_formed`.
+            let mut value: i128 = rng.r#gen();
+            if value == 0 {
+                value = 1;
+            }
+            Delta {
+                token_type: rng.r#gen(),
+                value,
+            }
+        }
+    }
+
+    impl<D: DB> Distribution<Input<(), D>> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Input<(), D> {
+            Input {
+                nullifier: rng.r#gen(),
+                value_commitment: Pedersen(rng.r#gen()),
+                contract_address: if rng.r#gen::<bool>() {
+                    Some(Sp::new(rng.r#gen()))
+                } else {
+                    None
+                },
+                merkle_tree_root: rng.r#gen(),
+                proof: Arc::new(()),
+            }
+        }
+    }
+
+    impl<D: DB> Distribution<Output<(), D>> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Output<(), D> {
+            Output {
+                coin_com: rng.r#gen(),
+                value_commitment: Pedersen(rng.r#gen()),
+                contract_address: if rng.r#gen::<bool>() {
+                    Some(Sp::new(rng.r#gen()))
+                } else {
+                    None
+                },
+                ciphertext: if rng.r#gen::<bool>() {
+                    Some(Sp::new(rng.r#gen()))
+                } else {
+                    None
+                },
+                proof: Arc::new(()),
+            }
+        }
+    }
+
+    impl<D: DB> Distribution<Transient<(), D>> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Transient<(), D> {
+            Transient {
+                nullifier: rng.r#gen(),
+                coin_com: rng.r#gen(),
+                value_commitment_input: Pedersen(rng.r#gen()),
+                value_commitment_output: Pedersen(rng.r#gen()),
+                contract_address: if rng.r#gen::<bool>() {
+                    Some(Sp::new(rng.r#gen()))
+                } else {
+                    None
+                },
+                ciphertext: if rng.r#gen::<bool>() {
+                    Some(Sp::new(rng.r#gen()))
+                } else {
+                    None
+                },
+                proof_input: Arc::new(()),
+                proof_output: Arc::new(()),
+            }
+        }
+    }
+
+    impl<D: DB> Distribution<Offer<(), D>> for Standard {
+        fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Offer<(), D> {
+            let mut inputs: std::vec::Vec<Input<(), D>> =
+                (0..rng.gen_range(0..=3)).map(|_| rng.r#gen()).collect();
+            let mut outputs: std::vec::Vec<Output<(), D>> =
+                (0..rng.gen_range(0..=3)).map(|_| rng.r#gen()).collect();
+            let mut transient: std::vec::Vec<Transient<(), D>> =
+                (0..rng.gen_range(0..=2)).map(|_| rng.r#gen()).collect();
+            inputs.sort();
+            outputs.sort();
+            transient.sort();
+
+            // Deltas must be strictly increasing by token type (unique) and
+            // non-zero — build from a deduped, sorted set of token types.
+            let mut tokens: std::vec::Vec<ShieldedTokenType> =
+                (0..rng.gen_range(0..=3)).map(|_| rng.r#gen()).collect();
+            tokens.sort();
+            tokens.dedup();
+            let deltas: std::vec::Vec<Delta> = tokens
+                .into_iter()
+                .map(|token_type| {
+                    let mut value: i128 = rng.r#gen();
+                    if value == 0 {
+                        value = 1;
+                    }
+                    Delta { token_type, value }
+                })
+                .collect();
+
+            Offer {
+                inputs: inputs.into(),
+                outputs: outputs.into(),
+                transient: transient.into(),
+                deltas: deltas.into(),
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Area A: zswap `Offer` / `Input` / `Output` / `Transient` + `binding_randomness`.
+//
+// Two property families:
+//   (A-tot) Totality: decoding arbitrary bytes never panics, and derivations
+//           reachable from decoded values (notably `binding_randomness`) do not
+//           panic / over/underflow.
+//   (A-inv) Invariant preservation: an `Offer` obtained from `deserialize`
+//           satisfies the same well-formedness (`Offer::well_formed`: sorted
+//           inputs/outputs/transient, strictly-increasing unique delta token
+//           types, non-zero delta values) that the checked path enforces.
+//
+// The `Storable` derive gives these types a binary `Serializable` /
+// `Deserializable` (through `Sp`), so `serialize` then `deserialize` is a
+// faithful decode. Neither the `Array` decoder nor `check_invariant` (default
+// `Ok`) re-establishes normal form, so a hand-built non-normal `Offer`
+// round-trips unchanged and is accepted by `deserialize` while `well_formed`
+// rejects it. `binding_randomness` (on `P = ProofPreimage`) reads
+// `proof.inputs.last()` and `EmbeddedFr::try_from` it, both via `expect`, so an
+// empty or out-of-range witness vector panics.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_a_props {
+    use super::*;
+    use proptest::prelude::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use serialize::{Deserializable, Serializable};
+    use storage::db::InMemoryDB;
+    use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+
+    type D = InMemoryDB;
+
+    fn roundtrip<T: Serializable + Deserializable>(v: &T) -> std::io::Result<T> {
+        let mut bytes = std::vec::Vec::new();
+        v.serialize(&mut bytes)?;
+        T::deserialize(&mut &bytes[..], 0)
+    }
+
+    /// A `ProofPreimage` with a chosen `inputs` vector and otherwise-trivial
+    /// fields; the other fields are irrelevant to `binding_randomness`.
+    fn preimage_with_inputs(inputs: std::vec::Vec<Fr>) -> ProofPreimage {
+        ProofPreimage {
+            inputs,
+            private_transcript: std::vec::Vec::new(),
+            public_transcript_inputs: std::vec::Vec::new(),
+            public_transcript_outputs: std::vec::Vec::new(),
+            binding_input: Fr::from(0u64),
+            communications_commitment: None,
+            key_location: KeyLocation(std::borrow::Cow::Borrowed("")),
+        }
+    }
+
+    fn input_with_preimage(pre: ProofPreimage) -> Input<ProofPreimage, D> {
+        let mut rng = StdRng::seed_from_u64(1);
+        Input {
+            nullifier: rng.r#gen(),
+            value_commitment: Pedersen(rng.r#gen()),
+            contract_address: None,
+            merkle_tree_root: rng.r#gen(),
+            proof: Arc::new(pre),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        // (A-tot) Arbitrary bytes never panic the proof-erased decoders.
+        #[test]
+        fn offer_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let _ = <Offer<(), D> as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+        #[test]
+        fn input_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let _ = <Input<(), D> as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+        #[test]
+        fn output_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let _ = <Output<(), D> as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+        #[test]
+        fn transient_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..256)) {
+            let _ = <Transient<(), D> as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+
+        // Decoded witnesses are untrusted: extraction must never panic (an
+        // unusable witness yields the default instead of aborting).
+        #[test]
+        fn input_binding_randomness_never_panics(pre in any::<ProofPreimage>()) {
+            let decoded = roundtrip(&pre).expect("ProofPreimage round-trips");
+            let input = input_with_preimage(decoded);
+            let _ = input.binding_randomness();
+        }
+
+        // The default is only a failure fallback: an honest witness (whose last
+        // element is the binding randomness) must recover it exactly, so the
+        // fallback stays unreachable on honestly-produced inputs.
+        #[test]
+        fn input_binding_randomness_recovers_honest_scalar(
+            rc in any::<PedersenRandomness>(),
+            prefix_len in 0usize..4,
+        ) {
+            let mut inputs: std::vec::Vec<Fr> =
+                (0..prefix_len).map(|i| Fr::from(i as u64 + 1)).collect();
+            inputs.push(Fr::try_from(rc).expect("embedded scalar embeds into the base field"));
+            let input = input_with_preimage(preimage_with_inputs(inputs));
+            prop_assert_eq!(input.binding_randomness(), rc);
+        }
+    }
+
+}
+
+// -----------------------------------------------------------------------------
+// Area B: `Offer::merge` and delta normalization.
+//
+// `merge` (structure.rs:579) concatenates the two offers' `deltas` and then
+// calls `normalize` -> `normalize_deltas` (structure.rs:551), which sums the
+// `i128` values of same-`token_type` deltas via an unchecked
+//     *map.entry(k).or_insert(0) += v;   (structure.rs:554)
+// There is no checked/saturating guard, so summing two same-token deltas whose
+// magnitudes exceed the `i128` range overflows: **panic in debug builds**
+// (`attempt to add with overflow`), **silent wraparound in release** — the
+// latter yields a merged `Offer` whose delta (and hence value-balance
+// commitment) is arithmetically wrong, yet still passes `well_formed`
+// (verify.rs:320-326 checks only sortedness, strict token ordering, and
+// non-zero).
+//
+// Properties asserted here:
+//   * (B-tot)  merge never panics for deltas within a non-overflowing range.
+//   * (B-inv)  the merged offer's deltas are in normal form: strictly
+//              increasing by `token_type` (=> sorted + key-unique) and all
+//              non-zero, matching what `normalize_deltas` guarantees.
+// The regressions below pin the overflow (B-tot violated at the i128
+// boundary).
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_b_merge_props {
+    use super::*;
+    use proptest::prelude::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    use storage::db::InMemoryDB;
+
+    type D = InMemoryDB;
+
+    /// A small fixed pool of distinct token types, so generated deltas collide
+    /// on `token_type` often enough to exercise the summation path in
+    /// `normalize_deltas`.
+    fn token_pool() -> Vec<ShieldedTokenType> {
+        let mut rng = StdRng::seed_from_u64(0xB0B0);
+        (0..4).map(|_| rng.r#gen()).collect()
+    }
+
+    /// Build a deltas-only offer (empty input/output/transient sets, so `merge`
+    /// never trips the disjointness check).
+    fn deltas_offer(deltas: Vec<Delta>) -> Offer<(), D> {
+        Offer {
+            inputs: std::vec::Vec::new().into(),
+            outputs: std::vec::Vec::new().into(),
+            transient: std::vec::Vec::new().into(),
+            deltas: deltas.into(),
+        }
+    }
+
+    /// Turn a list of `(pool_index, value)` into `Delta`s (dropping zeros so the
+    /// inputs are themselves plausible partial deltas).
+    fn make_deltas(pool: &[ShieldedTokenType], raw: &[(u8, i64)]) -> Vec<Delta> {
+        raw.iter()
+            .filter(|(_, v)| *v != 0)
+            .map(|(i, v)| Delta {
+                token_type: pool[(*i as usize) % pool.len()],
+                value: *v as i128,
+            })
+            .collect()
+    }
+
+    fn deltas_vec(offer: &Offer<(), D>) -> Vec<Delta> {
+        offer.deltas.iter_deref().cloned().collect()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // (B-tot)+(B-inv): merging two deltas-only offers whose values live in
+        // the i64 range never panics, and the result is in delta normal form.
+        #[test]
+        fn merge_preserves_delta_normal_form(
+            a in prop::collection::vec((any::<u8>(), any::<i64>()), 0..6),
+            b in prop::collection::vec((any::<u8>(), any::<i64>()), 0..6),
+        ) {
+            let pool = token_pool();
+            let oa = deltas_offer(make_deltas(&pool, &a));
+            let ob = deltas_offer(make_deltas(&pool, &b));
+            let merged = oa.merge(&ob).expect("disjoint (empty) coin sets merge");
+            let ds = deltas_vec(&merged);
+            // strictly increasing by token_type => sorted AND key-unique.
+            for w in ds.windows(2) {
+                prop_assert!(
+                    w[0].token_type < w[1].token_type,
+                    "merged deltas not strictly increasing by token_type"
+                );
+            }
+            // all non-zero.
+            prop_assert!(ds.iter().all(|d| d.value != 0), "merged deltas contain a zero");
+            // and it agrees with the reference normalization of the concatenation.
+            let mut concat: Vec<(ShieldedTokenType, i128)> =
+                make_deltas(&pool, &a).into_iter().chain(make_deltas(&pool, &b))
+                    .map(|d| (d.token_type, d.value)).collect();
+            concat = normalize_deltas(concat.into_iter());
+            let got: Vec<(ShieldedTokenType, i128)> =
+                ds.iter().map(|d| (d.token_type, d.value)).collect();
+            prop_assert_eq!(got, concat, "merge disagrees with normalize_deltas");
+        }
+
+        // (B-tot): merge is commutative on the delta set (normal form is order
+        // independent) — a sanity property that holds today.
+        #[test]
+        fn merge_delta_set_is_commutative(
+            a in prop::collection::vec((any::<u8>(), any::<i64>()), 0..6),
+            b in prop::collection::vec((any::<u8>(), any::<i64>()), 0..6),
+        ) {
+            let pool = token_pool();
+            let oa = deltas_offer(make_deltas(&pool, &a));
+            let ob = deltas_offer(make_deltas(&pool, &b));
+            let as_pairs = |o: &Offer<(), D>| -> Vec<(ShieldedTokenType, i128)> {
+                deltas_vec(o).iter().map(|d| (d.token_type, d.value)).collect()
+            };
+            let ab = as_pairs(&oa.merge(&ob).unwrap());
+            let ba = as_pairs(&ob.merge(&oa).unwrap());
+            prop_assert_eq!(ab, ba);
+        }
+    }
+
+    // Merging same-token deltas at the i128 extremes saturates rather than
+    // wrapping to the opposite sign.
+
+    #[test]
+    fn regression_merge_delta_overflow() {
+        let tt = token_pool()[0];
+        let a = deltas_offer(vec![Delta { token_type: tt, value: i128::MAX }]);
+        let b = deltas_offer(vec![Delta { token_type: tt, value: i128::MAX }]);
+        let merged = a.merge(&b).expect("empty coin sets merge");
+        let vals: Vec<i128> = deltas_vec(&merged).iter().map(|d| d.value).collect();
+        assert_eq!(vals, vec![i128::MAX]);
+    }
+
+    #[test]
+    fn regression_merge_delta_underflow() {
+        let tt = token_pool()[0];
+        let a = deltas_offer(vec![Delta { token_type: tt, value: i128::MIN }]);
+        let b = deltas_offer(vec![Delta { token_type: tt, value: i128::MIN }]);
+        let merged = a.merge(&b).expect("empty coin sets merge");
+        let vals: Vec<i128> = deltas_vec(&merged).iter().map(|d| d.value).collect();
+        assert_eq!(vals, vec![i128::MIN]);
+    }
+}

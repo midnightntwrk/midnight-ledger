@@ -581,6 +581,11 @@ impl CostDuration {
 /// should always be rejected), and division rounds up.
 pub struct FixedPoint(i128);
 
+// The default serde form is a lossy `f64` on purpose: it exists so `FixedPoint`
+// values are naturally representable in the JS bindings (JS has no i128), and it
+// is off-consensus only. Consensus/config-bearing fields opt into the exact,
+// lossless i128 form via `#[serde(with = "fixed_point_custom_serde")]`; the
+// binary `Serializable` codec (the consensus path) is exact.
 impl Serialize for FixedPoint {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -1108,4 +1113,68 @@ mod tests {
             serde_json::to_string(&expected_fee_prices).expect("failed to serialize");
         assert_eq!(clean_actual_fee_prices_str, expected_fee_prices_str);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Area H: `FixedPoint` decode canonicity + serde/binary agreement.
+//
+// `FixedPoint` is a signed Q64.64 integer (`FixedPoint(i128)`, cost_model.rs:606)
+// interpreted as `x / 2^64`. The *binary* `Serializable`/`Deserializable`
+// (derived, delegating to `i128`'s 16-byte LE codec) is canonical and lossless:
+// exactly one 16-byte encoding per value, and `deserialize(serialize(v)) == v`.
+//
+// The *default serde* path is neither:
+//   * `Serialize` writes an `f64` (cost_model.rs:613) and `Deserialize` reads
+//     an `f64` then casts via `From<f64>` (cost_model.rs:622, 632-634). The
+//     `f64` has only ~52 mantissa bits, so distinct `i128` values collapse to
+//     the same JSON number and read back as a *different* `i128`. Hence the
+//     serde round-trip is NOT the identity, and for a given logical value the
+//     serde and binary decode paths disagree.
+//   * `f64 as i128` is a saturating / `NaN -> 0` cast, so an out-of-range JSON
+//     number (e.g. `1e300`) is silently coerced to `i128::MAX` instead of being
+//     rejected — the doc-comment (cost_model.rs:600-605) describes the full
+//     signed domain but nothing about rejecting out-of-range input, and the
+//     binary path has no such coercion.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod fixed_point_canonicity_props {
+    use super::*;
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+
+    fn bin_ser(v: &FixedPoint) -> Vec<u8> {
+        let mut b = Vec::new();
+        Serializable::serialize(v, &mut b).unwrap();
+        b
+    }
+    fn bin_de(bytes: &[u8]) -> std::io::Result<FixedPoint> {
+        <FixedPoint as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // (H-canon) The binary codec is a lossless bijection: every raw i128
+        // value round-trips exactly (holds today).
+        #[test]
+        fn binary_roundtrip_is_lossless(raw in any::<i128>()) {
+            let v = FixedPoint(raw);
+            let back = bin_de(&bin_ser(&v)).unwrap();
+            prop_assert_eq!(back.0, raw);
+        }
+
+        // (H-canon) Every accepted 16-byte binary encoding re-encodes to itself
+        // (canonical; holds today).
+        #[test]
+        fn binary_decode_canonical(bytes in prop::collection::vec(any::<u8>(), 16..17)) {
+            let v = bin_de(&bytes).unwrap();
+            prop_assert_eq!(bin_ser(&v), bytes);
+        }
+
+        // Totality: fewer-than-16 bytes is a clean error, never a panic.
+        #[test]
+        fn binary_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..16)) {
+            prop_assert!(bin_de(&bytes).is_err());
+        }
+    }
+
 }

@@ -924,3 +924,70 @@ mod tests {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Area D: injectivity + canonicity of coin-structure identifiers and their
+// conversions from `AlignedValue` / `ValueAtom` / field representations.
+//
+//   * Field-repr surface (Nullifier / Commitment / ContractAddress / PublicKey
+//     / TokenType): `from_field_repr ∘ field_repr` is the identity, and the
+//     `[u8;32]` field decoder is strict, so this surface is injective and
+//     canonical (these are baseline properties that hold).
+//   * Fab `Value` surface (TokenType): `TryFrom<&ValueSlice>` is a left inverse
+//     of `From<TokenType> for Value`, and the encoding is injective. The hash
+//     decoder `HashOutput::try_from(&ValueAtom)` zero-pads atoms of length <= 32,
+//     but the `ValueAtom` codec enforces normal form on both sides of the wire:
+//     decode rejects a trailing zero byte, and serialize normalizes before
+//     writing, so no serialized input yields a trailing-zero atom. The decode is
+//     therefore canonical over every `Value` a decoder can produce.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_d_props {
+    use super::*;
+    use crate::contract::ContractAddress;
+    use base_crypto::fab::Value;
+    use proptest::prelude::*;
+    use transient_crypto::repr::{FieldRepr, FromFieldRepr};
+
+    // ---- Field-repr surface: round-trip + injectivity (baseline; holds). ----
+
+    macro_rules! field_roundtrip_props {
+        ($name:ident, $ty:ty) => {
+            proptest! {
+                #[test]
+                fn $name(a in any::<$ty>(), b in any::<$ty>()) {
+                    // Round-trip (decode ∘ encode == id).
+                    let fv = a.field_vec();
+                    prop_assert_eq!(fv.len(), a.field_size());
+                    prop_assert_eq!(<$ty>::from_field_repr(&fv), Some(a));
+                    // Injectivity: distinct values -> distinct field reprs.
+                    if a != b {
+                        prop_assert_ne!(a.field_vec(), b.field_vec());
+                    }
+                }
+            }
+        };
+    }
+
+    field_roundtrip_props!(nullifier_field, Nullifier);
+    field_roundtrip_props!(commitment_field, Commitment);
+    field_roundtrip_props!(public_key_field, PublicKey);
+    field_roundtrip_props!(contract_address_field, ContractAddress);
+    field_roundtrip_props!(token_type_field, TokenType);
+
+    // ---- Fab Value surface for TokenType. ----
+
+    proptest! {
+        // (baseline; holds) `Value::from` then `TryFrom<&ValueSlice>` is the
+        // identity, and the encoding is injective.
+        #[test]
+        fn token_type_value_roundtrip(a in TokenType::arbitrary(), b in TokenType::arbitrary()) {
+            let v = Value::from(a);
+            prop_assert_eq!(TokenType::try_from(&*v), Ok(a));
+            if a != b {
+                prop_assert_ne!(Value::from(a), Value::from(b));
+            }
+        }
+    }
+
+}

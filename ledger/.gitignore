@@ -1,0 +1,3 @@
+# Transaction fixtures written to the crate root by micro-dao.rs's capture
+# harness (TestMode::Capture / the #[ignore]d micro_dao_capture test).
+/tx[0-9]*

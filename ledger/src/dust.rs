@@ -2266,3 +2266,189 @@ mod tests {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Property-test hardening of the dust subsystem.
+//
+// All fields exercised here (`seq`, the `DustParameters` scalars, and the
+// `start`/`end` of a `MerkleTreeCollapsedUpdate`) are reachable from a decode
+// path, so any `u32`/`u64` value — including boundary values such as
+// `u32::MAX` / `u64::MAX` — is representable, so the arithmetic on those fields
+// must be total (no panic/overflow) on any decoded value.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod property_tests_dust_hardening {
+    use super::{
+        DustGenerationInfo, DustLocalState, DustParameters, DustPublicKey, DustSecretKey,
+        INITIAL_DUST_PARAMETERS, InitialNonce, QualifiedDustOutput, dust_nonce, successor_utxo,
+    };
+    use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES};
+    use base_crypto::time::{Duration, Timestamp};
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+    use storage::db::InMemoryDB;
+    use transient_crypto::curve::Fr;
+    use transient_crypto::merkle_tree::{MerkleTreeCollapsedUpdate, MerkleTreeDigest};
+
+    fn blank_nonce() -> InitialNonce {
+        InitialNonce(HashOutput([0u8; PERSISTENT_HASH_BYTES]))
+    }
+
+    fn sk() -> DustSecretKey {
+        DustSecretKey(Fr::from(1u64))
+    }
+
+    fn qdo(seq: u32) -> QualifiedDustOutput {
+        QualifiedDustOutput {
+            initial_value: 0,
+            owner: DustPublicKey(Fr::from(0u64)),
+            nonce: Fr::from(0u64),
+            seq,
+            ctime: Timestamp::default(),
+            backing_night: blank_nonce(),
+            mt_index: 0,
+        }
+    }
+
+    fn gen_info() -> DustGenerationInfo {
+        DustGenerationInfo {
+            value: 0,
+            owner: DustPublicKey(Fr::from(0u64)),
+            nonce: blank_nonce(),
+            dtime: Timestamp::default(),
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Area A: dust `seq` handling (successor path).
+    // ------------------------------------------------------------------
+
+    // HOLDS: for every `seq < u32::MAX`, `successor_utxo` computes the next
+    // sequence value (`seq + 1`, dust.rs:2103/2104) without overflow.
+    proptest! {
+        #[test]
+        fn successor_seq_totality_holds_below_max(seq in 0u32..u32::MAX) {
+            let out = successor_utxo(
+                &qdo(seq),
+                &Timestamp::default(),
+                0u128,
+                0u64,
+                &gen_info(),
+                &sk(),
+                &INITIAL_DUST_PARAMETERS,
+            );
+            prop_assert_eq!(out.seq, seq + 1);
+        }
+    }
+
+    // HOLDS: the nonce derived from `seq` is injective in `seq`. `seq` is a
+    // `u32` embedded as a distinct field element (u32 << the Fr modulus), so
+    // distinct `seq` feed distinct pre-images to `transient_hash`
+    // (`dust_nonce`, dust.rs:258).
+    proptest! {
+        #[test]
+        fn dust_nonce_injective_in_seq(a in any::<u32>(), b in any::<u32>()) {
+            prop_assume!(a != b);
+            let n = blank_nonce();
+            let k = sk();
+            prop_assert_ne!(dust_nonce(&n, a, &k), dust_nonce(&n, b, &k));
+        }
+    }
+
+    // At the u32 ceiling the successor sequence saturates rather than wrapping
+    // (the proptest above excludes this boundary).
+    #[test]
+    fn successor_seq_saturates_at_u32_max() {
+        let out = successor_utxo(
+            &qdo(u32::MAX),
+            &Timestamp::default(),
+            0u128,
+            0u64,
+            &gen_info(),
+            &sk(),
+            &INITIAL_DUST_PARAMETERS,
+        );
+        assert_eq!(out.seq, u32::MAX);
+    }
+
+    // ------------------------------------------------------------------
+    // Area B: `DustParameters` invariant + downstream totality.
+    // ------------------------------------------------------------------
+
+    fn roundtrip_params(p: &DustParameters) -> DustParameters {
+        let mut buf = Vec::new();
+        Serializable::serialize(p, &mut buf).expect("DustParameters serializes");
+        <DustParameters as Deserializable>::deserialize(&mut &buf[..], 0)
+            .expect("DustParameters decodes")
+    }
+
+    // HOLDS: whenever `generation_decay_rate > 0`, `time_to_cap`
+    // (dust.rs:881) divides without panicking, for any `night_dust_ratio`.
+    proptest! {
+        #[test]
+        fn time_to_cap_totality_holds_for_nonzero_rate(
+            ratio in any::<u64>(),
+            rate in 1u32..=u32::MAX,
+            grace in any::<u32>(),
+        ) {
+            let p = DustParameters {
+                night_dust_ratio: ratio,
+                generation_decay_rate: rate,
+                dust_grace_period: Duration::from_secs(grace as i128),
+            };
+            let p = roundtrip_params(&p);
+            let _ = p.time_to_cap();
+        }
+    }
+
+    // A zero decay rate can't divide, so time_to_cap caps at the maximum
+    // ("never caps") rather than dividing by zero (the proptest above excludes
+    // rate 0).
+    #[test]
+    fn time_to_cap_caps_on_zero_rate() {
+        let p = DustParameters {
+            night_dust_ratio: 1,
+            generation_decay_rate: 0,
+            dust_grace_period: Duration::from_secs(0),
+        };
+        assert_eq!(p.time_to_cap(), Duration::from_secs(i128::MAX));
+    }
+
+    // ------------------------------------------------------------------
+    // Area C: dust collapsed-update apply.
+    // ------------------------------------------------------------------
+
+    // Builds a `MerkleTreeCollapsedUpdate` with arbitrary `start`/`end` and no
+    // hashes, exactly as it would arrive from `Deserializable` (the derived
+    // field-order encoding is identical to that of the equivalent tuple, and
+    // decode performs no range validation on `start`/`end`).
+    fn decode_update(start: u64, end: u64) -> MerkleTreeCollapsedUpdate {
+        let mut buf = Vec::new();
+        Serializable::serialize(&(start, end, Vec::<MerkleTreeDigest>::new()), &mut buf)
+            .expect("update fields serialize");
+        <MerkleTreeCollapsedUpdate as Deserializable>::deserialize(&mut &buf[..], 0)
+            .expect("MerkleTreeCollapsedUpdate decodes from arbitrary start/end")
+    }
+
+    fn blank_state() -> DustLocalState<InMemoryDB> {
+        DustLocalState::new(INITIAL_DUST_PARAMETERS)
+    }
+
+    // HOLDS: for well-ordered ranges with `end < u64::MAX`, applying a decoded
+    // collapsed update never panics — it returns `Ok`/`Err` (typically
+    // `WrongNumberOfSegments`, since the empty hash list does not match the
+    // computed segmentation).
+    proptest! {
+        #[test]
+        fn apply_collapsed_update_totality_holds_for_ordered_ranges(
+            start in 0u64..=10_000,
+            len in 0u64..=10_000,
+        ) {
+            let end = start + len;
+            let update = decode_update(start, end);
+            let _ = blank_state().apply_generation_collapsed_update(&update);
+            let _ = blank_state().apply_commitment_collapsed_update(&update);
+        }
+    }
+
+}

@@ -891,3 +891,54 @@ randomised_serialization_test!(IrSource);
 
 #[cfg(feature = "proptest")]
 randomised_serialization_test!(Instruction);
+
+// -----------------------------------------------------------------------------
+// Area E: `Operand::Immediate` text/binary round-trip.
+//
+// The encoder emits a canonical spelling (lowercase `0x` + minimal little-endian
+// bytes), and that spelling round-trips on both the serde and binary surfaces.
+//
+// The decoders also accept non-canonical spellings of the same value (uppercase
+// `0X`/digits, trailing-zero padding, a redundant leading `-`). That is
+// deliberately OUT OF SCOPE: the zkir IR is a proving-time structure, not an
+// in-consensus one, so a single canonical wire form is not a goal for it. Only
+// the round-trip baseline is asserted here.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_e_props {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// serde: decode a raw operand spelling (the inner string, unquoted).
+    fn dec_json(spelling: &str) -> Result<Operand, serde_json::Error> {
+        let quoted = serde_json::to_string(spelling).unwrap(); // JSON-escape + quote
+        serde_json::from_str::<Operand>(&quoted)
+    }
+    fn enc_json(op: &Operand) -> String {
+        // Returns the inner string (strip the surrounding JSON quotes).
+        let s = serde_json::to_string(op).unwrap();
+        serde_json::from_str::<String>(&s).unwrap()
+    }
+
+    fn dec_bin(bytes: &[u8]) -> std::io::Result<Operand> {
+        <Operand as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+    fn enc_bin(op: &Operand) -> Vec<u8> {
+        let mut v = Vec::new();
+        Serializable::serialize(op, &mut v).unwrap();
+        v
+    }
+
+    proptest! {
+        /// (baseline; holds) The canonical encoding round-trips on both
+        /// surfaces.
+        #[test]
+        fn immediate_roundtrip(x in any::<u64>()) {
+            let op = Operand::Immediate(Fr::from(x));
+            let s = enc_json(&op);
+            prop_assert_eq!(dec_json(&s).unwrap(), op.clone());
+            prop_assert_eq!(dec_bin(&enc_bin(&op)).unwrap(), op);
+        }
+    }
+
+}

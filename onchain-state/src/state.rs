@@ -1048,3 +1048,75 @@ mod tests {
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Area C: `StateValue::invariant` must hold across ALL decode paths.
+//
+// The binary `Storable`/`Deserializable` path enforces the invariant: the
+// derive is annotated `#[storable(invariant = StateValue::invariant)]`, so
+// `from_binary_repr` runs `invariant()` and rejects out-of-bound values. The
+// serde `Deserialize` path (`StateValueVisitor`) constructs `Array`, `Cell`,
+// and `BoundedMerkleTree` variants directly and NEVER calls `invariant()`, so
+// it accepts values the binary path (and the VM's structural assumptions)
+// forbid: arrays longer than 16, oversized cells, and merkle trees of height 0
+// or > 32. This module pins the divergence.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_c_serde_invariant {
+    use super::*;
+    use storage::db::InMemoryDB;
+
+    type D = InMemoryDB;
+
+    fn binary_roundtrip(v: &StateValue<D>) -> std::io::Result<StateValue<D>> {
+        let mut bytes = std::vec::Vec::new();
+        <StateValue<D> as Serializable>::serialize(v, &mut bytes)?;
+        <StateValue<D> as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+
+    /// Builds an `Array` state value with `n` `Null` elements.
+    fn array_of_nulls(n: usize) -> StateValue<D> {
+        let arr = (0..n).fold(Array::new(), |arr, _| arr.push(StateValue::Null));
+        StateValue::Array(arr)
+    }
+
+    /// Baseline (holds today): the binary decode path enforces the invariant.
+    /// An over-long array serialized in binary is rejected on decode.
+    #[test]
+    fn binary_decode_enforces_array_bound() {
+        let v = array_of_nulls(17);
+        assert!(v.invariant().is_err(), "17-element array violates invariant");
+        assert!(
+            binary_roundtrip(&v).is_err(),
+            "binary decode must reject an over-long array"
+        );
+    }
+
+    /// The serde decode path enforces `StateValue::invariant` (matching the
+    /// binary path): an `Array` longer than 16 is rejected.
+    #[test]
+    fn serde_rejects_overlong_array() {
+        let v = array_of_nulls(17);
+        assert!(v.invariant().is_err(), "17-element array violates invariant");
+        let json = serde_json::to_string(&v).expect("serializes to JSON");
+        assert!(
+            serde_json::from_str::<StateValue<D>>(&json).is_err(),
+            "serde decode must reject an invariant-violating (len-17) Array"
+        );
+    }
+
+    /// The serde decode path rejects a height-0 `BoundedMerkleTree`
+    /// (`invariant` forbids height 0).
+    #[test]
+    fn serde_rejects_height_zero_bmt() {
+        use transient_crypto::merkle_tree::MerkleTree;
+        let mt: MerkleTree<(), D> = MerkleTree::blank(0).rehash();
+        let v = StateValue::BoundedMerkleTree(mt);
+        assert!(v.invariant().is_err());
+        let json = serde_json::to_string(&v).expect("serializes to JSON");
+        assert!(
+            serde_json::from_str::<StateValue<D>>(&json).is_err(),
+            "serde decode must reject a height-0 BoundedMerkleTree"
+        );
+    }
+}

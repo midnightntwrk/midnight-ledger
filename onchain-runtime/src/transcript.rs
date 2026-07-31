@@ -49,18 +49,29 @@ pub struct Transcript<D: DB> {
 }
 tag_enforcement_test!(Transcript<storage::db::InMemoryDB>);
 
-// TODO WG
-// #[cfg(feature = "proptest")]
-// impl<D: DB> rand::distributions::Distribution<Transcript<D>> for rand::distributions::Standard {
-//     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Transcript<D> {
-//         Transcript {
-//             gas: rng.gen(),
-//             effects: rng.gen(),
-//             program: storage::storage::Vec::from_std_vec(vec![]),
-//             version: rng.gen(),
-//         }
-//     }
-// }
+#[cfg(feature = "proptest")]
+impl<D: DB> rand::distributions::Distribution<Transcript<D>> for rand::distributions::Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Transcript<D> {
+        // `Op` has no `Distribution`, so the sampled program is empty; the gas,
+        // effects and (optional) version fields carry the randomness. This keeps
+        // the generator total while still producing a structurally-valid,
+        // serializable `Transcript` for the contract-action property tests.
+        let version = if rng.r#gen::<bool>() {
+            Some(Sp::new(TranscriptVersion {
+                major: rng.r#gen(),
+                minor: rng.r#gen(),
+            }))
+        } else {
+            None
+        };
+        Transcript {
+            gas: rng.r#gen(),
+            effects: rng.r#gen(),
+            program: storage::storage::Array::new(),
+            version,
+        }
+    }
+}
 
 impl<D: DB> Transcript<D> {
     pub const VERSION: TranscriptVersion = TranscriptVersion { major: 2, minor: 3 };

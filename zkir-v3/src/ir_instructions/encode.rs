@@ -189,3 +189,82 @@ pub fn jubjub_scalar_from_biguint(
         .jubjub()
         .scalar_from_reduced_le_bytes(layouter, &r_le_bytes)
 }
+
+// ---------------------------------------------------------------------------
+// Area B: totality of the off-circuit value decoder `decode_offcircuit`, in
+// particular the `Bytes32` arm.
+//
+// `decode_offcircuit` (encode.rs:114) is documented to "Return an error if the
+// provided raw values cannot be decoded as the given type" — i.e. it must be
+// total over its `&[Fr]` input, which comes straight from `deserialize`
+// (`ProofPreimage::{inputs,public_transcript_outputs,private_transcript}` are
+// `Vec<Fr>`), spanning the entire representable field-element space. Every arm
+// returns `Option`/`None` on bad input EXCEPT `Bytes32` (encode.rs:121), which
+// uses `assert_eq!`:
+//   * `assert_eq!(bytes[31], 0)` (encode.rs:126) panics whenever the first
+//     field element's little-endian byte 31 is non-zero — true for any field
+//     element >= 2^248 (well within the ~2^254.9 modulus).
+//   * `assert_eq!(*b, 0)` (encode.rs:130) panics whenever the second field
+//     element has any non-zero byte past index 0 (i.e. value >= 256).
+// Both are reachable from decoded input, so decoding aborts the process
+// instead of returning `Err`.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod decode_offcircuit_totality_props {
+    use super::{decode_offcircuit, encode_offcircuit};
+    use crate::ir_types::{IrType, IrValue};
+    use proptest::prelude::*;
+    use transient_crypto::curve::Fr;
+
+    /// Uniformly reduce 64 arbitrary bytes into a canonical field element,
+    /// covering the whole representable space (including values with a non-zero
+    /// top byte).
+    fn arb_fr() -> impl Strategy<Value = Fr> {
+        prop::array::uniform32(any::<u8>()).prop_flat_map(|lo| {
+            prop::array::uniform32(any::<u8>()).prop_map(move |hi| {
+                let mut wide = [0u8; 64];
+                wide[..32].copy_from_slice(&lo);
+                wide[32..].copy_from_slice(&hi);
+                Fr::from_uniform_bytes(&wide)
+            })
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // Decode runs on attacker-controlled field data: it must never panic,
+        // and must accept only canonical encodings — an accepted value has to
+        // re-encode to exactly its input.
+        #[test]
+        fn bytes32_decode_total_and_sound(a in arb_fr(), b in arb_fr()) {
+            if let Ok(v) = decode_offcircuit(&[a, b], &IrType::Bytes32) {
+                let re: Vec<Fr> = encode_offcircuit(&v)
+                    .into_iter()
+                    .map(|x| match x { IrValue::Native(f) => f, _ => unreachable!() })
+                    .collect();
+                prop_assert_eq!(re, vec![a, b]);
+            }
+        }
+
+        // (B-holds) The `Native` arm IS total over the whole field space (it
+        // returns `Option`, never asserts). HOLDS.
+        #[test]
+        fn native_decode_is_total(a in arb_fr()) {
+            let _ = decode_offcircuit(&[a], &IrType::Native);
+        }
+
+        // (B-holds) A *canonically encoded* Bytes32 value always decodes back
+        // to itself — the happy path is unaffected. HOLDS.
+        #[test]
+        fn bytes32_roundtrip_ok(bytes in prop::array::uniform32(any::<u8>())) {
+            let encoded: Vec<Fr> = encode_offcircuit(&IrValue::Bytes32(bytes))
+                .into_iter()
+                .map(|v| match v { IrValue::Native(f) => f, _ => unreachable!() })
+                .collect();
+            let decoded = decode_offcircuit(&encoded, &IrType::Bytes32).unwrap();
+            prop_assert_eq!(decoded, IrValue::Bytes32(bytes));
+        }
+    }
+
+}

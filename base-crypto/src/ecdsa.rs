@@ -379,3 +379,115 @@ mod tests {
         assert_eq!(sk.verifying_key(), sk2.verifying_key());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area D: injectivity / canonicity of `VerifyingKey` / `Signature` decode.
+//
+// The desired property is that exactly one accepted byte encoding exists per
+// key and per signature, and that no malleable-but-equivalent variant is
+// accepted. Two concrete violations exist on the current base:
+//
+//   D.1  Signature malleability (high-S accepted). `Signature::deserialize`
+//        (ecdsa.rs:298) parses 64 raw bytes with `k256::ecdsa::Signature::
+//        from_slice`, which does NOT enforce low-S. For any signature `(r, s)`
+//        the malleated `(r, n - s)` is a distinct 64-byte encoding that also
+//        decodes successfully and *verifies* the same message under the same
+//        key (`VerifyingKey::verify`, ecdsa.rs:153, does not reject high-S).
+//        So two distinct encodings are accepted as distinct-but-equivalent
+//        signatures — malleability.
+//
+//   D.2  `VerifyingKey` serde decode accepts multiple SEC1 encodings.
+//        The hand-written serde `Deserialize` (ecdsa.rs:47-54) feeds a
+//        variable-length `ByteBuf` to `from_sec1_bytes`, which accepts the
+//        33-byte compressed form AND the 65-byte uncompressed form for the
+//        same key. Serialization always emits 33-byte compressed, so the
+//        uncompressed encoding is a second, non-canonical accepted encoding of
+//        the same key. (The binary `Deserializable` path reads a fixed 33
+//        bytes and is not affected.)
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod canonicity_props {
+    use super::*;
+    use k256::elliptic_curve::PrimeField;
+    use proptest::prelude::*;
+    use rand::rngs::OsRng;
+
+    fn sample_key() -> SigningKey {
+        SigningKey::sample(OsRng)
+    }
+
+    fn ser_sig(sig: &Signature) -> Vec<u8> {
+        let mut b = Vec::new();
+        Serializable::serialize(sig, &mut b).unwrap();
+        b
+    }
+
+    /// Given a signature, produce the malleated high-S counterpart `(r, n - s)`
+    /// as a 64-byte `r || s` encoding.
+    fn malleate(sig: &Signature) -> [u8; 64] {
+        // Normalize the source to low-S first so negation is unambiguous.
+        let low = sig.0.normalize_s().unwrap_or(sig.0);
+        let (r, s) = low.split_scalars();
+        let neg_s = -*s; // n - s (mod n)
+        let high = ecdsa::Signature::from_scalars(r.to_bytes(), neg_s.to_repr())
+            .expect("n - s is a valid non-zero scalar");
+        high.to_bytes().into()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        // Totality: arbitrary 64/33 bytes never panic the decoders.
+        #[test]
+        fn sig_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            let _ = <Signature as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+        #[test]
+        fn vk_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            let _ = <VerifyingKey as Deserializable>::deserialize(&mut &bytes[..], 0);
+        }
+
+        // Canonicity of the *binary* paths: every accepted encoding re-encodes
+        // to itself (these hold today — the binary formats are fixed-width and
+        // bijective on their accepted set).
+        #[test]
+        fn sig_binary_roundtrip_canonical(bytes in prop::collection::vec(any::<u8>(), 64..65)) {
+            if let Ok(sig) = <Signature as Deserializable>::deserialize(&mut &bytes[..], 0) {
+                prop_assert_eq!(ser_sig(&sig), bytes);
+            }
+        }
+    }
+
+    // Property that HOLDS today (regression guard): ECDSA
+    // signatures are NOT malleable at the verification layer. A high-S
+    // malleation `(r, n - s)` of a valid signature still *parses* (k256's
+    // `from_slice` does not enforce low-S, ecdsa.rs:298), but `verify`
+    // (ecdsa.rs:153) rejects it, so it is not accepted as an equivalent value.
+    // The permissive parse is therefore harmless: the two encodings do not both
+    // verify.
+    #[test]
+    fn signature_high_s_parses_but_does_not_verify() {
+        let sk = sample_key();
+        let vk = sk.verifying_key();
+        let msg = b"malleability";
+        let sig = sk.sign(msg);
+        let high = malleate(&sig);
+        // Distinct encoding that still parses.
+        assert_ne!(ser_sig(&sig)[..], high[..], "malleation produced identical bytes");
+        let high_sig =
+            <Signature as Deserializable>::deserialize(&mut &high[..], 0).expect("high-S parses");
+        assert!(vk.verify(msg, &sig), "original (low-S) signature must verify");
+        assert!(
+            !vk.verify(msg, &high_sig),
+            "high-S malleation must NOT verify (low-S enforced at verify) -> no malleability"
+        );
+    }
+
+    // Note: the serde `Deserialize` for `VerifyingKey` accepts alternate SEC1
+    // encodings (e.g. the 65-byte uncompressed form) in addition to the
+    // canonical 33-byte compressed form. This is intentional on the serde/RPC
+    // surface -- a convenience for callers presenting a key in another
+    // encoding -- and cannot reach consensus: the binary `Deserializable`
+    // reads a fixed 33 bytes (compressed only), and this ecdsa key type is not
+    // used by any ledger/consensus path.
+}

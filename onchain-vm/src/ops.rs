@@ -519,3 +519,204 @@ mod tests {
         assert_eq!(op, op2);
     }
 }
+
+#[cfg(all(test, feature = "proptest"))]
+mod op_field_repr_properties {
+    use super::*;
+    use crate::result_mode::ResultModeVerify;
+    use base_crypto::fab::AlignedValue;
+    use runtime_state::state::StateValue;
+    use serialize::{Deserializable, Serializable};
+    use storage::db::InMemoryDB;
+    use transient_crypto::repr::FieldRepr;
+
+    /// Round-trip an op through the checked deserialization path (the untrusted
+    /// decode boundary runs `Op::invariant` via `do_check`). This is the layer
+    /// the operand bound lives at; `field_repr` itself is unchanged.
+    fn decode(op: &TestOp) -> std::io::Result<TestOp> {
+        let mut buf = Vec::new();
+        Serializable::serialize(op, &mut buf)?;
+        Deserializable::deserialize(&mut &buf[..], 0)
+    }
+
+    type TestOp = Op<ResultModeVerify, InMemoryDB>;
+
+    /// A generator over the full argument range of every `Op` variant. Numeric
+    /// arguments span their whole type (`u8`/`u32`), rather than being masked
+    /// to the small ranges the derived `Arbitrary` uses. `Noop`'s counter is
+    /// capped only to avoid multi-gigabyte allocations while still ranging far
+    /// beyond its encoded byte size (which is what C2 is about).
+    fn arb_op() -> impl Strategy<Value = TestOp> {
+        let simple_value =
+            prop_oneof![Just(StateValue::Null), any::<u64>().prop_map(StateValue::from)];
+        let simple_result = any::<u8>().prop_map(AlignedValue::from);
+        prop_oneof![
+            (0u32..=100_000).prop_map(|n| Op::Noop { n }),
+            Just(Op::Lt),
+            Just(Op::Eq),
+            Just(Op::Type),
+            Just(Op::Size),
+            Just(Op::New),
+            Just(Op::And),
+            Just(Op::Or),
+            Just(Op::Neg),
+            Just(Op::Log),
+            Just(Op::Root),
+            Just(Op::Pop),
+            Just(Op::Add),
+            Just(Op::Sub),
+            Just(Op::Member),
+            Just(Op::Ckpt),
+            any::<u32>().prop_map(|immediate| Op::Addi { immediate }),
+            any::<u32>().prop_map(|immediate| Op::Subi { immediate }),
+            any::<u32>().prop_map(|skip| Op::Branch { skip }),
+            any::<u32>().prop_map(|skip| Op::Jmp { skip }),
+            (any::<bool>(), any::<u32>()).prop_map(|(cached, n)| Op::Concat { cached, n }),
+            any::<bool>().prop_map(|cached| Op::Rem { cached }),
+            // Full u8 range -- NOT masked to 0..16 as the derived Arbitrary does.
+            any::<u8>().prop_map(|n| Op::Dup { n }),
+            any::<u8>().prop_map(|n| Op::Swap { n }),
+            (any::<bool>(), any::<u8>()).prop_map(|(cached, n)| Op::Ins { cached, n }),
+            // Path length includes 0 (the empty path) and >16.
+            (
+                any::<bool>(),
+                any::<bool>(),
+                proptest::collection::vec(
+                    any::<u8>().prop_map(|v| Key::Value(AlignedValue::from(v))),
+                    0..3
+                ),
+            )
+                .prop_map(|(cached, push_path, keys)| Op::Idx {
+                    cached,
+                    push_path,
+                    path: keys.into_iter().collect(),
+                }),
+            (any::<bool>(), simple_value).prop_map(|(storage, value)| Op::Push { storage, value }),
+            (any::<bool>(), simple_result)
+                .prop_map(|(cached, result)| Op::Popeq { cached, result }),
+        ]
+    }
+
+    /// A generator biased towards the variants whose `field_repr` collides, so
+    /// the injectivity property reliably samples colliding pairs: `Noop` with a
+    /// tiny counter, `Idx` with an empty path, and `Dup`/`Swap`/`Ins` over the
+    /// full `u8` range (whose low nibble is OR-ed into a fixed opcode).
+    fn arb_collision_prone_op() -> impl Strategy<Value = TestOp> {
+        prop_oneof![
+            (0u32..=3).prop_map(|n| Op::Noop { n }),
+            (any::<bool>(), any::<bool>()).prop_map(|(cached, push_path)| Op::Idx {
+                cached,
+                push_path,
+                path: Vec::new().into_iter().collect(),
+            }),
+            any::<u8>().prop_map(|n| Op::Dup { n }),
+            any::<u8>().prop_map(|n| Op::Swap { n }),
+            (any::<bool>(), any::<u8>()).prop_map(|(cached, n)| Op::Ins { cached, n }),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1024))]
+
+        /// (C1) Distinct `Op`s produce distinct `field_repr` outputs.
+        ///
+        /// `field_repr` is the proof's sole program binding, and it is only
+        /// injective for in-range operands (`Dup{n}`/`Dup{n+16}` alias; an
+        /// empty-path `Idx` aliases `Noop{0}`). The decode bound is exactly what
+        /// makes it injective over the reachable domain, so the property is
+        /// stated over ops the decoder admits.
+        #[test]
+        fn field_repr_is_injective(ops in proptest::collection::vec(arb_collision_prone_op(), 2..48)) {
+            let ops: Vec<TestOp> = ops.into_iter().filter(|o| decode(o).is_ok()).collect();
+            for i in 0..ops.len() {
+                for j in (i + 1)..ops.len() {
+                    if ops[i] != ops[j] {
+                        prop_assert_ne!(
+                            ops[i].field_vec(),
+                            ops[j].field_vec(),
+                            "distinct decodable ops share a field_repr: {:?} vs {:?}",
+                            ops[i], ops[j]
+                        );
+                    }
+                }
+            }
+        }
+
+        /// Sanity: the binary encoding IS injective for distinct ops. This
+        /// isolates the defect to `field_repr` (it passes on the current base).
+        #[test]
+        fn serialization_is_injective(a in arb_op(), b in arb_op()) {
+            if a != b {
+                let mut ba = Vec::new();
+                let mut bb = Vec::new();
+                Serializable::serialize(&a, &mut ba).unwrap();
+                Serializable::serialize(&b, &mut bb).unwrap();
+                prop_assert_ne!(ba, bb, "distinct ops share an encoding: {:?} vs {:?}", a, b);
+            }
+        }
+
+        /// `field_vec().len()` must equal `field_size()` (the latter is the
+        /// allocation hint). This holds for every decodable op; an empty-path
+        /// `Idx` (`field_size() == 1`, emits nothing) is now rejected on decode.
+        #[test]
+        fn field_size_matches_field_repr_length(op in arb_op()) {
+            prop_assume!(decode(&op).is_ok());
+            prop_assert_eq!(op.field_vec().len(), op.field_size(), "for {:?}", op);
+        }
+    }
+
+    // --- Regression tests: the decode boundary rejects the ops whose
+    // `field_repr` would collide (the proof's program binding). ---
+
+    /// `Dup{n}`/`Swap{n}`/`Ins{_,n}` OR `n` into the opcode nibble, so `n >= 16`
+    /// aliases the low-nibble op in `field_repr`; the decoder must reject them.
+    #[test]
+    fn dup_swap_ins_out_of_range_rejected() {
+        for op in [
+            Op::Dup { n: 16 },
+            Op::Swap { n: 16 },
+            Op::Ins { cached: false, n: 16 },
+            Op::Ins { cached: true, n: 16 },
+        ] {
+            let op: TestOp = op;
+            assert!(decode(&op).is_err(), "out-of-range {op:?} must be rejected on decode");
+        }
+        for op in [
+            Op::Dup { n: 15 },
+            Op::Swap { n: 0 },
+            Op::Ins { cached: true, n: 15 },
+        ] {
+            let op: TestOp = op;
+            assert!(decode(&op).is_ok(), "in-range {op:?} must decode");
+        }
+    }
+
+    /// An empty-path `Idx` emits no field elements (aliasing `Noop{0}`) and
+    /// over-reports `field_size`; a path longer than 16 overflows the opcode
+    /// nibble. Both are rejected on decode; a 1..=16 path and `Noop{0}` decode.
+    #[test]
+    fn idx_path_length_bounds_enforced() {
+        let empty: TestOp = Op::Idx {
+            cached: false,
+            push_path: false,
+            path: Vec::new().into_iter().collect(),
+        };
+        assert!(decode(&empty).is_err(), "empty-path Idx must be rejected");
+
+        let long: TestOp = Op::Idx {
+            cached: false,
+            push_path: false,
+            path: (0u8..17).map(|v| Key::Value(AlignedValue::from(v))).collect(),
+        };
+        assert!(decode(&long).is_err(), "17-entry Idx path must be rejected");
+
+        let ok: TestOp = Op::Idx {
+            cached: false,
+            push_path: false,
+            path: (0u8..16).map(|v| Key::Value(AlignedValue::from(v))).collect(),
+        };
+        assert!(decode(&ok).is_ok(), "16-entry Idx path must decode");
+        let noop0: TestOp = Op::Noop { n: 0 };
+        assert!(decode(&noop0).is_ok(), "Noop{{0}} must still decode");
+    }
+}

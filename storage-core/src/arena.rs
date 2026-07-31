@@ -2880,3 +2880,103 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area F: canonicity / injectivity of `DirectChildNode` / `ArenaKey` decode
+// around the inline/reference size boundary.
+//
+// The inline-vs-reference choice for a child is made deterministically by
+// `child_from` (storable.rs:139) using `is_in_small_object_limit`
+// (storable.rs:150): a child whose measured size `2 + data.len() + Σ child
+// sizes` is `<= SMALL_OBJECT_LIMIT` (1024) is inlined as `ArenaKey::Direct`,
+// otherwise it becomes a bare `ArenaKey::Ref(hash)`. This gives every logical
+// node a single canonical child representation keyed on the boundary. The
+// content hash (`arena::hash`, arena.rs:66; surfaced by `ArenaKey::hash`,
+// arena.rs:310) is computed from the node's data and its children's *hashes*
+// and is therefore representation-independent: one content hash per logical
+// node, regardless of whether a child is stored inline or by reference.
+//
+// Result: the desired canonicity invariants HOLD. `child_from` yields exactly
+// one representation per (data, children); the content hash is a function of
+// logical content only; and `DirectChildNode` decode is total and round-trips
+// canonically. (Non-canonical whole-graph encodings are additionally rejected
+// by the `Sp` normal-form re-serialization check at arena.rs:916-923.)
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod boundary_canonicity_props {
+    use super::*;
+    use crate::DefaultHasher;
+    use crate::storable::{SMALL_OBJECT_LIMIT, child_from};
+    use proptest::prelude::*;
+
+    type K = ArenaKey<DefaultHasher>;
+
+    fn de_key(bytes: &[u8]) -> std::io::Result<K> {
+        <K as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+    fn de_direct(bytes: &[u8]) -> std::io::Result<DirectChildNode<DefaultHasher>> {
+        <DirectChildNode<DefaultHasher> as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // (F-tot) Arbitrary bytes never panic the node decoders.
+        #[test]
+        fn arena_key_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..96)) {
+            let _ = de_key(&bytes);
+        }
+        #[test]
+        fn direct_child_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..96)) {
+            let _ = de_direct(&bytes);
+        }
+
+        // (F-canon) One content hash per logical node: for any data, the
+        // `child_from` representation and a bare `Ref` to the directly-computed
+        // hash agree on the content hash (representation-independent).
+        #[test]
+        fn content_hash_is_representation_independent(data in prop::collection::vec(any::<u8>(), 0..1200)) {
+            let children: Vec<K> = Vec::new();
+            let key = child_from::<DefaultHasher>(&data, &children);
+            let direct_hash = crate::arena::hash::<DefaultHasher>(&data, children.iter().map(|c| c.hash()));
+            // The chosen representation exposes exactly this content hash...
+            prop_assert_eq!(key.hash(), &direct_hash);
+            // ...and a `Ref` to that hash exposes the same content hash.
+            let as_ref = ArenaKey::<DefaultHasher>::Ref(direct_hash.clone());
+            prop_assert_eq!(as_ref.hash(), &direct_hash);
+        }
+
+        // (F-canon) The inline/reference choice is a deterministic function of
+        // the boundary: size `<= SMALL_OBJECT_LIMIT` inlines (`Direct`), above
+        // references (`Ref`). A single canonical representation per node.
+        #[test]
+        fn boundary_choice_is_deterministic(len in 0usize..2048) {
+            let data = vec![0xABu8; len];
+            let children: Vec<K> = Vec::new();
+            let key = child_from::<DefaultHasher>(&data, &children);
+            let measured = 2 + data.len(); // empty children
+            match key {
+                ArenaKey::Direct(_) => prop_assert!(measured <= SMALL_OBJECT_LIMIT),
+                ArenaKey::Ref(_) => prop_assert!(measured > SMALL_OBJECT_LIMIT),
+            }
+        }
+    }
+
+    // A `DirectChildNode` round-trips through its binary codec, preserving the
+    // content hash (canonical decode). Holds today; kept as a regression guard.
+    #[test]
+    fn direct_child_roundtrip_preserves_hash() {
+        for len in [0usize, 1, 1022, 1023] {
+            let data = vec![0x5Au8; len];
+            let node = DirectChildNode::<DefaultHasher>::new(data, Vec::new());
+            let mut bytes = Vec::new();
+            node.serialize(&mut bytes).unwrap();
+            let back = de_direct(&bytes).unwrap();
+            assert_eq!(node.hash, back.hash, "content hash changed across round-trip (len={len})");
+            // Re-serialization is byte-identical (canonical wire form).
+            let mut re = Vec::new();
+            back.serialize(&mut re).unwrap();
+            assert_eq!(bytes, re, "DirectChildNode wire form not canonical (len={len})");
+        }
+    }
+}

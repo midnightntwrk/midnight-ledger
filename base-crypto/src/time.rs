@@ -181,3 +181,57 @@ impl Sub<Self> for Duration {
         Duration(self.0.saturating_sub(rhs.0))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area F: totality of `Duration::from_hours`.
+//
+// `Duration::from_hours(h)` (time.rs:159) computes `h * 60 * 60` with the
+// plain `*` operator and no overflow guard. Every other arithmetic operation
+// in this module is explicitly *saturating* (`Timestamp::add`/`sub` at
+// time.rs:101/119/127, `Duration::add`/`sub` at time.rs:173/181 all use
+// `saturating_add`/`saturating_sub`). The unguarded multiplication therefore
+// diverges from the module's own arithmetic contract: for `|h| > i128::MAX /
+// 3600` the product overflows `i128`, which is a debug-mode panic ("attempt to
+// multiply with overflow") and a silent wrap in release. Construction from a
+// decoded/attacker-chosen hour count must be *total* (never panic); to stay
+// consistent with the rest of the module it should saturate.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod from_hours_totality_props {
+    use super::Duration;
+    use proptest::prelude::*;
+
+    /// The largest hour count for which `h * 3600` does not overflow `i128`.
+    const SAFE_MAX_HOURS: i128 = i128::MAX / 3600;
+
+    proptest! {
+        // (F-holds) Within the representable range the product is exact and
+        // never panics. This half of the property HOLDS today.
+        #[test]
+        fn from_hours_exact_in_range(h in -SAFE_MAX_HOURS..=SAFE_MAX_HOURS) {
+            let d = Duration::from_hours(h);
+            prop_assert_eq!(d.as_seconds(), h * 3600);
+        }
+    }
+
+    // `from_hours` arguments come from decode (`Duration` deserializes over the
+    // whole `i128` range), so it must be total for any `i128`.
+    proptest! {
+        #[test]
+        fn from_hours_is_total(h in any::<i128>()) {
+            let _ = Duration::from_hours(h);
+        }
+    }
+
+    // Just past the positive safe range the product saturates to i128::MAX.
+    #[test]
+    fn from_hours_saturates_at_boundary() {
+        assert_eq!(Duration::from_hours(SAFE_MAX_HOURS + 1).as_seconds(), i128::MAX);
+    }
+
+    // The negative extreme saturates symmetrically to i128::MIN.
+    #[test]
+    fn from_hours_saturates_at_negative_boundary() {
+        assert_eq!(Duration::from_hours(i128::MIN).as_seconds(), i128::MIN);
+    }
+}

@@ -444,3 +444,69 @@ impl AlignmentAtom {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area C: serde `Deserialize` vs binary `Deserializable` accept/reject parity
+// for `AlignmentAtom` / `ValueAtom` / `Alignment`.
+//
+// The binary `Deserializable` path (this file) is the stricter one: it enforces
+// value-atom normal form (rejects a trailing zero byte, serialize.rs:410-414),
+// caps `AlignmentAtom::Bytes { length }` at THREE_BYTE_LIMIT = 524287 via the
+// flagged-int codec (serialize.rs:24, write_flagged_int cannot emit more), and
+// enforces canonical singleton `Alignment` encodings. The serde impls are all
+// *derived* (encoding.rs:605-607 ValueAtom `#[serde(transparent)]`+serde_bytes;
+// encoding.rs:637-638 AlignmentAtom internally-tagged enum; encoding.rs:182-184
+// Alignment transparent), so they inherit none of these checks and admit values
+// the binary path rejects (or cannot even represent). The desired property:
+// the two decoders agree on the set of accepted values.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod parity_props {
+    use crate::fab::ValueAtom;
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+
+    fn bin_ser<T: Serializable>(v: &T) -> std::io::Result<Vec<u8>> {
+        let mut b = Vec::new();
+        v.serialize(&mut b)?;
+        Ok(b)
+    }
+    fn bin_de_valueatom(bytes: &[u8]) -> std::io::Result<ValueAtom> {
+        ValueAtom::deserialize(&mut &bytes[..], 0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // Totality: arbitrary bytes never panic the binary decoders.
+        #[test]
+        fn valueatom_binary_decode_total(bytes in prop::collection::vec(any::<u8>(), 0..64)) {
+            let _ = bin_de_valueatom(&bytes);
+        }
+
+        // (C-parity, positive) On the *valid* (normal-form) value set both
+        // decoders agree: a normalized `ValueAtom` round-trips through both the
+        // binary and the serde codecs to the same value (holds today).
+        #[test]
+        fn valueatom_normalform_agrees(raw in prop::collection::vec(any::<u8>(), 0..40)) {
+            let atom = ValueAtom(raw).normalize();
+            // binary round-trip
+            let bin = bin_ser(&atom).unwrap();
+            let via_bin = bin_de_valueatom(&bin).unwrap();
+            prop_assert_eq!(&via_bin, &atom);
+            // serde round-trip
+            let json = serde_json::to_string(&atom).unwrap();
+            let via_serde: ValueAtom = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(&via_serde, &atom);
+        }
+    }
+
+    // Note: the *serde* decoders for `ValueAtom`/`AlignmentAtom` are lenient
+    // relative to the binary path (they accept non-normal-form atoms and
+    // out-of-cap `Bytes` lengths). This is not consensus-relevant: the consensus
+    // wire is the binary `Deserializable`, which is strict, and neither lenient
+    // value can cross into it -- `ValueAtom::serialize` normalizes before
+    // writing, and `write_flagged_int` refuses a length beyond its cap. serde is
+    // the off-consensus (JSON/RPC) surface. Only the positive parity baseline is
+    // asserted here.
+}

@@ -26,6 +26,7 @@ use crate::Storable;
 use crate::arena::{ArenaKey, Sp};
 use crate::db::DB;
 use crate::storable::{Loader, SizeAnn};
+use contracts::debug_requires;
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 
@@ -33,7 +34,7 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[storable(db = D, invariant = MerklePatriciaTrie::invariant)]
+#[storable(db = D, invariant = MerklePatriciaTrie::annotation_consistency)]
 pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
@@ -69,7 +70,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         MerklePatriciaTrie(Sp::new(Node::Empty))
     }
 
-    fn invariant(&self) -> Result<(), std::io::Error> {
+    fn annotation_consistency(&self) -> Result<(), std::io::Error> {
         fn err<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
             ann: &A,
             true_val: A,
@@ -125,18 +126,98 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         Ok(())
     }
 
+    /// Check that the trie is in canonical form, returning a description of the
+    /// violated rule otherwise. A well-formed trie is *canonical*: its structure
+    /// is uniquely determined by its key-value contents (see the type-level
+    /// docs). This is a hand-enumerated statement of the structural rules,
+    /// composed with the annotation-consistency check.
+    ///
+    /// This is a pure inspection predicate: it is the oracle the property tests
+    /// use, and does not itself change what deserialization accepts.
+    pub fn canonicity(&self) -> Result<(), std::io::Error> {
+        fn err<T>(msg: &str) -> Result<T, std::io::Error> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("canonicity: {msg}"),
+            ))
+        }
+
+        fn structure<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+            node: &Node<V, D, A>,
+        ) -> Result<(), std::io::Error> {
+            match node {
+                Node::Empty | Node::Leaf { .. } => Ok(()),
+                Node::Branch { children, .. } => {
+                    if children
+                        .iter()
+                        .filter(|child| !matches!(***child, Node::Empty))
+                        .count()
+                        < 2
+                    {
+                        return err("Node::Branch must have at least two non-empty children");
+                    }
+                    children
+                        .iter()
+                        .try_for_each(|child| structure(child.deref()))
+                }
+                Node::Extension {
+                    compressed_path,
+                    child,
+                    ..
+                } => {
+                    if compressed_path.is_empty() {
+                        return err("Node::Extension path must be non-empty");
+                    }
+                    if compressed_path.len() > 255 {
+                        return err("Node::Extension path may not be longer than 255");
+                    }
+                    if compressed_path.iter().any(|b| *b > 0x0f) {
+                        return err("Node::Extension path must consist of nibbles");
+                    }
+                    match child.deref() {
+                        Node::Empty => {
+                            return err("Node::Extension child must not be Node::Empty");
+                        }
+                        Node::Extension { .. } if compressed_path.len() != 255 => {
+                            return err(
+                                "Node::Extension may only have a Node::Extension child when its own path is of length 255",
+                            );
+                        }
+                        _ => {}
+                    }
+                    structure(child.deref())
+                }
+                Node::MidBranchLeaf { child, .. } => match child.deref() {
+                    Node::Branch { .. } | Node::Extension { .. } => structure(child.deref()),
+                    _ => err("Node::MidBranchLeaf may only have Node::Branch or Node::Extension children"),
+                },
+            }
+        }
+
+        structure(self.0.deref())?;
+        self.annotation_consistency()
+    }
+
+    /// Whether [`Self::canonicity`] holds.
+    pub fn is_canonical(&self) -> bool {
+        self.canonicity().is_ok()
+    }
+
     /// Insert a value into the trie
+    #[debug_requires(path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub fn insert(&self, path: &[u8], value: V) -> Self {
         MerklePatriciaTrie(Node::<V, D, A>::insert(&self.0, path, value).0)
     }
 
     /// Lookup a value in the trie
+    #[debug_requires(path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub fn lookup(&self, path: &[u8]) -> Option<&V> {
         Node::<V, D, A>::lookup(&self.0, path)
     }
 
     /// Prunes all paths which are lexicographically less than the `target_path`.
     /// Returns the updated tree, and a vector of the removed leaves.
+    #[debug_requires(target_path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub(crate) fn prune(
         &self,
         target_path: &[u8],
@@ -147,11 +228,13 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     }
 
     /// Lookup a value in the trie
+    #[debug_requires(path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub fn lookup_sp(&self, path: &[u8]) -> Option<Sp<V, D>> {
         Node::<V, D, A>::lookup_sp(&self.0, path)
     }
 
     /// Given a path, find the nearest predecessor to that path
+    #[debug_requires(path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub(crate) fn find_predecessor<'a>(&'a self, path: &[u8]) -> Option<(Vec<u8>, &'a V)> {
         let mut best_predecessor = None;
         Node::<V, D, A>::find_predecessor_recursive(
@@ -164,6 +247,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     }
 
     /// Remove a value from the trie
+    #[debug_requires(path.iter().all(|b| *b <= 0xf), "path must consist of nibbles")]
     pub fn remove(&self, path: &[u8]) -> Self {
         MerklePatriciaTrie(Node::<V, D, A>::remove(&self.0, path).0)
     }
@@ -229,6 +313,132 @@ impl<V: Storable<D> + PartialOrd, D: DB, A: Storable<D> + PartialOrd + Annotatio
 {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.0.partial_cmp(&other.0)
+    }
+}
+
+/// Selects the family of tries produced by [`MerklePatriciaTrie`]'s
+/// [`proptest::arbitrary::Arbitrary`] implementation.
+#[cfg(feature = "proptest")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrieGeneration {
+    /// Canonical tries, built by inserting a generated list of entries
+    /// through the public API.
+    #[default]
+    Canonical,
+    /// Arbitrary wire-representable structures, including non-canonical
+    /// ones, with occasionally corrupted annotations. These are suitable for
+    /// testing the deserialization barrier, which should reject exactly the
+    /// non-canonical ones.
+    Raw,
+}
+
+/// Arbitrary wire-representable node structures: extension paths always fit
+/// the `u8` length prefix and consist of nibbles (other shapes cannot arrive
+/// via deserialization at all), but no structural invariants are respected,
+/// and annotations, while usually correct, are occasionally corrupted
+/// through [`HasSize::set_size`].
+#[cfg(feature = "proptest")]
+fn arb_raw_node<V, D, A>() -> impl proptest::strategy::Strategy<Value = Node<V, D, A>>
+where
+    V: Storable<D> + proptest::arbitrary::Arbitrary,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    use proptest::prelude::*;
+
+    fn corrupt<A: HasSize>(ann: A, corruption: Option<u64>) -> A {
+        match corruption {
+            None => ann,
+            Some(x) => ann.set_size(ann.get_size() ^ (1 + (x % 255))),
+        }
+    }
+
+    fn arb_corruption() -> impl Strategy<Value = Option<u64>> {
+        prop_oneof![
+            6 => Just(None),
+            1 => proptest::prelude::any::<u64>().prop_map(Some),
+        ]
+    }
+
+    // Extension paths biased towards the interesting boundaries: empty, and
+    // the 255-nibble maximum.
+    fn arb_ext_path() -> impl Strategy<Value = std::vec::Vec<u8>> {
+        prop_oneof![
+            1 => Just(std::vec::Vec::new()),
+            5 => proptest::collection::vec(0u8..16, 1..6),
+            1 => proptest::collection::vec(0u8..16, 250..=255usize),
+        ]
+    }
+
+    let leaf = (any::<V>(), arb_corruption()).prop_map(|(value, corruption)| Node::Leaf {
+        ann: corrupt(A::from_value(&value), corruption),
+        value: Sp::new(value),
+    });
+    prop_oneof![1 => Just(Node::Empty), 2 => leaf].prop_recursive(4, 24, 8, |inner| {
+        let branch = (proptest::collection::vec(inner.clone(), 16), arb_corruption()).prop_map(
+            |(children, corruption)| {
+                let children: Box<[Sp<Node<V, D, A>, D>; 16]> =
+                    Box::new(core::array::from_fn(|i| Sp::new(children[i].clone())));
+                let ann = children
+                    .iter()
+                    .fold(A::empty(), |acc, child| acc.append(&Node::ann(child)));
+                Node::Branch {
+                    ann: corrupt(ann, corruption),
+                    children,
+                }
+            },
+        );
+        let ext = (arb_ext_path(), inner.clone(), arb_corruption()).prop_map(
+            |(compressed_path, child, corruption)| {
+                let child = Sp::new(child);
+                Node::Extension {
+                    ann: corrupt(Node::ann(&child), corruption),
+                    compressed_path,
+                    child,
+                }
+            },
+        );
+        let mbl = (any::<V>(), inner, arb_corruption()).prop_map(|(value, child, corruption)| {
+            let child = Sp::new(child);
+            Node::MidBranchLeaf {
+                ann: corrupt(Node::ann(&child).append(&A::from_value(&value)), corruption),
+                value: Sp::new(value),
+                child,
+            }
+        });
+        prop_oneof![branch, ext, mbl]
+    })
+}
+
+#[cfg(feature = "proptest")]
+impl<V: Storable<D> + proptest::arbitrary::Arbitrary, D: DB, A: Storable<D> + Annotation<V>>
+    proptest::arbitrary::Arbitrary for MerklePatriciaTrie<V, D, A>
+{
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+    type Parameters = TrieGeneration;
+
+    fn arbitrary_with(generation: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        // Unlike most storage types, these strategies shrink: canonical
+        // tries shrink through their generating insertion list, raw ones
+        // towards smaller and shallower shapes.
+        match generation {
+            TrieGeneration::Canonical => proptest::collection::vec(
+                (proptest::collection::vec(0u8..16, 0..64), any::<V>()),
+                0..32,
+            )
+            .prop_map(|pairs| {
+                pairs
+                    .into_iter()
+                    .fold(MerklePatriciaTrie::new(), |trie, (path, value)| {
+                        trie.insert(&path, value)
+                    })
+            })
+            .boxed(),
+            TrieGeneration::Raw => arb_raw_node()
+                .prop_map(|node| MerklePatriciaTrie(Sp::new(node)))
+                .boxed(),
+        }
     }
 }
 
@@ -1677,58 +1887,313 @@ mod tests {
         validate_long_path(&deserialized_mpt, 300, 100);
     }
 
-    #[test]
-    fn extended_path_insertion() {
-        let mut mpt = MerklePatriciaTrie::<u32>::new();
-        mpt = mpt.insert(&([1, 2]), 12);
-        mpt = mpt.insert(&([1, 2, 3, 4, 5]), 12345);
-        mpt = mpt.insert(&([1, 2, 3, 4, 6]), 12346);
-        mpt = mpt.insert(&([1, 2, 3, 5, 6]), 12356);
-        mpt = mpt.insert(&([1]), 1);
+}
 
-        // Make sure we can look up specific values
-        assert_eq!(mpt.lookup(&([1, 2])), Some(&12));
-        assert_eq!(mpt.lookup(&([1, 2, 3, 4, 5])), Some(&12345));
-        assert_eq!(mpt.lookup(&([1, 2, 3, 5, 6])), Some(&12356));
-        assert_eq!(mpt.lookup(&([1])), Some(&1));
+// The generator (`TrieGeneration`/`arb_raw_node`) and the `canonicity()` oracle
+// live in the module above. These properties assert that the deserialization
+// barrier accepts exactly the canonical tries.
+#[cfg(all(test, feature = "proptest"))]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+    use std::vec::Vec;
 
-        // and make sure we get none for things not in the tree
-        assert_eq!(mpt.lookup(&([4])), None);
-        assert_eq!(mpt.lookup(&([1, 2, 4])), None);
-        // In particular, 123 ends at a *branch*, which used to panic because branch assumed path was non-empty
-        assert_eq!(mpt.lookup(&([1, 2, 3])), None);
-        assert_eq!(mpt.lookup(&([1, 2, 3, 6])), None);
-        // in particular, this test case used to panic with an out of bounds error because the path is empty
-        assert_eq!(mpt.lookup(&([])), None);
+    type Trie = MerklePatriciaTrie<u32>;
+    type TrieA<A> = MerklePatriciaTrie<u32, DefaultDB, A>;
 
-        // Finally, make sure we can print the tree, which will force a traversal of the whole tree
-        println!("{:?}", mpt);
+    /// A value-bearing annotation: tracks both the leaf count and the sum of
+    /// the `u32` values, so that the annotation properties also exercise a
+    /// component the size-based node checks cannot see.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serializable, Storable)]
+    #[tag = "mpt-proptest-sum-ann"]
+    #[storable(base)]
+    struct SumAnn {
+        size: u64,
+        sum: u64,
     }
 
-    #[test]
-    fn test_canonicity() {
-        let segment1 = [0u8; 200];
-        let segment2 = [1u8; 200];
-        let path1 = segment1
-            .iter()
-            .chain(segment1.iter())
-            .chain(segment1.iter())
-            .copied()
-            .collect::<Vec<_>>();
-        let path2 = segment1
-            .iter()
-            .chain(segment2.iter())
-            .chain(segment2.iter())
-            .copied()
-            .collect::<Vec<_>>();
+    impl Semigroup for SumAnn {
+        fn append(&self, other: &Self) -> Self {
+            SumAnn {
+                size: self.size + other.size,
+                sum: self.sum.wrapping_add(other.sum),
+            }
+        }
+    }
 
-        let mpt1 = MerklePatriciaTrie::<()>::new().insert(&path1, ());
-        let mpt2 = MerklePatriciaTrie::<()>::new()
-            .insert(&path2, ())
-            .insert(&path1, ())
-            .remove(&path2);
-        dbg!(&mpt1);
-        dbg!(&mpt2);
-        assert_eq!(mpt1.0.hash(), mpt2.0.hash());
+    impl Monoid for SumAnn {
+        fn empty() -> Self {
+            SumAnn { size: 0, sum: 0 }
+        }
+    }
+
+    impl HasSize for SumAnn {
+        fn get_size(&self) -> u64 {
+            self.size
+        }
+
+        fn set_size(&self, x: u64) -> Self {
+            SumAnn {
+                size: x,
+                sum: self.sum,
+            }
+        }
+    }
+
+    impl Annotation<u32> for SumAnn {
+        fn from_value(value: &u32) -> Self {
+            SumAnn {
+                size: 1,
+                sum: u64::from(*value),
+            }
+        }
+    }
+
+    fn round_trip<A: Storable<DefaultDB> + Annotation<u32>>(
+        trie: &TrieA<A>,
+    ) -> Result<TrieA<A>, std::io::Error> {
+        let mut bytes = Vec::new();
+        Serializable::serialize(trie, &mut bytes)?;
+        Deserializable::deserialize(&mut bytes.as_slice(), 0)
+    }
+
+    /// The deserialization barrier accepts exactly the canonical tries.
+    fn check_barrier_matches_canonicity<A: Storable<DefaultDB> + Annotation<u32>>(
+        trie: &TrieA<A>,
+    ) -> Result<(), TestCaseError> {
+        match (round_trip(trie), trie.canonicity()) {
+            (Ok(deserialized), Ok(())) => prop_assert_eq!(&deserialized, trie),
+            (Ok(_), Err(violation)) => {
+                return Err(TestCaseError::fail(format!(
+                    "non-canonical trie passed the deserialization barrier: {violation}"
+                )));
+            }
+            (Err(rejection), Ok(())) => {
+                return Err(TestCaseError::fail(format!(
+                    "canonical trie rejected by the deserialization barrier: {rejection}"
+                )));
+            }
+            (Err(_), Err(_)) => {}
+        }
+        Ok(())
+    }
+
+    proptest! {
+        // The deserialization barrier accepts exactly the canonical trees.
+        #[test]
+        fn barrier_accepts_exactly_canonical(trie in any_with::<Trie>(TrieGeneration::Raw)) {
+            check_barrier_matches_canonicity(&trie)?;
+        }
+
+        // The same barrier property with a value-bearing annotation, so the
+        // annotation invariant is exercised beyond what size-only annotations
+        // can distinguish.
+        #[test]
+        fn sum_ann_barrier_accepts_exactly_canonical(
+            trie in any_with::<TrieA<SumAnn>>(TrieGeneration::Raw),
+        ) {
+            check_barrier_matches_canonicity(&trie)?;
+        }
+    }
+}
+
+#[cfg(all(test, feature = "proptest"))]
+mod deser_robustness {
+    use super::*;
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+    use std::vec::Vec;
+
+    type Trie = MerklePatriciaTrie<u32>;
+    type TrieNode = Node<u32, DefaultDB, SizeAnn>;
+
+    fn deserialize_trie(bytes: &[u8]) -> std::io::Result<Trie> {
+        <Trie as Deserializable>::deserialize(&mut { bytes }, 0)
+    }
+
+    fn serialize_trie(trie: &Trie) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        Serializable::serialize(trie, &mut bytes).expect("serialization must succeed");
+        bytes
+    }
+
+    /// Deserialization outcome for a byte slice, catching any panic so the
+    /// property can assert totality. Returns `Ok(())` if `deserialize` returned
+    /// (whether `Ok` or `Err`), and `Err(())` if it panicked.
+    fn deserialize_is_total(bytes: &[u8]) -> Result<(), ()> {
+        let owned = bytes.to_vec();
+        std::panic::catch_unwind(move || {
+            let _ = deserialize_trie(&owned);
+        })
+        .map_err(|_| ())
+    }
+
+    /// Assert the membership triangle on a trie the barrier accepted.
+    fn membership_is_consistent(trie: &Trie) -> Result<(), String> {
+        let entries: Vec<(Vec<u8>, u32)> =
+            trie.iter().map(|(path, value)| (path, *value)).collect();
+
+        if trie.size() != entries.len() {
+            return Err(format!(
+                "size() = {} but iter() yielded {} entries: {trie:?}",
+                trie.size(),
+                entries.len()
+            ));
+        }
+        if trie.is_empty() != entries.is_empty() {
+            return Err(format!("is_empty() disagrees with iter(): {trie:?}"));
+        }
+        // Every iterated entry is retrievable by its own key.
+        for (path, value) in entries.iter() {
+            if trie.lookup(path) != Some(value) {
+                return Err(format!(
+                    "lookup({path:?}) missed an entry iter() reported ({value}): {trie:?}"
+                ));
+            }
+            if trie.lookup_sp(path).map(|sp| *sp) != Some(*value) {
+                return Err(format!(
+                    "lookup_sp({path:?}) missed an entry iter() reported ({value}): {trie:?}"
+                ));
+            }
+        }
+        // No two iterated entries share a key (otherwise lookup() could not
+        // distinguish them).
+        let mut keys: Vec<&Vec<u8>> = entries.iter().map(|(p, _)| p).collect();
+        keys.sort();
+        let mut deduped = keys.clone();
+        deduped.dedup();
+        if keys.len() != deduped.len() {
+            return Err(format!("iter() yielded duplicate keys: {trie:?}"));
+        }
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4096))]
+
+        /// (A1) Deserializing arbitrary random bytes never panics.
+        #[test]
+        fn deserialize_random_bytes_never_panics(
+            bytes in proptest::collection::vec(any::<u8>(), 0..256),
+        ) {
+            prop_assert!(deserialize_is_total(&bytes).is_ok(), "panicked on random bytes");
+        }
+
+        /// (A2) For any trie the barrier accepts (round-trips), the membership
+        /// views agree. Gated on `canonicity()`, which is the invariant a
+        /// correct barrier should enforce -- this is the positive property and
+        /// must always hold.
+        #[test]
+        fn canonical_trie_membership_is_consistent(raw in any_with::<Trie>(TrieGeneration::Raw)) {
+            // Only canonical tries are checked; non-canonical ones pass
+            // vacuously (the barrier rejects them).
+            if raw.canonicity().is_ok() {
+                if let Err(msg) = membership_is_consistent(&raw) {
+                    return Err(TestCaseError::fail(msg));
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2048))]
+
+        /// (A1) Bit-flipping a valid encoding must never make deserialization
+        /// panic.
+        ///
+        /// Regression guard: a corrupted `Node::Extension` length prefix used
+        /// to drive `expand_nibbles` to index past the compressed-path bytes
+        /// and panic; the disc-3 arm now rejects a compressed path whose length
+        /// disagrees with the nibble count before `expand_nibbles` runs.
+        #[test]
+        fn deserialize_bitflipped_encoding_never_panics(
+            trie in any_with::<Trie>(TrieGeneration::Raw),
+            flips in proptest::collection::vec((any::<prop::sample::Index>(), 1u8..), 1..8),
+        ) {
+            let mut bytes = serialize_trie(&trie);
+            prop_assume!(!bytes.is_empty());
+            for (idx, mask) in flips {
+                let pos = idx.index(bytes.len());
+                bytes[pos] ^= mask;
+            }
+            prop_assert!(deserialize_is_total(&bytes).is_ok(), "panicked on bit-flipped encoding");
+        }
+
+        /// (A1) Truncating a valid encoding at any point must never make
+        /// deserialization panic. This holds on the current base (a truncation
+        /// that drops compressed-path bytes fails the inner `Vec<u8>` decode
+        /// before `expand_nibbles` runs), so it is an active property.
+        #[test]
+        fn deserialize_truncated_encoding_never_panics(
+            trie in any_with::<Trie>(TrieGeneration::Raw),
+            cut in any::<prop::sample::Index>(),
+        ) {
+            let bytes = serialize_trie(&trie);
+            prop_assume!(!bytes.is_empty());
+            let end = cut.index(bytes.len());
+            prop_assert!(deserialize_is_total(&bytes[..end]).is_ok(), "panicked on truncated encoding");
+        }
+
+        /// (A2) For any trie the *deserialization barrier* accepts (not merely
+        /// the canonical ones), membership must be consistent: a non-canonical
+        /// shape (e.g. `MidBranchLeaf` with a `Leaf` child) would otherwise
+        /// have two entries at one key. The barrier now rejects such shapes, so
+        /// every accepted trie is canonical and membership holds.
+        #[test]
+        fn accepted_trie_membership_is_consistent(raw in any_with::<Trie>(TrieGeneration::Raw)) {
+            let bytes = serialize_trie(&raw);
+            let trie = match deserialize_trie(&bytes) {
+                Ok(trie) => trie,
+                Err(_) => return Ok(()),
+            };
+            if let Err(msg) = membership_is_consistent(&trie) {
+                return Err(TestCaseError::fail(msg));
+            }
+        }
+    }
+
+    // --- Regression tests: minimized findings, pinning correct behavior. ---
+
+    /// Deserializing an empty buffer is a clean `Err`, not a panic.
+    #[test]
+    fn empty_buffer_is_rejected() {
+        assert!(deserialize_trie(&[]).is_err());
+    }
+
+    /// Positive control for (A2): a canonical trie's membership triangle holds.
+    #[test]
+    fn canonical_round_trip_membership_holds() {
+        let trie = Trie::new()
+            .insert(&[1, 2, 3], 100)
+            .insert(&[1, 2, 4], 104)
+            .insert(&[2, 2, 4], 105);
+        let decoded = deserialize_trie(&serialize_trie(&trie)).expect("must round-trip");
+        membership_is_consistent(&decoded).expect("canonical membership must be consistent");
+    }
+
+    /// A `MidBranchLeaf` whose child is a `Leaf` would, if accepted, report two
+    /// entries at the *same* key (the empty path) via `iter()`/`size()` while
+    /// `lookup()` retrieves only one. The barrier must reject it (or, failing
+    /// that, its membership must be consistent); it now rejects it.
+    #[test]
+    fn regression_midbranchleaf_with_leaf_child_membership() {
+        let node: TrieNode = Node::MidBranchLeaf {
+            ann: SizeAnn(2),
+            value: Sp::new(1u32),
+            child: Sp::new(Node::Leaf {
+                ann: SizeAnn(1),
+                value: Sp::new(2u32),
+            }),
+        };
+        let trie = MerklePatriciaTrie(Sp::new(node));
+        let decoded = match deserialize_trie(&serialize_trie(&trie)) {
+            // If a future fix rejects it at the barrier, the property is
+            // vacuously satisfied.
+            Err(_) => return,
+            Ok(trie) => trie,
+        };
+        membership_is_consistent(&decoded)
+            .expect("an accepted trie must have consistent membership");
     }
 }

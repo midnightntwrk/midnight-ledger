@@ -2388,11 +2388,20 @@ impl rand::distributions::Distribution<ContractCall<(), InMemoryDB>>
     for rand::distributions::Standard
 {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ContractCall<(), InMemoryDB> {
+        // Sample real transcripts (each optional) now that `Transcript` has a
+        // `Distribution`; previously these were forced to `None`.
+        let sample_transcript = |rng: &mut R| -> Option<Sp<Transcript<InMemoryDB>, InMemoryDB>> {
+            if rng.r#gen::<bool>() {
+                Some(Sp::new(rng.r#gen()))
+            } else {
+                None
+            }
+        };
         ContractCall {
             address: rng.r#gen(),
             entry_point: rng.r#gen(),
-            guaranteed_transcript: None, // rng.r#gen(), TODO WG
-            fallible_transcript: None,   // rng.r#gen(), TODO WG
+            guaranteed_transcript: sample_transcript(rng),
+            fallible_transcript: sample_transcript(rng),
             communication_commitment: rng.r#gen(),
             proof: (),
         }

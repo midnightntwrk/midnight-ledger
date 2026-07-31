@@ -1108,6 +1108,12 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         &self,
         update: &MerkleTreeCollapsedUpdate,
     ) -> Result<Self, InvalidUpdate> {
+        if update.end < update.start {
+            return Err(InvalidUpdate::EndBeforeStart(update.start, update.end));
+        }
+        if (update.end as u128) >= (1u128 << self.height()) {
+            return Err(InvalidUpdate::EndOutOfTree(update.end));
+        }
         let segments = MerkleTreeCollapsedUpdate::step_sizes(update.start, update.end + 1);
         if segments.len() != update.hashes.len() {
             return Err(InvalidUpdate::WrongNumberOfSegments(
@@ -1751,5 +1757,106 @@ mod tests {
                 InvalidUpdate::IndexOutOfTree(index),
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "proptest"))]
+mod apply_collapsed_update_totality {
+    use super::*;
+    use proptest::prelude::*;
+    use storage_core::db::InMemoryDB;
+
+    type DB = InMemoryDB<sha2::Sha256>;
+
+    /// Build an update directly from its (public-on-the-wire) fields, without
+    /// going through the validating `MerkleTreeCollapsedUpdate::new`. This is
+    /// exactly the shape a `Deserializable::deserialize` can hand back.
+    fn raw_update(start: u64, end: u64, hashes: Vec<u64>) -> MerkleTreeCollapsedUpdate {
+        MerkleTreeCollapsedUpdate {
+            start,
+            end,
+            hashes: hashes
+                .into_iter()
+                .map(|h| MerkleTreeDigest(Fr::from(h)))
+                .collect(),
+        }
+    }
+
+    /// A generator over the full representable space of updates, biased towards
+    /// the structurally-interesting boundaries: `u64::MAX`, values around
+    /// `end + 1`, and short/empty hash vectors.
+    fn arb_bound() -> impl Strategy<Value = u64> {
+        prop_oneof![
+            5 => any::<u64>(),
+            2 => 0u64..=64,
+            1 => Just(u64::MAX),
+            1 => Just(u64::MAX - 1),
+        ]
+    }
+
+    fn arb_update() -> impl Strategy<Value = MerkleTreeCollapsedUpdate> {
+        (
+            arb_bound(),
+            arb_bound(),
+            proptest::collection::vec(any::<u64>(), 0..8),
+        )
+            .prop_map(|(start, end, hashes)| raw_update(start, end, hashes))
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(4096))]
+
+        // A collapsed update is deserialized from the wire, so applying any
+        // well-typed update to a blank tree of any height must return Ok/Err,
+        // never panic.
+        #[test]
+        fn apply_never_panics(
+            height in 0u8..=32,
+            update in arb_update(),
+        ) {
+            let tree = MerkleTree::<(), DB>::blank(height);
+            // Only requirement: this returns (Ok/Err), rather than panicking.
+            let _ = tree.apply_collapsed_update(&update);
+        }
+    }
+
+    // Each regression pins a distinct out-of-range update that must be rejected
+    // (the proptest above only asserts no-panic; these assert the rejection).
+
+    // end == u64::MAX (would overflow `end + 1`).
+    #[test]
+    fn regression_end_is_u64_max_is_rejected_not_panic() {
+        let tree = MerkleTree::<(), DB>::blank(4);
+        let update = raw_update(0, u64::MAX, vec![]);
+        // A total implementation should reject an out-of-tree end, not panic.
+        assert!(tree.apply_collapsed_update(&update).is_err());
+    }
+
+    // start == end + 1 (would hit `ilog2(0)` in `step_sizes`).
+    #[test]
+    fn regression_start_equals_end_plus_one_is_rejected_not_panic() {
+        let tree = MerkleTree::<(), DB>::blank(4);
+        // start = 1, end = 0  =>  a = 1, b = end + 1 = 1  =>  b ^ a == 0.
+        let update = raw_update(1, 0, vec![0u64]);
+        assert!(tree.apply_collapsed_update(&update).is_err());
+    }
+
+    // A step height exceeding the tree height (would underflow the `u8`
+    // subtraction in `partial_insert`).
+    #[test]
+    fn regression_step_taller_than_tree_is_rejected_not_panic() {
+        // Height-1 tree, but the update range spans indices that force a step
+        // of height >= 2, taller than the tree.
+        let tree = MerkleTree::<(), DB>::blank(1);
+        let update = raw_update(0, 7, vec![0u64]);
+        assert!(tree.apply_collapsed_update(&update).is_err());
+    }
+
+    // start > end + 1 (would overflow the `u64` accumulator in `step_sizes`).
+    #[test]
+    fn regression_start_far_above_end_is_rejected_not_panic() {
+        let tree = MerkleTree::<(), DB>::blank(0);
+        let update = raw_update((1u64 << 63) + 1, 0, vec![]);
+        assert!(tree.apply_collapsed_update(&update).is_err());
     }
 }

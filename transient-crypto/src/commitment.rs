@@ -219,3 +219,54 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area E: `PureGeneratorPedersen` decode.
+//
+// The `Deserializable` impl is *derived* (commitment.rs:130): it decodes the
+// `commitment` / `target` / `reply` fields (each point validated as on-curve /
+// in-subgroup by the `EmbeddedGroupAffine` decoder, curve.rs:470) and does NOT
+// re-run the Schnorr `valid(challenge_pre)` check. That is by design: the PoK is
+// bound to a `challenge_pre` (`Intent::challenge_pre_for`, derived from the whole
+// Intent + segment) that the raw decoder cannot know, and it is verified on the
+// consensus path by `Intent::well_formed` (ledger verify.rs:512), which rejects a
+// PoK-invalid binding commitment. Only the context-free totality + round-trip
+// baselines are asserted here.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod pok_props {
+    use super::*;
+    use proptest::prelude::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn roundtrip(c: &PureGeneratorPedersen) -> std::io::Result<PureGeneratorPedersen> {
+        let mut b = Vec::new();
+        Serializable::serialize(c, &mut b)?;
+        PureGeneratorPedersen::deserialize(&mut &b[..], 0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        // Totality: arbitrary bytes never panic the decoder.
+        #[test]
+        fn decode_total(bytes in prop::collection::vec(any::<u8>(), 0..128)) {
+            let _ = PureGeneratorPedersen::deserialize(&mut &bytes[..], 0);
+        }
+
+        // (E, positive) An honestly-constructed (valid) commitment stays valid
+        // across a serialize/deserialize round-trip (holds today).
+        #[test]
+        fn valid_commitment_survives_roundtrip(seed in any::<u64>()) {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let wit: EmbeddedFr = rng.r#gen();
+            let cp = b"area-e-challenge";
+            let c = PureGeneratorPedersen::new_from(&mut rng, &wit, cp);
+            prop_assert!(c.valid(cp), "constructor must produce a valid commitment");
+            let dec = roundtrip(&c).expect("valid commitment round-trips");
+            prop_assert!(dec.valid(cp), "decoded valid commitment must remain valid");
+        }
+    }
+
+}

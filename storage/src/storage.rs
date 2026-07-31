@@ -2300,3 +2300,168 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area E: decode-path (untrusted) invariants for `MultiSet` and
+// `TimeFilterMap`.
+//
+// Both types are `#[derive(Storable)]` and are decoded from user-controlled
+// bytes through `Arena::deserialize_sp` (storage-core/src/arena.rs:827), whose
+// own doc-comment calls it "a boundary for user controlled input ... we need
+// to be careful here to gracefully handle malformed (or even maliciously
+// formed?) input". The derived `Storable::from_binary_repr` merely
+// reconstructs the fields; it performs NONE of the cross-field/count checks
+// the public constructors maintain. Concretely:
+//
+//   * `MultiSet` (storage.rs:873) keeps its backing `HashMap<V, u32>` free of
+//     zero-count entries: `insert` only ever stores `>= 1`, and `remove_n`
+//     deletes the key once the count hits 0 (storage.rs:916). Its query
+//     methods rely on this: `member` = `contains_key` (storage.rs:948) while
+//     `count` = stored value or 0 (storage.rs:929). A decoded map holding a
+//     `(v, 0)` entry makes `member(v) == true` while `count(v) == 0`, so the
+//     two disagree (a normally-constructed set guarantees `member(v)` iff
+//     `count(v) > 0`).
+//
+//   * `TimeFilterMap` (storage.rs:1085) maintains `set` as exactly the
+//     flattened multiset of every item across `time_map`'s containers (see
+//     `insert`/`upsert`/`filter`, which mutate both fields in lock-step).
+//     `contains` answers purely from `set` (storage.rs:1207) while `get`
+//     answers from `time_map` (storage.rs:1148). A decoded value whose `set`
+//     mentions an item absent from every `time_map` container makes
+//     `contains(v) == true` even though no `get(..)` can ever surface `v`.
+//
+// These modules need `public-internal-structure` to *construct* the malformed
+// value (to reach the private fields), then round-trip it through the real
+// untrusted decode path (`Sp::serialize` -> `Sp::deserialize`, the latter
+// delegating to `Arena::deserialize_sp`). The decode faithfully reproduces the
+// invariant-violating value, i.e. it neither rejects nor normalizes it.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest", feature = "public-internal-structure"))]
+mod decode_invariant_props {
+    use super::*;
+    use crate::arena::Sp;
+    use base_crypto::time::Timestamp;
+    use proptest::prelude::*;
+
+    /// Round-trip a `Storable` value through the untrusted decode boundary
+    /// (`Sp::deserialize` -> `Arena::deserialize_sp`).
+    fn decode_roundtrip<T: Storable<DefaultDB> + Clone>(value: T) -> T {
+        let sp = Sp::<T, DefaultDB>::new(value);
+        let mut bytes = Vec::new();
+        Sp::serialize(&sp, &mut bytes).unwrap();
+        let decoded = Sp::<T, DefaultDB>::deserialize(&mut &bytes[..], 0)
+            .expect("untrusted decode must succeed on a serialized value");
+        (*decoded).clone()
+    }
+
+    /// Whether the untrusted decode boundary REJECTS a serialized value (its
+    /// `do_check` / `invariant` fires).
+    fn decode_rejected<T: Storable<DefaultDB> + Clone>(value: T) -> bool {
+        let sp = Sp::<T, DefaultDB>::new(value);
+        let mut bytes = Vec::new();
+        Sp::serialize(&sp, &mut bytes).unwrap();
+        Sp::<T, DefaultDB>::deserialize(&mut &bytes[..], 0).is_err()
+    }
+
+    // ---- MultiSet ------------------------------------------------------
+
+    /// Build a *malformed* `MultiSet<u8>` holding a single zero-count entry by
+    /// reaching the (feature-exposed) backing map directly.
+    fn multiset_with_zero_count(elem: u8) -> MultiSet<u8, DefaultDB> {
+        let elements = HashMap::<u8, u32>::new().insert(elem, 0u32);
+        MultiSet { elements }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        // (E-holds) A *well-formed* MultiSet (built only via `insert`) decodes
+        // back to a value that still satisfies `member(v) <=> count(v) > 0` and
+        // has no zero-count entries. HOLDS — the decode is faithful for good
+        // inputs; the problem is purely the lack of validation for bad ones.
+        #[test]
+        fn wellformed_multiset_decode_preserves_invariants(items in prop::collection::vec(any::<u8>(), 0..16)) {
+            let mut ms = MultiSet::<u8, DefaultDB>::new();
+            for it in &items {
+                ms = ms.insert(*it);
+            }
+            let decoded = decode_roundtrip(ms.clone());
+            for it in &items {
+                prop_assert_eq!(decoded.member(it), decoded.count(it) > 0);
+                prop_assert_eq!(decoded.count(it), ms.count(it));
+            }
+        }
+    }
+
+    /// A `MultiSet` carrying a zero-count entry (`member(v)` true but
+    /// `count(v) == 0`) is not producible by `insert`/`remove`; the untrusted
+    /// decoder must reject it via `MultiSet::invariant`. Path: `Sp::deserialize`
+    /// -> `Arena::deserialize_sp` (`do_check`).
+    #[test]
+    fn multiset_decode_rejects_zero_count_entries() {
+        let malformed = multiset_with_zero_count(0);
+        // Sanity: the in-memory value violates the invariant pre-decode.
+        assert!(malformed.member(&0) && malformed.count(&0) == 0);
+        assert!(
+            decode_rejected(malformed),
+            "decode must reject a MultiSet with a zero-count entry"
+        );
+    }
+
+    // ---- TimeFilterMap -------------------------------------------------
+
+    type C = Identity<u8>;
+
+    /// Build a *malformed* `TimeFilterMap` whose flattened `set` claims an item
+    /// that appears in no `time_map` container (an empty `time_map`).
+    fn tfm_set_disagrees_with_time_map(elem: u8) -> TimeFilterMap<C, DefaultDB> {
+        let set = MultiSet::<u8, DefaultDB>::new().insert(elem);
+        let time_map: Map<BigEndianU64, C, DefaultDB> = Map::new();
+        TimeFilterMap { time_map, set }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        // (E-holds) A well-formed TimeFilterMap (built via `insert`) decodes to
+        // a value whose `contains` still agrees with `get`. HOLDS.
+        #[test]
+        fn wellformed_tfm_decode_preserves_invariants(entries in prop::collection::vec((0u64..64, any::<u8>()), 0..12)) {
+            let mut tfm = TimeFilterMap::<C, DefaultDB>::new();
+            for (ts, v) in &entries {
+                tfm = tfm.insert(Timestamp::from_secs(*ts), *v);
+            }
+            let decoded = decode_roundtrip(tfm);
+            // Every item reported by `contains` must be surfaceable via some
+            // `get` (the last-inserted value at each timestamp).
+            for (ts, v) in &entries {
+                // The item inserted at `ts` is contained...
+                let ts = Timestamp::from_secs(*ts);
+                if let Some(container) = decoded.get(ts) {
+                    // ...and `get` returns a container; at minimum `contains`
+                    // must be consistent for whatever `get` surfaces.
+                    for item in <C as Container<DefaultDB>>::iter_items(container.clone()) {
+                        prop_assert!(decoded.contains(&item));
+                    }
+                }
+                let _ = v;
+            }
+        }
+    }
+
+    /// A `TimeFilterMap` whose `set` mentions an item absent from every
+    /// `time_map` container (`contains(v)` true but `get(..)` empty) is not
+    /// producible by the public API; the decoder must reject it via
+    /// `TimeFilterMap::invariant` (`set` must equal the flattening of `time_map`).
+    #[test]
+    fn tfm_decode_rejects_set_time_map_disagreement() {
+        let malformed = tfm_set_disagrees_with_time_map(0);
+        // Sanity: the in-memory value already violates the invariant.
+        assert!(malformed.contains(&0));
+        assert!(malformed.get(Timestamp::MAX).is_none());
+        assert!(
+            decode_rejected(malformed),
+            "decode must reject a TimeFilterMap whose set disagrees with time_map"
+        );
+    }
+}

@@ -1881,6 +1881,10 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         res
     }
 
+    pub fn public_inputs_len(&self) -> usize {
+        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
+    }
+
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
         let mut binding_input = Vec::new();
 
@@ -1923,6 +1927,62 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         hasher.update(&binding_input[..]);
         Fr::from_le_bytes(&hasher.finalize()[..31])
             .expect("Trimmed persistent hash should fall in Fr")
+    }
+}
+
+#[cfg(all(test, feature = "proptest"))]
+mod public_inputs_len_props {
+    use super::*;
+    use base_crypto::cost_model::RunningCost;
+    use onchain_runtime::context::Effects;
+    use onchain_runtime::result_mode::ResultModeVerify;
+    use proptest::prelude::*;
+    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use storage::{arena::Sp, db::InMemoryDB};
+
+    type Prog = Vec<Op<ResultModeVerify, InMemoryDB>>;
+
+    fn arb_prog() -> impl Strategy<Value = Prog> {
+        proptest::collection::vec(any::<Op<ResultModeVerify, InMemoryDB>>(), 0..12)
+    }
+
+    fn build_call(guaranteed: Option<Prog>, fallible: Option<Prog>) -> ContractCall<(), InMemoryDB> {
+        let mk = |prog: Prog| {
+            Sp::new(Transcript {
+                gas: RunningCost::default(),
+                effects: Effects::default(),
+                program: prog.into(),
+                version: None,
+            })
+        };
+        let mut rng = StdRng::seed_from_u64(0);
+        ContractCall {
+            address: rng.r#gen(),
+            entry_point: rng.r#gen(),
+            guaranteed_transcript: guaranteed.map(mk),
+            fallible_transcript: fallible.map(mk),
+            communication_commitment: rng.r#gen(),
+            proof: (),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // Proof-verification is priced off `public_inputs_len()` in place of
+        // materialising `public_inputs(..)`; if the two disagree, a transcript
+        // is mis-priced.
+        #[test]
+        fn public_inputs_len_matches_public_inputs(
+            guaranteed in prop::option::of(arb_prog()),
+            fallible in prop::option::of(arb_prog()),
+        ) {
+            let call = build_call(guaranteed, fallible);
+            prop_assert_eq!(
+                call.public_inputs_len(),
+                call.public_inputs(Pedersen(EmbeddedGroupAffine::generator())).len(),
+            );
+        }
     }
 }
 

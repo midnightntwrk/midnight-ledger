@@ -20,6 +20,7 @@ storage-core = { version = "1.0.0", path = "../storage-core", package = "midnigh
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
+contracts = "0.6"
 derive-where = "^1.6.1"
 digest = "^0.11.2"
 crypto = "0.5.1"

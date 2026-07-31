@@ -684,3 +684,137 @@ mod tests {
         }
     }
 }
+
+#[cfg(all(test, feature = "proptest"))]
+mod aligned_value_invariant {
+    use super::*;
+    use base_crypto::fab::{
+        AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value, ValueAtom,
+    };
+    use proptest::prelude::*;
+    use serialize::{Deserializable, Serializable};
+
+    fn arb_value_atom() -> impl Strategy<Value = ValueAtom> {
+        // Lengths chosen to straddle the FIELD_BYTE_LIMIT (64) boundary and
+        // the single-byte fast path, including the empty atom.
+        proptest::collection::vec(any::<u8>(), 0..70).prop_map(ValueAtom)
+    }
+
+    fn arb_value() -> impl Strategy<Value = Value> {
+        // Deliberately independent of any alignment, and often empty, so that
+        // atom counts frequently disagree with the alignment's expectations.
+        proptest::collection::vec(arb_value_atom(), 0..6).prop_map(Value)
+    }
+
+    fn arb_alignment_atom() -> impl Strategy<Value = AlignmentAtom> {
+        prop_oneof![
+            Just(AlignmentAtom::Compress),
+            Just(AlignmentAtom::Field),
+            prop_oneof![
+                Just(0u32),
+                Just(1),
+                Just(2),
+                Just(31),
+                Just(32),
+                Just(63),
+                Just(64),
+                Just(65),
+                0u32..300,
+            ]
+            .prop_map(|length| AlignmentAtom::Bytes { length }),
+        ]
+    }
+
+    fn arb_aligned_value() -> impl Strategy<Value = AlignedValue> {
+        (arb_value(), arb_alignment_vec()).prop_map(|(value, alignment)| AlignedValue {
+            value,
+            alignment,
+        })
+    }
+
+    fn arb_alignment_segment() -> impl Strategy<Value = AlignmentSegment> {
+        let leaf = arb_alignment_atom().prop_map(AlignmentSegment::Atom);
+        leaf.prop_recursive(3, 16, 4, |inner| {
+            prop_oneof![
+                4 => arb_alignment_atom().prop_map(AlignmentSegment::Atom),
+                1 => proptest::collection::vec(
+                        proptest::collection::vec(inner, 0..3).prop_map(Alignment),
+                        0..3,
+                     ).prop_map(AlignmentSegment::Option),
+            ]
+        })
+    }
+
+    fn arb_alignment_vec() -> impl Strategy<Value = Alignment> {
+        proptest::collection::vec(arb_alignment_segment(), 0..5).prop_map(Alignment)
+    }
+
+    /// Round-trips an arbitrarily-constructed `AlignedValue` through the binary
+    /// codec, returning whatever the decoder accepts.
+    fn decode_of(av: &AlignedValue) -> Option<AlignedValue> {
+        let mut bytes = Vec::new();
+        Serializable::serialize(av, &mut bytes).ok()?;
+        <AlignedValue as Deserializable>::deserialize(&mut &bytes[..], 0).ok()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(2048))]
+
+        /// (B1) A value accepted by binary `deserialize` must satisfy its own
+        /// declared alignment -- agreeing with the checked constructor.
+        ///
+        /// Regression guard: the binary `Deserializable for AlignedValue` used
+        /// to read `value` and `alignment` independently without checking
+        /// `alignment.fits(&value)` (unlike the serde `TryFrom` path), so it
+        /// accepted values that violate their alignment; the decoder now
+        /// enforces `fits` and rejects them.
+        #[test]
+        fn decoded_value_satisfies_its_alignment(av in arb_aligned_value()) {
+            if let Some(decoded) = decode_of(&av) {
+                prop_assert!(
+                    decoded.alignment.fits(&decoded.value),
+                    "binary decode accepted a value that does not fit its alignment: {:?}",
+                    decoded
+                );
+                // Cross-check against the checked constructor: it must agree.
+                prop_assert!(
+                    AlignedValue::new(decoded.value.clone(), decoded.alignment.clone()).is_some(),
+                    "binary decode accepted what AlignedValue::new rejects: {:?}",
+                    decoded
+                );
+            }
+        }
+
+        /// (B2) For any value the binary decoder accepts, `field_repr()` and
+        /// `binary_repr()` must not panic.
+        ///
+        /// Regression guard: this used to fail as a *consequence* of the B1 bug
+        /// -- the decoder handed back non-fitting values, and the unchecked repr
+        /// walkers then indexed past the value's atoms (or tripped a debug
+        /// assert). With the B1 `fits` check in place, non-fitting values never
+        /// reach the repr walkers.
+        #[test]
+        fn repr_of_decoded_value_never_panics(av in arb_aligned_value()) {
+            if let Some(decoded) = decode_of(&av) {
+                let _ = decoded.field_vec();
+                let _ = ValueReprAlignedValue(decoded).binary_vec();
+            }
+        }
+    }
+
+    // --- Regression tests: minimized findings, pinning correct behavior. ---
+
+    /// The concrete divergence between the two decode paths. `value` has two
+    /// atoms; `alignment` is a single `Field` (which consumes exactly one
+    /// atom), so the value does NOT fit. This holds on the current base and
+    /// documents the invariant the binary path is supposed to share.
+    #[test]
+    fn checked_constructors_reject_non_fitting_value() {
+        let value = Value(vec![ValueAtom(vec![1]), ValueAtom(vec![2])]);
+        let alignment = Alignment(vec![AlignmentSegment::Atom(AlignmentAtom::Field)]);
+        assert!(!alignment.fits(&value));
+        // Checked constructor rejects it...
+        assert!(AlignedValue::new(value.clone(), alignment.clone()).is_none());
+    }
+
+}

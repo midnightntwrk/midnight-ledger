@@ -968,6 +968,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contracts"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1be22136880ccef017b6b3d2e2ab23ba62755b308093862bad6b6e78d26d5e46"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 3.0.3",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3115,6 +3126,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_bytes",
+ "serde_json",
 ]
 
 [[package]]
@@ -3231,6 +3243,7 @@ dependencies = [
 name = "midnight-storage"
 version = "2.0.1"
 dependencies = [
+ "contracts",
  "criterion",
  "crypto",
  "derive-where",
@@ -3513,7 +3526,10 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zkir",
+ "midnight-zswap",
  "pastey",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.6",
  "rayon",
  "serde",
@@ -5266,6 +5282,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",

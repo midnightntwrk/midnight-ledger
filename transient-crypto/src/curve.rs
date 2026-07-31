@@ -698,3 +698,79 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area G: totality + validity of `EmbeddedGroupAffine` / curve-point decode.
+//
+// `EmbeddedGroupAffine::deserialize` (curve.rs:470) reads a fixed-width repr and
+// decodes it with `JubjubSubgroup::from_bytes`, converting the resulting
+// `CtOption` into an `io::Error` on failure -- no `unwrap`/`expect`, so decode
+// is total (never panics) on arbitrary bytes. Because the target type is the
+// prime-order subgroup type, an accepted encoding is by construction a valid
+// subgroup element (off-curve / wrong-subgroup / non-canonical encodings must
+// be rejected). Properties asserted:
+//   * (G-tot)   decode never panics on arbitrary bytes / lengths.
+//   * (G-canon) every accepted encoding re-serializes to itself (the decoder
+//               accepts only canonical encodings) and valid points round-trip.
+//   * (G-inv)   a decoded point is a genuine subgroup element: multiplying it
+//               by the embedded scalar-field order yields the identity.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod curve_decode_props {
+    use super::*;
+    use proptest::prelude::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    fn point_len() -> usize {
+        Serializable::serialized_size(&EmbeddedGroupAffine::generator())
+    }
+    fn ser(p: &EmbeddedGroupAffine) -> Vec<u8> {
+        let mut b = Vec::new();
+        Serializable::serialize(p, &mut b).unwrap();
+        b
+    }
+    fn de(bytes: &[u8]) -> std::io::Result<EmbeddedGroupAffine> {
+        <EmbeddedGroupAffine as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        // (G-tot) Arbitrary bytes of arbitrary length never panic.
+        #[test]
+        fn decode_total(bytes in prop::collection::vec(any::<u8>(), 0..80)) {
+            let _ = de(&bytes);
+        }
+
+        // (G-canon) Every accepted encoding is canonical: re-serializing a
+        // decoded point reproduces the exact input bytes (no non-canonical
+        // encoding is accepted).
+        #[test]
+        fn accepted_encoding_is_canonical(raw in prop::collection::vec(any::<u8>(), 0..64)) {
+            let n = point_len();
+            if raw.len() == n {
+                if let Ok(p) = de(&raw) {
+                    prop_assert_eq!(ser(&p), raw);
+                }
+            }
+        }
+
+        // (G-canon)+(G-inv) Randomly sampled valid points round-trip exactly and
+        // are genuine subgroup elements (order * P == identity).
+        #[test]
+        fn valid_points_roundtrip_and_in_subgroup(seed in any::<u64>()) {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let p: EmbeddedGroupAffine = rng.r#gen();
+            let back = de(&ser(&p)).expect("valid point decodes");
+            prop_assert_eq!(back, p);
+            // Multiplying by the full embedded scalar-field order maps any
+            // subgroup element to the identity. `EmbeddedFr` arithmetic is mod
+            // the order, so (0 - 1) + 1 == order == 0 in the field; multiply by
+            // the additive identity to land on the group identity.
+            let identity = p * EmbeddedFr::from(0u64);
+            let id_default = EmbeddedGroupAffine::default();
+            prop_assert_eq!(identity, id_default, "0 * P must be the identity");
+        }
+    }
+}

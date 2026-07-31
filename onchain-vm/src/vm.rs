@@ -1038,3 +1038,164 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
     })
 }
 // See onchain-runtime/tests/vm.rs for tests.
+
+// -----------------------------------------------------------------------------
+// VM totality: VM operations that consume structural quantities of a
+// `StateValue` (container lengths, tree heights) must not panic or over/under-
+// flow on values a decoder might produce.
+//
+// `StateValue::invariant` caps `Array` length at 16, and the *binary* decoder
+// enforces that. The *serde* decoder does NOT (see the corresponding checks in
+// onchain-state/src/state.rs), so an `Array` of length >= 32 is decoder-
+// producible. The `Type` opcode computes the type tag as
+// `3 + a.len() as u8 * 8` (vm.rs:462); for `a.len() >= 32` the `u8`
+// multiplication overflows (`32 * 8 = 256`), panicking under overflow checks.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_c_vm_totality {
+    use super::*;
+    use crate::cost_model::INITIAL_COST_MODEL;
+    use crate::ops::Op;
+    use crate::result_mode::ResultModeGather;
+    use proptest::prelude::*;
+    use storage::db::InMemoryDB;
+
+    type D = InMemoryDB;
+
+    fn array_state(n: usize) -> StateValue<D> {
+        StateValue::Array(vec![StateValue::Null; n].into())
+    }
+
+    fn run_type(state: StateValue<D>) -> Result<(), OnchainProgramError<D>> {
+        let initial = [VmValue::new(ValueStrength::Strong, state)];
+        let program: [Op<ResultModeGather, D>; 1] = [Op::Type];
+        run_program(&initial, &program, None, &INITIAL_COST_MODEL).map(|_| ())
+    }
+
+    proptest! {
+        // `Type` runs during apply on state a serde decoder can produce; an
+        // array beyond the length-16 invariant must error rather than overflow
+        // the u8 type tag.
+        #[test]
+        fn type_op_ok_iff_array_within_invariant(n in 0usize..=40) {
+            prop_assert_eq!(run_type(array_state(n)).is_ok(), n <= 16);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Area D: `idx` / `ins` on a `BoundedMerkleTree` must not shift-overflow.
+//
+// Both opcodes gate the index against the tree's capacity with `1u64 <<
+// tree.height()` (vm.rs:221 for `idx`, vm.rs:1022 for `ins`). `height()` is a
+// `u8`, so a height >= 64 makes the shift exceed the width of `u64` and panic
+// under overflow checks (and silently wrap in release).
+//
+// Reachability: the trees the VM actually operates on come from the binary
+// `Serializable`/`Deserializable` decode path (transcript `Push` values and
+// contract state), which runs `StateValue::invariant` and REJECTS any
+// `BoundedMerkleTree` with height 0 or > 32 (state.rs `invariant`). With height
+// bounded to 1..=32 the shift amount is always < 64, so `idx`/`ins` are total
+// on every tree reachable through that path — this area HOLDS for the runtime.
+// The raw shift is nonetheless a latent overflow: a height >= 64 tree (which
+// the serde decode path accepts, since it does not enforce the invariant — see
+// `area_c_serde_invariant`) would panic here if it ever reached the VM. That
+// latent case is pinned by the regression below.
+// -----------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod area_d_vm_tree_height {
+    use super::*;
+    use crate::cost_model::INITIAL_COST_MODEL;
+    use crate::ops::{Key, Op};
+    use crate::result_mode::ResultModeGather;
+    use proptest::prelude::*;
+    use serialize::Deserializable;
+    use storage::db::InMemoryDB;
+
+    type D = InMemoryDB;
+
+    fn bmt(height: u8) -> StateValue<D> {
+        StateValue::BoundedMerkleTree(MerkleTree::blank(height).rehash())
+    }
+
+    fn cell(v: u64) -> StateValue<D> {
+        StateValue::from(v)
+    }
+
+    /// Drives the real `idx` opcode with a constant key of 0 against `tree`.
+    fn run_idx(tree: StateValue<D>) -> Result<(), OnchainProgramError<D>> {
+        let initial = [VmValue::new(ValueStrength::Strong, tree)];
+        let program: [Op<ResultModeGather, D>; 1] = [Op::Idx {
+            cached: false,
+            push_path: false,
+            path: vec![Key::Value(AlignedValue::from(0u64))]
+                .into_iter()
+                .collect(),
+        }];
+        run_program(&initial, &program, None, &INITIAL_COST_MODEL).map(|_| ())
+    }
+
+    /// Drives the real `ins` opcode (inserting a cell at key 0) into `tree`.
+    fn run_ins(tree: StateValue<D>) -> Result<(), OnchainProgramError<D>> {
+        // Stack (bottom -> top): container, key, value.
+        let initial = [
+            VmValue::new(ValueStrength::Strong, tree),
+            VmValue::new(ValueStrength::Strong, cell(0)),
+            VmValue::new(ValueStrength::Strong, cell(0)),
+        ];
+        let program: [Op<ResultModeGather, D>; 1] = [Op::Ins {
+            cached: false,
+            n: 1,
+        }];
+        run_program(&initial, &program, None, &INITIAL_COST_MODEL).map(|_| ())
+    }
+
+    /// Binary round-trips a `StateValue` through the decode path the runtime
+    /// uses for transcript `Push` values and contract state.
+    fn binary_roundtrip(v: &StateValue<D>) -> std::io::Result<StateValue<D>> {
+        let mut bytes = std::vec::Vec::new();
+        <StateValue<D> as Serializable>::serialize(v, &mut bytes)?;
+        <StateValue<D> as Deserializable>::deserialize(&mut &bytes[..], 0)
+    }
+
+    proptest! {
+        // HOLDS: `idx` and `ins` are total for every in-bound tree height
+        // (1..=32). The shift `1u64 << height` never exceeds the `u64` width.
+        #[test]
+        fn idx_ins_total_for_in_bound_heights(height in 1u8..=32) {
+            let _ = run_idx(bmt(height));
+            let _ = run_ins(bmt(height));
+        }
+    }
+
+    proptest! {
+        // HOLDS: the binary decode path bounds `BoundedMerkleTree` height to
+        // 1..=32, so no tree with a panic-inducing height (0 or > 32) can be
+        // decoded from the format the VM consumes.
+        #[test]
+        fn binary_decode_bounds_bmt_height(height in 0u8..=64) {
+            let decoded = binary_roundtrip(&bmt(height));
+            if (1..=32).contains(&height) {
+                prop_assert!(decoded.is_ok(), "in-bound height {} must decode", height);
+            } else {
+                prop_assert!(decoded.is_err(), "out-of-bound height {} must be rejected", height);
+            }
+        }
+    }
+
+    // A `BoundedMerkleTree` of height 64 makes `idx` evaluate
+    // `1u64 << tree.height()`, a shift by 64 that overflows `u64` and panics.
+    // Unreachable via the binary decode path (height capped at 32) but reachable
+    // via the invariant-free serde decode path, so the shift must be
+    // checked/bounded rather than panic.
+    #[test]
+    fn regression_idx_shift_overflow_height_64() {
+        let _ = run_idx(bmt(64));
+    }
+
+    // Same shift overflow in `ins` (`1u64 << t.height()`) for a height-64 tree.
+    #[test]
+    fn regression_ins_shift_overflow_height_64() {
+        let _ = run_ins(bmt(64));
+    }
+}

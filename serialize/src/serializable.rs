@@ -231,3 +231,66 @@ impl<'a, T: ToOwned + ?Sized + Tagged> Tagged for Cow<'a, T> {
         T::tag_unique_factor()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area C: `serialized_size()` must equal the number of bytes `serialize`
+// actually writes, for any `HashMap` / `HashSet`.
+//
+// The length prefix is written as a `u32` via the crate's SCALE varint
+// (`via_scale!(u32, 4)` in util.rs:209; the encoded width is 1/2/4/(n+1) bytes
+// depending on the *value*, see `ScaleBigInt::serialize`/`serialized_size` at
+// util.rs:227/251). `Vec::serialized_size` (serializable.rs:57) correctly
+// accounts for this by computing `(self.len() as u64).serialized_size()`.
+// However, `HashMap::serialized_size` (serializable.rs:76) and
+// `HashSet::serialized_size` (serializable.rs:94) both start their fold at the
+// hard-coded constant `4`, as if the prefix were a fixed 4-byte integer. It is
+// not: for any map/set whose `len` encodes to fewer than 4 bytes (i.e. every
+// map/set with `len < 2^14`, and in particular the *empty* map/set) the
+// reported size *overestimates* the bytes `serialize` writes. This breaks the
+// `serialized_size == bytes-written` invariant that the existing
+// `randomised_serialization_test!` oracle (util.rs:662) checks for other
+// types.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod map_set_size_props {
+    use crate::Serializable;
+    use proptest::prelude::*;
+
+    /// Reusable oracle mirroring `randomised_serialization_test!`'s
+    /// `proptest_serialized_size_*`: the number of bytes written by `serialize`
+    /// must equal `serialized_size()`.
+    fn size_matches<T: Serializable>(v: &T) -> Result<(), TestCaseError> {
+        let mut bytes = Vec::new();
+        v.serialize(&mut bytes).unwrap();
+        prop_assert_eq!(
+            bytes.len(),
+            v.serialized_size(),
+            "serialize wrote {} bytes but serialized_size() reported {}",
+            bytes.len(),
+            v.serialized_size()
+        );
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        // (C) HashMap: reported size must equal bytes written.
+        #[test]
+        fn hashmap_size_matches(m in prop::collection::hash_map(any::<u8>(), any::<u16>(), 0..40)) {
+            size_matches(&m)?;
+        }
+
+        // (C) HashSet: reported size must equal bytes written.
+        #[test]
+        fn hashset_size_matches(s in prop::collection::hash_set(any::<u16>(), 0..40)) {
+            size_matches(&s)?;
+        }
+
+        // The equivalent `Vec` property, as a cross-check on the oracle itself.
+        #[test]
+        fn vec_size_matches(v in prop::collection::vec(any::<u16>(), 0..40)) {
+            size_matches(&v)?;
+        }
+    }
+}

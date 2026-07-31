@@ -1294,3 +1294,90 @@ impl Relation for IrSource {
         tagged_deserialize(&mut &raw[..])
     }
 }
+
+// ---------------------------------------------------------------------------
+// Area A: totality of `preprocess` over the transcript-consuming instruction
+// arms.
+//
+// The circuit-*input* loop (ir_vm.rs:215) is guarded: before slicing
+// `preimage.inputs[idx..idx + w]` it checks `if idx + w > preimage.inputs.len()`
+// and `bail!`s (ir_vm.rs:217). The transcript-consuming arms are NOT: the
+// `PublicInput` arm slices `preimage.public_transcript_outputs[idx..idx + w]`
+// (ir_vm.rs:382) and the `PrivateInput` arm slices
+// `preimage.private_transcript[idx..idx + w]` (ir_vm.rs:401) with no prior
+// bounds check. A decoded `ProofPreimage` (all transcript vectors are
+// `Vec<Fr>` straight from `deserialize`) whose transcript is shorter than the
+// instructions demand therefore causes an out-of-bounds slice panic
+// ("range end index .. out of range for slice of length ..") instead of
+// returning `Err`, breaking the totality contract the input loop already
+// upholds.
+// ---------------------------------------------------------------------------
+#[cfg(all(test, feature = "proptest"))]
+mod preprocess_totality_props {
+    use super::{I, Identifier, IrSource};
+    use crate::ir_types::IrType;
+    use proptest::prelude::*;
+    use std::sync::Arc;
+    use transient_crypto::curve::Fr;
+    use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+
+    /// An `IrSource` with a single unguarded `PublicInput` (Native, width 1),
+    /// so `preprocess` must consume exactly one public-transcript output.
+    fn ir_with_public_input() -> IrSource {
+        IrSource {
+            instructions: Arc::new(vec![I::PublicInput {
+                guard: None,
+                val_t: IrType::Native,
+                output: Identifier("x".into()),
+            }]),
+            ..Default::default()
+        }
+    }
+
+    /// Same, but consuming from the private transcript.
+    fn ir_with_private_input() -> IrSource {
+        IrSource {
+            instructions: Arc::new(vec![I::PrivateInput {
+                guard: None,
+                val_t: IrType::Native,
+                output: Identifier("x".into()),
+            }]),
+            ..Default::default()
+        }
+    }
+
+    fn empty_preimage() -> ProofPreimage {
+        ProofPreimage {
+            inputs: vec![],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            binding_input: Fr::from(0u64),
+            communications_commitment: None,
+            key_location: KeyLocation(std::borrow::Cow::Borrowed("")),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        // `preprocess` decodes an untrusted `ProofPreimage`; a transcript that
+        // doesn't supply exactly the reads a circuit performs must error, not
+        // slice out of bounds.
+        #[test]
+        fn public_input_preprocess_requires_exact_transcript(n in 0usize..4) {
+            let ir = ir_with_public_input();
+            let mut pre = empty_preimage();
+            pre.public_transcript_outputs = vec![Fr::from(0u64); n];
+            prop_assert_eq!(ir.preprocess(&pre).is_ok(), n == 1);
+        }
+
+        #[test]
+        fn private_input_preprocess_requires_exact_transcript(n in 0usize..4) {
+            let ir = ir_with_private_input();
+            let mut pre = empty_preimage();
+            pre.private_transcript = vec![Fr::from(0u64); n];
+            prop_assert_eq!(ir.preprocess(&pre).is_ok(), n == 1);
+        }
+    }
+}
