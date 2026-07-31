@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Ledger 9.1.0.0-rc.4
+
+- fix: array tests
+
 ## Ledger 9.1.0.0-rc.3
 
 - feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
@@ -32,8 +36,6 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   ledger-wasm as `IrInsert` / `IrRemove`)
 
 ## Unreleased (8.2)
-
-## Ledger 9.1.0.0-rc.4
 
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
