@@ -131,6 +131,7 @@ describe('Ledger API - DustStateChanges', () => {
     expect(changes.source).toEqual(source);
     expect(changes.receivedUtxos).toEqual(receivedUtxos);
     expect(changes.spentUtxos).toEqual(spentUtxos);
+    expect(changes.toString().length).toBeGreaterThan(0);
   });
 
   /**

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Static, getNewUnshieldedOffer } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Static, getNewUnshieldedOffer } from '@/test-objects';
 import { assertSerializationSuccess, corruptSignature } from '@/test-utils';
 import type { ContractDeploy } from '@midnight-ntwrk/ledger';
 import {
@@ -32,7 +32,20 @@ describe('Ledger API - WellFormedStrictness', () => {
   beforeEach(() => {
     date = new Date();
     const zSwapChainState = new ZswapChainState();
-    ledgerState = new LedgerState('local-test', zSwapChainState);
+    ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zSwapChainState);
+  });
+
+  test('flag accessors round-trip', () => {
+    const strictness = new WellFormedStrictness();
+
+    expect(strictness.enforceLimits).toBe(true);
+    expect(strictness.verifySignatures).toBe(true);
+
+    strictness.enforceLimits = false;
+    strictness.verifySignatures = false;
+
+    expect(strictness.enforceLimits).toBe(false);
+    expect(strictness.verifySignatures).toBe(false);
   });
 
   describe('verifySignatures', () => {
@@ -45,7 +58,7 @@ describe('Ledger API - WellFormedStrictness', () => {
 
       const intent = Intent.new(Static.calcBlockTime(date, 50));
       intent.guaranteedUnshieldedOffer = invalidSignatureOffer;
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       const strictness = new WellFormedStrictness();
       strictness.verifyContractProofs = false;
@@ -97,7 +110,7 @@ describe('Ledger API - WellFormedStrictness', () => {
         );
       }
 
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       const strictness = new WellFormedStrictness();
       strictness.verifyContractProofs = false;

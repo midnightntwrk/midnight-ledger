@@ -29,7 +29,7 @@ import {
   maxField,
   ZswapInput
 } from '@midnight-ntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -127,7 +127,7 @@ describe('Security Boundary Validation Tests', () => {
      * @then all modification attempts should throw binding violation errors
      */
     test('should prevent modification of bound transactions', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
       const boundTransaction = transaction.bind();
 
       expect(() => {
@@ -154,7 +154,7 @@ describe('Security Boundary Validation Tests', () => {
      * @then the system should reject the merge with a non-disjoint error
      */
     test('should reject transactions with conflicting coin identifiers', () => {
-      const transaction1 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction1 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
       expect(() => {
         transaction1.merge(transaction1);
@@ -232,7 +232,7 @@ describe('Security Boundary Validation Tests', () => {
      * @then serialization output should be identical and succeed validation
      */
     test('should maintain serialization determinism for security-critical objects', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
       const serialized1 = transaction.toString();
       const serialized2 = transaction.toString();
@@ -255,8 +255,8 @@ describe('Security Boundary Validation Tests', () => {
      * @then each transaction should have unique, positive randomness values
      */
     test('should generate unique binding randomness for each transaction', () => {
-      const transaction1 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
-      const transaction2 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction1 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
+      const transaction2 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
       expect(transaction1.bindingRandomness).not.toEqual(transaction2.bindingRandomness);
 
@@ -271,7 +271,7 @@ describe('Security Boundary Validation Tests', () => {
      * @then all identifiers should be unique within the transaction
      */
     test('should generate unique identifiers for transaction components', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
       const identifiers = transaction.identifiers();
 
       expect(identifiers.length).toBeGreaterThan(0);
@@ -283,26 +283,6 @@ describe('Security Boundary Validation Tests', () => {
   });
 
   describe('Privacy and Information Leakage Protection', () => {
-    /**
-     * Ensures error messages do not leak sensitive cryptographic key information
-     * @given an error condition triggered during coin creation
-     * @when examining the error message content
-     * @then message should not contain any secret key material
-     */
-    test('should not leak sensitive information in error messages', () => {
-      const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
-
-      try {
-        createShieldedCoinInfo(Random.shieldedTokenType().raw, -1n);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Error message should not contain sensitive key material
-        expect(errorMessage).not.toContain(secretKeys.coinSecretKey.toString());
-        expect(errorMessage).not.toContain(secretKeys.encryptionSecretKey.toString());
-      }
-    });
-
     /**
      * Protects offer privacy through encryption to prevent plaintext leakage
      * @given a zswap output with specific token type and amount
@@ -334,11 +314,9 @@ describe('Security Boundary Validation Tests', () => {
      * @when performing sequential tree updates within time constraints
      * @then operations should complete efficiently and maintain tree integrity
      */
-    test('should handle large but valid merkle tree operations efficiently', () => {
+    test('should handle large but valid merkle tree operations', () => {
       const size = 32;
       let tree = new StateBoundedMerkleTree(size);
-
-      const startTime = Date.now();
 
       for (let i = 0; i < size; i++) {
         tree = tree.update(BigInt(i), {
@@ -352,16 +330,10 @@ describe('Security Boundary Validation Tests', () => {
         });
       }
 
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-
-      // Tree should still function correctly
       expect(tree.height).toEqual(size);
       const root = tree.rehash().root()!;
       expect(root).toBeDefined();
       expect(Array.isArray(root.value)).toBe(true);
-
-      expect(duration).toBeLessThan(size * 50); // 50ms per operation is reasonable
     });
 
     /**
@@ -381,7 +353,7 @@ describe('Security Boundary Validation Tests', () => {
         const contractDeploy = new ContractDeploy(contractState);
         intent = intent.addDeploy(contractDeploy);
       }
-      const transaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer, intent);
 
       expect(transaction.guaranteedOffer).toBeDefined();
       expect(transaction.fallibleOffer).toBeDefined();

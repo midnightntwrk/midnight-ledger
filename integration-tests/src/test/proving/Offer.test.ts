@@ -13,7 +13,7 @@
 
 import { shieldedToken, ZswapOffer, Transaction } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { type ShieldedTokenType, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
@@ -28,7 +28,7 @@ describe.concurrent('Ledger API - OfferX [@slow][@proving]', () => {
    */
   test('should merge offers correctly', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(0, shieldedToken() as ShieldedTokenType, 100n),
       Static.unprovenOfferFromOutput(1, shieldedToken() as ShieldedTokenType, 200n)
     );
@@ -51,7 +51,7 @@ describe.concurrent('Ledger API - OfferX [@slow][@proving]', () => {
    */
   test('should serialize and deserialize offers correctly', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(0, shieldedToken() as ShieldedTokenType, 100n),
       Static.unprovenOfferFromOutput(1, shieldedToken() as ShieldedTokenType, 200n)
     );

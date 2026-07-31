@@ -56,7 +56,7 @@ import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ProvingKeyMaterial } from '@midnight-ntwrk/zkir-v2';
-import { generateHex, loadBinaryFile } from './test-utils.js';
+import { generateHex, loadBinaryFile, seededRandom } from './test-utils.js';
 
 export const VERSION_HEADER = '0200';
 export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
@@ -86,8 +86,8 @@ export class Random {
 
   static bigInt = () => {
     return (
-      BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)) *
-      BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER))
+      BigInt(Math.floor(seededRandom() * Number.MAX_SAFE_INTEGER)) *
+      BigInt(Math.floor(seededRandom() * Number.MAX_SAFE_INTEGER))
     );
   };
 
@@ -261,11 +261,15 @@ export class Static {
   };
 
   static unprovenTransactionGuaranteed = () => {
-    return Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    return Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
   };
 
   static unprovenTransactionGuaranteedAndFallible = () => {
-    return Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(), Static.unprovenOfferFromOutput(1));
+    return Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      Static.unprovenOfferFromOutput(),
+      Static.unprovenOfferFromOutput(1)
+    );
   };
 
   static unprovenTransactionGuaranteedAndFallibleAndContractCalls = (): Transaction<
@@ -281,7 +285,7 @@ export class Static {
       .addDeploy(contractDeploy2);
     const unprovenOfferGuaranteed = Static.unprovenOfferFromOutput();
     const unprovenOfferFallible = Static.unprovenOfferFromOutput(1);
-    return Transaction.fromParts('local-test', unprovenOfferGuaranteed, unprovenOfferFallible, intent);
+    return Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOfferGuaranteed, unprovenOfferFallible, intent);
   };
 
   static operationsArray: Op<null>[] = [

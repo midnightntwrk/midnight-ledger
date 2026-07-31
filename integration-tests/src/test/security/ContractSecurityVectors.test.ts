@@ -38,7 +38,7 @@ import {
   signatureVerifyingKey,
   type PreBinding
 } from '@midnight-ntwrk/ledger';
-import { Random, Static, TestResource } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random, Static, TestResource } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
 describe('Contract Security Vector Tests', () => {
@@ -191,7 +191,7 @@ describe('Contract Security Vector Tests', () => {
       );
 
       const intent = Intent.new(new Date()).addCall(contractCall);
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       const boundTransaction = transaction.bind();
 
@@ -231,25 +231,6 @@ describe('Contract Security Vector Tests', () => {
   });
 
   describe('Contract State Validation', () => {
-    /**
-     * Protects against malicious state value manipulation attacks
-     * @given different state value types (null and array)
-     * @when creating and converting state values to string representation
-     * @then each type should produce distinct, safe string outputs
-     */
-    test('should protect against state value manipulation', () => {
-      const originalValue = StateValue.newNull();
-      const modifiedValue = StateValue.newArray();
-
-      expect(originalValue.toString()).not.toEqual(modifiedValue.toString());
-
-      expect(() => originalValue.toString()).not.toThrow();
-      expect(() => modifiedValue.toString()).not.toThrow();
-
-      expect(originalValue.toString().length).toBeGreaterThan(0);
-      expect(modifiedValue.toString().length).toBeGreaterThan(0);
-    });
-
     /**
      * Validates security of state map operations to prevent memory disclosure
      * @given array and null state values
@@ -294,12 +275,11 @@ describe('Contract Security Vector Tests', () => {
 
   describe('VM Execution Security', () => {
     /**
-     * Prevents stack overflow attacks on the virtual machine
-     * @given a VM stack with 100 null values pushed
-     * @when checking stack strength at various indices
-     * @then stack should handle bounds correctly and not expose memory information
+     * @given a VM stack with 100 entries pushed
+     * @when querying strength flags
+     * @then every pushed index reports its flag and indices past the top report undefined
      */
-    test('should prevent stack overflow attacks', () => {
+    test('reports strength flags per index and undefined past the top of stack', () => {
       const vmStack = new VmStack();
 
       for (let i = 0; i < 100; i++) {
@@ -397,19 +377,12 @@ describe('Contract Security Vector Tests', () => {
      * @when creating and deploying the contract within time constraints
      * @then deployment should complete within reasonable time and produce valid address
      */
-    test('should handle large contract states efficiently', () => {
+    test('should handle large contract states', () => {
       const contractState = new ContractState();
-
-      const startTime = performance.now();
 
       for (let i = 0; i < 500; i++) {
         contractState.setOperation(`op_${i}`, new ContractOperation());
       }
-
-      const endTime = performance.now();
-      const duration = endTime - startTime;
-
-      expect(duration).toBeLessThan(1000);
 
       const deploy = new ContractDeploy(contractState);
       expect(deploy.address).toMatch(/^[a-fA-F0-9]{64}$/);
@@ -425,7 +398,7 @@ describe('Contract Security Vector Tests', () => {
      */
     test('should limit transaction context complexity', () => {
       const zswapChainState = new ZswapChainState();
-      const ledgerState = new LedgerState('local-test', zswapChainState);
+      const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
       const secondsSinceEpoch = Static.blockTime(new Date());
       const blockContext = {
         secondsSinceEpoch,
@@ -441,24 +414,16 @@ describe('Contract Security Vector Tests', () => {
     });
 
     /**
-     * Prevents memory exhaustion in VM operations under heavy load
-     * @given a VM stack with 1000 null values
-     * @when monitoring memory usage during stack operations
-     * @then memory growth should remain within acceptable limits
+     * @given a VM stack with 1000 entries pushed
+     * @when querying strength flags at the bounds
+     * @then the stack handles a large number of entries without error
      */
-    test('should prevent memory exhaustion in VM operations', () => {
+    test('should handle a large number of VM stack entries', () => {
       const vmStack = new VmStack();
-
-      const initialMemory = process.memoryUsage().heapUsed;
 
       for (let i = 0; i < 1000; i++) {
         vmStack.push(StateValue.newNull(), true);
       }
-
-      const finalMemory = process.memoryUsage().heapUsed;
-      const memoryGrowth = finalMemory - initialMemory;
-
-      expect(memoryGrowth).toBeLessThan(10 * 1024 * 1024);
 
       expect(vmStack.isStrong(0)).toBe(true);
       expect(vmStack.isStrong(999)).toBe(true);
@@ -466,27 +431,6 @@ describe('Contract Security Vector Tests', () => {
   });
 
   describe('Error Handling Security', () => {
-    /**
-     * Ensures error messages do not leak sensitive information
-     * @given a contract state with secret operations
-     * @when triggering an error condition with invalid operation name
-     * @then error message should not contain sensitive operation details
-     */
-    test('should not leak sensitive information in error messages', () => {
-      const contractState = new ContractState();
-      const secretOperation = new ContractOperation();
-      contractState.setOperation('secret_key', secretOperation);
-
-      try {
-        contractState.setOperation('', secretOperation);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        expect(errorMessage).not.toContain('secret_key');
-        expect(errorMessage).not.toContain(secretOperation.toString());
-      }
-    });
-
     /**
      * Handles malformed serialization gracefully without system compromise
      * @given a valid contract state

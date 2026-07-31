@@ -11,13 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-describe('Ledger API - ClaimRewardsTransaction', () => {
+import { IrRemove } from '@midnight-ntwrk/ledger';
+
+describe('Ledger API - IrRemove', () => {
   /**
-   * Placeholder test for ClaimRewardsTransaction functionality.
+   * Test exposing the operation.
    *
-   * @given ClaimRewardsTransaction API requirements
-   * @when Implementation is ready
-   * @then Should test claim rewards transaction operations
+   * @given An IrRemove built from an operation name
+   * @when Reading its operation property
+   * @then It should match the constructor argument and render a string
    */
-  test('should implement claim rewards transaction functionality', async () => {});
+  test('exposes operation from the constructor', () => {
+    const irRemove = new IrRemove('op');
+
+    expect(irRemove.operation).toEqual('op');
+    expect(irRemove.toString().length).toBeGreaterThan(0);
+  });
 });

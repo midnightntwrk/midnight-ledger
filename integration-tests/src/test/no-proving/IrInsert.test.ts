@@ -11,13 +11,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-describe('Ledger API - ContractCall', () => {
+import { IrInsert } from '@midnight-ntwrk/ledger';
+
+describe('Ledger API - IrInsert', () => {
   /**
-   * Placeholder test for ContractCall functionality.
+   * Test exposing operation and ir.
    *
-   * @given ContractCall API requirements
-   * @when Implementation is ready
-   * @then Should test contract call operations
+   * @given An IrInsert built from an operation name and IR bytes
+   * @when Reading its operation and ir properties
+   * @then They should match the constructor arguments and the value should render a string
    */
-  test('should implement contract call functionality', async () => {});
+  test('exposes operation and ir from the constructor', () => {
+    const ir = new Uint8Array([1, 2, 3]);
+    const irInsert = new IrInsert('op', ir);
+
+    expect(irInsert.operation).toEqual('op');
+    expect(irInsert.ir).toEqual(ir);
+    expect(irInsert.toString().length).toBeGreaterThan(0);
+  });
 });

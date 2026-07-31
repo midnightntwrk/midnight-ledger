@@ -26,7 +26,7 @@ import {
   createProvingTransactionPayload
 } from '@midnight-ntwrk/ledger';
 import { Cache } from 'cache-ts';
-import { type ChildProcess, exec /* , execSync */ } from 'node:child_process';
+import { type ChildProcess, exec } from 'node:child_process';
 import { createServer } from 'net';
 import axiosRetry from 'axios-retry';
 import axios from 'axios';
@@ -168,16 +168,6 @@ const proofServerRequest = async (endpoint: string, payload: Uint8Array): Promis
   return response.data;
 };
 
-// workaround for issue with node-fetch socket hang up bug that midnight-js is going to workaround later
-export const proveTxWithAxios = async (
-  unprovenTx: Transaction<SignatureEnabled, PreProof, PreBinding>
-): Promise<Transaction<SignatureEnabled, Proof, PreBinding>> => {
-  logger.info(`Using axios to prove transaction on: ${proofServerUrl}`);
-  const payload = serializePayload(unprovenTx);
-  const result = await proofServerRequest('prove-tx', payload);
-  return Transaction.deserialize('signature', 'proof', 'pre-binding', result);
-};
-
 export const prove = async (
   tx: Transaction<SignatureEnabled, PreProof, PreBinding>
 ): Promise<Transaction<SignatureEnabled, Proof, PreBinding>> => {
@@ -186,8 +176,6 @@ export const prove = async (
     proven = await tx.prove(wasmProverWorker, CostModel.initialCostModel());
   } else if (useAxiosForProving) {
     proven = await tx.prove(serverProver, CostModel.initialCostModel());
-    // TODO: remove old transaction-based proving endpoints?
-    // proven = await proveTxWithAxios(tx);
   } else {
     proven = await proofProvider.proveTx(tx);
   }
@@ -354,7 +342,7 @@ const serverProver = {
 
 const callProverWorker = (op: 'check' | 'prove', args: any[]): Promise<any> => {
   return new Promise((resolve, reject) => {
-    const worker = new Worker('./dist/src/proof-worker.js', { workerData: [op, __filename, args] });
+    const worker = new Worker(new URL('./proof-worker.js', import.meta.url), { workerData: [op, args] });
     worker.on('message', resolve);
     worker.on('error', reject);
     worker.on('exit', (code: number) => {

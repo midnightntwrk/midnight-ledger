@@ -28,7 +28,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
    * @then Should create valid transaction with undefined inputs, valid hash, positive fees, and no identifiers
    */
   test('should create transaction with empty guaranteed and fallible unproven outputs', async () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined);
     const transaction = await prove(unprovenTransaction);
 
     expect(transaction.guaranteedOffer?.inputs).toBeUndefined();
@@ -39,6 +39,21 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
   });
 
   /**
+   * Test transaction hash availability.
+   *
+   * @given A proven transaction
+   * @when Binding it and reading its transaction hash
+   * @then A non-empty hash should be returned (it is only defined for proven, signed, bound transactions)
+   */
+  test('transactionHash is available once the transaction is proven and bound', async () => {
+    const txProven = await prove(Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput()));
+
+    const hash = txProven.bind().transactionHash();
+
+    expect(hash.length).toBeGreaterThan(0);
+  });
+
+  /**
    * Test creating transaction without fallible unproven outputs.
    *
    * @given Transaction with only guaranteed offer from output
@@ -46,7 +61,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
    * @then Should have 0 inputs, 1 output, and 1 delta in guaranteed offer
    */
   test('should create transaction without fallible unproven outputs', async () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
     const transaction = await prove(unprovenTransaction);
 
     expect(transaction.guaranteedOffer?.inputs?.length).toEqual(0);
@@ -64,7 +79,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
    */
   test('should erase proofs correctly', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );
@@ -86,7 +101,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
    */
   test('should create transaction with guaranteed and fallible unproven outputs', async () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );
@@ -104,7 +119,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
    * @then Should have all offers and intents undefined
    */
   test('should create unproven transaction with empty guaranteed, fallible, and contract calls', async () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, undefined);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, undefined);
     const transaction = await prove(unprovenTransaction);
 
     expect(transaction.fallibleOffer?.get(1)?.outputs).toBeUndefined();
@@ -146,7 +161,7 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
   test('should merge transactions correctly', async () => {
     const transaction = await prove(Static.unprovenTransactionGuaranteedAndFallibleAndContractCalls());
     const unprovenTransaction2 = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput(1)
     );

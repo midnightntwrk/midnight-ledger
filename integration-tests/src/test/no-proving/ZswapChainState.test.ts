@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { LedgerState, ZswapChainState } from '@midnight-ntwrk/ledger';
-import { Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
 describe('Ledger API - ZSwapChainState', () => {
@@ -46,7 +46,7 @@ describe('Ledger API - ZSwapChainState', () => {
    */
   test('should deserialize from LedgerState correctly', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const serialized = ledgerState.serialize();
     const zswapChainStateDeserialized = ZswapChainState.deserializeFromLedgerState(serialized);
 

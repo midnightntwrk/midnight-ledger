@@ -21,7 +21,7 @@ import {
   type PreProof,
   Transaction
 } from '@midnight-ntwrk/ledger';
-import { Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 
 describe('Ledger API - ContractCalls', () => {
   /**
@@ -52,7 +52,7 @@ describe('Ledger API - ContractCalls', () => {
     const unprovenOfferGuaranteed = Static.unprovenOfferFromOutput();
     const unprovenOfferFallible = Static.unprovenOfferFromOutput(1);
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       unprovenOfferGuaranteed,
       unprovenOfferFallible,
       intent

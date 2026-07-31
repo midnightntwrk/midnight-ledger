@@ -30,7 +30,7 @@ import {
   signData,
   addressFromKey
 } from '@midnight-ntwrk/ledger';
-import { Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 import { compareBigIntArrays, sortBigIntArray } from '@/test-utils';
 
 describe('Ledger API - UtxoState', () => {
@@ -42,7 +42,7 @@ describe('Ledger API - UtxoState', () => {
    * @then Should store both outputs in the UTXO state
    */
   test('should store the outputs in utxo state', () => {
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const intent = Intent.new(Static.calcBlockTime(new Date(0), 50));
     intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
       [],
@@ -60,7 +60,7 @@ describe('Ledger API - UtxoState', () => {
       ],
       []
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
 
     const blockContext = {
@@ -90,7 +90,7 @@ describe('Ledger API - UtxoState', () => {
    * @then Should return correct UTXO subsets for each address with expected values
    */
   test('should filter the utxos by user address', () => {
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const intent = Intent.new(Static.calcBlockTime(new Date(0), 50));
     const address1 = sampleUserAddress();
     const address2 = sampleUserAddress();
@@ -110,7 +110,7 @@ describe('Ledger API - UtxoState', () => {
       ],
       []
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
 
     const blockContext = {
@@ -145,7 +145,7 @@ describe('Ledger API - UtxoState', () => {
   test('should compare two states', () => {
     const address1 = sampleUserAddress();
     const address2 = sampleUserAddress();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const intent = Intent.new(Static.calcBlockTime(new Date(0), 50));
     intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
       [],
@@ -163,7 +163,7 @@ describe('Ledger API - UtxoState', () => {
       ],
       []
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
 
     const blockContext = {
@@ -276,6 +276,43 @@ describe('Ledger API - UtxoState', () => {
       expect(retrievedUtxo.type).toEqual(utxo.type);
       expect(retrievedUtxo.intentHash).toEqual(utxo.intentHash);
       expect(retrievedUtxo.outputNo).toEqual(utxo.outputNo);
+    });
+
+    /**
+     * Test metadata lookup for present and absent UTXOs.
+     *
+     * @given A UtxoState holding one UTXO with known metadata
+     * @when Looking up metadata for that UTXO and for an unknown one
+     * @then Should return the stored metadata for the known UTXO and undefined otherwise
+     */
+    test('lookupMeta returns metadata for a known UTXO and undefined for an unknown one', () => {
+      const utxo: Utxo = {
+        value: 100n,
+        owner: sampleUserAddress(),
+        type: Random.unshieldedTokenType().raw,
+        intentHash: sampleIntentHash(),
+        outputNo: 0
+      };
+      const ctime = new Date(1000);
+      const utxoState = UtxoState.new(new Map([[utxo, new UtxoMeta(ctime)]]));
+
+      expect(utxoState.lookupMeta(utxo)?.ctime).toEqual(ctime);
+      expect(utxoState.lookupMeta({ ...utxo, outputNo: 9 })).toBeUndefined();
+    });
+
+    /**
+     * Test updating UtxoMeta ctime.
+     *
+     * @given A UtxoMeta instance
+     * @when Reassigning its ctime
+     * @then The new ctime should be readable back
+     */
+    test('UtxoMeta ctime can be updated', () => {
+      const meta = new UtxoMeta(new Date(0));
+
+      meta.ctime = new Date(5000);
+
+      expect(meta.ctime.getTime()).toEqual(5000);
     });
 
     /**
@@ -1010,7 +1047,7 @@ describe('Ledger API - UtxoState', () => {
      * @then Should correctly track UTXO lifecycle with proper counts and delta calculation
      */
     test('should track UTXOs through spend and create cycle', () => {
-      const ledgerState = new LedgerState('local-test', new ZswapChainState());
+      const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
       const signingKey = sampleSigningKey();
       const verifyingKey = signatureVerifyingKey(signingKey);
       const address = addressFromKey(verifyingKey);
@@ -1029,7 +1066,7 @@ describe('Ledger API - UtxoState', () => {
         []
       );
 
-      const tx1 = Transaction.fromParts('local-test', undefined, undefined, intent1);
+      const tx1 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent1);
       const proofErasedTx1 = tx1.eraseProofs();
 
       const blockContext = {
@@ -1080,7 +1117,7 @@ describe('Ledger API - UtxoState', () => {
         [new SignatureEnabled(signData(signingKey, new Uint8Array(32)))]
       );
 
-      const tx2 = Transaction.fromParts('local-test', undefined, undefined, intent2);
+      const tx2 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent2);
       const proofErasedTx2 = tx2.eraseProofs();
 
       const verifiedTx2 = proofErasedTx2.wellFormed(ledgerStateAfter1, strictness, new Date(0));

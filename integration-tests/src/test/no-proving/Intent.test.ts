@@ -60,6 +60,15 @@ describe('Ledger API - Intent', () => {
     expect(intent.toString()).toMatch(/Intent .*/);
   });
 
+  test('ttl can be updated', () => {
+    const intent = Intent.new(TTL);
+    const newTtl = new Date(TTL.getTime() + 1000);
+
+    intent.ttl = newTtl;
+
+    expect(intent.ttl).toEqual(newTtl);
+  });
+
   /**
    * Test signature data generation for bound intent.
    *

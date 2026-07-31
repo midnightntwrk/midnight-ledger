@@ -11,11 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { DustSecretKey } from '@midnight-ntwrk/ledger';
 import { DUST_SK_CLEAR_MESSAGE } from '@/test-constants';
 import { INITIAL_NIGHT_AMOUNT } from '@/test-objects';
 import { generateSampleDust } from '@/test/utils/dust';
 
 describe('Ledger API - DustSecretKey', () => {
+  /**
+   * Test deriving keys from a bigint and a seed.
+   *
+   * @given Fixed bigint and seed inputs
+   * @when Deriving dust secret keys via fromBigint and fromSeed
+   * @then Public keys should be deterministic, input-dependent, and differ between derivations
+   */
+  test('fromBigint and fromSeed derive deterministic, input-dependent public keys', () => {
+    const fromBigint = DustSecretKey.fromBigint(123n);
+    const fromSeed = DustSecretKey.fromSeed(new Uint8Array(32).fill(5));
+
+    expect(DustSecretKey.fromBigint(123n).publicKey).toEqual(fromBigint.publicKey);
+    expect(DustSecretKey.fromBigint(124n).publicKey).not.toEqual(fromBigint.publicKey);
+    expect(fromSeed.publicKey).not.toEqual(fromBigint.publicKey);
+  });
+
   /**
    * Test clearing functionality.
    *

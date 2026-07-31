@@ -14,6 +14,7 @@
 import { webcrypto } from 'node:crypto';
 import { beforeEach, expect } from 'vitest';
 import { createDefaultTestLogger } from './logger';
+import { TEST_SEED } from './test-utils';
 
 // eslint-disable-next-line no-undef
 Object.defineProperty(globalThis, 'crypto', {
@@ -24,6 +25,8 @@ Object.defineProperty(globalThis, 'crypto', {
 const logger = await createDefaultTestLogger();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any, no-undef
 (globalThis as any).logger = logger;
+
+logger.info(`Test RNG seed: ${TEST_SEED} (override with MN_TEST_SEED)`);
 
 beforeEach(() => {
   logger.info(`Running: ${expect.getState().testPath} -> '${expect.getState().currentTestName}'`);

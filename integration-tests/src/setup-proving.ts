@@ -11,8 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { vi } from 'vitest';
 import { startProofServer, stopProofServer } from './proof-provider';
 import { useWasmProving } from './config';
+
+const provingTimeout = (useWasmProving ? 45 : 15) * 60_000;
+vi.setConfig({ testTimeout: provingTimeout, hookTimeout: provingTimeout });
 
 beforeAll(async () => {
   if (!useWasmProving) {

@@ -72,6 +72,6 @@ describe('Ledger API -  ZswapOutput', () => {
       Random.encryptionPublicKey()
     );
 
-    expect(unprovenOutput.proof.instance).toEqual('pre-proof');
+    expect(unprovenOutput.proof.instance).toEqual(ProofMarker.preProof);
   });
 });

@@ -29,7 +29,7 @@ import {
   sampleUserAddress,
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -63,8 +63,14 @@ describe('Economic Attack Vector Tests', () => {
     test('should validate nullifier uniqueness across transactions', () => {
       const tokenType = Random.shieldedTokenType();
 
-      const transaction1 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 100n));
-      const transaction2 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 100n));
+      const transaction1 = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        Static.unprovenOfferFromOutput(0, tokenType, 100n)
+      );
+      const transaction2 = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        Static.unprovenOfferFromOutput(0, tokenType, 100n)
+      );
 
       const ids1 = transaction1.identifiers();
       const ids2 = transaction2.identifiers();
@@ -82,12 +88,12 @@ describe('Economic Attack Vector Tests', () => {
      */
     test('should detect unbalanced transaction attempts', () => {
       const tokenType = Random.shieldedTokenType();
-      const ledgerState = new LedgerState('local-test', new ZswapChainState());
+      const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
       const strictness = new WellFormedStrictness();
       strictness.enforceBalancing = true;
 
       const unbalancedTransaction = Transaction.fromParts(
-        'local-test',
+        LOCAL_TEST_NETWORK_ID,
         Static.unprovenOfferFromOutput(0, tokenType, 1000n)
       );
 
@@ -111,7 +117,7 @@ describe('Economic Attack Vector Tests', () => {
       const offer2 = Static.unprovenOfferFromOutput(0, tokenType2, 200n);
       const offer3 = Static.unprovenOfferFromOutput(1, tokenType3, 300n);
 
-      const transaction = Transaction.fromParts('local-test', offer1.merge(offer2), offer3);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer1.merge(offer2), offer3);
 
       const guaranteedImbalances = transaction.imbalances(0);
       const fallibleImbalances = transaction.imbalances(1);
@@ -158,7 +164,7 @@ describe('Economic Attack Vector Tests', () => {
 
   describe('Rewards Authority Validation', () => {
     test('should prevent unauthorized rewarding attempts', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
       expect(transaction.rewards).toBeUndefined();
 
@@ -199,7 +205,7 @@ describe('Economic Attack Vector Tests', () => {
 
       intent.guaranteedUnshieldedOffer = validOffer;
 
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       expect(transaction.intents?.get(1)?.guaranteedUnshieldedOffer?.toString()).toEqual(validOffer.toString());
 
@@ -216,7 +222,10 @@ describe('Economic Attack Vector Tests', () => {
     test('should prevent negative fee attacks through imbalance calculation', () => {
       const tokenType = Random.shieldedTokenType();
 
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 100n));
+      const transaction = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        Static.unprovenOfferFromOutput(0, tokenType, 100n)
+      );
 
       const imbalances = transaction.imbalances(0);
       const balance = mapFindByKey(imbalances, tokenType);
@@ -231,7 +240,7 @@ describe('Economic Attack Vector Tests', () => {
       const contractDeploy = new ContractDeploy(contractState);
       const intent = Intent.new(new Date()).addDeploy(contractDeploy);
 
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       expect(transaction.imbalances(0).size).toEqual(0);
       expect(transaction.imbalances(1).size).toEqual(0);
@@ -249,8 +258,8 @@ describe('Economic Attack Vector Tests', () => {
     test('should prevent segment ID collision attacks', () => {
       const offer1 = Static.unprovenOfferFromOutput(0, Random.shieldedTokenType(), 100n);
 
-      const transaction1 = Transaction.fromParts('local-test', offer1);
-      const transaction2 = Transaction.fromParts('local-test', offer1); // Same offer = same segment ID
+      const transaction1 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer1);
+      const transaction2 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer1); // Same offer = same segment ID
 
       expect(() => {
         transaction1.merge(transaction2);
@@ -260,8 +269,8 @@ describe('Economic Attack Vector Tests', () => {
     test('should generate unique segment IDs with randomization', () => {
       const offer = Static.unprovenOfferFromOutput();
 
-      const transaction1 = Transaction.fromPartsRandomized('local-test', offer);
-      const transaction2 = Transaction.fromPartsRandomized('local-test', offer);
+      const transaction1 = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, offer);
+      const transaction2 = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, offer);
 
       expect(transaction1.toString()).toEqual(transaction2.toString());
 
@@ -275,7 +284,11 @@ describe('Economic Attack Vector Tests', () => {
       const fallibleOffer1 = Static.unprovenOfferFromOutput(1);
       const fallibleOffer2 = Static.unprovenOfferFromOutput(1);
 
-      const transaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer1.merge(fallibleOffer2));
+      const transaction = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        guaranteedOffer,
+        fallibleOffer1.merge(fallibleOffer2)
+      );
 
       expect(transaction.guaranteedOffer?.outputs.length).toEqual(1);
       expect(transaction.fallibleOffer?.has(1)).toBe(true);
@@ -293,7 +306,7 @@ describe('Economic Attack Vector Tests', () => {
         intent = intent.addDeploy(contractDeploy);
       }
 
-      const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
       expect(transaction.intents?.get(1)?.actions.length).toEqual(50);
 
@@ -307,7 +320,7 @@ describe('Economic Attack Vector Tests', () => {
       const secretAmount = 123456789n;
 
       const transaction = Transaction.fromParts(
-        'local-test',
+        LOCAL_TEST_NETWORK_ID,
         Static.unprovenOfferFromOutput(0, tokenType, secretAmount)
       );
 
@@ -321,7 +334,7 @@ describe('Economic Attack Vector Tests', () => {
       const secretTokenType = Random.shieldedTokenType();
 
       const transaction = Transaction.fromParts(
-        'local-test',
+        LOCAL_TEST_NETWORK_ID,
         Static.unprovenOfferFromOutput(0, secretTokenType, 1000n)
       );
 
@@ -337,8 +350,14 @@ describe('Economic Attack Vector Tests', () => {
       const amount1 = 111111n;
       const amount2 = 222222n;
 
-      const transaction1 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType1, amount1));
-      const transaction2 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType2, amount2));
+      const transaction1 = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        Static.unprovenOfferFromOutput(0, tokenType1, amount1)
+      );
+      const transaction2 = Transaction.fromParts(
+        LOCAL_TEST_NETWORK_ID,
+        Static.unprovenOfferFromOutput(0, tokenType2, amount2)
+      );
 
       const mergedTransaction = transaction1.merge(transaction2);
       const mergedString = mergedTransaction.toString();
@@ -358,7 +377,7 @@ describe('Economic Attack Vector Tests', () => {
      * @then the system should throw an error preventing any modifications
      */
     test('should prevent modification after binding commitment', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
       const { bindingRandomness } = transaction;
 
       const boundTransaction = transaction.bind();
@@ -377,8 +396,8 @@ describe('Economic Attack Vector Tests', () => {
      * @then each transaction should have unique positive randomness preventing reuse
      */
     test('should generate unique binding randomness for each transaction', () => {
-      const transaction1 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
-      const transaction2 = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction1 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
+      const transaction2 = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
       expect(transaction1.bindingRandomness).not.toEqual(transaction2.bindingRandomness);
 
@@ -393,7 +412,7 @@ describe('Economic Attack Vector Tests', () => {
      * @then serialization should succeed and reflect the binding status
      */
     test('should maintain binding integrity through serialization', () => {
-      const transaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+      const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
       const boundTransaction = transaction.bind();
 
       // Bound transaction should serialize correctly

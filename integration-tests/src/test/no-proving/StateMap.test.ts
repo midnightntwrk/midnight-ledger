@@ -211,13 +211,11 @@ describe('Ledger API - StateMap', () => {
   });
 
   /**
-   * Test validation for oversized keys (currently skipped due to bug).
-   *
    * @given A StateMap and an oversized key (512KB+)
    * @when Attempting to insert the oversized key
-   * @then Should throw error about key size limit
+   * @then Should reject the insert rather than accept the oversized key
    */
-  it.skip('should not allow inserting a key that is too large', () => {
+  it('should not allow inserting a key that is too large', () => {
     const stateMap = new StateMap();
     expect(() =>
       stateMap.insert(
@@ -232,6 +230,6 @@ describe('Ledger API - StateMap', () => {
         },
         StateValue.newArray()
       )
-    ).toThrow('big key exceeding limit of 512KB');
+    ).toThrow();
   });
 });

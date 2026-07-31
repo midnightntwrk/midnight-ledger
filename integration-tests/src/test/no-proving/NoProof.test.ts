@@ -11,13 +11,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-describe('Ledger API - TransactionResult', () => {
+import { NoProof } from '@midnight-ntwrk/ledger';
+import { ProofMarker } from '@/test/utils/Markers';
+
+describe('Ledger API - NoProof', () => {
   /**
-   * Placeholder test for TransactionResult functionality.
+   * Test the instance discriminator.
    *
-   * @given TransactionResult API requirements
-   * @when Implementation is ready
-   * @then Should test transaction result operations
+   * @given A NoProof marker
+   * @when Reading its instance discriminator
+   * @then It should report 'no-proof'
    */
-  test('should implement transaction result functionality', async () => {});
+  test('reports its instance discriminator', () => {
+    const proof = new NoProof();
+
+    expect(proof.instance).toEqual(ProofMarker.noProof);
+    expect(proof.toString().length).toBeGreaterThan(0);
+  });
 });

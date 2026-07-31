@@ -11,13 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-describe('Ledger API - QueryResults', () => {
-  /**
-   * Placeholder test for QueryResults functionality.
-   *
-   * @given QueryResults API requirements
-   * @when Implementation is ready
-   * @then Should test query results operations
-   */
-  test('should implement query results functionality', async () => {});
+import { SystemTransaction } from '@midnight-ntwrk/ledger';
+
+describe('Ledger API - SystemTransaction', () => {
+  test('should fail on invalid system transaction deserialization', () => {
+    expect(() => SystemTransaction.deserialize(new Uint8Array(1))).toThrow('Unable to deserialize SystemTransaction.');
+  });
 });
