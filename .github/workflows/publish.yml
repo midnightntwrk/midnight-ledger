@@ -1,0 +1,151 @@
+name: Publish npm packages
+
+# Single npm-publish path for the ledger package family. Publishes each
+# package to GH Packages and public npmjs under BOTH scopes while the org
+# migrates:
+#   @midnight-ntwrk/<pkg>  (current scope)
+#   @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
+#                           to the midnightntwrk org instead of the
+#                           deprecated midnight-ntwrk org)
+# Publishes are idempotent per target: already-published versions are
+# skipped, so re-runs after partial failures are safe.
+#
+# npm TRUSTED PUBLISHING (planned): register THIS file (publish.yml) with
+# environment `release` as the trusted publisher for every package:
+#   @midnight-ntwrk/ledger-vN            @midnightntwrk/ledger-vN
+#   @midnight-ntwrk/onchain-runtime-vN   @midnightntwrk/onchain-runtime-vN
+#   @midnight-ntwrk/zkir-vN              @midnightntwrk/zkir-vN
+# Then flip auth here:
+#   1. permissions: add `id-token: write`
+#   2. delete the NPM_TOKEN env + the registry.npmjs.org auth line below
+#      (npm >= 11.5 performs the OIDC exchange automatically)
+#   3. keep MIDNIGHTCI_PACKAGES_WRITE - GH Packages has no trusted publishing
+# Trusted publishing validates the TOP-LEVEL workflow file, so this workflow
+# must stay directly dispatched - do not convert it to workflow_call.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and publish (branch, tag or SHA)."
+        type: string
+        required: true
+      packages:
+        description: "Which npm packages to publish."
+        type: choice
+        options:
+          - all
+          - ledger
+          - onchain-runtime
+          - zkir
+        default: all
+      dry_run:
+        description: "Build and log every publish without publishing."
+        type: boolean
+        default: false
+
+env:
+  DRY_RUN: ${{ github.event.inputs.dry_run }}
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest-8-core-x64
+    # Same approval gate as the release workflow: real publishes require the
+    # protected `release` environment; dry runs need no approval.
+    environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          registry-url: https://npm.pkg.github.com/
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Build and publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          PACKAGES: ${{ github.event.inputs.packages }}
+        run: |
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
+          NEW_SCOPE="@midnightntwrk"
+
+          # npmjs auth (GH Packages auth is configured by setup-node). The
+          # token is written literally: npm's ${VAR} expansion yields empty
+          # -> ENEEDAUTH. Under trusted publishing this block is deleted.
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
+          fi
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          case "$PACKAGES" in
+            all)             ATTRS="ledger-wasm onchain-runtime-wasm zkir-wasm" ;;
+            ledger)          ATTRS="ledger-wasm" ;;
+            onchain-runtime) ATTRS="onchain-runtime-wasm" ;;
+            zkir)            ATTRS="zkir-wasm" ;;
+            *) echo "::error::unknown packages selection '$PACKAGES'"; exit 1 ;;
+          esac
+
+          STAGE="${GITHUB_WORKSPACE}/publish-artifacts"
+
+          for ATTR in $ATTRS; do
+            nix build ".#${ATTR}"
+
+            # Copy the tarball out of the read-only nix store, then read the
+            # canonical name/version from the tarball itself - the package
+            # is the single source of truth, no duplicated derivation logic.
+            ATTR_DIR="${STAGE}/${ATTR}"
+            mkdir -p "$ATTR_DIR"
+            cp result/lib/*.tgz "$ATTR_DIR/"
+            TGZ=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz' | head -1)
+            if [ -z "$TGZ" ]; then
+              echo "::error::nix build .#${ATTR} produced no npm tarball in result/lib"; exit 1
+            fi
+            PKG=$(tar -xzOf "$TGZ" package/package.json | jq -r '.name')
+            VER=$(tar -xzOf "$TGZ" package/package.json | jq -r '.version')
+            echo "::group::${PKG}@${VER} (${ATTR})"
+
+            RESCOPED=$("${GITHUB_WORKSPACE}/.github/scripts/rescope-npm-tarball.sh" "$TGZ" "$NEW_SCOPE" "$ATTR_DIR")
+            NEW_PKG="${NEW_SCOPE}/${PKG##*/}"
+
+            for TARGET in \
+              "${TGZ}|${GH_REG}|${PKG}" \
+              "${TGZ}|${NPMJS_REG}|${PKG}" \
+              "${RESCOPED}|${GH_REG}|${NEW_PKG}" \
+              "${RESCOPED}|${NPMJS_REG}|${NEW_PKG}"; do
+              IFS='|' read -r T REG P <<<"$TARGET"
+              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+                "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+                "$T" "$REG" "$P" "$VER"
+            done
+            echo "::endgroup::"
+          done
