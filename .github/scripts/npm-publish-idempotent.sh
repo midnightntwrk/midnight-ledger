@@ -96,7 +96,9 @@ if [ "$STATUS" -ne 0 ]; then
   # A conflict means the version is already there (race, or a registry whose
   # metadata endpoint was not readable by this token) - that is the idempotent
   # success condition, not a failure.
-  if grep -qiE 'E409|EPUBLISHCONFLICT|cannot publish over' <<<"$OUTPUT"; then
+  # Anchored on 'code E409': npm's shasum/integrity notices are hex/base64
+  # that a bare 'E409' would occasionally match.
+  if grep -qiE 'code E409|EPUBLISHCONFLICT|cannot publish over' <<<"$OUTPUT"; then
     echo "Version already exists on $REG_HOST (registry reported a conflict) - skipping"
     exit 0
   fi

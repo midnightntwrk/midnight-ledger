@@ -3,10 +3,13 @@ name: Publish npm packages
 # Single npm-publish path for the ledger package family. Publishes each
 # package to GH Packages and public npmjs under BOTH scopes while the org
 # migrates:
-#   @midnight-ntwrk/<pkg>  (current scope)
+#   @midnight-ntwrk/<pkg>  (legacy scope)
 #   @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
 #                           to the midnightntwrk org instead of the
 #                           deprecated midnight-ntwrk org)
+# The built tarball's own scope is never trusted: bagel.nix's default scope
+# flipped on ledger-8 (f232211) and differs across release branches, so every
+# tarball is normalized to each target scope before publishing.
 # Publishes are idempotent per target: already-published versions are
 # skipped, so re-runs after partial failures are safe.
 #
@@ -72,7 +75,8 @@ jobs:
         with:
           registry-url: https://npm.pkg.github.com/
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          # Dry runs never publish; give them no credentials at all.
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
@@ -93,21 +97,25 @@ jobs:
 
       - name: Build and publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          # Dry runs never publish; give them no credentials at all.
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           PACKAGES: ${{ github.event.inputs.packages }}
         run: |
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-          NEW_SCOPE="@midnightntwrk"
+          SCOPES="@midnight-ntwrk @midnightntwrk"
 
           # npmjs auth (GH Packages auth is configured by setup-node). The
           # token is written literally: npm's ${VAR} expansion yields empty
           # -> ENEEDAUTH. Under trusted publishing this block is deleted.
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
+          # Dry runs never publish, so they get no token at all.
+          if [ "${DRY_RUN}" != "true" ]; then
+            if [ -z "${NPM_TOKEN:-}" ]; then
+              echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
+            fi
+            printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           fi
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           case "$PACKAGES" in
             all)             ATTRS="ledger-wasm onchain-runtime-wasm zkir-wasm" ;;
@@ -128,26 +136,26 @@ jobs:
             ATTR_DIR="${STAGE}/${ATTR}"
             mkdir -p "$ATTR_DIR"
             cp result/lib/*.tgz "$ATTR_DIR/"
-            TGZ=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz' | head -1)
-            if [ -z "$TGZ" ]; then
-              echo "::error::nix build .#${ATTR} produced no npm tarball in result/lib"; exit 1
+            TGZ_COUNT=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz' | wc -l)
+            if [ "$TGZ_COUNT" -ne 1 ]; then
+              echo "::error::expected exactly one npm tarball from nix build .#${ATTR}, found ${TGZ_COUNT}:"
+              find "$ATTR_DIR" -name '*.tgz'; exit 1
             fi
+            TGZ=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz')
             PKG=$(tar -xzOf "$TGZ" package/package.json | jq -r '.name')
             VER=$(tar -xzOf "$TGZ" package/package.json | jq -r '.version')
+            BASE="${PKG##*/}"
             echo "::group::${PKG}@${VER} (${ATTR})"
 
-            RESCOPED=$("${GITHUB_WORKSPACE}/.github/scripts/rescope-npm-tarball.sh" "$TGZ" "$NEW_SCOPE" "$ATTR_DIR")
-            NEW_PKG="${NEW_SCOPE}/${PKG##*/}"
-
-            for TARGET in \
-              "${TGZ}|${GH_REG}|${PKG}" \
-              "${TGZ}|${NPMJS_REG}|${PKG}" \
-              "${RESCOPED}|${GH_REG}|${NEW_PKG}" \
-              "${RESCOPED}|${NPMJS_REG}|${NEW_PKG}"; do
-              IFS='|' read -r T REG P <<<"$TARGET"
-              "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-                "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-                "$T" "$REG" "$P" "$VER"
+            # Normalize to every target scope (rescoping to the tarball's own
+            # scope is a harmless identity repack).
+            for SCOPE in $SCOPES; do
+              T=$("${GITHUB_WORKSPACE}/.github/scripts/rescope-npm-tarball.sh" "$TGZ" "$SCOPE" "$ATTR_DIR")
+              for REG in "$GH_REG" "$NPMJS_REG"; do
+                "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
+                  "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+                  "$T" "$REG" "${SCOPE}/${BASE}" "$VER"
+              done
             done
             echo "::endgroup::"
           done

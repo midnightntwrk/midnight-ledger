@@ -27,8 +27,6 @@ jobs:
     environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
     permissions:
       contents: write
-      # Dispatch publish.yml (npm publishing) after tags are pushed.
-      actions: write
     outputs:
       tag_name: ${{ steps.ids.outputs.tag_name }}
       version: ${{ steps.ids.outputs.version }}
@@ -242,19 +240,6 @@ jobs:
             "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
           fi
 
-      - name: Dispatch npm publish
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_REF: ${{ github.ref_name }}
-        run: |
-          # npm publishing lives in publish.yml (the npm trusted-publisher
-          # workflow); its definition always runs from the default branch,
-          # building/publishing the ref this release was cut from.
-          DEFAULT_BRANCH=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq .defaultBranchRef.name)
-          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
-            --ref "$DEFAULT_BRANCH" -f "ref=$BUILD_REF" -f packages=all
-
       - name: Upload npm package tarballs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -343,6 +328,41 @@ jobs:
             test-results.json
             test-results.xml
 
+  # npm publishing lives in publish.yml (the npm trusted-publisher workflow;
+  # its top-level filename is what npmjs validates, so it cannot be a
+  # reusable workflow here). Dispatch it pinned to this run's commit and
+  # propagate its conclusion so the release cannot complete with missing
+  # npm packages.
+  publish-npm:
+    needs: [ build, coverage, integration, unit-tests ]
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch publish.yml and wait
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          MARK=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
+            -f "ref=$BUILD_SHA" -f packages=all
+          # The dispatch API returns no run id; poll for the run it created.
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            sleep 5
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow publish.yml \
+              --event workflow_dispatch --created ">=$MARK" --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$RUN_ID" ] && break
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::dispatched publish.yml run did not appear"; exit 1
+          fi
+          echo "Waiting on publish.yml run ${RUN_ID} (may pause for its release-environment approval)"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
+
   crates-io:
     needs: [ build, coverage, integration, unit-tests ]
     # crates.io is immutable, so publish only after the suite is green (npm/tags
@@ -383,7 +403,10 @@ jobs:
           nix develop .#ci -c .github/scripts/cargo-publish-crates.sh "$VERSION"
 
   release:
-    needs: [ build, coverage, integration, unit-tests ]
+    # publish-npm is skipped on dry runs; `always() &&` keeps release eligible
+    # then, while real runs still hard-require npm publication success.
+    if: ${{ always() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
+    needs: [ build, coverage, integration, unit-tests, publish-npm ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
