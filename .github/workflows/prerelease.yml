@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Real runs only: overwrite an existing GH Packages version (delete-then-republish). Public npm cannot be overwritten and will error. Not needed for a dry run."
+        description: "Force a rebuild even when the version is already published on both registries. npm publishing itself lives in publish.yml (idempotent; existing versions are skipped)."
         type: boolean
         default: false
       dry_run:
@@ -27,6 +27,8 @@ jobs:
     environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
     permissions:
       contents: write
+      # Dispatch publish.yml (npm publishing) after tags are pushed.
+      actions: write
     outputs:
       tag_name: ${{ steps.ids.outputs.tag_name }}
       version: ${{ steps.ids.outputs.version }}
@@ -96,8 +98,6 @@ jobs:
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -113,19 +113,10 @@ jobs:
             ${SHORT_VERSION}.*) TAG_NAME="ledger-${VERSION}" ;;
             *)                  TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}" ;;
           esac
-          PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/ledger-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -145,13 +136,7 @@ jobs:
             # Copy out before the next nix build overwrites result/lib.
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -167,8 +152,6 @@ jobs:
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -177,19 +160,10 @@ jobs:
           VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
-          PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/onchain-runtime-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -208,13 +182,7 @@ jobs:
             TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -230,8 +198,6 @@ jobs:
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -242,19 +208,10 @@ jobs:
           TAG_NAME="zkir-${VERSION}"
           WASM_VERSION="${ZKIR_WASM_VERSION}"
           SHORT_VERSION=$(echo "$WASM_VERSION" | awk -F. '{print $1}')
-          PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/zkir-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -273,13 +230,7 @@ jobs:
             TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -290,6 +241,19 @@ jobs:
             git tag "${TAG_NAME}"
             "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
           fi
+
+      - name: Dispatch npm publish
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_REF: ${{ github.ref_name }}
+        run: |
+          # npm publishing lives in publish.yml (the npm trusted-publisher
+          # workflow); its definition always runs from the default branch,
+          # building/publishing the ref this release was cut from.
+          DEFAULT_BRANCH=$(gh repo view "$GITHUB_REPOSITORY" --json defaultBranchRef --jq .defaultBranchRef.name)
+          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$DEFAULT_BRANCH" -f "ref=$BUILD_REF" -f packages=all
 
       - name: Upload npm package tarballs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

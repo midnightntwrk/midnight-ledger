@@ -87,4 +87,18 @@ publish_args=(--registry="$REG" "$SCOPE_REG_ARG" --tag "$TAG")
 if [ "$REG_HOST" = "registry.npmjs.org" ]; then
   publish_args+=(--access public)
 fi
-npm publish "$TGZ" "${publish_args[@]}"
+set +e
+OUTPUT=$(npm publish "$TGZ" "${publish_args[@]}" 2>&1)
+STATUS=$?
+set -e
+printf '%s\n' "$OUTPUT"
+if [ "$STATUS" -ne 0 ]; then
+  # A conflict means the version is already there (race, or a registry whose
+  # metadata endpoint was not readable by this token) - that is the idempotent
+  # success condition, not a failure.
+  if grep -qiE 'E409|EPUBLISHCONFLICT|cannot publish over' <<<"$OUTPUT"; then
+    echo "Version already exists on $REG_HOST (registry reported a conflict) - skipping"
+    exit 0
+  fi
+  exit "$STATUS"
+fi
