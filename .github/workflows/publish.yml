@@ -53,7 +53,9 @@ concurrency:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest-8-core-x64
+    # Standard hosted runner (free on public repos): the nix build is mostly
+    # restored from the cache shared with prerelease.yml, so no large runner.
+    runs-on: ubuntu-24.04
     # Same approval gate as the release workflow: real publishes require the
     # protected `release` environment; dry runs need no approval.
     environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
