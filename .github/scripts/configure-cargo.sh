@@ -13,8 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set -euo pipefail
+
+# Append, never clobber: `.cargo/config.toml` is tracked and carries
+# `[env] RUST_MIN_STACK`, without which ZK proving overflows the 2 MiB default
+# thread stack and the micro-dao test aborts with SIGABRT. Deleting the file
+# here silently removed that setting from every CI job.
 mkdir -p ./.cargo
-rm -f ./.cargo/config.toml
-echo "[net]" >> ./.cargo/config.toml
-echo "git-fetch-with-cli = true" >> ./.cargo/config.toml
+if ! grep -q '^git-fetch-with-cli' ./.cargo/config.toml 2>/dev/null; then
+  {
+    echo
+    echo "[net]"
+    echo "git-fetch-with-cli = true"
+  } >> ./.cargo/config.toml
+fi
 cat ./.cargo/config.toml
