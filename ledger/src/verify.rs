@@ -2036,16 +2036,16 @@ impl ContractMaintenanceVerifyingKeyExt for ContractMaintenanceVerifyingKey {
 #[cfg(test)]
 mod sparse_unshielded_signature_tests {
     use super::*;
-    use crate::structure::UtxoSpend;
-    use base_crypto::schnorr::{Signature, SigningKey};
+    use crate::structure::{SigningKey, UtxoSpend};
+    use base_crypto::schnorr::SigningKey as SchnorrSigningKey;
     use coin_structure::coin::NIGHT;
-    use rand::rngs::OsRng;
     use rand::Rng;
+    use rand::rngs::OsRng;
+    use storage::Storable;
     use storage::arena::Sp;
     use storage::db::InMemoryDB;
     use storage::merkle_patricia_trie::{MerklePatriciaTrie, Node};
     use storage::storable::SizeAnn;
-    use storage::Storable;
 
     fn sparse_len_two_array<T: Storable<InMemoryDB> + 'static>(
         visible_at_zero: T,
@@ -2071,8 +2071,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn sparse_signature_offer_rejected_by_well_formed() {
         let mut rng = OsRng;
-        let signer = SigningKey::sample(&mut rng);
-        let victim = SigningKey::sample(&mut rng);
+        let signer = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
+        let victim = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
@@ -2128,8 +2128,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn malformed_sparse_signature_array_rejected_on_deserialize() {
         let mut rng = OsRng;
-        let signer = SigningKey::sample(&mut rng);
-        let victim = SigningKey::sample(&mut rng);
+        let signer = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
+        let victim = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
@@ -2182,8 +2182,8 @@ mod sparse_unshielded_signature_tests {
     #[test]
     fn dense_signature_array_round_trips_and_validates() {
         let mut rng = OsRng;
-        let signer_0 = SigningKey::sample(&mut rng);
-        let signer_1 = SigningKey::sample(&mut rng);
+        let signer_0 = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
+        let signer_1 = SigningKey::Schnorr(SchnorrSigningKey::sample(rng));
 
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,
