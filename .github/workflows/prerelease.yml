@@ -24,7 +24,9 @@ jobs:
     # environment (configure its required reviewers = ledger maintainers in repo
     # Settings -> Environments). Dry runs need no approval. The build job is the
     # gate because npm publish + tag push happen here, before anything downstream.
-    environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
+    # NB: the truthy value must be the && arm - '' is falsy in GitHub
+    # expressions, so `cond && '' || x` yields x on BOTH branches.
+    environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
     permissions:
       contents: write
     outputs:
@@ -446,7 +448,7 @@ jobs:
 
           # Guard: `sha256sum *` would block on stdin if STAGING were empty.
           if [ -n "$(ls -A "$STAGING")" ]; then
-            ( cd "$STAGING" && sha256sum * > SHA256SUMS )
+            ( cd "$STAGING" && sha256sum -- * > SHA256SUMS )
           else
             echo "::warning::No release assets were assembled."
           fi

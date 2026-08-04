@@ -61,7 +61,9 @@ jobs:
     runs-on: ubuntu-24.04
     # Same approval gate as the release workflow: real publishes require the
     # protected `release` environment; dry runs need no approval.
-    environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
+    # NB: the truthy value must be the && arm - '' is falsy in GitHub
+    # expressions, so `cond && '' || x` yields x on BOTH branches.
+    environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
     permissions:
       contents: read
     steps:
@@ -76,7 +78,7 @@ jobs:
           registry-url: https://npm.pkg.github.com/
         env:
           # Dry runs never publish; give them no credentials at all.
-          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
@@ -98,8 +100,8 @@ jobs:
       - name: Build and publish
         env:
           # Dry runs never publish; give them no credentials at all.
-          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ github.event.inputs.dry_run == 'true' && '' || secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
+          NPM_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_NPMJS_TOKEN || '' }}
           PACKAGES: ${{ github.event.inputs.packages }}
         run: |
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
