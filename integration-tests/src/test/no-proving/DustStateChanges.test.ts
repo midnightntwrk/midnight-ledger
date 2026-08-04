@@ -27,7 +27,7 @@ import {
   type UtxoOutput,
   type UtxoSpend,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {

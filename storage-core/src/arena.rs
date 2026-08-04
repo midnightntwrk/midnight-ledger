@@ -977,14 +977,9 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             let sp = {
                 let metadata_lock = self.arena.lock_metadata();
                 if let ArenaKey::Ref(key) = child {
-                    self.arena
-                        .track_lazy(&metadata_lock, key.clone(), child);
+                    self.arena.track_lazy(&metadata_lock, key.clone(), child);
                 }
-                Sp::lazy(
-                    self.arena.clone(),
-                    child.hash().clone(),
-                    child.clone(),
-                )
+                Sp::lazy(self.arena.clone(), child.hash().clone(), child.clone())
             };
             return Ok(sp);
         }

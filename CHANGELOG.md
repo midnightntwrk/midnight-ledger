@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 8.2.0-rc.1
+
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
@@ -13,6 +16,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: address non-associativity of Dust event processing.
 - fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
+- fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
 ## 8.1.0
 

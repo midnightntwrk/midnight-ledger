@@ -1813,6 +1813,11 @@ impl<D: DB> DustLocalState<D> {
 
     pub fn process_ttls(&self, time: Timestamp) -> Self {
         let mut state = self.clone();
+        // Rebuild `night_indices` from the UTXOs that survive this pass, so it
+        // stays bounded to nights still backing a live UTXO. `night_indices` is
+        // only ever consulted via a held UTXO's `backing_night`, so entries for
+        // dropped UTXOs are unreachable and safe to prune here.
+        let mut night_indices = HashMap::new();
         state.dust_utxos = state
             .dust_utxos
             .iter()
@@ -1828,10 +1833,12 @@ impl<D: DB> DustLocalState<D> {
                 if v_new == 0 && time > utxo.utxo.ctime {
                     None
                 } else {
+                    night_indices = night_indices.insert(utxo.utxo.backing_night, gen_idx);
                     Some((nul, utxo))
                 }
             })
             .collect();
+        state.night_indices = night_indices;
         state
     }
 
@@ -1955,13 +1962,15 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.commitment_tree_first_free += 1;
                         let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)
                         {
-                            if let Some(gen_idx) =
-                                acc.result.night_indices.get(&utxo.utxo.backing_night)
+                            if let Some(gen_info) = acc
+                                .result
+                                .night_indices
+                                .get(&utxo.utxo.backing_night)
+                                .and_then(|gen_idx| acc.result.generating_tree.index(*gen_idx))
+                                .map(|(_, gen_info)| *gen_info)
                             {
-                                let gen_info =
-                                    acc.result.generating_tree.index(*gen_idx).unwrap().1;
                                 let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
-                                    gen_info,
+                                    &gen_info,
                                     *declared_time,
                                     &acc.result.params,
                                 );
@@ -2220,7 +2229,7 @@ mod tests {
             println!("  seed:                  {:?}", entry.seed.0);
             println!(
                 "  intermediate bytes:    {:?}",
-                &entry.dust.secretKeyIntermediateBytes.0
+                entry.dust.secretKeyIntermediateBytes.0
             );
             println!(
                 "  intermediate computed: {:?}",

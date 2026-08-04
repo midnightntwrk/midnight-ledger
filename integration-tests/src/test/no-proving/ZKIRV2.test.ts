@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Zkir } from '@midnight-ntwrk/zkir-v2';
+import { Zkir } from '@midnightntwrk/zkir-v2';
 import { describe, it, expect } from 'vitest';
 import { keyMaterialProvider } from '../../test-objects';
 

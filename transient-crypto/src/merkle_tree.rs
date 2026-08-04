@@ -543,7 +543,7 @@ struct DebugEntry<'a, A>(HashOutput, &'a A);
 
 impl<A: Debug> Debug for DebugEntry<'_, A> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "({:?}, {:?})", &self.0, &self.1)
+        write!(f, "({:?}, {:?})", self.0, self.1)
     }
 }
 
@@ -776,15 +776,13 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
     }
 
     /// Retrieves the leaf hash value at a given index, if available.
-    /// `index` *must* be within range of the tree height.
+    /// `index` *must* be within range of the tree height. Returns `None` if the
+    /// leaf is absent (a stub) or has been collapsed away.
     pub fn index(&self, index: u64) -> Option<(HashOutput, &A)> {
-        if self.is_collapsed() {
-            panic!("Attempted to index into collapsed portion of Merkle tree!");
-        }
         match self {
             Leaf { hash, aux, .. } => Some((*hash, aux)),
             Stub { .. } => None,
-            Collapsed { .. } => unreachable!(),
+            Collapsed { .. } => None,
             Node {
                 left,
                 right,
