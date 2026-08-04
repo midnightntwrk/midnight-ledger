@@ -46,6 +46,15 @@ on:
         description: "Build and log every publish without publishing."
         type: boolean
         default: false
+      correlation:
+        description: "Opaque marker echoed into the run name so a dispatching workflow can find this exact run. Leave empty for manual runs."
+        type: string
+        default: ""
+
+# The [correlation] suffix makes the dispatched run findable: prerelease.yml
+# matches it exactly instead of guessing by creation time (which races with
+# concurrent dispatches).
+run-name: "Publish npm packages (${{ inputs.packages }} @ ${{ inputs.ref }})${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
 
 env:
   DRY_RUN: ${{ github.event.inputs.dry_run }}
