@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Real runs only: overwrite an existing GH Packages version (delete-then-republish). Public npm cannot be overwritten and will error. Not needed for a dry run."
+        description: "Force a rebuild even when the version is already published on both registries. npm publishing itself lives in publish.yml (idempotent; existing versions are skipped)."
         type: boolean
         default: false
       dry_run:
@@ -24,7 +24,9 @@ jobs:
     # environment (configure its required reviewers = ledger maintainers in repo
     # Settings -> Environments). Dry runs need no approval. The build job is the
     # gate because npm publish + tag push happen here, before anything downstream.
-    environment: ${{ github.event.inputs.dry_run == 'true' && '' || 'release' }}
+    # NB: the truthy value must be the && arm - '' is falsy in GitHub
+    # expressions, so `cond && '' || x` yields x on BOTH branches.
+    environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
     permissions:
       contents: write
     outputs:
@@ -96,8 +98,6 @@ jobs:
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -113,19 +113,10 @@ jobs:
             ${SHORT_VERSION}.*) TAG_NAME="ledger-${VERSION}" ;;
             *)                  TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}" ;;
           esac
-          PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/ledger-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -145,13 +136,7 @@ jobs:
             # Copy out before the next nix build overwrites result/lib.
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -167,8 +152,6 @@ jobs:
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -177,19 +160,10 @@ jobs:
           VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
-          PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/onchain-runtime-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -208,13 +182,7 @@ jobs:
             TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -230,8 +198,6 @@ jobs:
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
-          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
@@ -242,19 +208,10 @@ jobs:
           TAG_NAME="zkir-${VERSION}"
           WASM_VERSION="${ZKIR_WASM_VERSION}"
           SHORT_VERSION=$(echo "$WASM_VERSION" | awk -F. '{print $1}')
-          PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+          PKG="@midnight-ntwrk/zkir-v${SHORT_VERSION}"
           SCOPE="${PKG%%/*}"
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-
-          # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          if [ -z "${NPM_TOKEN:-}" ]; then
-            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-          fi
-          # setup-node points npm at $NPM_CONFIG_USERCONFIG, so write the token
-          # there literally (npm's ${VAR} expansion yields empty -> ENEEDAUTH).
-          # Leading newline guards a setup-node npmrc with no trailing newline.
-          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build unless the version already exists on both registries (FORCE or
           # dry run always builds). The --<scope>:registry override is required:
@@ -273,13 +230,7 @@ jobs:
             TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
             mkdir -p "${GITHUB_WORKSPACE}/release-artifacts"
             cp "$TGZ" "${GITHUB_WORKSPACE}/release-artifacts/"
-            # Publish is idempotent per-registry: skips where the version already exists.
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$GH_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
-            "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-              "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+            # npm publishing happens in publish.yml, dispatched below.
             cd ../..
           fi
 
@@ -379,6 +330,48 @@ jobs:
             test-results.json
             test-results.xml
 
+  # npm publishing lives in publish.yml (the npm trusted-publisher workflow;
+  # its top-level filename is what npmjs validates, so it cannot be a
+  # reusable workflow here). Dispatch it pinned to this run's commit and
+  # propagate its conclusion so the release cannot complete with missing
+  # npm packages.
+  publish-npm:
+    needs: [ build, coverage, integration, unit-tests ]
+    if: ${{ github.event.inputs.dry_run != 'true' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch publish.yml and wait
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          MARK=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Correlation marker: publish.yml echoes it into its run-name, so we
+          # find OUR run exactly. A timestamp filter alone races with concurrent
+          # dispatches (manual or another release) and could watch a stranger's
+          # run while ours is still queued or later fails.
+          CORR="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
+            -f "ref=$BUILD_SHA" -f packages=all -f "correlation=$CORR"
+          # The dispatch API returns no run id; poll for the run it created.
+          RUN_ID=""
+          for _ in $(seq 1 30); do
+            sleep 5
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow publish.yml \
+              --event workflow_dispatch --created ">=$MARK" --limit 50 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"[$CORR]\")) | .databaseId" \
+              | head -n 1)
+            [ -n "$RUN_ID" ] && break
+          done
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::dispatched publish.yml run did not appear"; exit 1
+          fi
+          echo "Waiting on publish.yml run ${RUN_ID} (may pause for its release-environment approval)"
+          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
+
   crates-io:
     needs: [ build, coverage, integration, unit-tests ]
     # crates.io is immutable, so publish only after the suite is green (npm/tags
@@ -419,7 +412,13 @@ jobs:
           nix develop .#ci -c .github/scripts/cargo-publish-crates.sh "$VERSION"
 
   release:
-    needs: [ build, coverage, integration, unit-tests ]
+    # publish-npm is skipped on dry runs; `!cancelled() &&` (a status function,
+    # so it bypasses the implicit success() check) keeps release eligible then,
+    # while real runs still hard-require npm publication success. Not always():
+    # that stays true during operator cancellation and would let this
+    # irreversible job create/announce the release anyway.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
+    needs: [ build, coverage, integration, unit-tests, publish-npm ]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -459,7 +458,7 @@ jobs:
 
           # Guard: `sha256sum *` would block on stdin if STAGING were empty.
           if [ -n "$(ls -A "$STAGING")" ]; then
-            ( cd "$STAGING" && sha256sum * > SHA256SUMS )
+            ( cd "$STAGING" && sha256sum -- * > SHA256SUMS )
           else
             echo "::warning::No release assets were assembled."
           fi
