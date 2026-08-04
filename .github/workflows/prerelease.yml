@@ -348,15 +348,22 @@ jobs:
           BUILD_SHA: ${{ github.sha }}
         run: |
           MARK=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Correlation marker: publish.yml echoes it into its run-name, so we
+          # find OUR run exactly. A timestamp filter alone races with concurrent
+          # dispatches (manual or another release) and could watch a stranger's
+          # run while ours is still queued or later fails.
+          CORR="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
-            -f "ref=$BUILD_SHA" -f packages=all
+            -f "ref=$BUILD_SHA" -f packages=all -f "correlation=$CORR"
           # The dispatch API returns no run id; poll for the run it created.
           RUN_ID=""
           for _ in $(seq 1 30); do
             sleep 5
             RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow publish.yml \
-              --event workflow_dispatch --created ">=$MARK" --limit 1 \
-              --json databaseId --jq '.[0].databaseId // empty')
+              --event workflow_dispatch --created ">=$MARK" --limit 50 \
+              --json databaseId,displayTitle \
+              --jq ".[] | select(.displayTitle | contains(\"[$CORR]\")) | .databaseId" \
+              | head -n 1)
             [ -n "$RUN_ID" ] && break
           done
           if [ -z "$RUN_ID" ]; then
@@ -405,9 +412,12 @@ jobs:
           nix develop .#ci -c .github/scripts/cargo-publish-crates.sh "$VERSION"
 
   release:
-    # publish-npm is skipped on dry runs; `always() &&` keeps release eligible
-    # then, while real runs still hard-require npm publication success.
-    if: ${{ always() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
+    # publish-npm is skipped on dry runs; `!cancelled() &&` (a status function,
+    # so it bypasses the implicit success() check) keeps release eligible then,
+    # while real runs still hard-require npm publication success. Not always():
+    # that stays true during operator cancellation and would let this
+    # irreversible job create/announce the release anyway.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
     needs: [ build, coverage, integration, unit-tests, publish-npm ]
     runs-on: ubuntu-latest
     permissions:
