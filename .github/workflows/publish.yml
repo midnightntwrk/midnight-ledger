@@ -81,6 +81,14 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref }}
 
+      - name: Checkout publish scripts (workflow ref)
+        # The checkout above is the dispatched ref, which may be a historical
+        # branch/tag that predates the helper scripts. The scripts must always
+        # come from the workflow's own commit, so check them out separately.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        with:
+          path: .publish-scripts
+
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
         with:
@@ -116,6 +124,7 @@ jobs:
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
           SCOPES="@midnight-ntwrk @midnightntwrk"
+          SCRIPTS="${GITHUB_WORKSPACE}/.publish-scripts/.github/scripts"
 
           # npmjs auth (GH Packages auth is configured by setup-node). The
           # token is written literally: npm's ${VAR} expansion yields empty
@@ -161,10 +170,10 @@ jobs:
             # Normalize to every target scope (rescoping to the tarball's own
             # scope is a harmless identity repack).
             for SCOPE in $SCOPES; do
-              T=$("${GITHUB_WORKSPACE}/.github/scripts/rescope-npm-tarball.sh" "$TGZ" "$SCOPE" "$ATTR_DIR")
+              T=$("${SCRIPTS}/rescope-npm-tarball.sh" "$TGZ" "$SCOPE" "$ATTR_DIR")
               for REG in "$GH_REG" "$NPMJS_REG"; do
-                "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" \
-                  "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+                "${SCRIPTS}/run-unless-dry.sh" \
+                  "${SCRIPTS}/npm-publish-idempotent.sh" \
                   "$T" "$REG" "${SCOPE}/${BASE}" "$VER"
               done
             done
