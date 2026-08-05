@@ -106,7 +106,8 @@ mod tests {
         use IrValue::*;
 
         // `into_bytes32` yields a `Bytes(32)` value; extract its fixed array.
-        let to_arr = |v: IrValue| -> [u8; 32] { <Vec<u8>>::try_from(v).unwrap().try_into().unwrap() };
+        let to_arr =
+            |v: IrValue| -> [u8; 32] { <Vec<u8>>::try_from(v).unwrap().try_into().unwrap() };
 
         let x = Native(Fr(F::random(OsRng)));
         let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());

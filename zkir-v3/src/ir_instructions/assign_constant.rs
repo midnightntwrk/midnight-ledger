@@ -34,13 +34,17 @@ pub fn assign_constant_incircuit(
     value: &IrValue,
 ) -> Result<CircuitValue, Error> {
     match value {
-        IrValue::Native(x) => std_lib.assign_fixed(layouter, x.0).map(CircuitValue::Native),
+        IrValue::Native(x) => std_lib
+            .assign_fixed(layouter, x.0)
+            .map(CircuitValue::Native),
 
         IrValue::Bool(b) => std_lib.assign_fixed(layouter, *b).map(CircuitValue::Bool),
 
         IrValue::Byte(b) => std_lib.assign_fixed(layouter, *b).map(CircuitValue::Byte),
 
-        IrValue::Bytes(bs) => std_lib.assign_many_fixed(layouter, bs).map(CircuitValue::Bytes),
+        IrValue::Bytes(bs) => std_lib
+            .assign_many_fixed(layouter, bs)
+            .map(CircuitValue::Bytes),
 
         IrValue::JubjubPoint(p) => std_lib
             .jubjub()

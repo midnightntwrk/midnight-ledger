@@ -12,8 +12,20 @@ path = "src/main.rs"
 required-features = ["binary"]
 
 [features]
-binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
-mock-verify = ["transient-crypto-old/mock-verify", "transient-crypto/mock-verify"]
+binary = [
+  "dep:log",
+  "dep:tracing-subscriber",
+  "dep:clap",
+  "dep:env_logger",
+  "dep:tokio",
+  "dep:indicatif",
+  "dep:console",
+  "dep:futures-executor",
+]
+mock-verify = [
+  "transient-crypto-old/mock-verify",
+  "transient-crypto/mock-verify",
+]
 proptest = [
   "dep:pastey",
   "dep:proptest",
@@ -26,11 +38,13 @@ proptest = [
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = [
+  "cli",
+] }
 
 midnight-proofs = { version = "^0.8.1" }
-midnight-circuits = { version = "^7.2.2" }
-midnight-zk-stdlib = { version = "^2.3.3" }
+midnight-circuits = { version = "^7.2.4" }
+midnight-zk-stdlib = { version = "^2.3.5" }
 
 # Pinned pre-zk-stdlib-v2 versions for backwards-compatible v1 proving.
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.2.0" }
@@ -58,7 +72,11 @@ log = { version = "^0.4.28", optional = true }
 tracing-subscriber = { version = "^0.3.19", optional = true }
 clap = { version = "^4.5.40", features = ["derive"], optional = true }
 env_logger = { version = "^0.11.8", optional = true }
-tokio = { version = "^1.46.1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
+tokio = { version = "^1.46.1", features = [
+  "rt",
+  "macros",
+  "rt-multi-thread",
+], optional = true }
 indicatif = { version = "^0.18.4", optional = true }
 console = { version = "^0.16.3", optional = true }
 futures-executor = { version = "^0.3.32", optional = true }
