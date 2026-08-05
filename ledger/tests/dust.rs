@@ -15,17 +15,23 @@ use base_crypto::rng::SplittableRng;
 use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
-    dust::{DustActions, DustPublicKey, DustRegistration, INITIAL_DUST_PARAMETERS, InitialNonce},
+    dust::{
+        DustActions, DustLocalState, DustPublicKey, DustRegistration, DustSecretKey,
+        INITIAL_DUST_PARAMETERS, InitialNonce,
+    },
+    events::{Event, EventDetails},
     semantics::TransactionResult,
     structure::{
-        CNightGeneratesDustEvent, Intent, Signature, SigningKey, SystemTransaction, Transaction,
-        UnshieldedOffer, UtxoOutput, UtxoSpend,
+        CNightGeneratesDustActionType, CNightGeneratesDustEvent, INITIAL_PARAMETERS, Intent,
+        Signature, SigningKey, SystemTransaction, Transaction, UnshieldedOffer, UtxoOutput,
+        UtxoSpend,
     },
-    test_utilities::{Resolver, TestState, test_resolver, tx_prove_bind},
+    test_utilities::{Resolver, TestState, dbg_fees_with_state, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
 };
 use midnight_ledger_v9 as midnight_ledger;
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use serialize::tagged_serialize;
 use std::collections::VecDeque;
 use storage::{arena::Sp, db::InMemoryDB};
 
@@ -95,10 +101,13 @@ async fn test_registration_dust_payment() {
     // Erase for fees due to technicality of the runtime fees calculation being slightly inaccurate
     // due to only having the proof-erased tx to hand.
     let dust_fee = dbg!(
-        tx.erase_proofs()
-            .erase_signatures()
-            .fees(&state.ledger.parameters, true)
-            .unwrap()
+        dbg_fees_with_state(
+            &tx.erase_proofs().erase_signatures(),
+            &state.ledger.parameters,
+            &state.ledger,
+            true,
+        )
+        .unwrap()
     );
     let result = state.apply(&tx, strictness).unwrap();
     assert!(matches!(result, TransactionResult::Success(_)));
@@ -162,6 +171,95 @@ async fn test_cnight_dust_payment() {
     state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
     assert_eq!(state.dust.wallet_balance(state.time), 0);
     assert!(state.dust.utxos().next().is_none());
+}
+
+/// Regression test for https://github.com/midnightntwrk/midnight-ledger/issues/455:
+/// `replay_events` must produce byte-identical state whether replayed in one
+/// batch or split across chunks, for a viewer that owns none of the UTXOs.
+#[tokio::test]
+async fn test_replay_events_associative_for_non_owning_viewer() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+
+    const CNIGHT_BAL: u128 = 10_000_000;
+    let nonce = InitialNonce(rng.r#gen());
+    // Owned by `owner`, not the viewer we replay with.
+    let owner = DustPublicKey::from(state.dust_key.clone());
+
+    let mut events: Vec<Event<InMemoryDB>> = Vec::new();
+
+    let create_tx = SystemTransaction::CNightGeneratesDustUpdate {
+        events: vec![CNightGeneratesDustEvent {
+            action: CNightGeneratesDustActionType::Create,
+            nonce,
+            owner,
+            time: state.time,
+            value: CNIGHT_BAL,
+        }],
+    };
+    let (ledger, evs) = state
+        .ledger
+        .apply_system_tx(&create_tx, state.time)
+        .expect("apply create");
+    state.ledger = ledger;
+    events.extend(evs);
+
+    state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
+
+    let destroy_tx = SystemTransaction::CNightGeneratesDustUpdate {
+        events: vec![CNightGeneratesDustEvent {
+            action: CNightGeneratesDustActionType::Destroy,
+            nonce,
+            owner,
+            time: state.time,
+            value: CNIGHT_BAL,
+        }],
+    };
+    let (ledger, evs) = state
+        .ledger
+        .apply_system_tx(&destroy_tx, state.time)
+        .expect("apply destroy");
+    state.ledger = ledger;
+    events.extend(evs);
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.content, EventDetails::DustInitialUtxo { .. })),
+        "fixture must contain a DustInitialUtxo event"
+    );
+    let split_idx = events
+        .iter()
+        .position(|e| matches!(e.content, EventDetails::DustGenerationDtimeUpdate { .. }))
+        .expect("fixture must contain a DustGenerationDtimeUpdate event");
+
+    let viewer = DustSecretKey::sample(&mut rng);
+    let viewer_state = DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust);
+
+    let batch = viewer_state
+        .replay_events(&viewer, events.iter())
+        .expect("batch replay");
+
+    let (head, tail) = events.split_at(split_idx);
+    let split = viewer_state
+        .replay_events(&viewer, head.iter())
+        .expect("replay head")
+        .replay_events(&viewer, tail.iter())
+        .expect("replay tail");
+
+    let mut batch_bytes = Vec::new();
+    tagged_serialize(&batch, &mut batch_bytes).expect("serialize batch state");
+    let mut split_bytes = Vec::new();
+    tagged_serialize(&split, &mut split_bytes).expect("serialize split state");
+
+    assert_eq!(
+        batch_bytes,
+        split_bytes,
+        "replay_events must be associative across chunk boundaries \
+         (batch = {} B, split = {} B)",
+        batch_bytes.len(),
+        split_bytes.len(),
+    );
 }
 
 #[tokio::test]

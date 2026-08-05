@@ -14,14 +14,13 @@
 use crate::conversions::*;
 use js_sys::{Array, BigInt, JsString, Uint8Array};
 use ledger::structure::{ProofMarker, ProofPreimageMarker, Signature, SingleUpdate};
-use onchain_runtime::state::EntryPointBuf;
+use onchain_runtime::state::{EntryPointBuf, IrBuf};
 use onchain_runtime_wasm::conversions::PreSignature;
 use onchain_runtime_wasm::state::{
     ContractMaintenanceAuthority, ContractOperation, ContractState, from_maybe_string, maybe_string,
 };
 use rand::rngs::OsRng;
 use serialize::Serializable;
-use serialize::tagged_deserialize;
 use storage::db::InMemoryDB;
 use transient_crypto::proofs::KeyLocation;
 use transient_crypto::proofs::ProofPreimage;
@@ -56,9 +55,9 @@ impl ContractDeploy {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -104,9 +103,9 @@ impl ContractCallPrototype {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -222,23 +221,23 @@ impl ContractCall {
         match &self.0 {
             ProvenContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedContractCall(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }
@@ -276,9 +275,9 @@ impl ReplaceAuthority {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -299,6 +298,7 @@ impl ContractOperationVersion {
                 )));
             }
             "v3" => V::V3,
+            "v4" => V::V4,
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -312,6 +312,7 @@ impl ContractOperationVersion {
         use ledger::structure::ContractOperationVersion as V;
         match &self.0 {
             V::V3 => "v3",
+            V::V4 => "v4",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -320,9 +321,9 @@ impl ContractOperationVersion {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -348,7 +349,8 @@ impl ContractOperationVersionedVerifierKey {
                     "superceded contract operation version: {version}"
                 )));
             }
-            "v3" => V::V3(tagged_deserialize(&mut &raw_vk[..])?),
+            "v3" => V::V3(serialize::tagged_deserialize(&mut &raw_vk[..])?),
+            "v4" => V::V4(serialize::tagged_deserialize(&mut &raw_vk[..])?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -362,6 +364,7 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         match &self.0 {
             V::V3(..) => "v3",
+            V::V4(..) => "v4",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -373,6 +376,7 @@ impl ContractOperationVersionedVerifierKey {
         let mut buf = Vec::new();
         match &self.0 {
             V::V3(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V4(vk) => Serializable::serialize(vk, &mut buf)?,
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         Ok(Uint8Array::from(&buf[..]))
@@ -381,9 +385,9 @@ impl ContractOperationVersionedVerifierKey {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -417,9 +421,9 @@ impl VerifierKeyRemove {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -453,9 +457,70 @@ impl VerifierKeyInsert {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct IrRemove(EntryPointBuf);
+
+try_ref_for_exported!(IrRemove);
+
+#[wasm_bindgen]
+impl IrRemove {
+    #[wasm_bindgen(constructor)]
+    pub fn new(operation: JsValue) -> Result<IrRemove, JsError> {
+        let operation: EntryPointBuf = EntryPointBuf(from_maybe_string(operation)?);
+        Ok(IrRemove(operation))
+    }
+
+    #[wasm_bindgen(getter = operation)]
+    pub fn operation(&self) -> JsValue {
+        maybe_string(&self.0.0)
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", self.0)
+        } else {
+            format!("{:#?}", self.0)
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct IrInsert(EntryPointBuf, IrBuf);
+
+try_ref_for_exported!(IrInsert);
+
+#[wasm_bindgen]
+impl IrInsert {
+    #[wasm_bindgen(constructor)]
+    pub fn new(operation: JsValue, vk: Uint8Array) -> Result<IrInsert, JsError> {
+        let operation: EntryPointBuf = EntryPointBuf(from_maybe_string(operation)?);
+        Ok(IrInsert(operation, IrBuf(vk.to_vec())))
+    }
+
+    #[wasm_bindgen(getter = operation)]
+    pub fn operation(&self) -> JsValue {
+        maybe_string(&self.0.0)
+    }
+
+    #[wasm_bindgen(getter = ir)]
+    pub fn ir(&self) -> Uint8Array {
+        self.1.0[..].into()
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", self.0)
+        } else {
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -475,21 +540,26 @@ impl MaintenanceUpdate {
     ) -> Result<MaintenanceUpdate, JsError> {
         let updates = updates
             .into_iter()
-            .map(|su| match ReplaceAuthority::try_ref(&su)? {
-                Some(ra) => Ok(SingleUpdate::ReplaceAuthority(ra.0.clone())),
-                _ => match VerifierKeyRemove::try_ref(&su)? {
-                    Some(rm) => Ok(SingleUpdate::VerifierKeyRemove(
+            .map(|su| {
+                if let Some(ra) = ReplaceAuthority::try_ref(&su)? {
+                    Ok(SingleUpdate::ReplaceAuthority(ra.0.clone()))
+                } else if let Some(rm) = VerifierKeyRemove::try_ref(&su)? {
+                    Ok(SingleUpdate::VerifierKeyRemove(
                         rm.0.clone(),
                         rm.1.0.clone(),
-                    )),
-                    _ => match VerifierKeyInsert::try_ref(&su)? {
-                        Some(ins) => Ok(SingleUpdate::VerifierKeyInsert(
-                            ins.0.clone(),
-                            ins.1.0.clone(),
-                        )),
-                        _ => Err(JsError::new("Expected SingleUpdate type")),
-                    },
-                },
+                    ))
+                } else if let Some(ins) = VerifierKeyInsert::try_ref(&su)? {
+                    Ok(SingleUpdate::VerifierKeyInsert(
+                        ins.0.clone(),
+                        ins.1.0.clone(),
+                    ))
+                } else if let Some(rm) = IrRemove::try_ref(&su)? {
+                    Ok(SingleUpdate::IrRemove(rm.0.clone()))
+                } else if let Some(ins) = IrInsert::try_ref(&su)? {
+                    Ok(SingleUpdate::IrInsert(ins.0.clone(), ins.1.clone()))
+                } else {
+                    Err(JsError::new("Expected SingleUpdate type"))
+                }
             })
             .collect::<Result<Vec<_>, _>>()?;
         let address = from_hex_ser(address)?;
@@ -522,9 +592,9 @@ impl MaintenanceUpdate {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 
@@ -552,6 +622,8 @@ impl MaintenanceUpdate {
                     op,
                     ContractOperationVersionedVerifierKey(vk),
                 )),
+                SingleUpdate::IrRemove(op) => JsValue::from(IrRemove(op)),
+                SingleUpdate::IrInsert(op, ir) => JsValue::from(IrInsert(op, ir)),
             })
             .collect()
     }

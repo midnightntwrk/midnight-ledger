@@ -96,6 +96,12 @@ pub trait StateReference<D: DB> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
 }
@@ -191,6 +197,17 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             .map(|x| x.0)
             .unwrap_or_default();
         check(params, commitment_root, generation_root)
+    }
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        check(&|contract, entry_point| {
+            self.index(contract)
+                .and_then(|cstate| cstate.operations.get(entry_point).map(|op| (*op).clone()))
+        })
     }
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
         if self.network_id == network {
@@ -332,6 +349,18 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             check(params_new, commitment_root_new, generation_root_new)
         }
     }
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        check(&|contract, entry_point| {
+            self.new_state
+                .index(contract)
+                .and_then(|cstate| cstate.operations.get(entry_point).map(|op| (*op).clone()))
+        })
+    }
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
         if self.new_state.network_id == network {
             Ok(())
@@ -345,6 +374,28 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.new_state.state_hash()
     }
+}
+
+pub(crate) enum MetadataSizeError {
+    EntryPoint(EntryPointBuf, u64),
+    Authority(u64),
+}
+
+pub(crate) fn check_entry_point_metadata_sizes<D: DB>(
+    state: &ContractState<D>,
+    limit: u64,
+) -> Result<(), MetadataSizeError> {
+    let auth_size = state.maintenance_authority.serialized_size() as u64;
+    if auth_size > limit {
+        return Err(MetadataSizeError::Authority(auth_size));
+    }
+    for entry in state.operations.iter() {
+        let size = entry.0.serialized_size() as u64 + entry.1.serialized_size() as u64;
+        if size > limit {
+            return Err(MetadataSizeError::EntryPoint((*entry.0).clone(), size));
+        }
+    }
+    Ok(())
 }
 
 impl<D: DB> ContractStateExt<D> for ContractState<D> {
@@ -377,16 +428,14 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
         address: ContractAddress,
         operation: EntryPoint,
     ) -> Result<(), MalformedTransaction<D>> {
-        match &self.v2 {
-            Some(_) => Ok(()),
-            None => {
-                warn!("no verifier key set");
-                Err(MalformedTransaction::VerifierKeyNotSet {
-                    address,
-                    operation: operation.into(),
-                })
-            }
+        if self.v2.is_none() && self.v3.is_none() {
+            warn!("no verifier key set");
+            return Err(MalformedTransaction::VerifierKeyNotSet {
+                address,
+                operation: operation.into(),
+            });
         }
+        Ok(())
     }
 }
 
@@ -609,17 +658,19 @@ where
 
                 let mut fees = 0;
                 ref_state.param_check(true, |params| {
-                    fees = match self.fees(params, true) {
-                        Ok(fees) => fees,
-                        Err(e) => {
-                            if strictness.enforce_balancing {
-                                return Err(MalformedTransaction::FeeCalculation(e));
-                            } else {
-                                0
+                    ref_state.fees_check(|get_op| {
+                        fees = match self.fees_with_impl(params, get_op, true) {
+                            Ok(fees) => fees,
+                            Err(e) => {
+                                if strictness.enforce_balancing {
+                                    return Err(MalformedTransaction::FeeCalculation(e));
+                                } else {
+                                    0
+                                }
                             }
-                        }
-                    };
-                    stx.balancing_check(strictness, fees)
+                        };
+                        stx.balancing_check(strictness, fees)
+                    })
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
@@ -1701,7 +1752,10 @@ where
 }
 
 impl<D: DB> ContractDeploy<D> {
-    pub(crate) fn well_formed(&self) -> Result<(), MalformedTransaction<D>> {
+    pub(crate) fn well_formed(
+        &self,
+        ref_state: &impl StateReference<D>,
+    ) -> Result<(), MalformedTransaction<D>> {
         self.initial_state.well_formed(self.address())?;
 
         // Or we could change the types. Current (pre-this-ticket) ContractState could be renamed to
@@ -1722,6 +1776,24 @@ impl<D: DB> ContractDeploy<D> {
                 MalformedContractDeploy::IncorrectChargedState,
             ));
         }
+        ref_state.param_check(false, |params| {
+            let limit = params.limits.max_contract_metadata_size;
+            if let Err(e) = check_entry_point_metadata_sizes(&self.initial_state, limit) {
+                return Err(MalformedTransaction::MalformedContractDeploy(match e {
+                    MetadataSizeError::EntryPoint(entry_point, size) => {
+                        MalformedContractDeploy::MetadataTooLarge {
+                            entry_point,
+                            size,
+                            limit,
+                        }
+                    }
+                    MetadataSizeError::Authority(size) => {
+                        MalformedContractDeploy::AuthorityMetadataTooLarge { size, limit }
+                    }
+                }));
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 }
@@ -1735,7 +1807,7 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
     ) -> Result<(), MalformedTransaction<D>> {
         match self {
             ContractAction::Call(call) => call.well_formed(ref_state, strictness, parent),
-            ContractAction::Deploy(deploy) => deploy.well_formed(),
+            ContractAction::Deploy(deploy) => deploy.well_formed(ref_state),
             ContractAction::Maintain(upd) => upd.well_formed(ref_state, strictness),
         }
     }

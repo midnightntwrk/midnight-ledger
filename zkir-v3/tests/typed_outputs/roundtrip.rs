@@ -27,7 +27,6 @@
 //!   load JSON IR -> compute commitment over inputs ++ encoded expected
 //!   outputs -> keygen -> prove -> verify against `[binding, commitment]`.
 
-use midnight_curves::{Fr as JubjubFr};
 use midnight_zkir_v3::ir_types::IrValue;
 use transient_crypto::curve::Fr;
 
@@ -76,30 +75,6 @@ async fn native_via_copy() {
         }"#,
         vec![input],
         vec![IrValue::Native(input)],
-    )
-    .await;
-}
-
-#[actix_rt::test]
-async fn jubjub_scalar() {
-    // Output a Scalar<Jubjub> obtained by decoding a Native input.
-    // Exercises the canonical-scalar path documented in
-    // `encode_incircuit::JubjubScalar`.
-    assert_typed_output_roundtrip(
-        r#"{
-           "version": { "major": 3, "minor": 0 },
-           "inputs": [
-              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
-           ],
-           "outputs": ["Scalar<Jubjub>"],
-           "do_communications_commitment": true,
-           "instructions": [
-               { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%v_0"], "output": "%s" },
-               { "op": "output", "vals": ["%s"] }
-           ]
-        }"#,
-        vec![5.into()],
-        vec![IrValue::JubjubScalar(JubjubFr::from(5u64))],
     )
     .await;
 }

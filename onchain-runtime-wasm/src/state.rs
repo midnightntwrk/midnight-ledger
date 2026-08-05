@@ -26,6 +26,7 @@ use onchain_runtime::contract_state_ext::ContractStateExt;
 use onchain_runtime::ops::Op;
 use onchain_runtime::result_mode::ResultModeGather;
 use onchain_runtime::state;
+use serialize::{peek_tag, tagged_deserialize};
 use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::fab::ValueReprAlignedValue;
@@ -73,9 +74,9 @@ impl StateMap {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -165,9 +166,9 @@ impl StateBoundedMerkleTree {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -197,9 +198,9 @@ impl ChargedState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -339,9 +340,9 @@ impl StateValue {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -467,9 +468,9 @@ impl ContractState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -494,20 +495,29 @@ impl From<ContractOperation> for state::ContractOperation {
 impl ContractOperation {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<ContractOperation, JsError> {
-        Ok(ContractOperation(state::ContractOperation::new(None)))
+        Ok(ContractOperation(state::ContractOperation::new(None, None)))
     }
 
     #[wasm_bindgen(getter = verifierKey)]
     pub fn verifier_key(&self) -> Result<JsValue, JsError> {
-        match self.0.latest() {
-            Some(vk) => to_value_ser(vk),
-            None => Ok(JsValue::UNDEFINED),
+        if let Some(vk) = &self.0.v3 {
+            to_value_ser(vk)
+        } else if let Some(vk) = &self.0.v2 {
+            to_value_ser(vk)
+        } else {
+            Ok(JsValue::UNDEFINED)
         }
     }
 
     #[wasm_bindgen(setter = verifierKey)]
     pub fn set_verifier_key(&mut self, key: Uint8Array) -> Result<(), JsError> {
-        *self.0.latest_mut() = Some(from_value_ser(key, "ContractOperation")?);
+        let data = key.to_vec();
+        let tag = peek_tag(&mut std::io::Cursor::new(&data))?;
+        match tag.as_str() {
+            "verifier-key[v6]" => self.0.v2 = Some(tagged_deserialize(&mut &data[..])?),
+            "verifier-key[v7]" => self.0.v3 = Some(tagged_deserialize(&mut &data[..])?),
+            _ => return Err(JsError::new("unknown verifier key tag: '{tag}'")),
+        }
         Ok(())
     }
 
@@ -522,9 +532,9 @@ impl ContractOperation {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }
@@ -624,9 +634,9 @@ impl ContractMaintenanceAuthority {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
+            format!("{:?}", self.0)
         } else {
-            format!("{:#?}", &self.0)
+            format!("{:#?}", self.0)
         }
     }
 }

@@ -20,7 +20,7 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_deserialize};
+use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::io::{self, Read};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
@@ -70,6 +70,8 @@ pub enum IrMinorVersion {
 }
 
 impl Zkir for IrSource {
+    type ProverKey = midnight_zk_stdlib::MidnightPK<IrSource>;
+
     fn check(
         &self,
         preimage: &ProofPreimage,
@@ -100,12 +102,56 @@ impl Zkir for IrSource {
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
     }
 
-    fn load_ir_from_tagged(reader: impl Read + io::Seek) -> io::Result<Self> {
-        tagged_deserialize(reader)
+    fn k(&self) -> u8 {
+        midnight_zk_stdlib::optimal_k(self) as u8
     }
 
-    fn load_prover_key_from_tagged(reader: impl Read + io::Seek) -> io::Result<ProverKey<Self>> {
-        tagged_deserialize(reader)
+    async fn keygen_vk(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
+        use midnight_zk_stdlib::setup_vk;
+        Ok(transient_crypto::proofs::VerifierKey::from(setup_vk(
+            params.get_params(self.k()).await?.as_ref(),
+            self,
+        )))
+    }
+
+    async fn keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, transient_crypto::proofs::VerifierKey), anyhow::Error> {
+        use midnight_zk_stdlib::{setup_pk, setup_vk};
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let pk = setup_pk(self, &vk);
+        Ok((
+            ProverKey::from_raw(pk),
+            transient_crypto::proofs::VerifierKey::from(vk),
+        ))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + std::io::Seek) -> std::io::Result<Self> {
+        serialize::tagged_deserialize(reader)
+    }
+
+    fn load_prover_key_from_tagged(
+        reader: impl Read + std::io::Seek,
+    ) -> std::io::Result<ProverKey<Self>> {
+        serialize::tagged_deserialize(reader)
+    }
+
+    fn read_raw_pk(reader: impl Read) -> std::io::Result<Self::ProverKey> {
+        midnight_zk_stdlib::MidnightPK::<Self>::read(
+            &mut { reader },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
+    }
+
+    fn write_raw_pk(writer: impl std::io::Write, pk: &Self::ProverKey) -> std::io::Result<()> {
+        pk.write(
+            &mut { writer },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
     }
 }
 
@@ -319,37 +365,30 @@ pub enum Instruction {
     /// value of the input type:
     ///
     ///  - Native:       1 output
+    ///  - Bytes32:      2 outputs (low 31 bytes, high byte)
     ///  - JubjubPoint:  2 outputs (x and y coordinates)
     ///  - JubjubScalar: 1 output
+    ///
+    /// Foreign-field elements encode as 2 limbs (midnight-circuits'
+    /// public-input encoding); points as x and y coordinates (2 limbs each)
+    /// followed, on Weierstrass curves only, by an is-identity flag:
+    ///
+    ///  - Secp256k1Point:  5 outputs
+    ///  - Secp256k1Base:   2 outputs
+    ///  - Secp256k1Scalar: 2 outputs
+    ///
+    ///  - Secp256r1Point:  5 outputs
+    ///  - Secp256r1Base:   2 outputs
+    ///  - Secp256r1Scalar: 2 outputs
+    ///
+    ///  - Curve25519Point:  4 outputs
+    ///  - Curve25519Base:   2 outputs
+    ///  - Curve25519Scalar: 2 outputs
     Encode {
         /// The value to encode
         input: Operand,
         /// The output variable names
         outputs: Vec<Identifier>,
-    },
-    /// Decodes the given raw Fr elements as a value of the given type.
-    ///
-    /// This operation will result in an error if the number of inputs
-    /// is not the exact number of raw Fr elements required to represent a
-    /// value of the given type:
-    ///
-    ///  - Native:       1 input
-    ///  - JubjubPoint:  2 inputs (x and y coordinates)
-    ///  - JubjubScalar: 1 input
-    ///
-    /// It will also result in an error if the operands are not of type
-    /// `Native`.
-    ///
-    /// The circuit may become unsatisfiable if the inputs do not encode
-    /// a valid value of the given type.
-    Decode {
-        /// The inputs to decode
-        inputs: Vec<Operand>,
-        /// The type to decode as
-        #[serde(rename = "type")]
-        val_t: IrType,
-        /// The output variable name
-        output: Identifier,
     },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
@@ -359,7 +398,18 @@ pub enum Instruction {
         cond: Operand,
     },
     /// Conditionally select a value. UB if `bit` is not `0` or `1`.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Point
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// Outputs one element, identical to `a` or `b`
     CondSelect {
@@ -382,7 +432,18 @@ pub enum Instruction {
         bits: u32,
     },
     /// Constrains two values `a` and `b` to be equal.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Point
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// No outputs
     ConstrainEq {
@@ -426,10 +487,14 @@ pub enum Instruction {
         inputs: Vec<Operand>,
     },
     /// Multiplies an elliptic curve point by a scalar.
+    /// Supported on types:
+    ///  - `JubjubPoint x JubjubScalar`
+    ///  - `Secp256k1Point x Secp256k1Scalar`
+    ///  - `Secp256r1Point x Secp256r1Scalar`
+    ///  - `Curve25519Point x Curve25519Scalar`
     ///
-    /// This operation will result in an error if the operand given as `a`
-    /// is not of type `JubjubPoint`, or if the operand given as `scalar`
-    /// is not of type `JubjubScalar`.
+    /// This operation will result in an error if the input types are not
+    /// supported.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -452,7 +517,7 @@ pub enum Instruction {
         /// The result of multiplication
         output: Identifier,
     },
-    /// Hashes a sequence of field elements to an embedded curve point.
+    /// Hashes a sequence of field elements to a Jubjub point.
     /// All inputs are required to be of type `Native`. Failure otherwise.
     ///
     /// Outputs 1 element, the point
@@ -460,6 +525,147 @@ pub enum Instruction {
         /// The values to hash to a curve point
         inputs: Vec<Operand>,
         /// The resulting point
+        output: Identifier,
+    },
+    /// The affine coordinates of the given elliptic curve point.
+    /// On Weierstrass curves the identity has no affine coordinates, so
+    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
+    ///
+    /// Supported on types:
+    /// * JubjubPoint
+    /// * Secp256k1Point
+    /// * Secp256r1Point
+    /// * Curve25519Point
+    ///
+    /// Outputs 2 elements, the coordinates (x, y)
+    IntoCoordinates {
+        /// The point whose coordinate are extracted
+        point: Operand,
+        /// The output variable names (x, y)
+        outputs: (Identifier, Identifier),
+    },
+    /// Reconstructs an elliptic curve point from the given affine coordinates.
+    ///
+    /// On Weierstrass curves the identity cannot be built with this instruction.
+    ///
+    /// Supported on types:
+    /// * (Native, Native):               producing a JubjubPoint
+    /// * (Secp256k1Base, Secp256k1Base): producing a Secp256k1Point
+    /// * (Secp256r1Base, Secp256r1Base): producing a Secp256r1Point
+    /// * (Curve25519Base, Curve25519Base): producing a Curve25519Point
+    ///
+    /// Outputs 1 element, the point
+    FromCoordinates {
+        /// The affine coordinates (x, y)
+        inputs: (Operand, Operand),
+        /// The output variable names
+        output: Identifier,
+    },
+    /// Transforms the given value into its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    /// * Secp256r1Base
+    /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    IntoBytes32 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Constructs an element of the given type from its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    /// * Secp256r1Base
+    /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    FromBytes32 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Reverses the byte order of a `Bytes32` value.
+    ///
+    /// The input must be of type `Bytes32`, otherwise this operation fails. The
+    /// output is a `Bytes32` whose bytes are those of the input in reverse
+    /// order, i.e. the first byte becomes the last and vice versa.
+    ///
+    /// Outputs 1 element, the reversed bytes
+    ReverseBytes {
+        /// The bytes to be reversed
+        bytes: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Decomposes a `Bytes32` value into two `Native` field elements.
+    ///
+    /// The first output (`low`) encodes the first 31 bytes of the input as a
+    /// little-endian native field element. The second output (`high`) encodes
+    /// the 32nd (most significant) byte as a native field element.
+    ///
+    /// This is the inverse of `Bytes32FromLowHigh`.
+    ///
+    /// This instruction imposes no off-circuit errors and no in-circuit constraints.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32IntoLowHigh {
+        /// The input bytes
+        bytes: Operand,
+        /// The output variables: (low, high)
+        outputs: (Identifier, Identifier),
+    },
+    /// Constructs a `Bytes32` value from two `Native` field elements in low-high form.
+    ///
+    /// The first input (`low`) must encode at most 31 bytes, i.e. its value must be
+    /// less than 2^248. The second input (`high`) must encode a single byte, i.e. its
+    /// value must be less than 256. The result concatenates the first 31 bytes from `low`
+    /// with byte `high`.
+    ///
+    /// This is the inverse of `Bytes32IntoLowHigh`.
+    ///
+    /// # Errors and constraints
+    ///
+    /// Off-circuit: returns an error if `low >= 2^248` or `high >= 256`.
+    ///
+    /// In-circuit: the constraint `low < 2^248` is enforced by asserting that the
+    /// 32nd byte of the little-endian decomposition of `low` is zero, making the
+    /// circuit unsatisfiable if violated. The constraint `high < 256` is enforced
+    /// by a byte range check on `high`, also causing unsatisfiability if violated.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32FromLowHigh {
+        /// The inputs: (low, high)
+        inputs: (Operand, Operand),
+        /// The output variable name
         output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).
@@ -499,29 +705,40 @@ pub enum Instruction {
     /// Calls a long-term hash function on a sequence of items with a given
     /// alignment.
     ///
-    /// Outputs 2 elements for binary format
+    /// Outputs a value of type Bytes32.
     PersistentHash {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Evaluates the Keccak-256 hash function on a sequence of items with
     /// a given alignment.
     ///
-    /// Outputs 2 elements for binary format.
+    /// Outputs a value of type Bytes32.
     Keccak256 {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Operand>,
         /// The output variable names
-        outputs: Vec<Identifier>,
+        output: Identifier,
     },
     /// Tests if `a` and `b` are equal.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Point
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One boolean output, `a == b`
     TestEq {
@@ -533,7 +750,18 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Adds `a` and `b`.
-    /// Supported on types: `Native, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Point
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `a + b`
     Add {
@@ -544,7 +772,15 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Multiplies `a` and `b` in the prime field.
+    /// Multiplies `a` and `b`.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `a * b`
     Mul {
@@ -555,11 +791,40 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Negates `a` in the prime field.
+    /// Negates `a`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Point
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Point
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
     ///
     /// One output `-a`
     Neg {
         /// The value to negate
+        a: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Inverts `a`, results in an error if `a` is zero.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///  - Secp256r1Base
+    ///  - Secp256r1Scalar
+    ///  - Curve25519Base
+    ///  - Curve25519Scalar
+    ///
+    /// One output `a^(-1)`
+    Inv {
+        /// The value to invert
         a: Operand,
         /// The output variable name
         output: Identifier,
@@ -585,6 +850,16 @@ pub enum Instruction {
         /// The number of bits to compare
         bits: u32,
         /// The output variable name
+        output: Identifier,
+    },
+    /// Cast a Native value as a Jubjub scalar by reducing it modulo the Jubjub scalar
+    /// field order if necessary.
+    ///
+    /// NB: This instruction will be removed when the BigUint type becomes available.
+    JubjubScalarFromNative {
+        /// The native value to be converted.
+        native: Operand,
+        /// The output variable name.
         output: Identifier,
     },
     /// Off-circuit (preprocessing):
@@ -672,7 +947,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_zk_stdlib::cost_model(self),
+            model: midnight_zk_stdlib::cost_model(self, None),
         }
     }
 

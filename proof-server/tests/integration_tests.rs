@@ -109,8 +109,8 @@ mod test_data {
         ContractDeploy, Intent, ProofPreimageMarker, ProofPreimageVersioned, Signature,
         SignatureKind, Transaction,
     };
-    use ledger::test_utilities::{Resolver, test_resolver, verifier_key};
-    use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+    use ledger::test_utilities::{Resolver, contract_operation, test_resolver};
+    use onchain_runtime::state::{ContractState, StateValue, stval};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use storage::arena::Sp;
@@ -169,7 +169,7 @@ mod test_data {
     -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
         let mut rng = StdRng::seed_from_u64(0x42);
 
-        let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+        let count_op = contract_operation(&RESOLVER, "count").await;
         let contract = ContractState::new(
             stval!([(0u64), (false), (0u64)]),
             HashMap::new().insert(b"count"[..].into(), count_op),
@@ -625,7 +625,7 @@ mod k_endpoint {
 
     fn create_minimal_ir_source() -> zkir_v2::IrSource {
         zkir_v2::IrSource {
-            version: Default::default(),
+            version: zkir_v2::IrMinorVersion::V0,
             num_inputs: 1,
             do_communications_commitment: false,
             instructions: std::sync::Arc::new(vec![]),
@@ -686,10 +686,12 @@ mod k_endpoint {
 
         assert_eq!(response.status(), 400);
 
-        let error_text = response.text().await.expect("Failed to get response text");
+        let error_text = dbg!(response.text().await.expect("Failed to get response text"));
         assert!(
             error_text.contains("Unsupported ZKIR version")
-                || error_text.contains("expected header tag"),
+                || error_text.contains("expected header tag")
+                || error_text.contains("tagged data does not begin with")
+                || error_text.contains("Unsupported ZKIR tag"),
             "Unexpected error: {}",
             error_text
         );

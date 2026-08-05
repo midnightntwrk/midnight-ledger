@@ -1,6 +1,6 @@
 [package]
 name = "midnight-ledger-wasm-v9"
-version = "0.1.0-alpha.1"
+version = "1.0.0-rc.3"
 license.workspace = true
 edition = "2024"
 publish = false
@@ -21,6 +21,8 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
+zkir_v2 = { path = "../zkir", package = "midnight-zkir" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
@@ -28,12 +30,12 @@ rand = { version = "^0.8.4", features = ["getrandom"] }
 rand_chacha = "^0.3.1"
 getrandom_2 = { package = "getrandom", version = "^0.2.16", features = ["js"] }
 getrandom_3 = { package = "getrandom", version = "^0.3.4", features = ["wasm_js"] }
-wasm-bindgen = "=0.2.104"
+wasm-bindgen = "=0.2.108"
 wasm-bindgen-futures = "^0.4.50"
 serde = "^1.0.219"
 serde_bytes = "^0.11.17"
 serde-wasm-bindgen = "^0.6.5"
-js-sys = "^0.3.77"
+js-sys = "^0.3.81"
 hex = "^0.4.3"
 pastey = "^0.2.1"
 anyhow = { version = "^1.0.102" }

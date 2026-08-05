@@ -19,8 +19,8 @@
   package-name,
   path,
   prefix ? "midnight",
-  scope ? "@midnight-ntwrk",
-  repo ? "https://github.com/midnight-ntwrk/artifacts",
+  scope ? "@midnightntwrk",
+  repo ? "https://github.com/midnightntwrk/midnight-ledger",
   version,
   extraBuildInputs ? [],
   extraVariables ? {},
@@ -167,7 +167,7 @@ in pkgs.stdenvNoCC.mkDerivation {
     pkgs.nodejs
     pkgs.coreutils
     pkgs.gnused
-    pkgs.wasm-bindgen-cli_0_2_104
+    pkgs.wasm-bindgen-cli_0_2_108
     pkgs.binaryen
   ];
 }

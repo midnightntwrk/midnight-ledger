@@ -1514,6 +1514,29 @@ impl<D: DB> LedgerState<D> {
                         if res.contract.contains_key(&addr) {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) = crate::verify::check_entry_point_metadata_sizes(
+                            &deploy.initial_state,
+                            limit,
+                        ) {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
+                        }
                         res.contract = res.contract.insert(addr, deploy.initial_state.clone());
                         events.push(Event {
                             source: event_source.clone(),
@@ -1545,8 +1568,8 @@ impl<D: DB> LedgerState<D> {
                                 }
                                 SingleUpdate::VerifierKeyRemove(ep, ver) => {
                                     let mut op = match cstate.operations.get(ep) {
-                                        Some(op) => op.deref().clone(),
-                                        None => {
+                                        Some(op) if ver.has(&op) => op.deref().clone(),
+                                        _ => {
                                             return Err(TransactionInvalid::VerifierKeyNotFound(
                                                 ep.clone(),
                                                 ver.clone(),
@@ -1554,7 +1577,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op == ContractOperation::new(None) {
+                                    if op == ContractOperation::new(None, None) {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
@@ -1564,7 +1587,7 @@ impl<D: DB> LedgerState<D> {
                                 SingleUpdate::VerifierKeyInsert(ep, vk) => {
                                     let mut op = match cstate.operations.get(ep) {
                                         Some(op) => (*op).clone(),
-                                        None => ContractOperation::new(None),
+                                        None => ContractOperation::new(None, None),
                                     };
                                     if vk.as_version().has(&op) {
                                         return Err(TransactionInvalid::VerifierKeyAlreadyPresent(
@@ -1575,7 +1598,58 @@ impl<D: DB> LedgerState<D> {
                                     vk.insert_into(&mut op);
                                     cstate.operations = cstate.operations.insert(ep.clone(), op);
                                 }
+                                SingleUpdate::IrRemove(ep) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => op.deref().clone(),
+                                        None => {
+                                            return Err(TransactionInvalid::IrNotFound(ep.clone()));
+                                        }
+                                    };
+                                    op.ir = None;
+
+                                    if op == ContractOperation::new(None, None) {
+                                        cstate.operations = cstate.operations.remove(ep);
+                                    } else {
+                                        cstate.operations =
+                                            cstate.operations.insert(ep.clone(), op);
+                                    }
+                                }
+                                SingleUpdate::IrInsert(ep, ir) => {
+                                    let mut op = match cstate.operations.get(ep) {
+                                        Some(op) => (*op).clone(),
+                                        None => ContractOperation::new(None, None),
+                                    };
+                                    if op.ir.is_some() {
+                                        return Err(TransactionInvalid::IrAlreadyPresent(
+                                            ep.clone(),
+                                        ));
+                                    }
+                                    op.ir = Some(Sp::new(ir.clone()));
+                                    cstate.operations = cstate.operations.insert(ep.clone(), op);
+                                }
                             }
+                        }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) =
+                            crate::verify::check_entry_point_metadata_sizes(&cstate, limit)
+                        {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
                         }
                         res.contract = res.contract.insert(addr, cstate);
                     }

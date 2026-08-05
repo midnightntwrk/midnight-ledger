@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend, InitialNonce};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
 use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
@@ -230,6 +230,19 @@ pub enum TransactionInvalid<D: DB> {
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
+    ContractMetadataTooLarge {
+        address: ContractAddress,
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    ContractAuthorityMetadataTooLarge {
+        address: ContractAddress,
+        size: u64,
+        limit: u64,
+    },
+    IrNotFound(EntryPointBuf),
+    IrAlreadyPresent(EntryPointBuf),
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -310,6 +323,25 @@ impl<D: DB> Display for TransactionInvalid<D> {
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
             MerkleTreeError(err) => err.fmt(formatter),
+            ContractMetadataTooLarge {
+                address,
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            ContractAuthorityMetadataTooLarge {
+                address,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
+            IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
         }
     }
 }
@@ -395,6 +427,15 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
+    MetadataTooLarge {
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    AuthorityMetadataTooLarge {
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl Display for MalformedContractDeploy {
@@ -413,6 +454,18 @@ impl Display for MalformedContractDeploy {
             IncorrectChargedState => write!(
                 formatter,
                 "contract deployment contained an incorrectly computed map of charged keys"
+            ),
+            MetadataTooLarge {
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            AuthorityMetadataTooLarge { size, limit } => write!(
+                formatter,
+                "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
@@ -1225,6 +1278,7 @@ pub enum TransactionProvingError<D: DB> {
         entry_point: EntryPointBuf,
     },
     MissingKeyset(KeyLocation),
+    UnknownVerifierKeyVersion(String),
     Proving(ProvingError),
     Tokio(std::io::Error),
 }
@@ -1253,6 +1307,10 @@ impl<D: DB> Display for TransactionProvingError<D> {
             MissingKeyset(keyloc) => write!(
                 formatter,
                 "attempted proof, but couldn't find keys with ID {keyloc:?}"
+            ),
+            UnknownVerifierKeyVersion(tag) => write!(
+                formatter,
+                "attempted proof, but verifier key had unrecognized version tag {tag:?}"
             ),
             Proving(e) => e.fmt(formatter),
             Tokio(e) => e.fmt(formatter),
@@ -1398,9 +1456,6 @@ pub enum DustLocalStateError {
     CommitmentIndexNotFound {
         commitment_index: u64,
     },
-    BackingNightNotFound {
-        backing_night: InitialNonce,
-    },
     MerkleTreeError(InvalidUpdate),
 }
 
@@ -1427,11 +1482,6 @@ impl Display for DustLocalStateError {
             CommitmentIndexNotFound { commitment_index } => write!(
                 f,
                 "failed to find commitment for commitment index {commitment_index}"
-            ),
-            BackingNightNotFound { backing_night } => write!(
-                f,
-                "failed to find generation info for backing night {:?}",
-                backing_night.0
             ),
             MerkleTreeError(err) => err.fmt(f),
         }

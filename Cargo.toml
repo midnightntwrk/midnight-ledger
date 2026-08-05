@@ -70,13 +70,17 @@ panic = "abort"
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
 
-# v9 release-candidate patches per the release instructions. v8 + shared infra
-# come from crates.io (the released ledger-8.1.0 set is published, and v9's rc
-# requirements all overlap with v8's released versions or are explicitly patched
-# here). `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to
-# the rc tag so it unifies with zkir-2.2's bumped requirement.
+# v9 release-candidate patches per the release instructions, combined with the
+# local-path patches from ledger-8 development. `midnight-serialize` and
+# `midnight-base-crypto` must resolve to the local workspace copies so that the
+# older crates.io/git `transient-crypto` unifies with the workspace's shared
+# infra; the local versions (1.2.0 / 1.1.0) also satisfy the v9 rc
+# requirements, so the v9 crates unify onto them too.
+# `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to the
+# rc tag because we rely on additions in 2.2.
 [patch.crates-io]
-midnight-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-rc.2" }
+midnight-base-crypto = { path = "base-crypto" }
+midnight-serialize = { path = "serialize" }
 midnight-base-crypto-derive = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
 midnight-ledger-v9 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.1.0.0-rc.3" }
 midnight-zswap = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-rc.3" }
@@ -87,4 +91,3 @@ midnight-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledg
 midnight-onchain-vm = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-rc.2" }
 midnight-onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-rc.2" }
 midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.3" }
-midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.2.0-rc.1" }
