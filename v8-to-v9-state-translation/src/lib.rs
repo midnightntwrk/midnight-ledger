@@ -55,9 +55,6 @@
 //!   this). When v9 publishes to crates.io, drop the patch block entirely.
 //! - If production rolls past `ledger-8.1.1`, bump the `ledger-v8` and
 //!   `onchain-state-v8` versions in `Cargo.toml`.
-//! - Final home for this crate is the `state-translation/v8-to-v9` branch
-//!   (per the one-branch-per-translation convention). Until then it lives on
-//!   the personal sketch branch.
 
 use base_crypto::cost_model::CostDuration;
 use serialize::Tagged;
@@ -180,11 +177,9 @@ impl<
                 for (child, new_child) in tls.iter().zip(new_children.iter_mut()) {
                     *new_child = try_resopt!(cache.resolve(&child.0, child.1.as_child()));
                 }
-                let ann = new_children
-                    .iter()
-                    .fold(AnnB::empty(), |acc, x| {
-                        acc.append(&merkle_patricia_trie::Node::<B, D, AnnB>::ann(x))
-                    });
+                let ann = new_children.iter().fold(AnnB::empty(), |acc, x| {
+                    acc.append(&merkle_patricia_trie::Node::<B, D, AnnB>::ann(x))
+                });
                 merkle_patricia_trie::Node::Branch {
                     ann,
                     children: Box::new(new_children),
@@ -313,9 +308,10 @@ impl<D: DB>
         else {
             return Ok(None);
         };
-        let Some(bridge_recv_mpt) =
-            cache.lookup(&Ids::bridge_receiving_mpt::<D>(), source.bridge_receiving.mpt.as_child())
-        else {
+        let Some(bridge_recv_mpt) = cache.lookup(
+            &Ids::bridge_receiving_mpt::<D>(),
+            source.bridge_receiving.mpt.as_child(),
+        ) else {
             return Ok(None);
         };
         let Some(contract_mpt) =
@@ -359,8 +355,11 @@ impl<D: DB>
 struct LedgerParametersTl;
 
 impl<D: DB>
-    DirectTranslation<ledger_v8::structure::LedgerParameters, ledger_v9::structure::LedgerParameters, D>
-    for LedgerParametersTl
+    DirectTranslation<
+        ledger_v8::structure::LedgerParameters,
+        ledger_v9::structure::LedgerParameters,
+        D,
+    > for LedgerParametersTl
 {
     fn required_translations() -> Vec<TranslationId> {
         Vec::new()
@@ -426,8 +425,8 @@ impl<D: DB>
             global_ttl: source.global_ttl,
             cost_dimension_min_ratio: source.cost_dimension_min_ratio,
             price_adjustment_a_parameter: source.price_adjustment_a_parameter,
-            cardano_to_midnight_bridge_fee_basis_points:
-                source.cardano_to_midnight_bridge_fee_basis_points,
+            cardano_to_midnight_bridge_fee_basis_points: source
+                .cardano_to_midnight_bridge_fee_basis_points,
             c_to_m_bridge_min_amount: source.c_to_m_bridge_min_amount,
             // NEW IN v9, no v8 equivalent — seeded from the v9
             // INITIAL_PARAMETERS default (10 full blocks as of rc.3), which
@@ -511,9 +510,7 @@ impl<D: DB>
             .maintenance_authority
             .committee
             .iter()
-            .map(|vk| {
-                onchain_state_v9::state::ContractMaintenanceVerifyingKey::Schnorr(vk.clone())
-            })
+            .map(|vk| onchain_state_v9::state::ContractMaintenanceVerifyingKey::Schnorr(vk.clone()))
             .collect();
         let maintenance_authority = onchain_state_v9::state::ContractMaintenanceAuthority {
             committee: committee_v9,
