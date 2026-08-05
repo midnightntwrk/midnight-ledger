@@ -53,11 +53,11 @@
 //!   bumps tags, update those tags and re-check the hardcoded `TABLE` tags
 //!   below against the new types (the `table_tags_match_types` test guards
 //!   this). When v9 publishes to crates.io, drop the patch block entirely.
-//! - If production rolls past `ledger-8.1.0`, bump the `ledger-v8` and
+//! - If production rolls past `ledger-8.1.1`, bump the `ledger-v8` and
 //!   `onchain-state-v8` versions in `Cargo.toml`.
-//! - Final home for this crate is `state-translation/v8-to-v9` (per the
-//!   one-branch-per-translation convention). Until then it lives on the
-//!   personal sketch branch.
+//! - Final home for this crate is the `state-translation/v8-to-v9` branch
+//!   (per the one-branch-per-translation convention). Until then it lives on
+//!   the personal sketch branch.
 
 use base_crypto::cost_model::CostDuration;
 use serialize::Tagged;
@@ -393,8 +393,11 @@ impl<D: DB>
             cost_model: ledger_v9::structure::TransactionCostModel {
                 runtime_cost_model: recast_base(&source.cost_model.runtime_cost_model)?,
                 baseline_cost: recast_base(&source.cost_model.baseline_cost)?,
-                // NEW IN v9 — placeholder; the production value should match the
-                // value chosen for the hardfork.
+                // NEW IN v9, no v8 equivalent — seeded from the v9
+                // INITIAL_PARAMETERS defaults (validation 1/4, guaranteed 1,
+                // fallible 1 as of rc.3), which are the values that take
+                // effect at the hardfork. Referenced symbolically so a later
+                // rc changing the defaults is picked up automatically.
                 validation_factor: ledger_v9::structure::INITIAL_PARAMETERS
                     .cost_model
                     .validation_factor,
@@ -411,8 +414,9 @@ impl<D: DB>
                 min_time_to_dismiss: source.limits.min_time_to_dismiss,
                 block_limits: source.limits.block_limits,
                 block_withdrawal_minimum_multiple: source.limits.block_withdrawal_minimum_multiple,
-                // NEW IN v9 — placeholder; the production value should match
-                // the value chosen for the hardfork.
+                // NEW IN v9, no v8 equivalent — seeded from the v9
+                // INITIAL_PARAMETERS default (50_000 as of rc.3), which takes
+                // effect at the hardfork.
                 max_contract_metadata_size: ledger_v9::structure::INITIAL_PARAMETERS
                     .limits
                     .max_contract_metadata_size,
@@ -425,8 +429,9 @@ impl<D: DB>
             cardano_to_midnight_bridge_fee_basis_points:
                 source.cardano_to_midnight_bridge_fee_basis_points,
             c_to_m_bridge_min_amount: source.c_to_m_bridge_min_amount,
-            // NEW IN v9 — placeholder; the production value should match the
-            // value chosen for the hardfork.
+            // NEW IN v9, no v8 equivalent — seeded from the v9
+            // INITIAL_PARAMETERS default (10 full blocks as of rc.3), which
+            // takes effect at the hardfork.
             min_block_price: ledger_v9::structure::INITIAL_PARAMETERS.min_block_price,
         }))
     }

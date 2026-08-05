@@ -6,13 +6,13 @@ version = "0.1.0"
 
 [dependencies]
 # v8: released crates.io versions. `midnight-node`'s `toolkit-1.0.0` tag
-# consumes the same final 8.1.0 (not rc.1), so the replay crate's helpers and
-# the translation crate's v8 side share one Cargo instance from crates.io.
+# unifies to the same crates.io release, so the replay crate's helpers and
+# the translation crate's v8 side share one Cargo instance.
 ledger-v8        = { version = "8.1.1", package = "midnight-ledger", features = ["proving"] }
 onchain-state-v8 = { version = "3.0.0", package = "midnight-onchain-state" }
 
 # v9: in-prerelease. Workspace `[patch.crates-io]` redirects these to the
-# alpha git tags per the v9 release instructions.
+# RC git tags per the v9 release instructions.
 ledger-v9        = { version = "1.0.0", package = "midnight-ledger-v9", features = ["proving", "test-utilities"] }
 onchain-state-v9 = { version = "4.0.0", package = "midnight-onchain-state" }
 

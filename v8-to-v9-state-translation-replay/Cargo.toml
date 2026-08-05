@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 # Standalone Cargo project — not a member of the main ledger workspace, since
-# its dep set (toolkit + helpers + v9 alpha) feature-unifies poorly with the
+# its dep set (toolkit + helpers + v9 RC) feature-unifies poorly with the
 # rest of the workspace.
 [workspace]
 
