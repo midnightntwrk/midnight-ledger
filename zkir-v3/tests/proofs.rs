@@ -1705,10 +1705,7 @@ mod proof_tests {
                 },
             )
             .await;
-        assert!(
-            result.is_err(),
-            "constrain_eq on unequal Bools should fail"
-        );
+        assert!(result.is_err(), "constrain_eq on unequal Bools should fail");
     }
 
     #[actix_rt::test]

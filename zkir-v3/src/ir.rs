@@ -359,7 +359,10 @@ mod constant_encoding {
     use super::{Fr, Operand};
     use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
-    pub(super) fn serialize<S: Serializer>(values: &[Fr], serializer: S) -> Result<S::Ok, S::Error> {
+    pub(super) fn serialize<S: Serializer>(
+        values: &[Fr],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         let immediates: Vec<Operand> = values.iter().map(|f| Operand::Immediate(*f)).collect();
         immediates.serialize(serializer)
     }
