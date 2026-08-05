@@ -19,6 +19,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
 
+      - name: Update NPM
+        run: npm install -g npm@12.0.2
+
       - name: Install dependencies
         run: |
           npm install --save-dev typedoc-plugin-markdown
