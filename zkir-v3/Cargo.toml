@@ -30,6 +30,11 @@ proptest = [
   "transient-crypto/proptest",
   "serialize/proptest",
 ]
+# Adds `AggregableIrSource`, a wrapper enabling IVC aggregation of `IrSource`
+# circuits via `midnight-aggregation`. See `src/ir_aggregation.rs` for the
+# approach and its "one shared architecture" caveat. Prototype-quality: not
+# yet reviewed for the aggregation circuit design.
+proof-aggregation = ["transient-crypto/proof-aggregation"]
 
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }

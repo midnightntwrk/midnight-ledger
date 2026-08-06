@@ -26,8 +26,8 @@
 pub use midnight_aggregation::{
     ivc::{IvcError, IvcInstance, IvcVerifier, setup as ivc_setup},
     multi_circuit_aggregator::{
-        AggregationWitness, Aggregator, InnerCircuitsContext, ProofAggregation,
-        Verifier as AggregationVerifier,
+        AggregableRelation, AggregationWitness, Aggregator, InnerCircuitsContext,
+        ProofAggregation, Verifier as AggregationVerifier,
     },
 };
 
