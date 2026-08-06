@@ -24,7 +24,7 @@ onchain-runtime = { version = "3.1.0", path = "../onchain-runtime", package = "m
 zswap = { version = "8.2.0-rc.1", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
-storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
@@ -62,7 +62,7 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-ledger = { path = ".", features = ["test-utilities", "proptest", "fixed-point-custom-serde"] }
 onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
-storage = { path = "../storage", package = "midnight-storage", features = ["parity-db"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["parity-db", "public-internal-structure"] }
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities", "layout-v2", "gc-v1"] }
 tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }
 criterion = { version = "^0.5.1" }

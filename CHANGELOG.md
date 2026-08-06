@@ -18,6 +18,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 - fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
+## Ledger 8.1.1
+
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
+- add array tests
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
