@@ -1,7 +1,13 @@
 # `transient-crypto` Changelog
 
-## Unreleased
+## Version `2.1.1`
 
+- security: `VerifierKey` serialization is now independent of whether the key has
+  been initialized: the bytes a key was decoded from are preserved, so
+  initializing in place (which is shared across clones) no longer changes what
+  the key serializes to.
+- security: reject a verifier key with trailing bytes after the encoded key, so
+  that two encodings cannot map to the same key.
 - fix: rehashing serde deserialized `MerkleTree`s
 
 ## Version `2.1.0`

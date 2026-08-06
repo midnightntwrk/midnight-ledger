@@ -1,5 +1,20 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `3.1.1`
+
+Covers `onchain-state` `3.0.1` and `onchain-vm` `3.1.1`.
+
+- security: `Op` deserialization rejects operands outside their legal encoding
+  bound: `dup`, `swap` and `ins` with `n >= 16`, and `idx` with a path length
+  outside `1..=16`.
+- security: serde `StateValue` deserialization now enforces the type's
+  invariant.
+- security: taking the `type` of an array with more than 16 entries is a type
+  error instead of producing an out-of-range tag byte.
+- fix: the Merkle tree bound checks in `idx` and `ins` no longer overflow for
+  large tree heights.
+- pull in hardened `serialize`, `base-crypto` and `storage` deserialization.
+
 ## Version `3.1.0`
 
 - feat: add more flexibility to `findPathForLeaf`, allowing it to scan index

@@ -1,5 +1,22 @@
 # `serialize` Changelog
 
+## Version `1.1.1`
+
+- security: `HashMap` and `HashSet` deserialization now requires a normalized
+  encoding (sorted, without duplicate keys), rejecting the non-canonical
+  encodings that previously decoded to the same value.
+- security: reject non-canonical `ScaleBigInt` encodings that use the 4-byte
+  form for a value that fits the smaller form.
+- security: `Box<T>` deserialization now counts against the recursion depth
+  budget.
+- fix: `Vec::with_bounded_capacity` no longer divides by zero for zero-sized
+  types.
+- fix: `serialized_size` for `HashMap` and `HashSet` accounts for the actual
+  width of the length prefix.
+- note: `Deserializable for HashSet<T>` now additionally requires
+  `T: PartialOrd`. `Serializable for HashSet<T>` already required `T: Ord`, so
+  any consumer that round-trips a `HashSet` is unaffected.
+
 ## Version `1.1.0`
 
 - feat: add `tagged_deserialize_sequence`, which deserializes a sequence of tagged values

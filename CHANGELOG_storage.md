@@ -1,5 +1,20 @@
 # `storage` Changelog
 
+## Version `2.0.3`
+
+- security: `MerklePatriciaTrie` deserialization now enforces full structural
+  canonicity rather than annotation consistency alone, so a trie whose structure
+  is not uniquely determined by its contents no longer decodes.
+- security: an `Extension` node whose declared nibble length disagrees with the
+  length of its encoded path is rejected.
+- security: `MultiSet` rejects zero-count entries.
+- security: `TimeFilterMap` rejects an encoding whose set and time-map
+  representations disagree.
+- security: nibble-encoded keys reject trailing bytes left over after decoding.
+- feat: add `MerklePatriciaTrie::canonicity` and
+  `MerklePatriciaTrie::is_canonical`, which state the canonicity rules
+  explicitly.
+
 ## Version `2.0.2`
 
 - fix: clear clippy::useless_borrows_in_formatting across workspace

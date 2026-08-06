@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Version `1.2.1`
+
+- pull in hardened `serialize` and `base-crypto` deserialization.
+
 ## Version `1.2.0`
 
 - feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.
