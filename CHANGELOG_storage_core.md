@@ -10,6 +10,7 @@
 - feat: allow shared parity_db backend through generic Dere
 - fix: remove pending Update from memory before cache_insert_new_key in get()
 - fix: Respect lock ordering in `force_as_arc`
+- fix: hold metadata lock across `track_lazy` and `Sp::lazy` in `BackendLoader::get` lazy path to prevent a panic when a concurrent drop removes the ref-counted entry between the two calls
 
 ## Version `1.1.0`
 

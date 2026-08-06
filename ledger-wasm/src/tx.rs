@@ -21,8 +21,8 @@ use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
     ZswapOutputTypes, ZswapTransient, ZswapTransientTypes,
 };
-use base_crypto::signatures;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
@@ -1481,7 +1481,7 @@ impl ClaimRewardsTransaction {
         signature: JsValue,
         kind: JsValue,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = if kind.is_null() || kind.is_undefined() {
@@ -1531,7 +1531,7 @@ impl ClaimRewardsTransaction {
         nonce: &str,
         kind: &str,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = text_to_claim_kind(kind)?;

@@ -18,7 +18,7 @@
 use base_crypto::fab::{AlignedValue, Value};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure::contract::ContractAddress;
@@ -442,6 +442,12 @@ async fn micro_dao_inner(mode: TestMode) {
                     &INITIAL_PARAMETERS,
                 )
                 .unwrap();
+                let is_guaranteed = transcripts[0].0.is_some();
+                let (guaranteed_coins, fallible_coins) = if is_guaranteed {
+                    (Some(offer), HashMap::new())
+                } else {
+                    (None, [(1, offer)].into_iter().collect())
+                };
                 let call = ContractCallPrototype {
                     address: addr,
                     entry_point: b"buyIn"[..].into(),
@@ -457,8 +463,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 let tx = Transaction::new(
                     "local-test",
                     test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                    None,
-                    [(1, offer)].into_iter().collect(),
+                    guaranteed_coins,
+                    fallible_coins,
                 );
                 let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
                 tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
@@ -939,8 +945,8 @@ async fn micro_dao_inner(mode: TestMode) {
             let tx = Transaction::new(
                 "local-test",
                 test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                None,
-                [(1, offer)].into_iter().collect(),
+                Some(offer),
+                HashMap::new(),
             );
             let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
             tx.well_formed(&state.ledger, unbalanced_strictness, state.time)

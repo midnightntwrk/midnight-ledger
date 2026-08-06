@@ -15,7 +15,7 @@
 #![cfg(feature = "proving")]
 
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use coin_structure::coin::Info as CoinInfo;
 use lazy_static::lazy_static;
 use midnight_ledger::structure::{ContractDeploy, ProofPreimageMarker, Transaction};

@@ -6,6 +6,35 @@
 
 # Class: ZswapStateChanges
 
+## Constructors
+
+### Constructor
+
+```ts
+new ZswapStateChanges(
+   source, 
+   receivedCoins, 
+   spentCoins): ZswapStateChanges;
+```
+
+#### Parameters
+
+##### source
+
+`string`
+
+##### receivedCoins
+
+[`QualifiedShieldedCoinInfo`](../type-aliases/QualifiedShieldedCoinInfo.md)[]
+
+##### spentCoins
+
+[`QualifiedShieldedCoinInfo`](../type-aliases/QualifiedShieldedCoinInfo.md)[]
+
+#### Returns
+
+`ZswapStateChanges`
+
 ## Properties
 
 ### receivedCoins
@@ -35,3 +64,21 @@ readonly spentCoins: QualifiedShieldedCoinInfo[];
 ```
 
 The coins that were spent in this state change
+
+## Methods
+
+### toString()
+
+```ts
+toString(compact?): string;
+```
+
+#### Parameters
+
+##### compact?
+
+`boolean`
+
+#### Returns
+
+`string`

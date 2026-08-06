@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 use ledger::prove::Resolver;
 use rand::rngs::OsRng;
+#[allow(unused_imports)]
 use serialize::tagged_deserialize;
+use std::io::Cursor;
 use transient_crypto::proofs::{Proof, ProofPreimage, Zkir};
 use zkir as zkir_v2;
 
@@ -23,7 +25,7 @@ use crate::endpoints::PUBLIC_PARAMS;
 
 #[cfg(feature = "experimental")]
 pub(crate) fn k(request: &[u8]) -> Result<u8, &'static str> {
-    if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(request) {
+    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(request)) {
         Ok(ir_v2.k())
     } else if let Ok(ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(request) {
         Ok(ir_v3.k())
@@ -34,7 +36,7 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, &'static str> {
 
 #[cfg(not(feature = "experimental"))]
 pub(crate) fn k(request: &[u8]) -> Result<u8, &'static str> {
-    if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(request) {
+    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(request)) {
         Ok(ir_v2.k())
     } else {
         Err("Unsupported ZKIR version")
@@ -43,7 +45,7 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, &'static str> {
 
 #[cfg(feature = "experimental")]
 pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usize>>, String> {
-    if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(ir) {
+    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)) {
         ppi.check(&ir_v2).map_err(|e| e.to_string())
     } else if let Ok(ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(ir) {
         ppi.check(&ir_v3).map_err(|e| e.to_string())
@@ -54,7 +56,7 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
 
 #[cfg(not(feature = "experimental"))]
 pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usize>>, String> {
-    if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(ir) {
+    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)) {
         ppi.check(&ir_v2).map_err(|e| e.to_string())
     } else {
         Err("Unsupported ZKIR version".to_string())
@@ -67,7 +69,7 @@ pub(crate) async fn prove(
     ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    if let Ok(_ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(ir_source) {
+    if let Ok(_ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
         ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
             .map_err(|e| e.to_string())
@@ -86,7 +88,7 @@ pub(crate) async fn prove(
     ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    if let Ok(_ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(ir_source) {
+    if let Ok(_ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
         ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
             .map_err(|e| e.to_string())

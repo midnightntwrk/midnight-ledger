@@ -25,7 +25,7 @@ use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
-    signatures::VerifyingKey,
+    schnorr::VerifyingKey,
     time::{Duration, Timestamp},
 };
 use base_crypto::{
@@ -259,6 +259,10 @@ impl Utxo {
 
 pub fn dust_nonce(initial_nonce: &InitialNonce, seq: u32, sk: &DustSecretKey) -> Fr {
     transient_hash((*initial_nonce, seq, sk.0).field_vec().as_ref())
+}
+
+pub fn dust_first_nonce(initial_nonce: &InitialNonce, dust_addr: &DustPublicKey) -> Fr {
+    transient_hash((*initial_nonce, 0u32, *dust_addr).field_vec().as_ref())
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
@@ -954,7 +958,7 @@ impl<D: DB> DustState<D> {
         time: Timestamp,
         context: &TransactionContext<D>,
         _params: &DustParameters,
-        mut event_push: impl FnMut(EventDetails<D>),
+        mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<Self, TransactionInvalid<D>> {
         let mut state = self.clone();
         if state.utxo.nullifiers.member(&spend.old_nullifier) {
@@ -972,14 +976,19 @@ impl<D: DB> DustState<D> {
             )
             .map_err(TransactionInvalid::MerkleTreeError)?;
         state.utxo.commitments_first_free += 1;
-        event_push(EventDetails::DustSpendProcessed {
-            commitment: spend.new_commitment,
-            commitment_index: &state.utxo.commitments_first_free - 1,
-            nullifier: spend.old_nullifier,
-            v_fee: spend.v_fee,
+        let commitment = spend.new_commitment;
+        let commitment_index = state.utxo.commitments_first_free - 1;
+        let nullifier = spend.old_nullifier;
+        let v_fee = spend.v_fee;
+        let block_time = context.block_context.tblock;
+        event_push(Box::new(move || EventDetails::DustSpendProcessed {
+            commitment,
+            commitment_index,
+            nullifier,
+            v_fee,
             declared_time: time,
-            block_time: context.block_context.tblock,
-        });
+            block_time,
+        }));
         Ok(state)
     }
 
@@ -993,7 +1002,7 @@ impl<D: DB> DustState<D> {
         dust_params: &DustParameters,
         tnow: Timestamp,
         context: &TransactionContext<D>,
-        mut event_push: impl FnMut(EventDetails<D>),
+        mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<(Self, u128), TransactionInvalid<D>> {
         let night_address = UserAddress::from(registration.night_key.clone());
         let mut state = self.clone();
@@ -1083,14 +1092,13 @@ impl<D: DB> DustState<D> {
         dust_addr: DustPublicKey,
         tnow: Timestamp,
         tblock: Timestamp,
-        mut event_push: impl FnMut(EventDetails<D>),
+        mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<Self, DustStateError> {
         let mut state = self.clone();
-        let seq = 0u32;
         let dust_pre_projection = DustPreProjection {
             initial_value,
             owner: dust_addr,
-            nonce: transient_hash((initial_nonce, seq, dust_addr).field_vec().as_ref()),
+            nonce: dust_first_nonce(&initial_nonce, &dust_addr),
             ctime: tnow,
         };
         let dust_commitment = dust_pre_projection.commitment();
@@ -1130,20 +1138,23 @@ impl<D: DB> DustState<D> {
             .insert(initial_nonce, self.generation.generating_tree_first_free);
         state.generation.generating_tree_first_free += 1;
 
-        event_push(EventDetails::DustInitialUtxo {
+        let nonce = dust_pre_projection.nonce;
+        let commitment_index = state.utxo.commitments_first_free - 1;
+        let generation_index = state.generation.generating_tree_first_free - 1;
+        event_push(Box::new(move || EventDetails::DustInitialUtxo {
             output: QualifiedDustOutput {
                 initial_value,
                 owner: dust_addr,
-                nonce: dust_pre_projection.nonce,
+                nonce,
                 seq: 0,
                 ctime: tnow,
                 backing_night: initial_nonce,
-                mt_index: state.utxo.commitments_first_free - 1,
+                mt_index: commitment_index,
             },
             generation: gen_info,
-            generation_index: state.generation.generating_tree_first_free - 1,
+            generation_index,
             block_time: tblock,
-        });
+        }));
 
         Ok(state)
     }
@@ -1196,7 +1207,7 @@ impl<D: DB> DustState<D> {
         parent: &ErasedIntent<D>,
         segment: u16,
         context: &TransactionContext<D>,
-        mut event_push: impl FnMut(EventDetails<D>),
+        mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<Self, TransactionInvalid<D>> {
         let mut state = self.clone();
         for input in offer.inputs.iter_deref().filter(|i| i.type_ == NIGHT) {
@@ -1214,23 +1225,24 @@ impl<D: DB> DustState<D> {
                 continue;
             };
             gen_info.dtime = context.block_context.tblock;
-            // TODO: We maybe can do better than immediately rehashing here... But not much,
-            // because anything in the insertion evidence in the event *will* need to be computed
-            // here.
             state.generation.generating_tree = state
                 .generation
                 .generating_tree
                 .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
-                .map_err(TransactionInvalid::MerkleTreeError)?
-                .rehash();
-            event_push(EventDetails::DustGenerationDtimeUpdate {
-                update: state
-                    .generation
-                    .generating_tree
-                    .insertion_evidence(*idx)
+                .map_err(TransactionInvalid::MerkleTreeError)?;
+            let tree_snapshot = state.generation.generating_tree.clone();
+            let idx = *idx;
+            let block_time = context.block_context.tblock;
+            event_push(Box::new(move || EventDetails::DustGenerationDtimeUpdate {
+                // TODO: We maybe can do better than immediately rehashing here... But not much,
+                // because anything in the insertion evidence in the event *will* need to be
+                // computed here.
+                update: tree_snapshot
+                    .rehash()
+                    .insertion_evidence(idx)
                     .expect("must be able to produce evidence for updated path"),
-                block_time: context.block_context.tblock,
-            });
+                block_time,
+            }));
         }
         for (output_no, output) in offer
             .outputs
@@ -1302,8 +1314,8 @@ pub const INITIAL_DUST_PARAMETERS: DustParameters = DustParameters {
 #[storable(base)]
 #[tag = "dust-wallet-utxo-state[v1]"]
 pub struct DustWalletUtxoState {
-    utxo: QualifiedDustOutput,
-    pending_until: Option<Timestamp>,
+    pub utxo: QualifiedDustOutput,
+    pub pending_until: Option<Timestamp>,
 }
 tag_enforcement_test!(DustWalletUtxoState);
 
@@ -1346,17 +1358,17 @@ impl Error for DustSpendError {}
 #[tag = "dust-local-state[v1]"]
 pub struct DustLocalState<D: DB> {
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
-    generating_tree_first_free: u64,
+    pub generating_tree_first_free: u64,
     pub commitment_tree: MerkleTree<(), D>,
-    commitment_tree_first_free: u64,
+    pub commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
-    dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
+    pub dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     pub sync_time: Timestamp,
     pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DustStateChanges {
     pub received_utxos: Vec<QualifiedDustOutput>,
     pub spent_utxos: Vec<QualifiedDustOutput>,
@@ -1486,35 +1498,6 @@ impl<D: DB> DustLocalState<D> {
         let mut state = self.clone();
         state.dust_utxos = state.dust_utxos.remove(nullifier);
         Ok(state)
-    }
-
-    pub fn successor_utxo(
-        &self,
-        utxo: &QualifiedDustOutput,
-        now: &Timestamp,
-        subtract_fee: u128,
-        new_commitment_index: u64,
-        sk: &DustSecretKey,
-    ) -> Result<QualifiedDustOutput, DustLocalStateError> {
-        let gen_idx = self.night_indices.get(&utxo.backing_night).ok_or(
-            DustLocalStateError::BackingNightNotFound {
-                backing_night: utxo.backing_night,
-            },
-        )?;
-
-        let gen_info = self.generating_tree.index(*gen_idx).unwrap().1;
-        let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, &self.params);
-        let v_now = v_pre_spend.saturating_sub(subtract_fee);
-        let qdo_new = QualifiedDustOutput {
-            backing_night: utxo.backing_night,
-            ctime: *now,
-            initial_value: v_now,
-            seq: utxo.seq + 1,
-            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
-            owner: utxo.owner,
-            mt_index: new_commitment_index,
-        };
-        Ok(qdo_new)
     }
 
     pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {
@@ -1830,6 +1813,11 @@ impl<D: DB> DustLocalState<D> {
 
     pub fn process_ttls(&self, time: Timestamp) -> Self {
         let mut state = self.clone();
+        // Rebuild `night_indices` from the UTXOs that survive this pass, so it
+        // stays bounded to nights still backing a live UTXO. `night_indices` is
+        // only ever consulted via a held UTXO's `backing_night`, so entries for
+        // dropped UTXOs are unreachable and safe to prune here.
+        let mut night_indices = HashMap::new();
         state.dust_utxos = state
             .dust_utxos
             .iter()
@@ -1845,10 +1833,12 @@ impl<D: DB> DustLocalState<D> {
                 if v_new == 0 && time > utxo.utxo.ctime {
                     None
                 } else {
+                    night_indices = night_indices.insert(utxo.utxo.backing_night, gen_idx);
                     Some((nul, utxo))
                 }
             })
             .collect();
+        state.night_indices = night_indices;
         state
     }
 
@@ -1972,13 +1962,15 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.commitment_tree_first_free += 1;
                         let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)
                         {
-                            if let Some(gen_idx) =
-                                acc.result.night_indices.get(&utxo.utxo.backing_night)
+                            if let Some(gen_info) = acc
+                                .result
+                                .night_indices
+                                .get(&utxo.utxo.backing_night)
+                                .and_then(|gen_idx| acc.result.generating_tree.index(*gen_idx))
+                                .map(|(_, gen_info)| *gen_info)
                             {
-                                let gen_info =
-                                    acc.result.generating_tree.index(*gen_idx).unwrap().1;
                                 let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
-                                    gen_info,
+                                    &gen_info,
                                     *declared_time,
                                     &acc.result.params,
                                 );
@@ -2056,6 +2048,29 @@ impl<D: DB> DustLocalState<D> {
         res.result.commitment_tree = res.result.commitment_tree.rehash();
         res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn successor_utxo(
+    utxo: &QualifiedDustOutput,
+    now: &Timestamp,
+    subtract_fee: u128,
+    new_commitment_index: u64,
+    gen_info: &DustGenerationInfo,
+    sk: &DustSecretKey,
+    params: &DustParameters,
+) -> QualifiedDustOutput {
+    let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, params);
+    let v_now = v_pre_spend.saturating_sub(subtract_fee);
+    QualifiedDustOutput {
+        backing_night: utxo.backing_night,
+        ctime: *now,
+        initial_value: v_now,
+        seq: utxo.seq + 1,
+        nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
+        owner: utxo.owner,
+        mt_index: new_commitment_index,
     }
 }
 

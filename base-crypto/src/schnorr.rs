@@ -11,9 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Signature scheme for use primarily outside of proofs
-//!
-//! Schnorr over secp256k1, conforming to BIP340.
+//! Schnorr signature scheme over secp256k1, conforming to BIP340.
 use crate::BinaryHashRepr;
 use k256::schnorr;
 #[cfg(feature = "proptest")]

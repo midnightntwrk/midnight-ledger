@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use js_sys::Uint8Array;
 use ledger::structure::{ProofKind, ProofMarker, ProofPreimageMarker};
 use onchain_runtime_wasm::from_value_ser;

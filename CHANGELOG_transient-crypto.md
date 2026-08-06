@@ -3,6 +3,8 @@
 ## Unreleased
 
 - fix: rehashing serde deserialized `MerkleTree`s
+- fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
+- fix: do not panic on indexing into a collapsed `MerkleTree`, but return `None` instead
 
 ## Version `2.1.0`
 

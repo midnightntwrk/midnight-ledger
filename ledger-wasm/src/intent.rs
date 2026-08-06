@@ -15,7 +15,7 @@ use crate::contract::{ContractCallPrototype, ContractDeploy, MaintenanceUpdate};
 use crate::conversions::*;
 use crate::dust::DustActions;
 use crate::unshielded::UnshieldedOffer;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use js_sys::{Date, Uint8Array};
 use ledger::structure::{

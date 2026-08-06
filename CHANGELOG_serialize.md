@@ -1,5 +1,9 @@
 # `serialize` Changelog
 
+## Unreleased
+
+- feat: add `peek_tag` to identify a tag before deserialization
+
 ## Version `1.1.0`
 
 - feat: add `tagged_deserialize_sequence`, which deserializes a sequence of tagged values
