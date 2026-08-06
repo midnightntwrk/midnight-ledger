@@ -16,6 +16,7 @@ proof-verifying = ["zswap/proof-verifying"]
 test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
+proof-aggregation = ["transient-crypto/proof-aggregation"]
 fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
 
 [dependencies]

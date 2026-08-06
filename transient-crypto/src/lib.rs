@@ -35,3 +35,6 @@ pub mod mock_verify;
 pub mod proofs;
 pub mod repr;
 pub mod schnorr;
+
+#[cfg(feature = "proof-aggregation")]
+pub mod aggregation;

@@ -296,6 +296,9 @@ pub enum ProofVersioned {
     V2(Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
     V3(Proof),
+    /// A pre-aggregated IVC proof bundle covering one or more V3 proofs.
+    #[cfg(feature = "proof-aggregation")]
+    Aggregated(transient_crypto::aggregation::AggregatedContractProof),
 }
 
 impl Serializable for ProofVersioned {
@@ -309,11 +312,26 @@ impl Serializable for ProofVersioned {
                 Serializable::serialize(&2u8, writer)?;
                 proof.serialize(writer)
             }
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(agg) => {
+                Serializable::serialize(&3u8, writer)?;
+                Serializable::serialize(&(agg.ivc_proof.len() as u64), writer)?;
+                writer.write_all(&agg.ivc_proof)?;
+                Serializable::serialize(&(agg.ivc_instance.len() as u64), writer)?;
+                writer.write_all(&agg.ivc_instance)
+            }
         }
     }
     fn serialized_size(&self) -> usize {
         match self {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(agg) => {
+                1 + (agg.ivc_proof.len() as u64).serialized_size()
+                    + agg.ivc_proof.len()
+                    + (agg.ivc_instance.len() as u64).serialized_size()
+                    + agg.ivc_instance.len()
+            }
         }
     }
 }
@@ -334,6 +352,21 @@ impl Deserializable for ProofVersioned {
                 reader,
                 recursion_depth,
             )?)),
+            #[cfg(feature = "proof-aggregation")]
+            3 => {
+                let proof_len: u64 = Deserializable::deserialize(reader, recursion_depth)?;
+                let mut ivc_proof = vec![0u8; proof_len as usize];
+                reader.read_exact(&mut ivc_proof)?;
+                let instance_len: u64 = Deserializable::deserialize(reader, recursion_depth)?;
+                let mut ivc_instance = vec![0u8; instance_len as usize];
+                reader.read_exact(&mut ivc_instance)?;
+                Ok(ProofVersioned::Aggregated(
+                    transient_crypto::aggregation::AggregatedContractProof {
+                        ivc_proof,
+                        ivc_instance,
+                    },
+                ))
+            }
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("unknown discriminant for ProofVersioned: {discrim}"),
@@ -446,6 +479,20 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         mode: ProofVerificationMode,
         linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>>;
+    /// Verifies any pre-aggregated IVC proofs in the evidence set.
+    ///
+    /// Called by [`Transaction::verify_aggregated_proofs`]. The default
+    /// implementation is a no-op; only [`ProofMarker`] overrides it when the
+    /// `proof-aggregation` feature is enabled.
+    #[allow(clippy::result_large_err)]
+    #[cfg(feature = "proof-aggregation")]
+    fn verify_aggregated_proofs(
+        evidence: &[Self::ProofEvidence],
+        verifier: &dyn transient_crypto::aggregation::AggregationVerify,
+    ) -> Result<(), MalformedTransaction<D>> {
+        let _ = (evidence, verifier);
+        Ok(())
+    }
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -466,7 +513,8 @@ impl From<Proof> for ProofVersioned {
 
 /// Proof evidence for a single contract call, partitioned by proof version.
 ///
-/// Collected during traversal and consumed by [`ProofKind::batch_proof_verify`].
+/// Collected during traversal and consumed by [`ProofKind::batch_proof_verify`]
+/// (for V2/V3) or [`Transaction::verify_aggregated_proofs`] (for Aggregated).
 #[cfg(feature = "proof-verifying")]
 pub enum ContractProofEvidence {
     V2 {
@@ -478,6 +526,10 @@ pub enum ContractProofEvidence {
         vk: transient_crypto::proofs::VerifierKey,
         proof: Proof,
         pis: Vec<Fr>,
+    },
+    #[cfg(feature = "proof-aggregation")]
+    Aggregated {
+        proof: transient_crypto::aggregation::AggregatedContractProof,
     },
 }
 
@@ -552,8 +604,16 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
+        #[cfg(feature = "proof-aggregation")]
+        if matches!(proof, ProofVersioned::Aggregated(_)) {
+            return Err(MalformedTransaction::<D>::InvalidProof(anyhow::anyhow!(
+                "aggregated proofs must be verified via verify_aggregated_proofs, not proof_verify"
+            )));
+        }
         let inner_proof = match proof {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(_) => unreachable!("handled above"),
         };
 
         match proof {
@@ -604,6 +664,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                 }
             }
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(_) => unreachable!("handled above"),
         }
     }
     #[cfg(not(feature = "proof-verifying"))]
@@ -622,8 +684,16 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         pis: Vec<Fr>,
         call: &ContractCall<Self, D>,
     ) -> Result<ContractProofEvidence, MalformedTransaction<D>> {
+        #[cfg(feature = "proof-aggregation")]
+        if let ProofVersioned::Aggregated(agg) = proof {
+            return Ok(ContractProofEvidence::Aggregated {
+                proof: agg.clone(),
+            });
+        }
         let inner_proof = match proof {
             ProofVersioned::V2(p) | ProofVersioned::V3(p) => p,
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(_) => unreachable!("handled above"),
         };
         match proof {
             ProofVersioned::V2(_) => {
@@ -662,6 +732,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     pis,
                 })
             }
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(_) => unreachable!("handled above"),
         }
     }
     #[cfg(not(feature = "proof-verifying"))]
@@ -741,10 +813,26 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         tx.serialized_size()
     }
     fn proof_version_to_operation_version(proof: &Self::Proof) -> Option<ContractOperationVersion> {
-        Some(match proof {
-            ProofVersioned::V2(_) => ContractOperationVersion::V3,
-            ProofVersioned::V3(_) => ContractOperationVersion::V4,
-        })
+        match proof {
+            ProofVersioned::V2(_) => Some(ContractOperationVersion::V3),
+            ProofVersioned::V3(_) => Some(ContractOperationVersion::V4),
+            #[cfg(feature = "proof-aggregation")]
+            ProofVersioned::Aggregated(_) => None,
+        }
+    }
+    #[cfg(feature = "proof-aggregation")]
+    fn verify_aggregated_proofs(
+        evidence: &[ContractProofEvidence],
+        verifier: &dyn transient_crypto::aggregation::AggregationVerify,
+    ) -> Result<(), MalformedTransaction<D>> {
+        for ev in evidence {
+            if let ContractProofEvidence::Aggregated { proof } = ev {
+                verifier
+                    .verify_aggregated_proof(proof)
+                    .map_err(MalformedTransaction::<D>::InvalidProof)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -3795,5 +3883,41 @@ mod tests {
         let mut ser = Vec::new();
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
+    }
+
+    #[cfg(feature = "proof-aggregation")]
+    #[test]
+    fn proof_versioned_aggregated_round_trip() {
+        use serialize::{Deserializable, Serializable};
+        use transient_crypto::aggregation::AggregatedContractProof;
+
+        let original = ProofVersioned::Aggregated(AggregatedContractProof {
+            ivc_proof: vec![0xab, 0xcd, 0xef],
+            ivc_instance: vec![0x12, 0x34],
+        });
+        let mut buf = Vec::new();
+        Serializable::serialize(&original, &mut buf).unwrap();
+        assert_eq!(buf[0], 3u8, "first byte should be discriminant 3");
+        let round_tripped = ProofVersioned::deserialize(&mut &buf[..], 0).unwrap();
+        assert_eq!(original, round_tripped);
+    }
+
+    #[cfg(feature = "proof-aggregation")]
+    #[test]
+    fn proof_versioned_aggregated_serialized_size_matches() {
+        use serialize::Serializable;
+        use transient_crypto::aggregation::AggregatedContractProof;
+
+        let agg = ProofVersioned::Aggregated(AggregatedContractProof {
+            ivc_proof: vec![1u8; 64],
+            ivc_instance: vec![2u8; 32],
+        });
+        let mut buf = Vec::new();
+        Serializable::serialize(&agg, &mut buf).unwrap();
+        assert_eq!(
+            agg.serialized_size(),
+            buf.len(),
+            "serialized_size() must match the actual byte count written"
+        );
     }
 }

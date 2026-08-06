@@ -838,6 +838,24 @@ where
             }
         }
     }
+
+    /// Verifies any pre-aggregated IVC proofs carried by this transaction.
+    ///
+    /// Call this after [`Transaction::well_formed`] when the transaction may contain
+    /// [`ProofVersioned::Aggregated`] proofs. The `verifier` is constructed by the upper
+    /// layer using a runtime SRS via
+    /// [`ProofAggregation::setup`](transient_crypto::aggregation::ProofAggregation::setup).
+    ///
+    /// `ClaimRewards` transactions never carry aggregated proofs; this is a no-op for them.
+    #[cfg(feature = "proof-aggregation")]
+    pub fn verify_aggregated_proofs(
+        &self,
+        ref_state: &impl StateReference<D>,
+        verifier: &dyn transient_crypto::aggregation::AggregationVerify,
+    ) -> Result<(), MalformedTransaction<D>> {
+        let evidence = self.collect_proof_evidence(ref_state)?;
+        P::verify_aggregated_proofs(&evidence, verifier)
+    }
 }
 
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Transaction<S, P, B, D>
@@ -3185,5 +3203,108 @@ mod tests {
         .expect("batch verify with zswap coins should succeed");
 
         assert!(all_evidence.is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "proof-aggregation"))]
+mod aggregation_tests {
+    use crate::error::MalformedTransaction;
+    use crate::structure::{
+        ContractProofEvidence, LedgerState, ProofKind, ProofMarker, ProofPreimageMarker, Signature,
+        StandardTransaction, Transaction,
+    };
+    use storage::db::InMemoryDB;
+    use transient_crypto::aggregation::{AggregatedContractProof, AggregationVerify};
+    use transient_crypto::commitment::PedersenRandomness;
+
+    fn dummy_proof() -> AggregatedContractProof {
+        AggregatedContractProof {
+            ivc_proof: vec![0u8; 8],
+            ivc_instance: vec![1u8; 4],
+        }
+    }
+
+    struct PassVerifier;
+    impl AggregationVerify for PassVerifier {
+        fn verify_aggregated_proof(
+            &self,
+            _proof: &AggregatedContractProof,
+        ) -> Result<(), anyhow::Error> {
+            Ok(())
+        }
+    }
+
+    struct FailVerifier;
+    impl AggregationVerify for FailVerifier {
+        fn verify_aggregated_proof(
+            &self,
+            _proof: &AggregatedContractProof,
+        ) -> Result<(), anyhow::Error> {
+            Err(anyhow::anyhow!("mock verification failure"))
+        }
+    }
+
+    /// Calls `ProofMarker::verify_aggregated_proofs` with a passing mock verifier and
+    /// checks that all `Aggregated` evidence items are routed to it.
+    #[test]
+    fn verify_aggregated_proofs_passes_with_mock_verifier() {
+        let evidence = vec![
+            ContractProofEvidence::Aggregated { proof: dummy_proof() },
+            ContractProofEvidence::Aggregated { proof: dummy_proof() },
+        ];
+        <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&evidence, &PassVerifier)
+            .expect("all aggregated proofs should verify with a passing mock");
+    }
+
+    /// A failing verifier must propagate its error as `MalformedTransaction::InvalidProof`.
+    #[test]
+    fn verify_aggregated_proofs_propagates_verifier_error() {
+        let evidence = vec![ContractProofEvidence::Aggregated { proof: dummy_proof() }];
+        let result = <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(
+            &evidence,
+            &FailVerifier,
+        );
+        assert!(
+            matches!(result, Err(MalformedTransaction::InvalidProof(_))),
+            "verifier error should map to MalformedTransaction::InvalidProof"
+        );
+    }
+
+    /// Empty evidence must succeed even with a verifier that would always fail.
+    #[test]
+    fn verify_aggregated_proofs_empty_evidence_is_noop() {
+        <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&[], &FailVerifier)
+            .expect("empty evidence must always pass regardless of verifier");
+    }
+
+    /// `Transaction::verify_aggregated_proofs` on a transaction that carries no
+    /// aggregated proofs must succeed without calling the verifier at all.
+    #[test]
+    fn transaction_verify_aggregated_proofs_no_aggregated_evidence() {
+        struct PanickingVerifier;
+        impl AggregationVerify for PanickingVerifier {
+            fn verify_aggregated_proof(
+                &self,
+                _: &AggregatedContractProof,
+            ) -> Result<(), anyhow::Error> {
+                panic!("verifier must not be called when there are no aggregated proofs")
+            }
+        }
+
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            None,
+            storage::storage::HashMap::new(),
+        );
+        let tx = Transaction::Standard(stx);
+        tx.verify_aggregated_proofs(&ledger, &PanickingVerifier)
+            .expect("transaction with no aggregated proofs must not invoke the verifier");
     }
 }
