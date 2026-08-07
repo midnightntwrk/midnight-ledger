@@ -19,14 +19,6 @@ jobs:
   upload-srs:
     runs-on: ubuntu-latest
     steps:
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
-
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
 

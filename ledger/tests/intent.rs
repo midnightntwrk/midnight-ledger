@@ -12,27 +12,27 @@
 // limitations under the License.
 
 #![cfg(feature = "proving")]
+
 use base_crypto::fab::AlignedValue;
+use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
-use base_crypto::{
-    rng::SplittableRng,
-    schnorr::{Signature, SigningKey},
-};
 use coin_structure::coin::TokenType;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::error::TransactionApplicationError;
 use midnight_ledger::prove::Resolver;
-use midnight_ledger::structure::ContractAction;
 use midnight_ledger::structure::ReplayProtectionState;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Transaction, UnshieldedOffer,
-    UtxoOutput, UtxoSpend,
+    ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Signature, SigningKey, Transaction,
+    UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
-use midnight_ledger::test_utilities::{test_intents, test_resolver, tx_prove, verifier_key};
+use midnight_ledger::test_utilities::{
+    contract_operation, dbg_fees_with_state, test_intents, test_resolver, tx_prove,
+};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger::{structure::StandardTransaction, test_utilities::TestState};
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use onchain_runtime::ops::Key;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
@@ -42,7 +42,7 @@ use onchain_runtime::{
     context::QueryContext,
     kernel_checkpoint,
     ops::{Op, key},
-    state::{ContractOperation, ContractState, stval},
+    state::{ContractState, stval},
 };
 use rand::Rng;
 use rand::{SeedableRng, rngs::StdRng};
@@ -253,7 +253,7 @@ async fn well_formed_signature_verification_failure_all() {
     intent_bc.binding_commitment = PureGeneratorPedersen::new_from(
         &mut rng.clone(),
         &rng.r#gen(),
-        &ContractAction::challenge_pre_for(&Vec::from(&intent_bc.actions)),
+        &intent_bc.challenge_pre_for(segment_id),
     );
 
     let strictness = WellFormedStrictness::default();
@@ -523,7 +523,7 @@ async fn balanced_utxos_1_intent() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -600,7 +600,8 @@ async fn balanced_utxos_1_intent() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_g: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner = signing_key_g.verifying_key();
     let type_ = rng.r#gen();
@@ -629,7 +630,8 @@ async fn balanced_utxos_1_intent() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: 200,
@@ -701,9 +703,13 @@ async fn balanced_utxos_1_intent() {
     let res_unbalanced: Result<_, midnight_ledger::error::MalformedTransaction<InMemoryDB>> =
         proven_unbalanced_tx.well_formed(&state.ledger, strictness, state.time);
 
-    let fees = proven_unbalanced_tx
-        .fees(&state.ledger.parameters, false)
-        .unwrap();
+    let fees = dbg_fees_with_state(
+        &proven_unbalanced_tx,
+        &state.ledger.parameters,
+        &state.ledger,
+        false,
+    )
+    .unwrap();
 
     match res_unbalanced {
         Ok(_) => panic!(
@@ -747,7 +753,7 @@ async fn intents_cannot_balance_across_segments() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -812,7 +818,8 @@ async fn intents_cannot_balance_across_segments() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_g_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner_1 = signing_key_g_1.verifying_key();
     let intent_hash = rng.r#gen();
@@ -840,7 +847,8 @@ async fn intents_cannot_balance_across_segments() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_1 = UtxoSpend {
         value: 0,
@@ -904,7 +912,8 @@ async fn intents_cannot_balance_across_segments() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_f_2: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_2: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_2 = UtxoSpend {
         value: 0,
@@ -1023,7 +1032,7 @@ async fn causality_check_sanity_check() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1103,7 +1112,8 @@ async fn causality_check_sanity_check() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_g_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner_1 = signing_key_g_1.verifying_key();
     let intent_hash = rng.r#gen();
@@ -1131,7 +1141,8 @@ async fn causality_check_sanity_check() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_1 = UtxoSpend {
         value: 0,
@@ -1210,7 +1221,8 @@ async fn causality_check_sanity_check() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_f_2: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_2: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_2 = UtxoSpend {
         value: 0,
@@ -1325,7 +1337,7 @@ async fn imbalanced_utxos_1_intent() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1402,7 +1414,8 @@ async fn imbalanced_utxos_1_intent() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_g: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner = signing_key_g.verifying_key();
     let type_ = rng.r#gen();
@@ -1515,7 +1528,7 @@ async fn imbalanced_utxos_1_intent_fallible() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1594,7 +1607,8 @@ async fn imbalanced_utxos_1_intent_fallible() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_f: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: 200,
@@ -2111,7 +2125,8 @@ fn assert_success(res: Result<(), MalformedTransaction<InMemoryDB>>) {
 }
 
 fn gen_unshielded_offer(rng: &mut StdRng) -> (SigningKey, UnshieldedOffer<Signature, InMemoryDB>) {
-    let signing_key: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: rng.r#gen(),
@@ -2155,7 +2170,7 @@ async fn setup() -> (
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),

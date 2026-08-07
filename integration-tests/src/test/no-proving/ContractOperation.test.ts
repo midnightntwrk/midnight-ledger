@@ -53,7 +53,7 @@ describe('Ledger API - ContractOperation', () => {
 
     expect(() => {
       contractOperation.verifierKey = new Uint8Array(1024);
-    }).toThrow(/expected header tag 'midnight:verifier-key/);
+    }).toThrow(/tagged data does not begin with/);
   });
 
   /**

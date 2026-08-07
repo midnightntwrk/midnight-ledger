@@ -31,7 +31,7 @@
     "lint:fix": "eslint . --ext .ts --fix"
   },
   "dependencies": {
-    "@midnightntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v8",
+    "@midnightntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v9",
     "@midnightntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2"
   },
   "devDependencies": {

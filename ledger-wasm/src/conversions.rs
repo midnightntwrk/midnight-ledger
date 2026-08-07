@@ -19,8 +19,11 @@ use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, Date, Function, JsString, Map, Number};
 use ledger::events::{EventDetails, EventSource};
-use ledger::structure::UtxoMeta;
 use ledger::structure::{ClaimKind, SignatureKind};
+use ledger::structure::{SignatureVerifyingKey, UtxoMeta};
+use onchain_runtime::ops::{LogEventType, VersionedLogItem};
+use onchain_runtime_wasm::conversions::PreSignature;
+use onchain_runtime_wasm::state::maybe_string;
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable};
 use std::io::{BufReader, Read};
@@ -238,7 +241,7 @@ struct PreQualifiedShieldedCoinInfo {
 #[derive(Serialize, Deserialize)]
 struct PreUtxoSpend {
     value: u128,
-    owner: String,
+    owner: PreSignature,
     #[serde(rename = "type")]
     type_: String,
     #[serde(rename = "intentHash")]
@@ -341,6 +344,15 @@ struct PreTreeInsertionPathEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreVersionedLogItem {
+    version: u32,
+    event_type: LogEventType,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    data: JsValue,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "tag")]
 enum PreEventDetails {
     ZswapInput {
@@ -351,6 +363,12 @@ enum PreEventDetails {
         commitment: String,
         contract: Option<String>,
         mt_index: u64,
+    },
+    ContractLog {
+        address: String,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        entry_point: JsValue,
+        logged_item: PreVersionedLogItem,
     },
     DustInitialUtxo {
         output: PreQualifiedDustOutput,
@@ -377,6 +395,17 @@ enum PreEventDetails {
         block_time: Date,
     },
     NotYetSupportedEventType,
+}
+
+impl TryFrom<&VersionedLogItem<InMemoryDB>> for PreVersionedLogItem {
+    type Error = JsError;
+    fn try_from(item: &VersionedLogItem<InMemoryDB>) -> Result<Self, Self::Error> {
+        Ok(PreVersionedLogItem {
+            version: item.version,
+            event_type: item.event_type,
+            data: to_value(&item.data)?,
+        })
+    }
 }
 
 pub fn value_to_shielded_coininfo(value: JsValue) -> Result<ShieldedCoinInfo, JsError> {
@@ -422,7 +451,10 @@ pub fn qualified_shielded_coininfo_to_value(
 pub fn utxo_spend_to_value(utxo: &UtxoSpend) -> Result<JsValue, JsError> {
     Ok(to_value(&PreUtxoSpend {
         value: utxo.value,
-        owner: to_hex_ser(&utxo.owner)?,
+        owner: match &utxo.owner {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(&vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(&vk)?),
+        },
         type_: to_hex_ser(&utxo.type_.0)?,
         intent_hash: to_hex_ser(&utxo.intent_hash)?,
         output_no: utxo.output_no,
@@ -433,7 +465,10 @@ pub fn value_to_utxo_spend(value: JsValue) -> Result<UtxoSpend, JsError> {
     let pre: PreUtxoSpend = from_value(value)?;
     Ok(UtxoSpend {
         value: pre.value,
-        owner: from_hex_ser(&pre.owner)?,
+        owner: match pre.owner {
+            PreSignature::Schnorr(raw) => SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?),
+        },
         type_: UnshieldedTokenType(from_hex_ser(&pre.type_)?),
         intent_hash: from_hex_ser(&pre.intent_hash)?,
         output_no: pre.output_no,
@@ -620,6 +655,15 @@ pub fn event_details_to_value(
             v_fee: *v_fee,
             declared_time: seconds_to_js_date(declared_time.to_secs()),
             block_time: seconds_to_js_date(block_time.to_secs()),
+        },
+        L::ContractLog {
+            address,
+            entry_point,
+            logged_item,
+        } => P::ContractLog {
+            address: to_hex_ser(address)?,
+            entry_point: maybe_string(&entry_point.0),
+            logged_item: PreVersionedLogItem::try_from(logged_item)?,
         },
         _ => P::NotYetSupportedEventType,
     };

@@ -21,26 +21,18 @@ jobs:
   docker-amd64:
     runs-on: ubuntu-latest-8-core-x64
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
           password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+
+      - name: Docker login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Configure git rewrite
         run: |
@@ -73,36 +65,30 @@ jobs:
       - name: Create proof-server images
         run: |
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
-          git pull
           nix build -L .#proof-server-oci
           docker load -i result
           docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
 
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
+
   docker-arm64:
     runs-on: ubuntu-latest-4-core-arm64
-    needs: docker-amd64
 
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
           password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+
+      - name: Docker login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Checkout ledger repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
@@ -131,6 +117,10 @@ jobs:
           docker load -i result
           docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
 
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64 \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+
   docker-manifest:
     runs-on: ubuntu-latest
     needs: [docker-amd64, docker-arm64]
@@ -139,26 +129,18 @@ jobs:
       id-token: write
 
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
           password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+
+      - name: Docker login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Checkout ledger repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
@@ -185,10 +167,10 @@ jobs:
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
           echo "PROOF_SERVER_VERSION=$PROOF_SERVER_VERSION" >> $GITHUB_ENV
 
+          # GHCR multi-arch manifest
           docker manifest create ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
             ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
             ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-
           docker manifest push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION
 
           # Only a final release moves `latest`; a pre-release version contains a
@@ -199,6 +181,11 @@ jobs:
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
             docker manifest push ghcr.io/midnight-ntwrk/proof-server:latest
+
+            docker manifest create docker.io/midnightntwrk/proof-server:latest \
+              docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
+              docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+            docker manifest push docker.io/midnightntwrk/proof-server:latest
           fi
 
           IMAGE_DIGEST=$(docker buildx imagetools inspect \
