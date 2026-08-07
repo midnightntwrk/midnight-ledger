@@ -7,7 +7,7 @@ repository.workspace = true
 publish = false
 
 [[bin]]
-name = "zkir3"
+name = "zkir"
 path = "src/main.rs"
 required-features = ["binary"]
 
