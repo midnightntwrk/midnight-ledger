@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   workflow_call:
     secrets:
+      DOCKERHUB_MIDNIGHTNTWRK_USER:
+        required: true
+      DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
+        required: true
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
       GH_USERNAME:
@@ -73,6 +77,17 @@ jobs:
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
           docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
 
+      - name: Create experimental proof-server images
+        run: |
+          PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          nix build -L .#proof-server-oci-experimental 
+          docker load -i result
+          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64_experimental
+
   docker-arm64:
     runs-on: ubuntu-latest-4-core-arm64
 
@@ -120,6 +135,17 @@ jobs:
           docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64 \
             docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
           docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+
+      - name: Create experimental proof-server images
+        run: |
+          PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          nix build -L .#proof-server-oci-arm64-experimental 
+          docker load -i result
+          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+
+          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental \
+            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
+          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64_experimental
 
   docker-manifest:
     runs-on: ubuntu-latest
