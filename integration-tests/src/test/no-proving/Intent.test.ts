@@ -30,7 +30,7 @@ import {
   signData,
   Transaction,
   UnshieldedOffer,
-  VerifierKeyRemove,
+  VerifierKeyRemove
 } from '@midnightntwrk/ledger';
 import { SignatureKindMarker } from '@/test/utils/Markers';
 import { getNewUnshieldedOffer, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
