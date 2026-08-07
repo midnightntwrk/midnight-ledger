@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -7,7 +7,7 @@
 # Function: signatureVerifyingKey()
 
 ```ts
-function signatureVerifyingKey(sk): SignatureVerifyingKey;
+function signatureVerifyingKey(sk): string;
 ```
 
 Returns the verifying key for a given signing key
@@ -16,8 +16,8 @@ Returns the verifying key for a given signing key
 
 ### sk
 
-[`SigningKey`](../type-aliases/SigningKey.md)
+`string`
 
 ## Returns
 
-[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
+`string`

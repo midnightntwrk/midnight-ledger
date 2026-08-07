@@ -2,6 +2,7 @@ name: Ledger Test Coverage
 
 on:
   workflow_dispatch:
+  workflow_call:
   pull_request:
   push:
     branches:
@@ -21,7 +22,7 @@ jobs:
     steps:
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
@@ -33,7 +34,7 @@ jobs:
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-

@@ -24,7 +24,7 @@ import {
   type UtxoOutput,
   type UtxoSpend,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { TestState } from '@/test/utils/TestState';
 import { DEFAULT_TOKEN_TYPE, LOCAL_TEST_NETWORK_ID, Random, Static, type UnshieldedTokenType } from '@/test-objects';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';

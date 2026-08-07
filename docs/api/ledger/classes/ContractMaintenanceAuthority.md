@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -36,7 +36,7 @@ set counter to exactly one greater than the current value.
 
 ##### committee
 
-[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)[]
+`string`[]
 
 ##### threshold
 
@@ -55,7 +55,7 @@ set counter to exactly one greater than the current value.
 ### committee
 
 ```ts
-readonly committee: SignatureVerifyingKey[];
+readonly committee: string[];
 ```
 
 The committee public keys
@@ -115,7 +115,7 @@ toString(compact?): string;
 ### deserialize()
 
 ```ts
-static deserialize(raw): ContractMaintenanceAuthority;
+static deserialize(raw): ContractState;
 ```
 
 #### Parameters
@@ -126,4 +126,4 @@ static deserialize(raw): ContractMaintenanceAuthority;
 
 #### Returns
 
-`ContractMaintenanceAuthority`
+[`ContractState`](ContractState.md)

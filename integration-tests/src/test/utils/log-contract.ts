@@ -25,7 +25,7 @@ import {
   Transaction,
   type TransactionResult,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { LOCAL_TEST_NETWORK_ID, Random, Static, TestResource } from '@/test-objects';
 import type { TestState } from '@/test/utils/TestState';
 

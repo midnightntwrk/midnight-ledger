@@ -69,7 +69,7 @@ import {
   type UtxoSpend,
   type Value,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { TestState } from '@/test/utils/TestState';
 import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Random, Static, TestResource } from '@/test-objects';

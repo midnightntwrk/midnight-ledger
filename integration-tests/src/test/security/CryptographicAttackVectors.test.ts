@@ -41,7 +41,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 import { corruptSignature } from '@/test-utils';
 import { SignatureKindMarker } from '@/test/utils/Markers';

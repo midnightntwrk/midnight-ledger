@@ -28,7 +28,7 @@ import {
   StateValue,
   type Transcript,
   ZswapOutput
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { addressToPublic, Random, Static } from '@/test-objects';
 import { mapFindByKey } from '@/test-utils';

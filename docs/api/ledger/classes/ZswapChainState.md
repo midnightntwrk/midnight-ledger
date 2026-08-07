@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -58,7 +58,7 @@ contract address.
 ### postBlockUpdate()
 
 ```ts
-postBlockUpdate(tblock, retentionDuration): ZswapChainState;
+postBlockUpdate(tblock): ZswapChainState;
 ```
 
 Carries out a post-block update, which does amortized bookkeeping that
@@ -72,14 +72,6 @@ Typically, `postBlockUpdate` should be run after any (sequence of)
 ##### tblock
 
 `Date`
-
-timestamp of a block last batch of updates was applied at
-
-##### retentionDuration
-
-`bigint`
-
-number of seconds to retain past Merkle tree roots
 
 #### Returns
 
