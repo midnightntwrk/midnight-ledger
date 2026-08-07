@@ -21,7 +21,7 @@ import {
   signData,
   Transaction,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
 import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';

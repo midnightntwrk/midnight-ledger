@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -7,18 +7,11 @@
 # Function: sampleSigningKey()
 
 ```ts
-function sampleSigningKey(kind?): SigningKey;
+function sampleSigningKey(): string;
 ```
 
-Randomly samples a [SigningKey](../type-aliases/SigningKey.md). If `kind` is not supplied, assumes
-`schnorr`.
-
-## Parameters
-
-### kind?
-
-[`SignatureKind`](../type-aliases/SignatureKind.md)
+Randomly samples a [SigningKey](../type-aliases/SigningKey.md).
 
 ## Returns
 
-[`SigningKey`](../type-aliases/SigningKey.md)
+`string`

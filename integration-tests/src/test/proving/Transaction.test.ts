@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { LedgerParameters, shieldedToken, Transaction } from '@midnight-ntwrk/ledger';
+import { LedgerParameters, shieldedToken, Transaction } from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import '@/setup-proving';

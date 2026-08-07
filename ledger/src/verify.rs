@@ -514,7 +514,17 @@ impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
                 });
             }
 
-            for (inp, sig) in self.inputs.iter_deref().zip(self.signatures.iter_deref()) {
+            // Pair each input with the signature at the *same* index rather
+            // than `zip`ping the two iterators. `zip` stops at the shorter one,
+            // so a signature array reporting `len() == inputs.len()` but
+            // exposing fewer entries on iteration (e.g. a malformed, non-dense
+            // storage `Array`) would leave trailing inputs unverified. `get`
+            // requires a signature to exist for every spent input.
+            for (i, inp) in self.inputs.iter_deref().enumerate() {
+                let sig = self
+                    .signatures
+                    .get(i)
+                    .ok_or(IntentSignatureVerificationFailure)?;
                 S::signature_verify(&verify_input, inp.owner.clone(), sig)
                     .then_some(())
                     .ok_or(IntentSignatureVerificationFailure)?;
@@ -2020,6 +2030,209 @@ impl ContractMaintenanceVerifyingKeyExt for ContractMaintenanceVerifyingKey {
             }
             (ContractMaintenanceVerifyingKey::ECDSA(_), _) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod sparse_unshielded_signature_tests {
+    use super::*;
+    use crate::structure::{SigningKey, UtxoSpend};
+    use coin_structure::coin::NIGHT;
+    use rand::Rng;
+    use rand::rngs::OsRng;
+    use storage::Storable;
+    use storage::arena::Sp;
+    use storage::db::InMemoryDB;
+    use storage::merkle_patricia_trie::{MerklePatriciaTrie, Node};
+    use storage::storable::SizeAnn;
+
+    fn sparse_len_two_array<T: Storable<InMemoryDB> + 'static>(
+        visible_at_zero: T,
+        hidden_duplicate: T,
+    ) -> storage::storage::Array<T, InMemoryDB> {
+        let hidden_duplicate: Node<T, InMemoryDB> = Node::Leaf {
+            ann: SizeAnn(1),
+            value: Sp::new(hidden_duplicate),
+        };
+        let malformed_root = Node::MidBranchLeaf {
+            ann: SizeAnn(2),
+            value: Sp::new(visible_at_zero),
+            child: Sp::new(hidden_duplicate),
+        };
+        storage::storage::Array(Sp::new(MerklePatriciaTrie(Sp::new(malformed_root))))
+    }
+
+    /// Defence-in-depth: `well_formed` rejects a sparse signature array even
+    /// when it is constructed directly in-process (bypassing the
+    /// deserialization invariant). Because every input index must resolve to a
+    /// signature via `get`, the victim input at index 1 — which has none — is
+    /// no longer silently skipped by `zip`.
+    #[test]
+    fn sparse_signature_offer_rejected_by_well_formed() {
+        let mut rng = OsRng;
+        let signer = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+        let victim = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let msg = parent.data_to_sign(1);
+
+        let input_0 = UtxoSpend {
+            value: 1,
+            owner: signer.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let input_1 = UtxoSpend {
+            value: 2,
+            owner: victim.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let sig_0 = signer.sign(&mut rng, &msg);
+
+        let offer: UnshieldedOffer<Signature, InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input_0, input_1].into(),
+            outputs: vec![].into(),
+            signatures: sparse_len_two_array(sig_0, Signature::default()),
+        };
+
+        // The signature array really is malformed: it reports length 2 but
+        // only exposes one signature on iteration.
+        assert_eq!(offer.signatures.len(), 2);
+        assert_eq!(offer.signatures.iter_deref().count(), 1);
+
+        // Structural checks pass, but the signature closure must now reject it.
+        let check = offer.well_formed(1, &parent).unwrap();
+        let err = check().expect_err("sparse signature array must be rejected");
+        assert!(matches!(
+            err,
+            MalformedTransaction::IntentSignatureVerificationFailure
+        ));
+    }
+
+    /// Root-cause fix: the malformed offer is rejected at (untrusted) wire
+    /// deserialization. `IrLoader` (`CHECK_INVARIANTS = true`) now routes each
+    /// node through `Node::check_invariant`, which rejects the sparse
+    /// `MidBranchLeaf` shape (its child is a `Leaf`, not a `Branch`/`Extension`)
+    /// before the offer can ever reach `well_formed`.
+    #[test]
+    fn malformed_sparse_signature_array_rejected_on_deserialize() {
+        let mut rng = OsRng;
+        let signer = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+        let victim = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let msg = parent.data_to_sign(1);
+
+        let input_0 = UtxoSpend {
+            value: 1,
+            owner: signer.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let input_1 = UtxoSpend {
+            value: 2,
+            owner: victim.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let sig_0 = signer.sign(&mut rng, &msg);
+
+        let offer: UnshieldedOffer<Signature, InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input_0, input_1].into(),
+            outputs: vec![].into(),
+            signatures: sparse_len_two_array(sig_0, Signature::default()),
+        };
+
+        // Serialize the offer to the tagged wire format a peer would send.
+        let mut bytes = Vec::new();
+        serialize::tagged_serialize(&offer, &mut bytes).expect("offer should serialize");
+
+        // Deserialize as an untrusted peer's bytes. The tightened node
+        // invariant must reject the malformed sparse array.
+        let result: std::io::Result<UnshieldedOffer<Signature, InMemoryDB>> =
+            serialize::tagged_deserialize(&bytes[..]);
+        let err = result.expect_err("malformed offer must be rejected on deserialization");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    /// Regression guard: a legitimately-constructed dense signatures array
+    /// still round-trips through the same untrusted wire path and validates,
+    /// confirming the tightened invariant does not reject well-formed data and
+    /// that the `well_formed` change still accepts fully-signed offers.
+    #[test]
+    fn dense_signature_array_round_trips_and_validates() {
+        let mut rng = OsRng;
+        let signer_0 = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+        let signer_1 = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng));
+
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let msg = parent.data_to_sign(1);
+
+        // `input_0` sorts before `input_1` (lower value), satisfying the
+        // sorted-inputs requirement.
+        let input_0 = UtxoSpend {
+            value: 1,
+            owner: signer_0.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let input_1 = UtxoSpend {
+            value: 2,
+            owner: signer_1.verifying_key(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let sig_0 = signer_0.sign(&mut rng, &msg);
+        let sig_1 = signer_1.sign(&mut rng, &msg);
+
+        let offer: UnshieldedOffer<Signature, InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input_0, input_1].into(),
+            outputs: vec![].into(),
+            // Canonical, dense construction from a slice.
+            signatures: vec![sig_0, sig_1].into(),
+        };
+
+        let mut bytes = Vec::new();
+        serialize::tagged_serialize(&offer, &mut bytes).expect("offer should serialize");
+        let offer: UnshieldedOffer<Signature, InMemoryDB> =
+            serialize::tagged_deserialize(&bytes[..])
+                .expect("well-formed dense offer must deserialize");
+
+        assert_eq!(offer.inputs.len(), 2);
+        assert_eq!(offer.inputs.iter_deref().count(), 2);
+        assert_eq!(offer.signatures.len(), 2);
+        assert_eq!(offer.signatures.iter_deref().count(), 2);
+
+        let check = offer.well_formed(1, &parent).unwrap();
+        assert!(check().is_ok());
     }
 }
 

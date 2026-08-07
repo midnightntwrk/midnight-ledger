@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -7,7 +7,7 @@
 # Function: signData()
 
 ```ts
-function signData(key, data): Signature;
+function signData(key, data): string;
 ```
 
 Signs arbitrary data with the given signing key.
@@ -19,7 +19,7 @@ that is not strictly controlled!
 
 ### key
 
-[`SigningKey`](../type-aliases/SigningKey.md)
+`string`
 
 ### data
 
@@ -27,4 +27,4 @@ that is not strictly controlled!
 
 ## Returns
 
-[`Signature`](../type-aliases/Signature.md)
+`string`

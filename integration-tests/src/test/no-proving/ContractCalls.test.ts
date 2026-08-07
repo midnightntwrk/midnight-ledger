@@ -20,7 +20,7 @@ import {
   Intent,
   type PreProof,
   Transaction
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random, Static } from '@/test-objects';
 
 describe('Ledger API - ContractCalls', () => {

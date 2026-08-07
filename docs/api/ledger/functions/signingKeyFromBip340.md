@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -7,7 +7,7 @@
 # Function: signingKeyFromBip340()
 
 ```ts
-function signingKeyFromBip340(data): SigningKey;
+function signingKeyFromBip340(data): string;
 ```
 
 Creates a [SigningKey](../type-aliases/SigningKey.md) from provided Bip340 private key.
@@ -20,4 +20,4 @@ Creates a [SigningKey](../type-aliases/SigningKey.md) from provided Bip340 priva
 
 ## Returns
 
-[`SigningKey`](../type-aliases/SigningKey.md)
+`string`

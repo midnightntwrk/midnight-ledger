@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -13,7 +13,7 @@ type ShieldedTokenType = {
 };
 ```
 
-Shielded token type (or color), as a hex-encoded 32-byte string
+Shielded token type (or color), as a hex-encoded 35-byte string
 
 ## Properties
 

@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.3**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
@@ -33,7 +33,7 @@ signature?): DustRegistration<S>;
 
 ##### nightKey
 
-[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
+`string`
 
 ##### dustAddress
 
@@ -72,7 +72,7 @@ dustAddress: bigint | undefined;
 ### nightKey
 
 ```ts
-nightKey: SignatureVerifyingKey;
+nightKey: string;
 ```
 
 ***

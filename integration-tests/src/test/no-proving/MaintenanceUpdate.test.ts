@@ -20,7 +20,7 @@ import {
   signData,
   VerifierKeyInsert,
   VerifierKeyRemove
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random } from '@/test-objects';
 import { SignatureKindMarker } from '@/test/utils/Markers';
 
