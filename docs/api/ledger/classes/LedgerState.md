@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.1**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -291,6 +291,60 @@ Use is for testing purposes only.
 
 ***
 
+### testingUnlockToReserve()
+
+```ts
+testingUnlockToReserve(amount, tblock): LedgerState;
+```
+
+Applies an `UnlockToReserve` system transaction, moving the given amount
+of Night from the locked pool into the reserve pool.
+
+Use is for testing purposes only.
+
+#### Parameters
+
+##### amount
+
+`bigint`
+
+##### tblock
+
+`Date`
+
+#### Returns
+
+`LedgerState`
+
+***
+
+### testingUnlockToTreasury()
+
+```ts
+testingUnlockToTreasury(amount, tblock): LedgerState;
+```
+
+Applies an `UnlockToTreasury` system transaction, moving the given amount
+of Night from the locked pool into the treasury.
+
+Use is for testing purposes only.
+
+#### Parameters
+
+##### amount
+
+`bigint`
+
+##### tblock
+
+`Date`
+
+#### Returns
+
+`LedgerState`
+
+***
+
 ### toString()
 
 ```ts
@@ -411,6 +465,47 @@ static deserialize(raw): LedgerState;
 ##### raw
 
 `Uint8Array`
+
+#### Returns
+
+`LedgerState`
+
+***
+
+### testingFromGenesis()
+
+```ts
+static testingFromGenesis(
+   network_id, 
+   lockedPool, 
+   reservePool, 
+   treasury): LedgerState;
+```
+
+Constructs a ledger state with the given genesis parameterisation, using
+the default initial parameters. Allows seeding the locked, reserve, and
+treasury NIGHT pools so that subsequent system transactions (e.g.
+[testingUnlockToTreasury](#testingunlocktotreasury)) can be exercised
+
+Use is for testing purposes only.
+
+#### Parameters
+
+##### network\_id
+
+`string`
+
+##### lockedPool
+
+`bigint`
+
+##### reservePool
+
+`bigint`
+
+##### treasury
+
+`bigint`
 
 #### Returns
 
