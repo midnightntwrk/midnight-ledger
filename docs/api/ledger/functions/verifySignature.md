@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.1**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -19,7 +19,7 @@ Verifies if a signature is correct
 
 ### vk
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ### data
 
@@ -27,7 +27,7 @@ Verifies if a signature is correct
 
 ### signature
 
-`string`
+[`Signature`](../type-aliases/Signature.md)
 
 ## Returns
 

@@ -1,8 +1,8 @@
-[**@midnight/ledger v8.1.1**](README.md)
+[**@midnight/ledger v1.0.0-rc.3**](README.md)
 
 ***
 
-# @midnight/ledger v8.1.1
+# @midnight/ledger v1.0.0-rc.3
 
 ## Classes
 
@@ -35,6 +35,8 @@
 - [EncryptionSecretKey](classes/EncryptionSecretKey.md)
 - [Event](classes/Event.md)
 - [Intent](classes/Intent.md)
+- [IrInsert](classes/IrInsert.md)
+- [IrRemove](classes/IrRemove.md)
 - [LedgerParameters](classes/LedgerParameters.md)
 - [LedgerState](classes/LedgerState.md)
 - [MaintenanceUpdate](classes/MaintenanceUpdate.md)
@@ -116,6 +118,7 @@
 - [GatherResult](type-aliases/GatherResult.md)
 - [IntentHash](type-aliases/IntentHash.md)
 - [Key](type-aliases/Key.md)
+- [LogEventType](type-aliases/LogEventType.md)
 - [Nonce](type-aliases/Nonce.md)
 - [NormalizedCost](type-aliases/NormalizedCost.md)
 - [Nullifier](type-aliases/Nullifier.md)
@@ -134,6 +137,7 @@
 - [ShieldedCoinInfo](type-aliases/ShieldedCoinInfo.md)
 - [ShieldedTokenType](type-aliases/ShieldedTokenType.md)
 - [Signature](type-aliases/Signature.md)
+- [SignatureKind](type-aliases/SignatureKind.md)
 - [SignatureVerifyingKey](type-aliases/SignatureVerifyingKey.md)
 - [Signaturish](type-aliases/Signaturish.md)
 - [SigningKey](type-aliases/SigningKey.md)
