@@ -406,6 +406,7 @@
 
           packages.proof-server-oci-arm64 = mkDocker { isCrossArm = true; };
 
+          # NOTE: Will currently fail to build, as we have no experimental features at the moment.
           packages.proof-server-oci-experimental = mkDocker { isCrossArm = false; experimental = true; };
 
           packages.proof-server-oci-arm64-experimental = mkDocker { isCrossArm = true; experimental = true; };

@@ -23,7 +23,6 @@ use zkir as zkir_v2;
 
 use crate::endpoints::PUBLIC_PARAMS;
 
-#[cfg(feature = "experimental")]
 pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
     let tag = peek_tag(&mut std::io::Cursor::new(request)).map_err(|e| e.to_string())?;
     match tag.as_str() {
@@ -41,16 +40,6 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
     }
 }
 
-#[cfg(not(feature = "experimental"))]
-pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
-    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(request)) {
-        Ok(ir_v2.k())
-    } else {
-        Err("Unsupported ZKIR version".into())
-    }
-}
-
-#[cfg(feature = "experimental")]
 pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usize>>, String> {
     let tag = peek_tag(&mut std::io::Cursor::new(ir)).map_err(|e| e.to_string())?;
     match tag.as_str() {
@@ -67,16 +56,6 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
     }
 }
 
-#[cfg(not(feature = "experimental"))]
-pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usize>>, String> {
-    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)) {
-        ppi.check(&ir_v2).map_err(|e| e.to_string())
-    } else {
-        Err("Unsupported ZKIR version".to_string())
-    }
-}
-
-#[cfg(feature = "experimental")]
 pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
     ir_source: &[u8],
@@ -112,29 +91,4 @@ pub(crate) async fn prove(
         }
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
-}
-
-#[cfg(not(feature = "experimental"))]
-pub(crate) async fn prove(
-    ppi: Arc<ProofPreimage>,
-    ir_source: &[u8],
-    resolver: &Resolver,
-) -> Result<(Proof, Vec<Option<usize>>), String> {
-    use base_crypto::rng::SplittableRng;
-    use transient_crypto::proofs::ProvingProvider;
-
-    let mut provider = zkir_v2::LocalProvingProvider {
-        rng: OsRng.split(),
-        resolver,
-        params: &*PUBLIC_PARAMS,
-    };
-    let proof = provider
-        .split()
-        .prove(&ppi, None)
-        .await
-        .map_err(|e| e.to_string())?;
-    let ir =
-        zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)).map_err(|e| e.to_string())?;
-    let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
-    Ok((proof, skips))
 }
