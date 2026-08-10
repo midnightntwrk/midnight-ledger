@@ -1,0 +1,181 @@
+name: Publish npm packages
+
+# Single npm-publish path for the ledger package family. Publishes each
+# package to GH Packages and public npmjs under BOTH scopes while the org
+# migrates:
+#   @midnight-ntwrk/<pkg>  (legacy scope)
+#   @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
+#                           to the midnightntwrk org instead of the
+#                           deprecated midnight-ntwrk org)
+# The built tarball's own scope is never trusted: bagel.nix's default scope
+# flipped on ledger-8 (f232211) and differs across release branches, so every
+# tarball is normalized to each target scope before publishing.
+# Publishes are idempotent per target: already-published versions are
+# skipped, so re-runs after partial failures are safe.
+#
+# npm TRUSTED PUBLISHING (planned): register THIS file (publish.yml) with
+# environment `release` as the trusted publisher for every package:
+#   @midnight-ntwrk/ledger-vN            @midnightntwrk/ledger-vN
+#   @midnight-ntwrk/onchain-runtime-vN   @midnightntwrk/onchain-runtime-vN
+#   @midnight-ntwrk/zkir-vN              @midnightntwrk/zkir-vN
+# Then flip auth here:
+#   1. permissions: add `id-token: write`
+#   2. delete the NPM_TOKEN env + the registry.npmjs.org auth line below
+#      (npm >= 11.5 performs the OIDC exchange automatically)
+#   3. keep MIDNIGHTCI_PACKAGES_WRITE - GH Packages has no trusted publishing
+# Trusted publishing validates the TOP-LEVEL workflow file, so this workflow
+# must stay directly dispatched - do not convert it to workflow_call.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build and publish (branch, tag or SHA)."
+        type: string
+        required: true
+      packages:
+        description: "Which npm packages to publish."
+        type: choice
+        options:
+          - all
+          - ledger
+          - onchain-runtime
+          - zkir
+        default: all
+      dry_run:
+        description: "Build and log every publish without publishing."
+        type: boolean
+        default: false
+      correlation:
+        description: "Opaque marker echoed into the run name so a dispatching workflow can find this exact run. Leave empty for manual runs."
+        type: string
+        default: ""
+
+# The [correlation] suffix makes the dispatched run findable: prerelease.yml
+# matches it exactly instead of guessing by creation time (which races with
+# concurrent dispatches).
+run-name: "Publish npm packages (${{ inputs.packages }} @ ${{ inputs.ref }})${{ inputs.correlation != '' && format(' [{0}]', inputs.correlation) || '' }}"
+
+env:
+  DRY_RUN: ${{ github.event.inputs.dry_run }}
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # Standard hosted runner (free on public repos): the nix build is mostly
+    # restored from the cache shared with prerelease.yml, so no large runner.
+    runs-on: ubuntu-24.04
+    # Same approval gate as the release workflow: real publishes require the
+    # protected `release` environment; dry runs need no approval.
+    # NB: the truthy value must be the && arm - '' is falsy in GitHub
+    # expressions, so `cond && '' || x` yields x on BOTH branches.
+    environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        with:
+          ref: ${{ github.event.inputs.ref }}
+
+      - name: Checkout publish scripts (workflow ref)
+        # The checkout above is the dispatched ref, which may be a historical
+        # branch/tag that predates the helper scripts. The scripts must always
+        # come from the workflow's own commit, so check them out separately.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        with:
+          path: .publish-scripts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          registry-url: https://npm.pkg.github.com/
+        env:
+          # Dry runs never publish; give them no credentials at all.
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Build and publish
+        env:
+          # Dry runs never publish; give them no credentials at all.
+          NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
+          NPM_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_NPMJS_TOKEN || '' }}
+          PACKAGES: ${{ github.event.inputs.packages }}
+        run: |
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
+          SCOPES="@midnight-ntwrk @midnightntwrk"
+          SCRIPTS="${GITHUB_WORKSPACE}/.publish-scripts/.github/scripts"
+
+          # npmjs auth (GH Packages auth is configured by setup-node). The
+          # token is written literally: npm's ${VAR} expansion yields empty
+          # -> ENEEDAUTH. Under trusted publishing this block is deleted.
+          # Dry runs never publish, so they get no token at all.
+          if [ "${DRY_RUN}" != "true" ]; then
+            if [ -z "${NPM_TOKEN:-}" ]; then
+              echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
+            fi
+            printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          fi
+
+          case "$PACKAGES" in
+            all)             ATTRS="ledger-wasm onchain-runtime-wasm zkir-wasm" ;;
+            ledger)          ATTRS="ledger-wasm" ;;
+            onchain-runtime) ATTRS="onchain-runtime-wasm" ;;
+            zkir)            ATTRS="zkir-wasm" ;;
+            *) echo "::error::unknown packages selection '$PACKAGES'"; exit 1 ;;
+          esac
+
+          STAGE="${GITHUB_WORKSPACE}/publish-artifacts"
+
+          for ATTR in $ATTRS; do
+            nix build ".#${ATTR}"
+
+            # Copy the tarball out of the read-only nix store, then read the
+            # canonical name/version from the tarball itself - the package
+            # is the single source of truth, no duplicated derivation logic.
+            ATTR_DIR="${STAGE}/${ATTR}"
+            mkdir -p "$ATTR_DIR"
+            cp result/lib/*.tgz "$ATTR_DIR/"
+            TGZ_COUNT=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz' | wc -l)
+            if [ "$TGZ_COUNT" -ne 1 ]; then
+              echo "::error::expected exactly one npm tarball from nix build .#${ATTR}, found ${TGZ_COUNT}:"
+              find "$ATTR_DIR" -name '*.tgz'; exit 1
+            fi
+            TGZ=$(find "$ATTR_DIR" -name '*.tgz' ! -name '*-rescoped.tgz')
+            PKG=$(tar -xzOf "$TGZ" package/package.json | jq -r '.name')
+            VER=$(tar -xzOf "$TGZ" package/package.json | jq -r '.version')
+            BASE="${PKG##*/}"
+            echo "::group::${PKG}@${VER} (${ATTR})"
+
+            # Normalize to every target scope (rescoping to the tarball's own
+            # scope is a harmless identity repack).
+            for SCOPE in $SCOPES; do
+              T=$("${SCRIPTS}/rescope-npm-tarball.sh" "$TGZ" "$SCOPE" "$ATTR_DIR")
+              for REG in "$GH_REG" "$NPMJS_REG"; do
+                "${SCRIPTS}/run-unless-dry.sh" \
+                  "${SCRIPTS}/npm-publish-idempotent.sh" \
+                  "$T" "$REG" "${SCOPE}/${BASE}" "$VER"
+              done
+            done
+            echo "::endgroup::"
+          done

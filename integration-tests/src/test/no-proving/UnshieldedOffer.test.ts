@@ -31,7 +31,7 @@ import {
   type UtxoOutput,
   type UtxoSpend,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getNewUnshieldedOffer, INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Random } from '@/test-objects';
 import { BindingMarker, ProofMarker, SignatureKindMarker, SignatureMarker } from '@/test/utils/Markers';
 import { TestState } from '@/test/utils/TestState';

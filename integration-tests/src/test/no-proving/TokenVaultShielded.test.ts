@@ -69,7 +69,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapTransient
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { TestState } from '@/test/utils/TestState';
 import {

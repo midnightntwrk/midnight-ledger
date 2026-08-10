@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { type AlignedValue, StateMap, StateValue } from '@midnight-ntwrk/ledger';
+import { type AlignedValue, StateMap, StateValue } from '@midnightntwrk/ledger';
 import { ONE_KB, Static } from '@/test-objects';
 
 describe('Ledger API - StateMap', () => {
