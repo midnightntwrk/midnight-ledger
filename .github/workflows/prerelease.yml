@@ -557,6 +557,6 @@ jobs:
           gh release upload "${TAG_NAME}" \
             ./proof-server-release-assets/build-manifest.json \
             ./proof-server-release-assets/build-manifest.json.asc \
-            ./proof-server-release-assets/midnight-proof-server-public.asc \
+            ./proof-server-release-assets/proof-server/midnight-proof-server-public.asc \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber
