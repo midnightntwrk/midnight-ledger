@@ -575,7 +575,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         offer.collect_proof_evidence(segment).map(|bundles| {
             bundles
                 .into_iter()
-                .map(|(vk, proof, pis)| ContractProofEvidence::V2 { vk, proof, pis })
+                .map(|(vk, proof, pis)| ContractProofEvidence::V3 { vk, proof, pis })
                 .collect()
         })
     }
