@@ -726,6 +726,19 @@ pub enum Instruction {
         /// The output variable names
         output: Identifier,
     },
+    /// Evaluates the SHA-512 hash function on a sequence of items with
+    /// a given alignment.
+    ///
+    /// Outputs 2 elements of type Bytes32: the first and second halves of the
+    /// 64-byte digest.
+    Sha512 {
+        /// The alignment of the inputs being passed
+        alignment: Alignment,
+        /// The inputs to hash
+        inputs: Vec<Operand>,
+        /// The output variable names: (first 32 bytes, last 32 bytes)
+        outputs: (Identifier, Identifier),
+    },
     /// Tests if `a` and `b` are equal.
     /// Supported on types:
     ///  - Native
