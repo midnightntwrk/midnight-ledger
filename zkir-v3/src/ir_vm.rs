@@ -53,7 +53,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -559,6 +559,26 @@ impl IrSource {
                     };
                     memory.insert(output.clone(), IrValue::Bytes(hash_output.to_vec()));
                 }
+                I::Sha512 {
+                    alignment,
+                    inputs,
+                    output,
+                } => {
+                    let inputs = inputs
+                        .iter()
+                        .map(|i| resolve_operand(&memory, i))
+                        .map(|r| r.and_then(|v| v.try_into()))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let value = alignment.parse_field_repr(&inputs).ok_or_else(|| {
+                        error!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})");
+                        anyhow!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})")
+                    })?;
+                    let mut repr = Vec::new();
+                    ValueReprAlignedValue(value).binary_repr(&mut repr);
+                    trace!(bytes = ?repr, "bytes decoded out-of-circuit");
+                    let hash_output: [u8; 64] = Sha512::digest(&repr).into();
+                    memory.insert(output.clone(), IrValue::Bytes(hash_output.to_vec()));
+                }
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
                     if !resolve_operand_bool(&memory, guard)? {
@@ -1051,6 +1071,25 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::Sha512 {
+                    alignment,
+                    inputs,
+                    output,
+                } => {
+                    let mut resolved_inputs = Vec::new();
+                    for inp in inputs {
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
+                    }
+                    let bytes = fab_decode_to_bytes(std, layouter, alignment, &resolved_inputs)?;
+                    let hash_output = std.sha2_512(layouter, &bytes)?;
+                    mem_insert(
+                        output.clone(),
+                        CircuitValue::Bytes(hash_output.to_vec()),
+                        &mut memory,
+                    )?;
+                }
                 I::TestEq { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
@@ -1454,7 +1493,7 @@ impl Relation for IrSource {
                     matches!(op, I::TransientHash { .. } | I::HashToCurve { .. })
                 }),
             sha2_256: involves_instructions(&|op| matches!(op, I::PersistentHash { .. })),
-            sha2_512: false,
+            sha2_512: involves_instructions(&|op| matches!(op, I::Sha512 { .. })),
             keccak_256: involves_instructions(&|op| matches!(op, I::Keccak256 { .. })),
             sha3_256: false,
             blake2b: false,
