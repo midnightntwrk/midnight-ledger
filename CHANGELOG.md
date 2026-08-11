@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.0-rc.4
+
 - fix: dust registration accounting moved to block time, rather than declared
   transaction time.
 
