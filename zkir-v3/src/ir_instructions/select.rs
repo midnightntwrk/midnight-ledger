@@ -26,6 +26,8 @@ use crate::{
 ///
 /// Supported on:
 ///   - `Native`
+///   - `Bool`
+///   - `Byte`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -56,6 +58,8 @@ pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue,
 ///
 /// Supported on:
 ///   - `Native`
+///   - `Bool`
+///   - `Byte`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -80,6 +84,8 @@ pub fn select_incircuit(
     use CircuitValue::*;
     match (a, b) {
         (Native(x), Native(y)) => Ok(Native(std_lib.select(layouter, bit, x, y)?)),
+        (Bool(a), Bool(b)) => Ok(Bool(std_lib.select(layouter, bit, a, b)?)),
+        (Byte(a), Byte(b)) => Ok(Byte(std_lib.select(layouter, bit, a, b)?)),
         (JubjubPoint(p), JubjubPoint(q)) => {
             Ok(JubjubPoint(std_lib.jubjub().select(layouter, bit, p, q)?))
         }
@@ -117,5 +123,38 @@ pub fn select_incircuit(
             a.get_type(),
             b.get_type()
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_offcircuit_behavior() {
+        use IrValue::*;
+
+        // `bit == true` returns `a`, `bit == false` returns `b`.
+        assert_eq!(
+            select_offcircuit(true, &Bool(true), &Bool(false)).unwrap(),
+            Bool(true)
+        );
+        assert_eq!(
+            select_offcircuit(false, &Bool(true), &Bool(false)).unwrap(),
+            Bool(false)
+        );
+
+        assert_eq!(
+            select_offcircuit(true, &Byte(1), &Byte(2)).unwrap(),
+            Byte(1)
+        );
+        assert_eq!(
+            select_offcircuit(false, &Byte(1), &Byte(2)).unwrap(),
+            Byte(2)
+        );
+
+        // Mismatched operand types are rejected.
+        assert!(select_offcircuit(true, &Bool(true), &Native(1.into())).is_err());
+        assert!(select_offcircuit(true, &Byte(1), &Bool(true)).is_err());
     }
 }

@@ -14,7 +14,9 @@
 #[cfg(test)]
 use std::ops::Neg;
 
-use midnight_circuits::instructions::{ArithInstructions, EccInstructions as _};
+use midnight_circuits::instructions::{
+    ArithInstructions, BinaryInstructions, EccInstructions as _,
+};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 
@@ -26,6 +28,7 @@ use crate::{
 /// Negates off-circuit the given input.
 /// Negation is supported on:
 ///   - `Native`
+///   - `Bool`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -44,6 +47,7 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
     use IrValue::*;
     match x {
         Native(a) => Ok(Native(-*a)),
+        Bool(a) => Ok(Bool(!a)),
         JubjubPoint(p) => Ok(JubjubPoint(-p)),
 
         Secp256k1Point(p) => Ok(Secp256k1Point(-p)),
@@ -68,6 +72,7 @@ pub fn neg_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
 /// Negates in-circuit the given input.
 /// Negation is supported on:
 ///   - `Native`
+///   - `Bool`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -92,6 +97,10 @@ pub fn neg_incircuit(
         Native(a) => {
             let r = std_lib.neg(layouter, a)?;
             Ok(Native(r))
+        }
+        Bool(a) => {
+            let r = std_lib.not(layouter, a)?;
+            Ok(Bool(r))
         }
         JubjubPoint(p) => {
             let r = std_lib.jubjub().negate(layouter, p)?;
@@ -171,6 +180,8 @@ mod tests {
         let p = JubjubSubgroup::random(OsRng);
 
         assert_eq!(-Native(x), Native(-x));
+        assert_eq!(-Bool(true), Bool(false));
+        assert_eq!(-Bool(false), Bool(true));
         assert_eq!(-JubjubPoint(p), JubjubPoint(-p));
 
         let p = k256::K256::random(OsRng);

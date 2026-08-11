@@ -171,46 +171,49 @@ mod tests {
     fn test_from_bytes32_roundtrip() {
         use IrValue::*;
 
+        // `into_bytes32` yields a `Bytes(32)` value; extract its fixed array.
+        let to_arr = |v: IrValue| -> [u8; 32] { <Vec<u8>>::try_from(v).unwrap().try_into().unwrap() };
+
         let x = Native(Fr(F::random(OsRng)));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Native, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Secp256k1Base(k256::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Secp256k1Scalar(k256::Fq::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Secp256r1Base(p256::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Secp256r1Base, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Secp256r1Scalar(p256::Fq::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Curve25519Base(curve25519::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Curve25519Base, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
 
         let x = Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         let y = from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap();
-        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        let bytes2 = to_arr(into_bytes32_offcircuit(&y).unwrap());
         assert_eq!(bytes2, bytes);
     }
 

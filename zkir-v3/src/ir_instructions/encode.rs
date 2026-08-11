@@ -17,8 +17,8 @@ use midnight_circuits::{
     field::foreign::params::MultiEmulationParams as MEP,
     instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
-        AssignedBigUint, AssignedField, AssignedForeignPoint, AssignedNative, AssignedNativePoint,
-        AssignedScalarOfNativeCurve, Instantiable,
+        AssignedBigUint, AssignedBit, AssignedByte, AssignedField, AssignedForeignPoint,
+        AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
     },
 };
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, curve25519, k256, p256};
@@ -28,7 +28,7 @@ use transient_crypto::curve::Fr;
 
 use crate::{
     ir_instructions::F,
-    ir_types::{CircuitValue, IrType, IrValue},
+    ir_types::{BYTES_PER_FIELD_ELEMENT, CircuitValue, IrType, IrValue},
 };
 use anyhow::anyhow;
 
@@ -36,18 +36,18 @@ use anyhow::anyhow;
 pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
     let encoded = match value {
         IrValue::Native(x) => AssignedNative::<F>::as_public_input(&x.0),
-        IrValue::Bytes32(bs) => {
-            let mut low: [u8; 32] = *bs;
-            low[31] = 0;
-
-            let mut high = [0u8; 32];
-            high[0] = bs[31];
-
-            vec![
-                F::from_bytes_le(&low).unwrap(),
-                F::from_bytes_le(&high).unwrap(),
-            ]
-        }
+        IrValue::Bool(b) => AssignedBit::<F>::as_public_input(b),
+        IrValue::Byte(b) => AssignedByte::<F>::as_public_input(b),
+        IrValue::Bytes(bs) => bs
+            .chunks(BYTES_PER_FIELD_ELEMENT)
+            .map(|chunk| {
+                // Pack up to `BYTES_PER_FIELD_ELEMENT` little-endian bytes into
+                // one field element.
+                let mut buf = [0u8; 32];
+                buf[..chunk.len()].copy_from_slice(chunk);
+                F::from_bytes_le(&buf).unwrap()
+            })
+            .collect(),
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
         IrValue::JubjubScalar(s) => {
             let encoded = AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s);
@@ -90,10 +90,12 @@ pub fn encode_incircuit(
 ) -> Result<Vec<CircuitValue>, Error> {
     let encoded = match value {
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
-        CircuitValue::Bytes32(bs) => Ok(vec![
-            std_lib.assigned_from_le_bytes(layouter, &bs[..31])?,
-            bs[31].clone().into(),
-        ]),
+        CircuitValue::Bool(b) => std_lib.as_public_input(layouter, b),
+        CircuitValue::Byte(b) => std_lib.as_public_input(layouter, b),
+        CircuitValue::Bytes(bs) => bs
+            .chunks(BYTES_PER_FIELD_ELEMENT)
+            .map(|chunk| std_lib.assigned_from_le_bytes(layouter, chunk))
+            .collect::<Result<Vec<_>, _>>(),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
         CircuitValue::JubjubScalar(s) => {
             // Jubjub::Scalar::NUM_BITS is incorrectly set to 255 (instead of 252)
@@ -135,6 +137,28 @@ pub fn encode_incircuit(
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
 }
 
+/// Decodes `encoded` (field elements packed by `encode_offcircuit`) into an
+/// `n`-byte `Bytes` value. Returns `None` if the number of field elements is
+/// wrong for `n`, or if any chunk carries non-canonical (non-zero) high bytes.
+fn decode_bytes(encoded: &[F], n: usize) -> Option<IrValue> {
+    if encoded.len() != n.div_ceil(BYTES_PER_FIELD_ELEMENT) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(n);
+    for (i, f) in encoded.iter().enumerate() {
+        let buf = f.to_bytes_le();
+        // Bytes contributed by this chunk: `BYTES_PER_FIELD_ELEMENT`, or fewer
+        // for the final chunk when `n` is not a multiple.
+        let chunk_len = (n - i * BYTES_PER_FIELD_ELEMENT).min(BYTES_PER_FIELD_ELEMENT);
+        // The remaining high bytes must be zero (canonical form).
+        if buf[chunk_len..].iter().any(|b| *b != 0) {
+            return None;
+        }
+        bytes.extend_from_slice(&buf[..chunk_len]);
+    }
+    Some(IrValue::Bytes(bytes))
+}
+
 /// Decodes the given Fr values as an IrValue of the given type.
 ///
 /// # Errors
@@ -147,22 +171,11 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
             .map(Fr)
             .map(IrValue::Native),
 
-        IrType::Bytes32 => {
-            if encoded.len() != 2 {
-                None
-            } else {
-                let mut bytes = encoded[0].to_bytes_le();
-                assert_eq!(bytes[31], 0);
+        IrType::Bool => AssignedBit::<F>::from_public_input(&encoded).map(IrValue::Bool),
 
-                let high = encoded[1].to_bytes_le();
-                for b in high.iter().skip(1) {
-                    assert_eq!(*b, 0);
-                }
+        IrType::Byte => AssignedByte::<F>::from_public_input(&encoded).map(IrValue::Byte),
 
-                bytes[31] = high[0];
-                Some(IrValue::Bytes32(bytes))
-            }
-        }
+        IrType::Bytes(n) => decode_bytes(&encoded, *n as usize),
 
         IrType::JubjubPoint => AssignedNativePoint::<JubjubExtended>::from_public_input(&encoded)
             .map(IrValue::JubjubPoint),
@@ -237,4 +250,62 @@ pub fn jubjub_scalar_from_biguint(
 
     let r_le_bytes = std_lib.biguint().to_le_bytes(layouter, &r)?;
     std_lib.jubjub().scalar_from_le_bytes(layouter, &r_le_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_bool_roundtrip() {
+        for b in [true, false] {
+            let value = IrValue::Bool(b);
+            let encoded: Vec<Fr> = encode_offcircuit(&value)
+                .into_iter()
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            // A Bool encodes to a single native field element.
+            assert_eq!(encoded.len(), IrType::Bool.encoded_len());
+            let decoded = decode_offcircuit(&encoded, &IrType::Bool).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn encode_decode_byte_roundtrip() {
+        for b in [0u8, 1, 42, 255] {
+            let value = IrValue::Byte(b);
+            let encoded: Vec<Fr> = encode_offcircuit(&value)
+                .into_iter()
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            // A Byte encodes to a single native field element.
+            assert_eq!(encoded.len(), IrType::Byte.encoded_len());
+            let decoded = decode_offcircuit(&encoded, &IrType::Byte).unwrap();
+            assert_eq!(decoded, value);
+        }
+    }
+
+    #[test]
+    fn encode_decode_bytes_roundtrip() {
+        // Cover lengths straddling the field-element chunk boundary.
+        let c = BYTES_PER_FIELD_ELEMENT;
+        for n in [1, c - 1, c, c + 1, 2 * c, 2 * c + 1, 100] {
+            let bytes: Vec<u8> = (0..n).map(|i| (i as u8).wrapping_mul(7).wrapping_add(1)).collect();
+            let value = IrValue::Bytes(bytes);
+            let encoded: Vec<Fr> = encode_offcircuit(&value)
+                .into_iter()
+                .map(|v| v.try_into().unwrap())
+                .collect();
+            assert_eq!(encoded.len(), IrType::Bytes(n as u32).encoded_len());
+            let decoded = decode_offcircuit(&encoded, &IrType::Bytes(n as u32)).unwrap();
+            assert_eq!(decoded, value, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn decode_bytes_wrong_element_count_fails() {
+        // Bytes(32) needs exactly 2 field elements.
+        assert!(decode_offcircuit(&[Fr::from(0u64)], &IrType::Bytes(32)).is_err());
+    }
 }

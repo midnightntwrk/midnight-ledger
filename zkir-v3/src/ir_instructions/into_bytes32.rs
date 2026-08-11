@@ -40,19 +40,19 @@ use crate::{
 pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error> {
     use IrValue::*;
     match value {
-        Native(x) => Ok(Bytes32(x.0.to_bytes_le())),
+        Native(x) => Ok(Bytes(x.0.to_bytes_le().to_vec())),
 
-        Secp256k1Base(s) => Ok(Bytes32(s.to_bytes_le())),
+        Secp256k1Base(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
-        Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
+        Secp256k1Scalar(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
-        Secp256r1Base(s) => Ok(Bytes32(s.to_bytes_le())),
+        Secp256r1Base(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
-        Secp256r1Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
+        Secp256r1Scalar(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
-        Curve25519Base(s) => Ok(Bytes32(s.to_bytes_le())),
+        Curve25519Base(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
-        Curve25519Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
+        Curve25519Scalar(s) => Ok(Bytes(s.to_bytes_le().to_vec())),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported into_bytes32 for {:?}",
@@ -86,43 +86,43 @@ pub fn into_bytes32_incircuit(
     match value {
         Native(x) => std_lib
             .assigned_to_le_bytes(layouter, x, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Secp256k1Base(s) => std_lib
             .secp256k1()
             .base_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Secp256k1Scalar(s) => std_lib
             .secp256k1()
             .scalar_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Secp256r1Base(s) => std_lib
             .p256()
             .base_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Secp256r1Scalar(s) => std_lib
             .p256()
             .scalar_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Curve25519Base(s) => std_lib
             .curve25519()
             .base_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         Curve25519Scalar(s) => std_lib
             .curve25519()
             .scalar_field_chip()
             .assigned_to_le_bytes(layouter, s, Some(32))
-            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+            .map(Bytes),
 
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported into_bytes32 for {:?}",
@@ -145,32 +145,35 @@ mod tests {
     fn test_into_bytes32_roundtrip() {
         use IrValue::*;
 
+        // `into_bytes32` yields a `Bytes(32)` value; extract its fixed array.
+        let to_arr = |v: IrValue| -> [u8; 32] { <Vec<u8>>::try_from(v).unwrap().try_into().unwrap() };
+
         let x = Native(Fr(F::random(OsRng)));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Secp256k1Base(k256::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Secp256k1Scalar(k256::Fq::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Secp256r1Base(p256::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Secp256r1Scalar(p256::Fq::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Curve25519Base(curve25519::Fp::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng));
-        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let bytes = to_arr(into_bytes32_offcircuit(&x).unwrap());
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
     }
 }

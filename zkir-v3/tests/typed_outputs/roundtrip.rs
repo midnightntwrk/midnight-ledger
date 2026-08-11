@@ -80,6 +80,112 @@ async fn native_via_copy() {
 }
 
 #[actix_rt::test]
+async fn bool_identity() {
+    // Output a Bool input directly. Exercises the Bool arm of
+    // encode_incircuit / encode_offcircuit and the Bool input assignment.
+    for b in [true, false] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Bool" }
+               ],
+               "outputs": ["Bool"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "output", "vals": ["%b"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Bool(b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
+async fn bool_via_neg() {
+    // Output the logical negation of a Bool input, exercising `neg` on a Bool
+    // (which yields a Bool) followed by encoding it as a typed output.
+    for b in [true, false] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Bool" }
+               ],
+               "outputs": ["Bool"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "neg", "a": "%b", "output": "%nb" },
+                   { "op": "output", "vals": ["%nb"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Bool(!b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
+async fn byte_identity() {
+    // Output a Byte input directly. Exercises the Byte arm of
+    // encode_incircuit / encode_offcircuit and the Byte input assignment.
+    for b in [0u8, 1, 42, 255] {
+        assert_typed_output_roundtrip(
+            r#"{
+               "version": { "major": 3, "minor": 0 },
+               "inputs": [
+                  { "name": "%b", "type": "Byte" }
+               ],
+               "outputs": ["Byte"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   { "op": "output", "vals": ["%b"] }
+               ]
+            }"#,
+            vec![Fr::from(b as u64)],
+            vec![IrValue::Byte(b)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
+async fn bytes_n_identity() {
+    // Output a Bytes(n) input directly for several n (spanning the 31-byte
+    // chunk boundary), exercising encode_incircuit / encode_offcircuit and the
+    // Bytes(n) input assignment.
+    use midnight_zkir_v3::ir_instructions::encode::encode_offcircuit;
+    for n in [1usize, 31, 32, 48, 63] {
+        let bytes: Vec<u8> = (0..n as u8).collect();
+        let inputs: Vec<Fr> = encode_offcircuit(&IrValue::Bytes(bytes.clone()))
+            .into_iter()
+            .map(|v| v.try_into().unwrap())
+            .collect();
+        assert_typed_output_roundtrip(
+            &format!(
+                r#"{{
+               "version": {{ "major": 3, "minor": 0 }},
+               "inputs": [
+                  {{ "name": "%b", "type": "Bytes<{n}>" }}
+               ],
+               "outputs": ["Bytes<{n}>"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   {{ "op": "output", "vals": ["%b"] }}
+               ]
+            }}"#
+            ),
+            inputs,
+            vec![IrValue::Bytes(bytes)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
 async fn multi_output_native_pair() {
     // Two Native outputs from the same input. Exercises the per-position
     // arity & type loop in the Output arm.

@@ -67,13 +67,24 @@ pub fn assign_incircuit(
                 .map(|xs| xs.into_iter().map(CircuitValue::Native).collect())
         }
 
-        IrType::Bytes32 => {
-            let mut byte32_chunks = vec![];
-            for chunk in convert_values::<[u8; 32]>(values)? {
-                let assigned_chunk = std_lib.assign_many(layouter, &chunk.transpose_array())?;
-                byte32_chunks.push(CircuitValue::Bytes32(assigned_chunk.try_into().unwrap()));
+        IrType::Bool => std_lib
+            .assign_many(layouter, &convert_values::<bool>(values)?)
+            .map(|bs| bs.into_iter().map(CircuitValue::Bool).collect()),
+
+        IrType::Byte => std_lib
+            .assign_many(layouter, &convert_values::<u8>(values)?)
+            .map(|bs| bs.into_iter().map(CircuitValue::Byte).collect()),
+
+        IrType::Bytes(n) => {
+            let n = *n as usize;
+            let mut byte_strings = vec![];
+            for value in convert_values::<Vec<u8>>(values)? {
+                // `transpose_vec` yields the `n` per-byte values, asserting the
+                // (known) witness is exactly `n` bytes long.
+                let assigned = std_lib.assign_many(layouter, &value.transpose_vec(n))?;
+                byte_strings.push(CircuitValue::Bytes(assigned));
             }
-            Ok(byte32_chunks)
+            Ok(byte_strings)
         }
 
         IrType::JubjubPoint => std_lib
