@@ -19,7 +19,7 @@ import {
   createShieldedCoinInfo,
   sampleCoinPublicKey,
   sampleEncryptionPublicKey
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { ESK_CLEAR_MESSAGE } from '@/test-constants';
 import { Random } from '@/test-objects';
 

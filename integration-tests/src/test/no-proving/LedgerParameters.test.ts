@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { LedgerParameters } from '@midnight-ntwrk/ledger';
+import { LedgerParameters } from '@midnightntwrk/ledger';
 
 describe('Ledger API - LedgerParameters', () => {
   /**

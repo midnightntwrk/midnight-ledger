@@ -25,7 +25,7 @@ import {
   nativeToken,
   dummyContractAddress,
   type ShieldedTokenType
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { LOCAL_TEST_NETWORK_ID, Random } from '@/test-objects';
 

@@ -16,7 +16,7 @@ proof-verifying = ["zswap/proof-verifying"]
 test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
-fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
+fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
 
 [dependencies]
 coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
@@ -25,7 +25,7 @@ zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
-storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
@@ -52,7 +52,7 @@ tracing-subscriber = "0.3.19"
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }
 serde = { version = "^1.0.219", features = ["derive"] }
-reqwest = { version = "^0.13.0", default-features = false, features = ["rustls"], optional = true }
+reqwest = { version = "^0.13.4", default-features = false, features = ["rustls"], optional = true }
 rayon = "^1.10.0"
 zeroize = "^1.8.0"
 digest-io = "^0.1.0"
@@ -64,7 +64,7 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-ledger-v9 = { path = ".", features = ["test-utilities", "proptest", "fixed-point-custom-serde"] }
 onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
-storage = { path = "../storage", package = "midnight-storage", features = ["parity-db"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["parity-db", "public-internal-structure"] }
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities", "layout-v2", "gc-v1"] }
 tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }
 criterion = { version = "^0.5.1" }

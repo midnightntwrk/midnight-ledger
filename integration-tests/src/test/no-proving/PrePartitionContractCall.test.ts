@@ -26,7 +26,7 @@ import {
   QueryContext,
   Transaction,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import {
   INITIAL_NIGHT_AMOUNT,
   LOCAL_TEST_NETWORK_ID,

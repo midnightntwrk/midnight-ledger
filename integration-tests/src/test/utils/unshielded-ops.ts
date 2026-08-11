@@ -48,8 +48,8 @@
  * ```
  */
 
-import type { AlignedValue, Op } from '@midnight-ntwrk/ledger';
-import { bigIntToValue } from '@midnight-ntwrk/ledger';
+import type { AlignedValue, Op } from '@midnightntwrk/ledger';
+import { bigIntToValue } from '@midnightntwrk/ledger';
 import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, ONE_VALUE } from '@/test/utils/value-alignment';
 import { Static } from '@/test-objects';
 

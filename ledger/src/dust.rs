@@ -2281,7 +2281,7 @@ mod tests {
             println!("  seed:                  {:?}", entry.seed.0);
             println!(
                 "  intermediate bytes:    {:?}",
-                &entry.dust.secretKeyIntermediateBytes.0
+                entry.dust.secretKeyIntermediateBytes.0
             );
             println!(
                 "  intermediate computed: {:?}",

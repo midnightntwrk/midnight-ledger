@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ContractOperationVersionedVerifierKey } from '@midnight-ntwrk/ledger';
+import { ContractOperationVersionedVerifierKey } from '@midnightntwrk/ledger';
 import { TestResource } from '@/test-objects';
 
 describe('Ledger API - ContractOperationVersionedVerifierKey', () => {

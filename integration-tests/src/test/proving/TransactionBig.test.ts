@@ -23,12 +23,17 @@ import {
   MaintenanceUpdate,
   VerifierKeyRemove,
   ContractOperationVersion
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { Static, type ShieldedTokenType } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess, createValidZSwapInput } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
+
+// The transaction in this file proves 20 zswap components concurrently,
+// exceeding the proof server's default job capacity of 10. Raise it for the
+// server spawned for this file (read by the beforeAll in setup-proving).
+process.env.MIDNIGHT_PROOF_SERVER_JOB_CAPACITY = '50';
 
 describe.concurrent('Ledger API - TransactionBig [@slow][@proving]', () => {
   /**

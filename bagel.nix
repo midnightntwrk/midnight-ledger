@@ -167,7 +167,7 @@ in pkgs.stdenvNoCC.mkDerivation {
     pkgs.nodejs
     pkgs.coreutils
     pkgs.gnused
-    pkgs.wasm-bindgen-cli_0_2_104
+    pkgs.wasm-bindgen-cli_0_2_108
     pkgs.binaryen
   ];
 }
