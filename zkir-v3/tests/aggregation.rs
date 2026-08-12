@@ -50,6 +50,7 @@ mod common;
 mod aggregation_tests {
     use std::borrow::Cow;
 
+    use midnight_circuits::hash::poseidon::PoseidonState;
     use midnight_curves::Bls12;
     use midnight_proofs::poly::kzg::params::ParamsKZG;
     use midnight_zk_stdlib::{prove as zk_prove, setup_pk, setup_vk};
@@ -59,7 +60,8 @@ mod aggregation_tests {
     use transient_crypto::aggregation::{
         AggregationWitness, InnerCircuitsContext, ProofAggregation,
     };
-    use transient_crypto::proofs::{KeyLocation, ParamsProverProvider, ProofPreimage, TranscriptHash};
+    use transient_crypto::curve::outer;
+    use transient_crypto::proofs::{KeyLocation, ParamsProverProvider, ProofPreimage};
 
     use super::common::TestParams;
 
@@ -83,7 +85,7 @@ mod aggregation_tests {
         inner_params: &ParamsKZG<Bls12>,
     ) -> (
         midnight_zk_stdlib::MidnightVK,
-        Vec<transient_crypto::curve::outer::Scalar>,
+        Vec<outer::Scalar>,
         Vec<u8>,
     ) {
         let ir = IrSource::load(ir_raw.as_bytes()).expect("IR JSON must parse");
@@ -106,7 +108,7 @@ mod aggregation_tests {
             .expect("preprocess must succeed for a satisfying witness");
         let instance = preprocessed.pis.clone();
 
-        let proof = zk_prove::<AggregableIrSource, TranscriptHash>(
+        let proof = zk_prove::<AggregableIrSource, PoseidonState<outer::Scalar>>(
             inner_params,
             &pk,
             &aggregable,
