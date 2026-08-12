@@ -23,15 +23,16 @@ use std::sync::Arc;
 #[cfg(feature = "gcp_cs")]
 use {
     crate::endpoints::attestation,
-    crypto_box::{Nonce, PublicKey, SalsaBox, SecretKey, aead::Aead},
+    crypto_box::aead::Aead,
+    crypto_box::{Nonce, PublicKey, SalsaBox, SecretKey},
     hex::{FromHex, ToHex},
     rand::RngCore,
 };
 
 use crate::endpoints::{
-    check, fetch_k, get_k, health, proof_versions, prove, prove_transaction, ready, version,
+    check, fetch_k, get_k, health, proof_status, proof_versions, prove, prove_transaction, ready,
+    version,
 };
-
 use crate::worker_pool::WorkerPool;
 
 pub mod endpoints;
@@ -47,7 +48,7 @@ pub struct ServerEncryptionKey {
 
 #[cfg(feature = "gcp_cs")]
 impl ServerEncryptionKey {
-    fn generate() -> Self {
+    pub fn generate() -> Self {
         let mut secret_key_bytes = [0u8; 32];
         rand::rngs::OsRng.fill_bytes(&mut secret_key_bytes);
         let secret_key = SecretKey::from(secret_key_bytes);
@@ -92,12 +93,6 @@ impl ServerEncryptionKey {
         Some((response_nonce_hex, ciphertext))
     }
 
-    pub fn generate_response_nonce_hex(&self) -> String {
-        let mut nonce_bytes = [0u8; 24];
-        rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
-        nonce_bytes.encode_hex::<String>()
-    }
-
     pub fn encrypt_response_with_nonce(
         &self,
         client_public_key_hex: &str,
@@ -135,6 +130,7 @@ pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Resul
             .service(get_k)
             .service(version)
             .service(proof_versions)
+            .service(proof_status)
             .service(ready)
             .route("/", web::get().to(health))
             .route("/health", web::get().to(health))

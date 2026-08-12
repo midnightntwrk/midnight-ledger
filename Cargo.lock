@@ -5916,6 +5916,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "rand 0.10.1",
+ "serde_core",
  "wasm-bindgen",
 ]
 
