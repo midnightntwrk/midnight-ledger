@@ -77,7 +77,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
         with:
           ref: ${{ github.event.inputs.ref }}
 
@@ -85,7 +85,7 @@ jobs:
         # The checkout above is the dispatched ref, which may be a historical
         # branch/tag that predates the helper scripts. The scripts must always
         # come from the workflow's own commit, so check them out separately.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
         with:
           path: .publish-scripts
 
