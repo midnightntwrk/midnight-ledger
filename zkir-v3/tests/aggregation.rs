@@ -99,7 +99,7 @@ mod aggregation_tests {
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
-            key_location: KeyLocation(Cow::Borrowed("aggregation-test")),
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let preprocessed = aggregable
             .preprocess(&preimage)

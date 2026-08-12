@@ -88,6 +88,7 @@ impl AggregableIrSource {
     pub fn aggregation_arch() -> ZkStdLibArch {
         ZkStdLibArch {
             poseidon: true,
+            nr_pow2range_cols: 4,
             ..ZkStdLibArch::default()
         }
     }
