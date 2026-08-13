@@ -18,7 +18,7 @@ use midnight_circuits::{
         AssignedNativePoint, AssignedScalarOfNativeCurve, InnerValue,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, curve25519, k256};
 use midnight_proofs::{circuit::Value, plonk::Error};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
@@ -81,6 +81,9 @@ pub enum IrType {
 
     /// Element of the scalar field of Secp256k1.
     Secp256k1Scalar,
+
+    /// Element of the scalar field of Curve25519.
+    Curve25519Scalar,
 }
 
 impl IrType {
@@ -97,6 +100,23 @@ impl IrType {
             IrType::Secp256k1Point => 5,
             IrType::Secp256k1Base => 2,
             IrType::Secp256k1Scalar => 2,
+
+            IrType::Curve25519Scalar => 2,
+        }
+    }
+
+    /// Length (in bytes) of the byte representation of this type, as used by
+    /// the `FromBytes` / `ToBytes` instructions. `None` for types without a
+    /// byte representation.
+    ///
+    /// Curve25519 scalars use a 64-byte representation (even though the
+    /// canonical value fits in 32 bytes) so that the output of a 512-bit hash
+    /// can be reduced into a scalar, as required by ed25519.
+    pub fn byte_repr_len(&self) -> Option<u32> {
+        match self {
+            IrType::Native | IrType::Secp256k1Base | IrType::Secp256k1Scalar => Some(32),
+            IrType::Curve25519Scalar => Some(64),
+            _ => None,
         }
     }
 
@@ -112,6 +132,7 @@ impl IrType {
             IrType::Secp256k1Point => "Point<Secp256k1>".to_string(),
             IrType::Secp256k1Base => "Base<Secp256k1>".to_string(),
             IrType::Secp256k1Scalar => "Scalar<Secp256k1>".to_string(),
+            IrType::Curve25519Scalar => "Scalar<Curve25519>".to_string(),
         }
     }
 
@@ -128,6 +149,7 @@ impl IrType {
             "Point<Secp256k1>" => IrType::Secp256k1Point,
             "Base<Secp256k1>" => IrType::Secp256k1Base,
             "Scalar<Secp256k1>" => IrType::Secp256k1Scalar,
+            "Scalar<Curve25519>" => IrType::Curve25519Scalar,
             other => {
                 let inner = other.strip_prefix("Bytes<")?.strip_suffix('>')?;
                 // Reject non-canonical integers: empty, non-digits, or a
@@ -191,6 +213,9 @@ pub enum IrValue {
 
     /// Secp256k1 scalar field value.
     Secp256k1Scalar(k256::Fq),
+
+    /// Curve25519 scalar field value.
+    Curve25519Scalar(curve25519::Scalar),
 }
 
 impl IrValue {
@@ -206,6 +231,8 @@ impl IrValue {
             IrValue::Secp256k1Point(_) => IrType::Secp256k1Point,
             IrValue::Secp256k1Base(_) => IrType::Secp256k1Base,
             IrValue::Secp256k1Scalar(_) => IrType::Secp256k1Scalar,
+
+            IrValue::Curve25519Scalar(_) => IrType::Curve25519Scalar,
         }
     }
 
@@ -221,6 +248,8 @@ impl IrValue {
             IrType::Secp256k1Point => IrValue::Secp256k1Point(k256::K256::default()),
             IrType::Secp256k1Base => IrValue::Secp256k1Base(k256::Fp::default()),
             IrType::Secp256k1Scalar => IrValue::Secp256k1Scalar(k256::Fq::default()),
+
+            IrType::Curve25519Scalar => IrValue::Curve25519Scalar(curve25519::Scalar::default()),
         }
     }
 }
@@ -241,6 +270,8 @@ pub enum CircuitValue {
     Secp256k1Point(AssignedForeignPoint<F, k256::K256, MEP>),
     Secp256k1Base(AssignedField<F, k256::Fp, MEP>),
     Secp256k1Scalar(AssignedField<F, k256::Fq, MEP>),
+
+    Curve25519Scalar(AssignedField<F, curve25519::Scalar, MEP>),
 }
 
 impl CircuitValue {
@@ -258,6 +289,8 @@ impl CircuitValue {
             CircuitValue::Secp256k1Point(p) => p.value().map(IrValue::Secp256k1Point),
             CircuitValue::Secp256k1Scalar(s) => s.value().map(IrValue::Secp256k1Scalar),
             CircuitValue::Secp256k1Base(s) => s.value().map(IrValue::Secp256k1Base),
+
+            CircuitValue::Curve25519Scalar(s) => s.value().map(IrValue::Curve25519Scalar),
         }
     }
 
@@ -273,6 +306,8 @@ impl CircuitValue {
             CircuitValue::Secp256k1Point(_) => IrType::Secp256k1Point,
             CircuitValue::Secp256k1Base(_) => IrType::Secp256k1Base,
             CircuitValue::Secp256k1Scalar(_) => IrType::Secp256k1Scalar,
+
+            CircuitValue::Curve25519Scalar(_) => IrType::Curve25519Scalar,
         }
     }
 }
@@ -322,6 +357,8 @@ impl_enum_from_try_from!(IrValue, anyhow::Error, anyhow::Error::msg;
     Secp256k1Point => k256::K256,
     Secp256k1Base => k256::Fp,
     Secp256k1Scalar => k256::Fq,
+
+    Curve25519Scalar => curve25519::Scalar,
 );
 
 // Derives implementations, for every basic type T:
@@ -338,6 +375,8 @@ impl_enum_from_try_from!(CircuitValue, Error, Error::Synthesis;
     Secp256k1Point => AssignedForeignPoint<F, k256::K256, MEP>,
     Secp256k1Base => AssignedField<F, k256::Fp, MEP>,
     Secp256k1Scalar => AssignedField<F, k256::Fq, MEP>,
+
+    Curve25519Scalar => AssignedField<F, curve25519::Scalar, MEP>,
 );
 
 #[cfg(test)]

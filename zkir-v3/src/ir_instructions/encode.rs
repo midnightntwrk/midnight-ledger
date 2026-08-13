@@ -20,7 +20,7 @@ use midnight_circuits::{
         AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, curve25519, k256};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -62,6 +62,10 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         }
         IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
         IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
+
+        IrValue::Curve25519Scalar(s) => {
+            AssignedField::<F, curve25519::Scalar, MEP>::as_public_input(s)
+        }
     };
     encoded
         .into_iter()
@@ -103,6 +107,10 @@ pub fn encode_incircuit(
         }
         CircuitValue::Secp256k1Scalar(s) => {
             (std_lib.secp256k1().scalar_field_chip()).as_public_input(layouter, s)
+        }
+
+        CircuitValue::Curve25519Scalar(s) => {
+            (std_lib.curve25519().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
@@ -166,6 +174,11 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
 
         IrType::Secp256k1Scalar => AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
             .map(IrValue::Secp256k1Scalar),
+
+        IrType::Curve25519Scalar => {
+            AssignedField::<F, curve25519::Scalar, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Scalar)
+        }
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
 }

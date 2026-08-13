@@ -419,6 +419,7 @@ pub enum Instruction {
     ///  - Secp256k1Point
     ///  - Secp256k1Base
     ///  - Secp256k1Scalar
+    ///  - Curve25519Scalar
     ///
     /// No outputs
     ConstrainEq {
@@ -528,34 +529,41 @@ pub enum Instruction {
         /// The output variable names
         output: Identifier,
     },
-    /// Transforms the given value into its 32-byte representation.
+    /// Transforms the given value into its byte representation, a `Bytes(n)`
+    /// whose length `n` is determined by the input type:
     ///
-    /// Supported on types:
-    /// * Native
-    /// * Secp256k1Base
-    /// * Secp256k1Scalar
+    /// * Native:           32 bytes
+    /// * Secp256k1Base:    32 bytes
+    /// * Secp256k1Scalar:  32 bytes
+    /// * Curve25519Scalar: 64 bytes
     ///
-    /// In all the above prime fields, the 32-byte representation is the little-endian
-    /// byte encoding of the underlying (canonical) integer.
-    IntoBytes32 {
+    /// In all the above prime fields, the byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer. Curve25519 scalars
+    /// are padded to 64 bytes (the most significant 32 bytes are zero) so that
+    /// `ToBytes` round-trips with `FromBytes`.
+    ToBytes {
         /// The element to be converted
         input: Operand,
         /// The output variable name
         output: Identifier,
     },
-    /// Constructs an element of the given type from its 32-byte representation.
+    /// Constructs an element of the given type from its byte representation.
+    /// The input must be a `Bytes(n)` whose length `n` is determined by the
+    /// target type:
     ///
-    /// Supported on types:
-    /// * Native
-    /// * Secp256k1Base
-    /// * Secp256k1Scalar
+    /// * Native:           32 bytes
+    /// * Secp256k1Base:    32 bytes
+    /// * Secp256k1Scalar:  32 bytes
+    /// * Curve25519Scalar: 64 bytes
     ///
-    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// In all the above prime fields, the byte representation is the little-endian
     /// byte encoding of the underlying (canonical) integer.
     ///
-    /// This operation also accepts non-canonical 32-byte representation in prime fields
-    /// by applying the relevant modular reduction.
-    FromBytes32 {
+    /// This operation also accepts non-canonical byte representations in prime fields
+    /// by applying the relevant modular reduction. In particular, the 64-byte
+    /// input of `Curve25519Scalar` allows reducing the output of a 512-bit
+    /// hash into a scalar, as required by ed25519.
+    FromBytes {
         /// The input bytes
         bytes: Operand,
         /// The type to be converted into

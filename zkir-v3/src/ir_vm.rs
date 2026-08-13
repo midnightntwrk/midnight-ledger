@@ -20,11 +20,10 @@ use crate::ir_instructions::encode::{
     native_to_jubjub_scalar,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
-use crate::ir_instructions::from_bytes32::{from_bytes32_incircuit, from_bytes32_offcircuit};
+use crate::ir_instructions::from_bytes::{from_bytes_incircuit, from_bytes_offcircuit};
 use crate::ir_instructions::from_coordinates::{
     from_coordinates_incircuit, from_coordinates_offcircuit,
 };
-use crate::ir_instructions::into_bytes32::{into_bytes32_incircuit, into_bytes32_offcircuit};
 use crate::ir_instructions::into_coordinates::{
     into_coordinates_incircuit, into_coordinates_offcircuit,
 };
@@ -32,6 +31,7 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
+use crate::ir_instructions::to_bytes::{to_bytes_incircuit, to_bytes_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue, MAX_BYTES_LEN};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -633,19 +633,18 @@ impl IrSource {
                     let p = from_coordinates_offcircuit(&x, &y)?;
                     memory.insert(output.clone(), p);
                 }
-                I::IntoBytes32 { input, output } => {
+                I::ToBytes { input, output } => {
                     let x = resolve_operand(&memory, input)?;
-                    let bytes = into_bytes32_offcircuit(&x)?;
+                    let bytes = to_bytes_offcircuit(&x)?;
                     memory.insert(output.clone(), bytes);
                 }
-                I::FromBytes32 {
+                I::FromBytes {
                     val_t,
                     bytes,
                     output,
                 } => {
-                    let bytes = resolve_operand(&memory, bytes)?;
-                    let bytes = ir_value_to_bytes32(bytes)?;
-                    let x = from_bytes32_offcircuit(val_t, &bytes)?;
+                    let bytes: Vec<u8> = resolve_operand(&memory, bytes)?.try_into()?;
+                    let x = from_bytes_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
                 I::Reverse { bytes, output } => {
@@ -681,15 +680,15 @@ impl IrSource {
                     let mut bytes = ir_value_to_bytes32(bytes)?;
                     let high = IrValue::Native(Fr::from(bytes[31]));
                     bytes[31] = 0;
-                    let low = from_bytes32_offcircuit(&IrType::Native, &bytes)?;
+                    let low = from_bytes_offcircuit(&IrType::Native, &bytes)?;
                     memory.insert(outputs.0.clone(), low);
                     memory.insert(outputs.1.clone(), high);
                 }
                 I::Bytes32FromLowHigh { inputs, output } => {
                     let low = resolve_operand(&memory, &inputs.0)?;
                     let high = resolve_operand(&memory, &inputs.1)?;
-                    let bytes_low = ir_value_to_bytes32(into_bytes32_offcircuit(&low)?)?;
-                    let bytes_high = ir_value_to_bytes32(into_bytes32_offcircuit(&high)?)?;
+                    let bytes_low = ir_value_to_bytes32(to_bytes_offcircuit(&low)?)?;
+                    let bytes_high = ir_value_to_bytes32(to_bytes_offcircuit(&high)?)?;
                     if bytes_low[31] != 0 || bytes_high[1..].iter().any(|b| *b != 0) {
                         bail!(
                             "Bytes32FromLowHigh: low operand must fit in 31 bytes (be less than 2^248) and high operand must fit in a single byte (be less than 256)"
@@ -1254,19 +1253,19 @@ impl Relation for IrSource {
                     let p = from_coordinates_incircuit(std, layouter, &x, &y)?;
                     mem_insert(output.clone(), p, &mut memory)?;
                 }
-                I::IntoBytes32 { input, output } => {
+                I::ToBytes { input, output } => {
                     let x = resolve_operand(std, layouter, &memory, input)?;
-                    let bytes = into_bytes32_incircuit(std, layouter, &x)?;
+                    let bytes = to_bytes_incircuit(std, layouter, &x)?;
                     mem_insert(output.clone(), bytes, &mut memory)?;
                 }
-                I::FromBytes32 {
+                I::FromBytes {
                     val_t,
                     bytes,
                     output,
                 } => {
-                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
-                    let bytes = circuit_value_to_bytes32(bytes)?;
-                    let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
+                    let bytes: Vec<AssignedByte<outer::Scalar>> =
+                        resolve_operand(std, layouter, &memory, bytes)?.try_into()?;
+                    let x = from_bytes_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
                 I::Reverse { bytes, output } => {
@@ -1304,7 +1303,7 @@ impl Relation for IrSource {
                     let mut bytes = circuit_value_to_bytes32(bytes)?;
                     let high = CircuitValue::Native(std.convert(layouter, &bytes[31])?);
                     bytes[31] = std.assign_fixed(layouter, 0u8)?;
-                    let low = from_bytes32_incircuit(std, layouter, &IrType::Native, &bytes)?;
+                    let low = from_bytes_incircuit(std, layouter, &IrType::Native, &bytes)?;
                     memory.insert(outputs.0.clone(), low);
                     memory.insert(outputs.1.clone(), high);
                 }
@@ -1313,7 +1312,7 @@ impl Relation for IrSource {
                     let high: AssignedNative<_> =
                         resolve_operand(std, layouter, &memory, &inputs.1)?.try_into()?;
                     let bytes_low =
-                        circuit_value_to_bytes32(into_bytes32_incircuit(std, layouter, &low)?)?;
+                        circuit_value_to_bytes32(to_bytes_incircuit(std, layouter, &low)?)?;
                     std.assert_equal_to_fixed(layouter, &bytes_low[31], 0u8)?;
                     let mut out_bytes = bytes_low;
                     out_bytes[31] = std.convert(layouter, &high)?;
@@ -1431,11 +1430,11 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             // We can figure out if a type is used in the circuit by looking at the entry
-            // points, currently: PublicInput or PrivateInput.
+            // points, currently: PublicInput, PrivateInput or FromBytes.
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::PublicInput { val_t, .. } | I::PrivateInput { val_t, .. } => {
-                    target_types.contains(val_t)
-                }
+                I::PublicInput { val_t, .. }
+                | I::PrivateInput { val_t, .. }
+                | I::FromBytes { val_t, .. } => target_types.contains(val_t),
                 _ => false,
             });
 
@@ -1466,7 +1465,7 @@ impl Relation for IrSource {
             ]),
             p256: false,
             bls12_381: false,
-            curve25519: false,
+            curve25519: involves_types(&[IrType::Curve25519Scalar]),
             base64: false,
             automaton: false,
         }

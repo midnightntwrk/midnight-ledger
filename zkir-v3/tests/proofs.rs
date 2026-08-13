@@ -18,7 +18,7 @@ mod common;
 mod proof_tests {
     use super::common::{TestParams, TestResolver};
     use group::{Group, ff::Field};
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256};
     use midnight_zkir_v3::{
         Identifier, IrSource, Preprocessed, ir_instructions::encode::encode_offcircuit,
         ir_types::IrValue,
@@ -1281,53 +1281,62 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_bytes32_proof() {
-        // Exercises into_bytes32 / from_bytes32 across all three currently
-        // supported types (Native, Secp256k1Base, Secp256k1Scalar):
-        //   1. Round-trips a typed value through into_bytes32 then
-        //      from_bytes32 and checks it matches the original.
-        //   2. Converts a fixed, non-canonical 32-byte string (all 0xff,
+    async fn test_bytes_conversion_proof() {
+        // Exercises to_bytes / from_bytes across all supported types
+        // (Native, Secp256k1Base, Secp256k1Scalar with 32 bytes, and
+        // Curve25519Scalar with 64 bytes):
+        //   1. Round-trips a typed value through to_bytes then
+        //      from_bytes and checks it matches the original.
+        //   2. Converts a fixed, non-canonical byte string (all 0xff,
         //      which exceeds every one of these fields' moduli) via
-        //      from_bytes32 and checks the in-circuit result against the
+        //      from_bytes and checks the in-circuit result against the
         //      off-circuit reference implementation, exercising the
         //      modular-reduction behavior documented on the instruction.
-        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_instructions::from_bytes::from_bytes_offcircuit;
         use midnight_zkir_v3::ir_types::IrType;
 
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%native",      "type": "Scalar<BLS12-381>" },
-              { "name": "%secp_base",   "type": "Base<Secp256k1>"   },
-              { "name": "%secp_scalar", "type": "Scalar<Secp256k1>" },
-              { "name": "%raw",         "type": "Bytes<32>"         }
+              { "name": "%native",        "type": "Scalar<BLS12-381>"  },
+              { "name": "%secp_base",     "type": "Base<Secp256k1>"    },
+              { "name": "%secp_scalar",   "type": "Scalar<Secp256k1>"  },
+              { "name": "%c25519_scalar", "type": "Scalar<Curve25519>" },
+              { "name": "%raw",           "type": "Bytes<32>"          },
+              { "name": "%raw_wide",      "type": "Bytes<64>"          }
            ],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "into_bytes32", "input": "%native",      "output": "%native_bytes" },
-               { "op": "into_bytes32", "input": "%secp_base",   "output": "%base_bytes"   },
-               { "op": "into_bytes32", "input": "%secp_scalar", "output": "%scalar_bytes" },
+               { "op": "to_bytes", "input": "%native",        "output": "%native_bytes" },
+               { "op": "to_bytes", "input": "%secp_base",     "output": "%base_bytes"   },
+               { "op": "to_bytes", "input": "%secp_scalar",   "output": "%scalar_bytes" },
+               { "op": "to_bytes", "input": "%c25519_scalar", "output": "%c25519_bytes" },
 
-               { "op": "from_bytes32", "bytes": "%native_bytes", "type": "Scalar<BLS12-381>", "output": "%native_back" },
-               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<Secp256k1>",   "output": "%base_back"   },
-               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<Secp256k1>", "output": "%scalar_back" },
+               { "op": "from_bytes", "bytes": "%native_bytes", "type": "Scalar<BLS12-381>",  "output": "%native_back" },
+               { "op": "from_bytes", "bytes": "%base_bytes",   "type": "Base<Secp256k1>",    "output": "%base_back"   },
+               { "op": "from_bytes", "bytes": "%scalar_bytes", "type": "Scalar<Secp256k1>",  "output": "%scalar_back" },
+               { "op": "from_bytes", "bytes": "%c25519_bytes", "type": "Scalar<Curve25519>", "output": "%c25519_back" },
 
-               { "op": "constrain_eq", "a": "%native_back", "b": "%native"      },
-               { "op": "constrain_eq", "a": "%base_back",   "b": "%secp_base"   },
-               { "op": "constrain_eq", "a": "%scalar_back", "b": "%secp_scalar" },
+               { "op": "constrain_eq", "a": "%native_back", "b": "%native"        },
+               { "op": "constrain_eq", "a": "%base_back",   "b": "%secp_base"     },
+               { "op": "constrain_eq", "a": "%scalar_back", "b": "%secp_scalar"   },
+               { "op": "constrain_eq", "a": "%c25519_back", "b": "%c25519_scalar" },
 
-               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<BLS12-381>", "output": "%raw_native" },
-               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<Secp256k1>",   "output": "%raw_base"   },
-               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<Secp256k1>", "output": "%raw_scalar" },
+               { "op": "from_bytes", "bytes": "%raw",      "type": "Scalar<BLS12-381>",  "output": "%raw_native" },
+               { "op": "from_bytes", "bytes": "%raw",      "type": "Base<Secp256k1>",    "output": "%raw_base"   },
+               { "op": "from_bytes", "bytes": "%raw",      "type": "Scalar<Secp256k1>",  "output": "%raw_scalar" },
+               { "op": "from_bytes", "bytes": "%raw_wide", "type": "Scalar<Curve25519>", "output": "%raw_c25519" },
 
-               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%raw_native_exp" },
-               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%raw_base_exp"   },
-               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%raw_scalar_exp" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>",  "guard": null, "output": "%raw_native_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",    "guard": null, "output": "%raw_base_exp"   },
+               { "op": "private_input", "type": "Scalar<Secp256k1>",  "guard": null, "output": "%raw_scalar_exp" },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%raw_c25519_exp" },
 
                { "op": "constrain_eq", "a": "%raw_native", "b": "%raw_native_exp" },
                { "op": "constrain_eq", "a": "%raw_base",   "b": "%raw_base_exp"   },
-               { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" }
+               { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" },
+               { "op": "constrain_eq", "a": "%raw_c25519", "b": "%raw_c25519_exp" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -1335,7 +1344,9 @@ mod proof_tests {
         let native_val: transient_crypto::curve::Fr = rand::random();
         let base_val = k256::Fp::random(OsRng);
         let scalar_val = k256::Fq::random(OsRng);
+        let c25519_val = curve25519::Scalar::random(&mut OsRng);
         let raw_bytes = [0xffu8; 32];
+        let raw_wide_bytes = [0xffu8; 64];
 
         let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
             encode_offcircuit(&v)
@@ -1348,18 +1359,23 @@ mod proof_tests {
             encode(IrValue::Native(native_val)),
             encode(IrValue::Secp256k1Base(base_val)),
             encode(IrValue::Secp256k1Scalar(scalar_val)),
+            encode(IrValue::Curve25519Scalar(c25519_val)),
             encode(IrValue::Bytes(raw_bytes.to_vec())),
+            encode(IrValue::Bytes(raw_wide_bytes.to_vec())),
         ]
         .concat();
 
-        let raw_native_exp = from_bytes32_offcircuit(&IrType::Native, &raw_bytes).unwrap();
-        let raw_base_exp = from_bytes32_offcircuit(&IrType::Secp256k1Base, &raw_bytes).unwrap();
-        let raw_scalar_exp = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &raw_bytes).unwrap();
+        let raw_native_exp = from_bytes_offcircuit(&IrType::Native, &raw_bytes).unwrap();
+        let raw_base_exp = from_bytes_offcircuit(&IrType::Secp256k1Base, &raw_bytes).unwrap();
+        let raw_scalar_exp = from_bytes_offcircuit(&IrType::Secp256k1Scalar, &raw_bytes).unwrap();
+        let raw_c25519_exp =
+            from_bytes_offcircuit(&IrType::Curve25519Scalar, &raw_wide_bytes).unwrap();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> = [
             encode(raw_native_exp),
             encode(raw_base_exp),
             encode(raw_scalar_exp),
+            encode(raw_c25519_exp),
         ]
         .concat();
 
@@ -1396,7 +1412,7 @@ mod proof_tests {
         //      field elements and checks each against the off-circuit reference.
         //   2. Reconstructs the original Bytes32 via bytes32_from_low_high and checks
         //      equality with the original value, exercising the full roundtrip.
-        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_instructions::from_bytes::from_bytes_offcircuit;
         use midnight_zkir_v3::ir_types::IrType;
 
         let ir_raw = r#"{
@@ -1433,10 +1449,10 @@ mod proof_tests {
         // Compute expected lo and hi using the same logic as the off-circuit VM.
         let mut lo_bytes = bytes;
         lo_bytes[31] = 0;
-        let lo_exp = from_bytes32_offcircuit(&IrType::Native, &lo_bytes).unwrap();
+        let lo_exp = from_bytes_offcircuit(&IrType::Native, &lo_bytes).unwrap();
         let mut hi_bytes = [0u8; 32];
         hi_bytes[0] = bytes[31];
-        let hi_exp = from_bytes32_offcircuit(&IrType::Native, &hi_bytes).unwrap();
+        let hi_exp = from_bytes_offcircuit(&IrType::Native, &hi_bytes).unwrap();
 
         let private_transcript: Vec<transient_crypto::curve::Fr> =
             [encode(lo_exp), encode(hi_exp)].concat();

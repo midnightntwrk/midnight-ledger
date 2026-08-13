@@ -30,6 +30,7 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -63,6 +64,7 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -96,6 +98,10 @@ pub fn constrain_eq_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).assert_equal(layouter, s, r)
         }
 
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => {
+            (std_lib.curve25519().scalar_field_chip()).assert_equal(layouter, s, r)
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
@@ -108,7 +114,7 @@ pub fn constrain_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, k256};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256};
     use rand::Rng;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
@@ -144,5 +150,9 @@ mod tests {
         assert!(constrain_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).is_ok());
         assert!(constrain_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).is_ok());
         assert!(constrain_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).is_ok());
+
+        let s = curve25519::Scalar::random(&mut OsRng);
+        assert!(constrain_eq_offcircuit(&Curve25519Scalar(s), &Curve25519Scalar(s)).is_ok());
+        assert!(constrain_eq_offcircuit(&Native(x), &Curve25519Scalar(s)).is_err());
     }
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::instructions::AssignmentInstructions;
-use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, curve25519, k256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -113,5 +113,11 @@ pub fn assign_incircuit(
             .scalar_field_chip()
             .assign_many(layouter, &convert_values::<k256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Scalar).collect()),
+
+        IrType::Curve25519Scalar => std_lib
+            .curve25519()
+            .scalar_field_chip()
+            .assign_many(layouter, &convert_values::<curve25519::Scalar>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::Curve25519Scalar).collect()),
     }
 }
