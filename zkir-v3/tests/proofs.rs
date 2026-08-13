@@ -1390,6 +1390,101 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
+    async fn test_bytes64_proof() {
+        // Exercises into_bytes64 / from_bytes64:
+        //   1. Round-trips typed values through into_bytes64 then from_bytes64
+        //      and checks they match the originals (the 32 most significant
+        //      bytes of the 64-byte representation are zero).
+        //   2. Converts a fixed, non-canonical 64-byte string (all 0xff) via
+        //      from_bytes64 and checks the in-circuit result against the
+        //      off-circuit reference implementation, exercising the wide
+        //      modular reduction needed e.g. for ed25519 (SHA-512 digest to
+        //      Curve25519 scalar).
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes64_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%native",       "type": "Scalar<BLS12-381>" },
+              { "name": "%ed_scalar",    "type": "Scalar<Curve25519>" },
+              { "name": "%raw",          "type": "Bytes<64>"         }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_bytes64", "input": "%native",    "output": "%native_bytes" },
+               { "op": "into_bytes64", "input": "%ed_scalar", "output": "%ed_bytes"     },
+
+               { "op": "from_bytes64", "bytes": "%native_bytes", "type": "Scalar<BLS12-381>",  "output": "%native_back" },
+               { "op": "from_bytes64", "bytes": "%ed_bytes",     "type": "Scalar<Curve25519>", "output": "%ed_back"     },
+
+               { "op": "constrain_eq", "a": "%native_back", "b": "%native"    },
+               { "op": "constrain_eq", "a": "%ed_back",     "b": "%ed_scalar" },
+
+               { "op": "from_bytes64", "bytes": "%raw", "type": "Scalar<BLS12-381>",  "output": "%raw_native" },
+               { "op": "from_bytes64", "bytes": "%raw", "type": "Scalar<Curve25519>", "output": "%raw_ed"     },
+
+               { "op": "private_input", "type": "Scalar<BLS12-381>",  "guard": null, "output": "%raw_native_exp" },
+               { "op": "private_input", "type": "Scalar<Curve25519>", "guard": null, "output": "%raw_ed_exp"     },
+
+               { "op": "constrain_eq", "a": "%raw_native", "b": "%raw_native_exp" },
+               { "op": "constrain_eq", "a": "%raw_ed",     "b": "%raw_ed_exp"     }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let native_val: transient_crypto::curve::Fr = rand::random();
+        let ed_scalar_val = <curve25519::Scalar as Field>::random(OsRng);
+        let raw_bytes = [0xffu8; 64];
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Native(native_val)),
+            encode(IrValue::Curve25519Scalar(ed_scalar_val)),
+            encode(IrValue::Bytes64(raw_bytes)),
+        ]
+        .concat();
+
+        let raw_native_exp = from_bytes64_offcircuit(&IrType::Native, &raw_bytes).unwrap();
+        let raw_ed_exp = from_bytes64_offcircuit(&IrType::Curve25519Scalar, &raw_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(raw_native_exp), encode(raw_ed_exp)].concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
     async fn test_bytes32_low_high_proof() {
         // Exercises bytes32_into_low_high / bytes32_from_low_high:
         //   1. Splits a Bytes32 into its low (first 31 bytes) and high (byte 31) native

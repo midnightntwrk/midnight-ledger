@@ -44,6 +44,7 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
     match (a, b) {
         (Native(x), Native(y)) => Ok(x == y),
         (Bytes32(xs), Bytes32(ys)) => Ok(xs == ys),
+        (Bytes64(xs), Bytes64(ys)) => Ok(xs == ys),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(p == q),
 
         (Secp256k1Point(p), Secp256k1Point(q)) => Ok(p == q),
@@ -94,6 +95,13 @@ pub fn test_eq_incircuit(
         (Native(x), Native(y)) => std_lib.is_equal(layouter, x, y),
 
         (Bytes32(xs), Bytes32(ys)) => {
+            let pair_wise_eqs = (xs.iter().zip(ys.iter()))
+                .map(|(x, y)| std_lib.is_equal(layouter, x, y))
+                .collect::<Result<Vec<_>, plonk::Error>>()?;
+            std_lib.and(layouter, &pair_wise_eqs)
+        }
+
+        (Bytes64(xs), Bytes64(ys)) => {
             let pair_wise_eqs = (xs.iter().zip(ys.iter()))
                 .map(|(x, y)| std_lib.is_equal(layouter, x, y))
                 .collect::<Result<Vec<_>, plonk::Error>>()?;

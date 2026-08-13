@@ -605,6 +605,51 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Transforms the given value into its 64-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    /// * Secp256r1Base
+    /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
+    ///
+    /// The 64-byte representation is the little-endian byte encoding of the
+    /// underlying (canonical) integer. Since all supported values fit in 32
+    /// bytes, the 32 most significant bytes of the output are always zero;
+    /// this instruction exists to allow round-tripping with `FromBytes64`.
+    IntoBytes64 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Constructs an element of the given type from its 64-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    /// * Secp256r1Base
+    /// * Secp256r1Scalar
+    /// * Curve25519Base
+    /// * Curve25519Scalar
+    ///
+    /// The 64 bytes are interpreted as a little-endian integer, which is
+    /// reduced modulo the relevant field order. The wide (64-byte) form is
+    /// needed e.g. for deriving a Curve25519 scalar from a SHA-512 digest
+    /// in ed25519.
+    FromBytes64 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Reverses the byte order of a `Bytes32` value.
     ///
     /// The input must be of type `Bytes32`, otherwise this operation fails. The

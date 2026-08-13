@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use group::ff::FromUniformBytes;
 use midnight_circuits::{
     CircuitField, instructions::DecompositionInstructions, types::AssignedByte,
 };
@@ -47,13 +46,28 @@ use crate::{
 ///
 /// Errors if the input is not a supported type.
 pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrValue, anyhow::Error> {
+    from_bytes_offcircuit(val_t, bytes)
+}
+
+/// Builds (off-circuit) a value of the given type from its 64-byte representation.
+/// Supported for the same types as [from_bytes32_offcircuit].
+///
+/// The 64 bytes are interpreted as a little-endian integer, which is reduced
+/// modulo the relevant field order. The wide (64-byte) form is needed e.g. for
+/// deriving a Curve25519 scalar from a SHA-512 digest in ed25519.
+///
+/// # Errors
+///
+/// Errors if the input is not a supported type.
+pub fn from_bytes64_offcircuit(val_t: &IrType, bytes: &[u8; 64]) -> Result<IrValue, anyhow::Error> {
+    from_bytes_offcircuit(val_t, bytes)
+}
+
+fn from_bytes_offcircuit(val_t: &IrType, bytes: &[u8]) -> Result<IrValue, anyhow::Error> {
     use IrValue::*;
 
-    let mut buffer = [0u8; 64];
-    buffer[..32].copy_from_slice(bytes);
-
     match val_t {
-        IrType::Native => Ok(Native(Fr(F::from_uniform_bytes(&buffer)))),
+        IrType::Native => Ok(Native(Fr(from_le_bytes_with_reduction(bytes)))),
 
         IrType::Secp256k1Base => Ok(Secp256k1Base(from_le_bytes_with_reduction(bytes))),
 
@@ -68,7 +82,8 @@ pub fn from_bytes32_offcircuit(val_t: &IrType, bytes: &[u8; 32]) -> Result<IrVal
         IrType::Curve25519Scalar => Ok(Curve25519Scalar(from_le_bytes_with_reduction(bytes))),
 
         _ => Err(anyhow::anyhow!(
-            "Unsupported from_bytes32 for type {val_t:?}",
+            "Unsupported from_bytes({}) for type {val_t:?}",
+            bytes.len(),
         )),
     }
 }
@@ -97,6 +112,34 @@ pub fn from_bytes32_incircuit(
     layouter: &mut impl Layouter<F>,
     val_t: &IrType,
     bytes: &[AssignedByte<F>; 32],
+) -> Result<CircuitValue, plonk::Error> {
+    from_bytes_incircuit(std_lib, layouter, val_t, bytes)
+}
+
+/// Builds (in-circuit) a value of the given type from its 64-byte representation.
+/// Supported for the same types as [from_bytes32_incircuit].
+///
+/// The 64 bytes are interpreted as a little-endian integer, which is reduced
+/// modulo the relevant field order. The wide (64-byte) form is needed e.g. for
+/// deriving a Curve25519 scalar from a SHA-512 digest in ed25519.
+///
+/// # Errors
+///
+/// Errors if the input is not a supported type.
+pub fn from_bytes64_incircuit(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    val_t: &IrType,
+    bytes: &[AssignedByte<F>; 64],
+) -> Result<CircuitValue, plonk::Error> {
+    from_bytes_incircuit(std_lib, layouter, val_t, bytes)
+}
+
+fn from_bytes_incircuit(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    val_t: &IrType,
+    bytes: &[AssignedByte<F>],
 ) -> Result<CircuitValue, plonk::Error> {
     use CircuitValue::*;
     match val_t {
@@ -139,14 +182,15 @@ pub fn from_bytes32_incircuit(
             .map(Curve25519Scalar),
 
         _ => Err(plonk::Error::Synthesis(format!(
-            "Unsupported from_bytes32 for {val_t:?}",
+            "Unsupported from_bytes({}) for {val_t:?}",
+            bytes.len(),
         ))),
     }
 }
 
-/// Builds a prime field element from the given 32 bytes by interpreting them
+/// Builds a prime field element from the given bytes by interpreting them
 /// in little-endian as an integer. The integer can be bigger than field order.
-pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8; 32]) -> F {
+pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8]) -> F {
     let (_, rem) = BigUint::from_bytes_le(bytes).div_rem_euclid(&F::modulus());
     let mut rem_bytes = rem.to_bytes_le();
     rem_bytes.resize(32, 0);
@@ -161,7 +205,7 @@ mod tests {
     use transient_crypto::curve::Fr;
 
     use super::*;
-    use crate::ir_instructions::into_bytes32::into_bytes32_offcircuit;
+    use crate::ir_instructions::into_bytes32::{into_bytes32_offcircuit, into_bytes64_offcircuit};
 
     // Starts from a random value, converts it into bytes (so as to obtain a
     // valid, canonical 32-byte representation), then goes from those bytes
@@ -212,6 +256,65 @@ mod tests {
         let y = from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap();
         let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
         assert_eq!(bytes2, bytes);
+    }
+
+    // Starts from a random value, converts it into its 64-byte representation
+    // (whose upper half is zero), then goes from those bytes back into a value,
+    // checking that it matches the one we started from.
+    #[test]
+    fn test_from_bytes64_roundtrip() {
+        use IrValue::*;
+
+        let values = [
+            Native(Fr(F::random(OsRng))),
+            Secp256k1Base(k256::Fp::random(OsRng)),
+            Secp256k1Scalar(k256::Fq::random(OsRng)),
+            Secp256r1Base(p256::Fp::random(OsRng)),
+            Secp256r1Scalar(p256::Fq::random(OsRng)),
+            Curve25519Base(curve25519::Fp::random(OsRng)),
+            Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng)),
+        ];
+        for x in values {
+            let bytes: [u8; 64] = into_bytes64_offcircuit(&x).unwrap().try_into().unwrap();
+            assert!(bytes[32..].iter().all(|b| *b == 0));
+            assert_eq!(from_bytes64_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+        }
+    }
+
+    // 64-byte inputs are interpreted in little-endian and reduced modulo each
+    // field's characteristic (wide reduction, as needed e.g. for ed25519).
+    #[test]
+    fn test_from_bytes64_reduces_non_canonical_input() {
+        let bytes = [0xffu8; 64];
+
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Native, &bytes).unwrap(),
+            IrValue::Native(Fr(from_le_bytes_with_reduction(&bytes)))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap(),
+            IrValue::Secp256k1Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap(),
+            IrValue::Secp256k1Scalar(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Secp256r1Base, &bytes).unwrap(),
+            IrValue::Secp256r1Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Secp256r1Scalar, &bytes).unwrap(),
+            IrValue::Secp256r1Scalar(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Curve25519Base, &bytes).unwrap(),
+            IrValue::Curve25519Base(from_le_bytes_with_reduction(&bytes))
+        );
+        assert_eq!(
+            from_bytes64_offcircuit(&IrType::Curve25519Scalar, &bytes).unwrap(),
+            IrValue::Curve25519Scalar(from_le_bytes_with_reduction(&bytes))
+        );
     }
 
     // Non-canonical (out-of-range) bytes are accepted and reduced modulo

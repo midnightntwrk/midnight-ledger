@@ -90,6 +90,11 @@ pub fn constrain_eq_incircuit(
             .zip(ys.iter())
             .try_for_each(|(x, y)| std_lib.assert_equal(layouter, x, y)),
 
+        (Bytes64(xs), Bytes64(ys)) => xs
+            .iter()
+            .zip(ys.iter())
+            .try_for_each(|(x, y)| std_lib.assert_equal(layouter, x, y)),
+
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().assert_equal(layouter, p, q),
 
         (Secp256k1Point(p), Secp256k1Point(q)) => std_lib.secp256k1().assert_equal(layouter, p, q),

@@ -20,11 +20,17 @@ use crate::ir_instructions::encode::{
     native_to_jubjub_scalar,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
-use crate::ir_instructions::from_bytes32::{from_bytes32_incircuit, from_bytes32_offcircuit};
+use crate::ir_instructions::from_bytes32::{
+    from_bytes32_incircuit, from_bytes32_offcircuit, from_bytes64_incircuit,
+    from_bytes64_offcircuit,
+};
 use crate::ir_instructions::from_coordinates::{
     from_coordinates_incircuit, from_coordinates_offcircuit,
 };
-use crate::ir_instructions::into_bytes32::{into_bytes32_incircuit, into_bytes32_offcircuit};
+use crate::ir_instructions::into_bytes32::{
+    into_bytes32_incircuit, into_bytes32_offcircuit, into_bytes64_incircuit,
+    into_bytes64_offcircuit,
+};
 use crate::ir_instructions::into_coordinates::{
     into_coordinates_incircuit, into_coordinates_offcircuit,
 };
@@ -593,6 +599,21 @@ impl IrSource {
                     let x = from_bytes32_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
+                I::IntoBytes64 { input, output } => {
+                    let x = resolve_operand(&memory, input)?;
+                    let bytes = into_bytes64_offcircuit(&x)?;
+                    memory.insert(output.clone(), bytes);
+                }
+                I::FromBytes64 {
+                    val_t,
+                    bytes,
+                    output,
+                } => {
+                    let bytes = resolve_operand(&memory, bytes)?;
+                    let bytes: [u8; 64] = bytes.try_into()?;
+                    let x = from_bytes64_offcircuit(val_t, &bytes)?;
+                    memory.insert(output.clone(), x);
+                }
                 I::ReverseBytes { bytes, output } => {
                     let bytes = resolve_operand(&memory, bytes)?;
                     let mut bytes: [u8; 32] = bytes.try_into()?;
@@ -1122,6 +1143,21 @@ impl Relation for IrSource {
                     let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
                 }
+                I::IntoBytes64 { input, output } => {
+                    let x = resolve_operand(std, layouter, &memory, input)?;
+                    let bytes = into_bytes64_incircuit(std, layouter, &x)?;
+                    mem_insert(output.clone(), bytes, &mut memory)?;
+                }
+                I::FromBytes64 {
+                    val_t,
+                    bytes,
+                    output,
+                } => {
+                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
+                    let bytes: [AssignedByte<outer::Scalar>; 64] = bytes.try_into()?;
+                    let x = from_bytes64_incircuit(std, layouter, val_t, &bytes)?;
+                    memory.insert(output.clone(), x);
+                }
                 I::ReverseBytes { bytes, output } => {
                     let bytes = resolve_operand(std, layouter, &memory, bytes)?;
                     let mut bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
@@ -1217,11 +1253,14 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             // We can figure out if a type is used in the circuit by looking at the entry
-            // points, currently: PublicInput or PrivateInput.
+            // points, currently: PublicInput, PrivateInput, or the bytes-to-value
+            // conversions, which can introduce values of a type that appears nowhere
+            // in the circuit's inputs.
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::PublicInput { val_t, .. } | I::PrivateInput { val_t, .. } => {
-                    target_types.contains(val_t)
-                }
+                I::PublicInput { val_t, .. }
+                | I::PrivateInput { val_t, .. }
+                | I::FromBytes32 { val_t, .. }
+                | I::FromBytes64 { val_t, .. } => target_types.contains(val_t),
                 _ => false,
             });
 

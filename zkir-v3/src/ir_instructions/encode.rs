@@ -48,6 +48,14 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
                 F::from_bytes_le(&high).unwrap(),
             ]
         }
+        IrValue::Bytes64(bs) => [&bs[..31], &bs[31..62], &bs[62..]]
+            .iter()
+            .map(|chunk| {
+                let mut padded = [0u8; 32];
+                padded[..chunk.len()].copy_from_slice(chunk);
+                F::from_bytes_le(&padded).unwrap()
+            })
+            .collect(),
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
         IrValue::JubjubScalar(s) => {
             let encoded = AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s);
@@ -93,6 +101,11 @@ pub fn encode_incircuit(
         CircuitValue::Bytes32(bs) => Ok(vec![
             std_lib.assigned_from_le_bytes(layouter, &bs[..31])?,
             bs[31].clone().into(),
+        ]),
+        CircuitValue::Bytes64(bs) => Ok(vec![
+            std_lib.assigned_from_le_bytes(layouter, &bs[..31])?,
+            std_lib.assigned_from_le_bytes(layouter, &bs[31..62])?,
+            std_lib.assigned_from_le_bytes(layouter, &bs[62..])?,
         ]),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
         CircuitValue::JubjubScalar(s) => {
@@ -161,6 +174,22 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
 
                 bytes[31] = high[0];
                 Some(IrValue::Bytes32(bytes))
+            }
+        }
+
+        IrType::Bytes64 => {
+            if encoded.len() != 3 {
+                None
+            } else {
+                let mut bytes = [0u8; 64];
+                for (chunk, limb) in [(0usize..31, 0), (31..62, 1), (62..64, 2)] {
+                    let limb_bytes = encoded[limb].to_bytes_le();
+                    for b in limb_bytes.iter().skip(chunk.len()) {
+                        assert_eq!(*b, 0);
+                    }
+                    bytes[chunk.clone()].copy_from_slice(&limb_bytes[..chunk.len()]);
+                }
+                Some(IrValue::Bytes64(bytes))
             }
         }
 
