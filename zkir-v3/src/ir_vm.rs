@@ -539,27 +539,8 @@ impl IrSource {
                     alignment,
                     inputs,
                     output,
-                } => {
-                    let inputs = inputs
-                        .iter()
-                        .map(|i| resolve_operand(&memory, i))
-                        .map(|r| r.and_then(|v| v.try_into()))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let value = alignment.parse_field_repr(&inputs).ok_or_else(|| {
-                        error!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})");
-                        anyhow!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})")
-                    })?;
-                    let mut repr = Vec::new();
-                    ValueReprAlignedValue(value).binary_repr(&mut repr);
-                    trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash_output: [u8; 32] = match ins {
-                        I::PersistentHash { .. } => Sha256::digest(&repr).into(),
-                        I::Keccak256 { .. } => Keccak256::digest(&repr).into(),
-                        _ => unreachable!(),
-                    };
-                    memory.insert(output.clone(), IrValue::Bytes(hash_output.to_vec()));
                 }
-                I::Sha512 {
+                | I::Sha512 {
                     alignment,
                     inputs,
                     output,
@@ -576,8 +557,13 @@ impl IrSource {
                     let mut repr = Vec::new();
                     ValueReprAlignedValue(value).binary_repr(&mut repr);
                     trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash_output: [u8; 64] = Sha512::digest(&repr).into();
-                    memory.insert(output.clone(), IrValue::Bytes(hash_output.to_vec()));
+                    let hash_output: Vec<u8> = match ins {
+                        I::PersistentHash { .. } => Sha256::digest(&repr).to_vec(),
+                        I::Keccak256 { .. } => Keccak256::digest(&repr).to_vec(),
+                        I::Sha512 { .. } => Sha512::digest(&repr).to_vec(),
+                        _ => unreachable!(),
+                    };
+                    memory.insert(output.clone(), IrValue::Bytes(hash_output));
                 }
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
@@ -1051,27 +1037,8 @@ impl Relation for IrSource {
                     alignment,
                     inputs,
                     output,
-                } => {
-                    let mut resolved_inputs = Vec::new();
-                    for inp in inputs {
-                        let x = resolve_operand(std, layouter, &memory, inp)?;
-                        let x: AssignedNative<_> = x.try_into()?;
-                        resolved_inputs.push(x);
-                    }
-                    let inputs = resolved_inputs;
-                    let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let hash_output = match ins {
-                        I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?,
-                        I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?,
-                        _ => unreachable!(),
-                    };
-                    mem_insert(
-                        output.clone(),
-                        CircuitValue::Bytes(hash_output.to_vec()),
-                        &mut memory,
-                    )?;
                 }
-                I::Sha512 {
+                | I::Sha512 {
                     alignment,
                     inputs,
                     output,
@@ -1082,11 +1049,17 @@ impl Relation for IrSource {
                         let x: AssignedNative<_> = x.try_into()?;
                         resolved_inputs.push(x);
                     }
-                    let bytes = fab_decode_to_bytes(std, layouter, alignment, &resolved_inputs)?;
-                    let hash_output = std.sha2_512(layouter, &bytes)?;
+                    let inputs = resolved_inputs;
+                    let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
+                    let hash_output = match ins {
+                        I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?.to_vec(),
+                        I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?.to_vec(),
+                        I::Sha512 { .. } => std.sha2_512(layouter, &bytes)?.to_vec(),
+                        _ => unreachable!(),
+                    };
                     mem_insert(
                         output.clone(),
-                        CircuitValue::Bytes(hash_output.to_vec()),
+                        CircuitValue::Bytes(hash_output),
                         &mut memory,
                     )?;
                 }
