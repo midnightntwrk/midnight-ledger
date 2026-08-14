@@ -1,10 +1,12 @@
-// This file is part of midnight-ledger.
-// Copyright (C) Midnight Foundation
+// This file is part of Compact.
+// Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
-// You may not use this file except in compliance with the License.
+// you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// http://www.apache.org/licenses/LICENSE-2.0
+//
+//  	http://www.apache.org/licenses/LICENSE-2.0
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,7 +28,7 @@ struct CoinPreimage {
 
 ledger merkleTree: HistoricMerkleTree<32, Bytes<32>>;
 ledger nullifiers: Set<Bytes<32>>;
-ledger valueCom: CurvePoint;
+ledger valueCom: JubjubPoint;
 ledger contractAddr: ContractAddress;
 ledger publicKey: ZswapCoinPublicKey;
 ledger segment: Uint<16>;
@@ -60,8 +62,8 @@ export circuit spend(
     contractAddr = disclose(sk.right);
   }
   const colorBase = hashToCurve<[Bytes<32>, Uint<16>]>([coin.color, segment]);
-  const pedersenBlinding = ecMulGenerator(rc);
-  const pedersenCommit = ecMul(colorBase, coin.value);
+  const pedersenBlinding = ecMulGenerator(rc as JubjubScalar);
+  const pedersenCommit = ecMul(colorBase, coin.value as JubjubScalar);
   valueCom = disclose(ecAdd(pedersenBlinding, pedersenCommit));
 }
 
@@ -96,8 +98,8 @@ export circuit output(
     contractAddr = disclose(pk.right);
   }
   const colorBase = hashToCurve<[Bytes<32>, Uint<16>]>([coin.color, segment]);
-  const pedersenBlinding = ecMulGenerator(rc);
-  const pedersenCommit = ecMul(colorBase, coin.value);
+  const pedersenBlinding = ecMulGenerator(rc as JubjubScalar);
+  const pedersenCommit = ecMul(colorBase, coin.value as JubjubScalar);
   valueCom = disclose(ecAdd(pedersenBlinding, pedersenCommit));
 }
 
