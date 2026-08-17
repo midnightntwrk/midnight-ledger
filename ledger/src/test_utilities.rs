@@ -52,7 +52,6 @@ use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
-#[cfg(feature = "proving")]
 use std::env;
 use std::io;
 use storage::Storable;
