@@ -11,10 +11,6 @@ members = [
     "onchain-state",
     "onchain-vm",
     "storage",
-    "zkir",
-    "zkir-v3",
-    "zkir-wasm",
-    "zkir-v3-wasm",
     "transient-crypto",
     "base-crypto",
     "base-crypto-derive",
@@ -33,7 +29,6 @@ default-members = [
     "onchain-state",
     "onchain-vm",
     "storage",
-    "zkir",
     "base-crypto",
     "base-crypto-derive",
     "transient-crypto",
@@ -69,6 +64,13 @@ panic = "abort"
 [patch.crates-io]
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
+midnight-transient-crypto = { path = "transient-crypto" }
+# The zkir crates now live in a sibling checkout, ahead of their move to their
+# own repository (midnight-zkir). Once they are published to crates.io, these
+# patches can be dropped.
+midnight-zkir = { path = "../zkir/zkir" }
+midnight-zkir-v3 = { path = "../zkir/zkir-v3" }
+midnight-zkir-wasm = { path = "../zkir/zkir-wasm" }
 # Because we rely on additions in 2.2
 midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto" }
 
