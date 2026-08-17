@@ -52,6 +52,7 @@ use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
+#[cfg(feature = "proving")]
 use std::env;
 use std::io;
 use storage::Storable;
@@ -1003,6 +1004,11 @@ impl ProvingProvider for ProofServerProvider<'_> {
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
                 ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => Ok(proof),
+                #[cfg(feature = "proof-aggregation")]
+                ProofVersioned::Aggregated(_) => anyhow::bail!(
+                    "proving server returned an aggregated proof; \
+                     only V2/V3 proofs are expected here"
+                ),
             }
         } else {
             anyhow::bail!(

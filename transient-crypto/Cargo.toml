@@ -11,11 +11,11 @@ default = []
 cli = ["base-crypto/cli"]
 proof-aggregation = ["dep:midnight-aggregation"]
 proptest = [
-  "dep:proptest",
-  "dep:proptest-derive",
-  "base-crypto/proptest",
-  "serialize/proptest",
-  "storage-core/proptest",
+    "dep:proptest",
+    "dep:proptest-derive",
+    "base-crypto/proptest",
+    "serialize/proptest",
+    "storage-core/proptest",
 ]
 mock-verify = []
 public-internal-structure = []
@@ -32,7 +32,7 @@ midnight-curves = { version = "^0.3.1" }
 midnight-proofs = { version = "^0.8.1" }
 midnight-circuits = { version = "^7.2.2" }
 midnight-zk-stdlib = { version = "^2.3.3" }
-midnight-aggregation = { version = "^0.1.2", optional = true }
+midnight-aggregation = { version = "^0.1.2", optional = true, features = ["truncated-challenges", "fewer-point-sets"] }
 anyhow = { version = "^1.0.102" }
 lru = "0.18.0"
 

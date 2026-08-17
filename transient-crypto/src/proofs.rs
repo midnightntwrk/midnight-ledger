@@ -143,7 +143,7 @@ impl ParamsVerifier {
     }
 }
 
-const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_midnight_2p14");
+pub(crate) const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_midnight_2p14");
 
 lazy_static! {
     /// The midnight verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
@@ -536,6 +536,16 @@ impl VerifierKey {
     pub fn init(&self) -> Result<(), VerifyingError> {
         self.force_init()?;
         Ok(())
+    }
+
+    /// Returns the inner [`MidnightVK`], initialising from raw bytes if needed.
+    ///
+    /// Required for constructing [`midnight_zk_stdlib::MidnightVK`]-typed witnesses
+    /// when building [`transient_crypto::aggregation::AggregationWitness`] values
+    /// during proof aggregation.
+    #[cfg(feature = "proof-aggregation")]
+    pub fn midnight_vk(&self) -> Result<MidnightVK, VerifyingError> {
+        self.force_init()
     }
 
     // warning! This grabs the lock! Make sure to drop the result before re-running!

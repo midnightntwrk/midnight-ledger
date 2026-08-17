@@ -26,10 +26,42 @@
 pub use midnight_aggregation::{
     ivc::{IvcError, IvcInstance, IvcVerifier, setup as ivc_setup},
     multi_circuit_aggregator::{
-        AggregableRelation, AggregationWitness, Aggregator, InnerCircuitsContext,
-        ProofAggregation, Verifier as AggregationVerifier,
+        AggregableRelation, AggregationWitness, Aggregator, InnerCircuitsContext, ProofAggregation,
+        Verifier as AggregationVerifier,
     },
 };
+pub use midnight_zk_stdlib::MidnightVK;
+
+use midnight_curves::Bls12;
+use midnight_proofs::{
+    poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    utils::SerdeFormat,
+};
+
+/// Returns the K=14 inner-circuit verifier params from the embedded Midnight SRS.
+///
+/// Suitable for passing to [`InnerCircuitsContext::new`] when aggregating V3 proofs
+/// produced by zkir-v3 circuits compiled against the default Midnight trusted setup.
+pub fn inner_verifier_params() -> ParamsVerifierKZG<Bls12> {
+    crate::proofs::ParamsProver::read(crate::proofs::PARAMS_VERIFIER_RAW)
+        .expect("embedded inner SRS bytes are valid")
+        .0
+        .verifier_params()
+}
+
+/// Reads `{dir}/bls_midnight_2p{k}` and returns the full [`ParamsKZG`].
+///
+/// Intended for loading the outer aggregator SRS (typically K=19) before
+/// calling [`ProofAggregation::setup`]. Returns an error if the file cannot
+/// be opened or parsed.
+pub fn load_midnight_srs(dir: &std::path::Path, k: u32) -> std::io::Result<ParamsKZG<Bls12>> {
+    let path = dir.join(format!("bls_midnight_2p{k}"));
+    let mut reader = std::io::BufReader::new(std::fs::File::open(&path)?);
+    Ok(ParamsKZG::<Bls12>::read_custom(
+        &mut reader,
+        SerdeFormat::RawBytesUnchecked,
+    )?)
+}
 
 /// Opaque pre-aggregated IVC proof bundle for inclusion in a transaction.
 ///
