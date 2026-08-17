@@ -552,8 +552,12 @@ impl VerifierKey {
             InnerVerifierKey::Uninitialized(data) => data.clone(),
         };
         let reader = &mut &data[..];
-        let vk = MidnightVK::read(reader, SerdeFormat::Processed)
-            .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
+        let vk = MidnightVK::read(reader, SerdeFormat::Processed).map_err(|e| {
+            anyhow::anyhow!(
+                "problem reading the verifier key ({} bytes): {e}",
+                data.len()
+            )
+        })?;
         *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
         Ok(vk)
     }
@@ -582,13 +586,22 @@ impl VerifierKey {
         proof: &Proof,
         statement: F,
     ) -> Result<(), VerifyingError> {
-        let vk = self.force_init()?;
+        let vk = self
+            .force_init()
+            .map_err(|e| anyhow::anyhow!("verifier key initialization: {e}"))?;
         let pi = statement.map(|f| f.0).collect::<Vec<_>>();
         trace!(statement = ?pi, "verifying proof against statement");
         midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash>(
             &params.0, &vk, &pi, None, &proof.0,
         )
-        .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "invalid proof: {e} (vk k: {}, public inputs: {}, proof size: {} bytes)",
+                vk.k(),
+                pi.len(),
+                proof.0.len(),
+            )
+        })
     }
 
     /// Mocks the checking of a proof against a statement
@@ -637,9 +650,13 @@ impl VerifierKey {
         let mut pis = vec![];
         let mut proofs = vec![];
 
-        for (vk, proof, stmt) in parts.into_iter() {
+        for (i, (vk, proof, stmt)) in parts.into_iter().enumerate() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
-            let vk = vk.force_init().map_err(BatchVerifyError::Unlocalized)?;
+            let vk = vk.force_init().map_err(|e| {
+                BatchVerifyError::Unlocalized(anyhow::anyhow!(
+                    "verifier key initialization (proof {i}): {e}"
+                ))
+            })?;
             vks.push(vk);
             pis.push(pi);
             proofs.push(proof.0.clone());
@@ -650,7 +667,11 @@ impl VerifierKey {
                 midnight_proofs::plonk::Error::BatchOpening(indices) => {
                     BatchVerifyError::InvalidProofs(indices)
                 }
-                _ => BatchVerifyError::Unlocalized(anyhow::anyhow!("Invalid proof")),
+                e => BatchVerifyError::Unlocalized(anyhow::anyhow!(
+                    "invalid proof batch: {e} (batch size: {}, public inputs: {:?})",
+                    vks.len(),
+                    pis.iter().map(|pi| pi.len()).collect::<Vec<_>>(),
+                )),
             },
         )
     }

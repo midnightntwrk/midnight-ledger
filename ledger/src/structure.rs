@@ -556,6 +556,25 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
         };
 
+        // Annotates a failure with what is needed to tell *which* part of the
+        // verification failed: the stage it failed at, the proof version, the
+        // operation it was checked against, and the shape of the statement.
+        let pis_len = pis.len();
+        let describe = |stage: &str, err: anyhow::Error| {
+            let version = match proof {
+                ProofVersioned::V2(_) => "V2",
+                ProofVersioned::V3(_) => "V3",
+            };
+            let err = anyhow::anyhow!(
+                "{stage} of {version} proof for {:?}/{:?} failed ({pis_len} public inputs, {} proof bytes): {err:#}",
+                call.address,
+                call.entry_point,
+                inner_proof.0.len(),
+            );
+            warn!("{err:#}");
+            MalformedTransaction::<D>::InvalidProof(err)
+        };
+
         match proof {
             ProofVersioned::V2(_) => {
                 let vk = op.v2_vk().ok_or_else(|| {
@@ -574,16 +593,14 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk
                         .mock_verify(old_pis)
-                        .map_err(|e| anyhow::anyhow!("v1 mock verification: {e}"))
-                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                        .map_err(|e| describe("mock verification", anyhow::anyhow!("{e:#}"))),
                     _ => vk
                         .verify(
                             &transient_crypto_old::proofs::PARAMS_VERIFIER,
                             &old_proof,
                             old_pis,
                         )
-                        .map_err(|e| anyhow::anyhow!("v1 verification: {e}"))
-                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                        .map_err(|e| describe("verification", anyhow::anyhow!("{e:#}"))),
                 }
             }
             ProofVersioned::V3(_) => {
@@ -598,10 +615,10 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk
                         .mock_verify(pis.into_iter())
-                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                        .map_err(|e| describe("mock verification", e)),
                     _ => vk
                         .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
-                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                        .map_err(|e| describe("verification", e)),
                 }
             }
         }
