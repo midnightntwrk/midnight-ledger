@@ -869,10 +869,11 @@ pub struct ProofPreimage {
     pub public_transcript_inputs: Vec<Fr>,
     /// A public statement vector encoding statement call results in the IR.
     pub public_transcript_outputs: Vec<Fr>,
-    /// Opaque, prover-supplied byte blobs consumed positionally by `VerifyProof`
-    /// instructions — one blob per `VerifyProof`, in instruction order. These
-    /// are the inner proofs being verified in-circuit; the proof system does not
-    /// interpret them (they are handed verbatim to the decider as a witness).
+    /// Opaque, prover-supplied byte blobs consumed positionally by `InnerProof`
+    /// instructions — one blob per `InnerProof`, in instruction order. These are
+    /// the inner proofs verified in-circuit by the `VerifyProof` instructions
+    /// that consume them; the proof system does not interpret them (they are
+    /// handed verbatim to the decider as a witness).
     pub proof_witnesses: Vec<Vec<u8>>,
     /// An arbitrary input to be bound to in the proof.
     pub binding_input: Fr,

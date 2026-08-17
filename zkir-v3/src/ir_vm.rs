@@ -59,7 +59,7 @@ use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged
 use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
@@ -77,8 +77,8 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
-    /// The prover-supplied inner-proof witnesses. Used to run the 
-    /// in-circuit verifier.
+    /// The prover-supplied inner-proof witnesses, in `InnerProof` order. Used
+    /// to run the in-circuit verifier.
     pub inner_proof_witnesses: Vec<Vec<u8>>,
 }
 
@@ -211,13 +211,53 @@ impl IrSource {
         offsets
     }
 
+    /// Indexes [`IrSource::verify_proof_vks`] by digest, so each `VerifyProof`
+    /// can resolve its key by `vk_hash`.
+    ///
+    /// Rejects a duplicated blob, and one left unused by every instruction, so
+    /// the side-table stays a canonical set of the keys the circuit needs.
+    fn resolve_verify_proof_vks(&self) -> anyhow::Result<HashMap<Vec<u8>, &[u8]>> {
+        let mut vk_map: HashMap<Vec<u8>, &[u8]> = HashMap::new();
+        for vk_blob in self.verify_proof_vks.iter() {
+            let vk_hash = Sha256::digest(vk_blob).to_vec();
+            if vk_map.insert(vk_hash, vk_blob).is_some() {
+                bail!("duplicate verifying key in `verify_proof_vks`");
+            }
+        }
+
+        let mut used = HashSet::new();
+        for ins in self.instructions.iter() {
+            if let I::VerifyProof { vk_hash, .. } = ins {
+                if !vk_map.contains_key(vk_hash) {
+                    bail!(
+                        "no verifying key in `verify_proof_vks` for vk_hash 0x{}",
+                        const_hex::encode(vk_hash)
+                    );
+                }
+                used.insert(vk_hash);
+            }
+        }
+        
+        if used.len() != vk_map.len() {
+            bail!(
+                "`verify_proof_vks` holds {} keys but only {} are used",
+                vk_map.len(),
+                used.len()
+            );
+        }
+        Ok(vk_map)
+    }
+
     /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
     /// to produce a public input vector, and public input skip information.
     pub(crate) fn preprocess(
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
+        let verify_proof_vks = self.resolve_verify_proof_vks()?;
+
         let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
+        let mut proofs: HashMap<Identifier, Vec<u8>> = HashMap::new();
 
         let mut idx = 0;
         for input_id in self.inputs.iter() {
@@ -254,7 +294,7 @@ impl IrSource {
         let mut public_transcript_inputs_idx: usize = 0;
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
-        let mut nb_verify_proof_calls: usize = 0;
+        let mut proof_witnesses_idx: usize = 0;
         let mut outputs = Vec::new();
         let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
             let res = memory
@@ -674,33 +714,46 @@ impl IrSource {
                         outputs.push(value);
                     }
                 }
-                I::VerifyProof { vk_hash, instance } => {
+                I::VerifyProof {
+                    vk_hash,
+                    instance,
+                    proof,
+                } => {
                     let instance = instance
                         .iter()
                         .map(|op| resolve_operand(&memory, op))
                         .map(|r| r.and_then(|v| Ok::<_, anyhow::Error>(Fr::try_from(v)?.0)))
                         .collect::<Result<Vec<outer::Scalar>, _>>()?;
 
-                    let idx = nb_verify_proof_calls;
-                    nb_verify_proof_calls += 1;
+                    let proof = proofs
+                        .get(proof)
+                        .ok_or_else(|| anyhow!("not an inner proof: {:?}", proof))?;
 
-                    // The inner proof is taken from the preimage.
-                    let proof = preimage.proof_witnesses.get(idx).ok_or_else(|| {
-                        anyhow!("missing proof witness for VerifyProof #{idx}")
+                    let vk_blob = verify_proof_vks.get(vk_hash).ok_or_else(|| {
+                        anyhow!(
+                            "no verifying key for vk_hash 0x{}",
+                            const_hex::encode(vk_hash)
+                        )
                     })?;
-
-                    // Check the provided VK matches the hash in the IR.
-                    let vk_blob = self.verify_proof_vks.get(idx).ok_or_else(|| {
-                        anyhow!("missing verifying key for VerifyProof #{idx}")
-                    })?;
-                    if Sha256::digest(vk_blob).to_vec() != *vk_hash {
-                        bail!("verifying key for VerifyProof #{idx} does not match its vk_hash");
-                    }
 
                     let acc_pis = verify_proof_offcircuit(vk_blob, &instance, proof)?;
                     for f in acc_pis {
                         pis.push(Fr(f));
                     }
+                }
+                I::InnerProof { output } => {
+                    let proof = preimage
+                        .proof_witnesses
+                        .get(proof_witnesses_idx)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Not enough proof witnesses: ran out at index {}",
+                                proof_witnesses_idx
+                            )
+                        })?
+                        .clone();
+                    proof_witnesses_idx += 1;
+                    proofs.insert(output.clone(), proof);
                 }
             }
         }
@@ -719,18 +772,11 @@ impl IrSource {
                 "Transcripts not fully consumed");
             bail!("Transcripts not fully consumed");
         }
-        if preimage.proof_witnesses.len() != nb_verify_proof_calls {
+        if preimage.proof_witnesses.len() != proof_witnesses_idx {
             bail!(
-                "Expected {} proof witnesses (one per VerifyProof), received {}",
-                nb_verify_proof_calls,
+                "Expected {} proof witnesses (one per InnerProof), received {}",
+                proof_witnesses_idx,
                 preimage.proof_witnesses.len()
-            );
-        }
-        if self.verify_proof_vks.len() != nb_verify_proof_calls {
-            bail!(
-                "Expected {} verifying keys (one per VerifyProof), received {}",
-                nb_verify_proof_calls,
-                self.verify_proof_vks.len()
             );
         }
         if self.do_communications_commitment {
@@ -784,6 +830,10 @@ impl Relation for IrSource {
         _instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
+        let verify_proof_vks = self
+            .resolve_verify_proof_vks()
+            .map_err(|e| Error::Synthesis(e.to_string()))?;
+
         let mut input_values = Vec::new();
         for id in &self.inputs {
             let value = witness.as_ref().map(|preproc| {
@@ -800,6 +850,7 @@ impl Relation for IrSource {
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
         let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
+        let mut proofs: HashMap<Identifier, Value<Vec<u8>>> = HashMap::new();
 
         for (id, value) in self.inputs.iter().zip(input_values) {
             let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
@@ -896,7 +947,7 @@ impl Relation for IrSource {
         } else {
             None
         };
-        let mut verify_proof_idx: usize = 0;
+        let mut inner_proof_idx: usize = 0;
         for ins in self.instructions.iter() {
             match ins {
                 I::Encode { input, outputs } => {
@@ -1255,6 +1306,7 @@ impl Relation for IrSource {
                 I::VerifyProof {
                     vk_hash,
                     instance,
+                    proof,
                 } => {
                     let mut assigned_instance = Vec::new();
                     for op in instance {
@@ -1263,21 +1315,17 @@ impl Relation for IrSource {
                         assigned_instance.push(x);
                     }
 
-                    // The inner proof is taken from the preimage.
-                    let idx = verify_proof_idx;
-                    verify_proof_idx += 1;
-                    let proof_value: Value<Vec<u8>> =
-                        witness.as_ref().map(|w| w.inner_proof_witnesses[idx].clone());
+                    let proof_value = proofs
+                        .get(proof)
+                        .cloned()
+                        .ok_or_else(|| Error::Synthesis(format!("not an inner proof: {proof:?}")))?;
 
-                    // Check the provided VK matches the hash in the IR.
-                    let vk_blob = self.verify_proof_vks.get(idx).ok_or_else(|| {
-                        Error::Synthesis(format!("missing verifying key for VerifyProof #{idx}"))
+                    let vk_blob = verify_proof_vks.get(vk_hash).ok_or_else(|| {
+                        Error::Synthesis(format!(
+                            "no verifying key for vk_hash 0x{}",
+                            const_hex::encode(vk_hash)
+                        ))
                     })?;
-                    if Sha256::digest(vk_blob).to_vec() != *vk_hash {
-                        return Err(Error::Synthesis(format!(
-                            "verifying key for VerifyProof #{idx} does not match its vk_hash"
-                        )));
-                    }
 
                     verify_proof_incircuit(
                         std,
@@ -1287,6 +1335,14 @@ impl Relation for IrSource {
                         proof_value,
                     )?;
                     pi_idx += accumulator_pi_len();
+                }
+                I::InnerProof { output } => {
+                    let idx = inner_proof_idx;
+                    inner_proof_idx += 1;
+                    let proof_value = witness
+                        .as_ref()
+                        .map(|w| w.inner_proof_witnesses[idx].clone());
+                    proofs.insert(output.clone(), proof_value);
                 }
             }
         }

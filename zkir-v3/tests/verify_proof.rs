@@ -11,27 +11,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Shows the ZKIR text format of the `verify_proof` instruction.
+//! Shows the ZKIR text format of the `inner_proof` / `verify_proof` pair.
 //!
-//! The instruction carries only the **hash** of the inner circuit's verifying
-//! key, rendered as a `0x`-prefixed hex string:
+//! `inner_proof` binds the next prover-supplied inner proof
+//! (`ProofPreimage::proof_witnesses`) to a name, and `verify_proof` takes that
+//! name as its third input, alongside:
 //!
 //! - `vk_hash`: hash of the decider-tagged, self-contained `MidnightVK` blob
 //!   (the blob's leading byte is the decider tag, `0x00` = the Standard
 //!   decider). The full VK is resolved out-of-band and carried in the IR's
-//!   `verify_proof_vks` side-table; the canonical text stores only the hash.
+//!   `verify_proof_vks` side-table, keyed by this hash; the canonical text
+//!   stores only the hash.
 //! - `instance`: the inner proof's public inputs, as ordinary `Native`
 //!   operands (variable references or `0x`-hex immediates).
 //!
-//! The inner proof is *not* in the instruction — it is a prover-supplied
-//! witness (`ProofPreimage::proof_witnesses`). The `vk_hash` here is fake —
-//! this test exercises only the text format and round-trip, not verification.
+//! The `vk_hash` here is fake — this test exercises only the text format and
+//! round-trip, not verification.
 
 use midnight_zkir_v3::IrSource;
 
-/// Canonical, hash-only `verify_proof` IR: the instruction stores just the VK
-/// hash; the inner statement is the single public input `%v_0`. Neither the
-/// full VK nor the proof appears in the text — both are supplied out-of-band.
+/// Canonical, hash-only IR: `%p_0` is bound to the inner proof, the inner
+/// statement is the single public input `%v_0`, and the instruction stores just
+/// the VK hash. Neither the full VK nor the proof appears in the text — both
+/// are supplied out-of-band.
 const VERIFY_PROOF_IR: &str = r#"{
    "version": { "major": 3, "minor": 0 },
    "inputs": [
@@ -41,9 +43,14 @@ const VERIFY_PROOF_IR: &str = r#"{
    "do_communications_commitment": false,
    "instructions": [
        {
+           "op": "inner_proof",
+           "output": "%p_0"
+       },
+       {
            "op": "verify_proof",
            "vk_hash": "0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
-           "instance": ["%v_0"]
+           "instance": ["%v_0"],
+           "proof": "%p_0"
        }
    ]
 }"#;
@@ -63,9 +70,12 @@ fn verify_proof_text_format_roundtrips() {
     let json = serde_json::to_string_pretty(&ir).expect("IrSource serializes");
     println!("{json}");
 
-    // The instruction is tagged `verify_proof`, the VK hash survives the
-    // round-trip as a `0x` hex string, and the empty VK side-table is omitted.
+    // Both instructions survive the round-trip, the proof flows from one to the
+    // other by name, the VK hash stays a `0x` hex string, and the empty VK
+    // side-table is omitted.
+    assert!(json.contains("inner_proof"), "op tag missing:\n{json}");
     assert!(json.contains("verify_proof"), "op tag missing:\n{json}");
+    assert!(json.contains("%p_0"), "proof operand missing:\n{json}");
     assert!(
         json.contains("0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"),
         "vk_hash hex missing:\n{json}"

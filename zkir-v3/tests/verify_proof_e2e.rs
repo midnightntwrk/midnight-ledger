@@ -20,8 +20,9 @@
 //!      Blake2b transcript.
 //!   2. Serialize its `MidnightVK` (Processed) as the VK blob, and take the raw
 //!      proof bytes.
-//!   3. Build an outer ZKIR circuit whose only instruction is `verify_proof`,
-//!      embedding that VK + proof + the inner public input (as hex in the IR).
+//!   3. Build an outer ZKIR circuit that binds the proof with `inner_proof` and
+//!      verifies it with `verify_proof`, against that VK and the inner public
+//!      input (as hex in the IR).
 //!   4. keygen the outer circuit (which records the accumulator's public-input
 //!      offset in the verifying key); then prove it and verify, where verifying
 //!      runs the deferred pairing check on the inner proof's accumulator.
@@ -36,8 +37,8 @@
 use std::fs::File;
 use std::io::BufReader;
 
-use sha2::Digest;
 use midnight_circuits::hash::poseidon::PoseidonState;
+use sha2::Digest;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
 use midnight_circuits::types::AssignedNative;
 use midnight_curves::Fq;
@@ -151,11 +152,12 @@ async fn verify_proof_end_to_end() {
         blob
     };
 
-    // ---- 3. Outer ZKIR circuit: one verify_proof instruction ------------
+    // ---- 3. Outer ZKIR circuit: inner_proof + verify_proof --------------
     // Built via JSON (`IrSource::load`). The canonical IR is hash-only: the
     // instruction stores just `hash(vk_blob)`, the inner public input is the
-    // immediate `0x7b` (= 123). The full VK is supplied out-of-band below.
-    let vk_hash = sha2::Sha256::digest(&vk_blob).to_vec();
+    // immediate `0x7b` (= 123), and the proof arrives by name from
+    // `inner_proof`. The full VK is supplied out-of-band below.
+    let vk_hash = sha2::Sha256::digest(&vk_blob);
     let ir_json = format!(
         r#"{{
            "version": {{ "major": 3, "minor": 0 }},
@@ -164,19 +166,24 @@ async fn verify_proof_end_to_end() {
            "do_communications_commitment": false,
            "instructions": [
                {{
+                   "op": "inner_proof",
+                   "output": "%p_0"
+               }},
+               {{
                    "op": "verify_proof",
                    "vk_hash": "0x{vk_hash_hex}",
-                   "instance": ["0x7b"]
+                   "instance": ["0x7b"],
+                   "proof": "%p_0"
                }}
            ]
         }}"#,
-        vk_hash_hex = const_hex::encode(&vk_hash),
+        vk_hash_hex = const_hex::encode(vk_hash),
     );
     let mut outer_ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
 
     // Resolve the full VK out-of-band (at "compile time"): the hash-only IR
-    // gains its VK side-table, in `VerifyProof` order. keygen/proving check
-    // each blob hashes to the instruction's `vk_hash`.
+    // gains its VK side-table. Both passes index it by digest, so the
+    // instruction's `vk_hash` resolves to this blob.
     outer_ir.verify_proof_vks = vec![vk_blob];
 
     // ---- 4. keygen + prove + verify the outer ZKIR circuit --------------

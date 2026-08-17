@@ -48,7 +48,7 @@ pub struct IrSource {
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
     /// Full verifying keys for the circuit's `VerifyProof` instructions, in
-    /// instruction order (the i-th `VerifyProof` uses the i-th blob).
+    /// instruction order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_proof_vks: Vec<Vec<u8>>,
 }
@@ -924,27 +924,37 @@ pub enum Instruction {
         /// The values returned, one per `IrSource::outputs[i]`.
         vals: Vec<Operand>,
     },
-    /// Verifies an inner Plonk proof in-circuit. The resulting accumulator 
-    /// is exposed as public inputs (its in-circuit value is constrained 
-    /// equal to them). The final pairing check on that accumulator is 
+    /// Verifies an inner Plonk proof in-circuit. The resulting accumulator
+    /// is exposed as public inputs (its in-circuit value is constrained
+    /// equal to them). The final pairing check on that accumulator is
     /// deferred to the outer verifier.
-    /// 
-    /// The inner proof itself is *not* part of the instruction: it is a
-    /// prover-supplied witness, consumed positionally from
-    /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage)
-    /// (the i-th `VerifyProof` takes the i-th blob).
     ///
-    /// The VK is fixed circuit data. The `vk_hash` binds which VK the 
-    /// circuit was compiled against; keygen/proving check that the 
-    /// resolved blob hashes to it.
+    /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
+    /// which VK the circuit was compiled against.
     ///
     /// No outputs.
     VerifyProof {
-        /// Hash of the inner proof verifying key. 
+        /// Hash of the inner proof verifying key.
         #[serde(with = "const_hex::serde")]
         vk_hash: Vec<u8>,
         /// The inner proof's public inputs (each of type `Native`).
         instance: Vec<Operand>,
+        /// The proof to verify, as bound by an `InnerProof` instruction.
+        proof: Identifier,
+    },
+    /// Off-circuit (preprocessing):
+    /// Binds `output` to the next inner proof from
+    /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage),
+    /// consumed in instruction order.
+    ///
+    /// In-circuit:
+    /// Binds `output` to the same blob as a free prover witness. It carries no
+    /// constraints of its own.
+    ///
+    /// One output, the inner proof.
+    InnerProof {
+        /// The output variable name.
+        output: Identifier,
     },
 }
 tag_enforcement_test!(Instruction);
