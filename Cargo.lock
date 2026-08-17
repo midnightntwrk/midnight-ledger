@@ -3291,7 +3291,6 @@ dependencies = [
  "midnight-zswap 9.0.0 (git+https://github.com/midnightntwrk/midnight-ledger?tag=zswap-9.0.0-rc.3)",
  "rand 0.8.6",
  "rayon",
- "reqwest",
  "serde",
  "sha2 0.11.0",
  "tokio",

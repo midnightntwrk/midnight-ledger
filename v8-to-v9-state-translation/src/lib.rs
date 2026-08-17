@@ -345,7 +345,8 @@ impl<D: DB>
             },
             utxo: recast(&source.utxo)?,
             replay_protection: recast(&source.replay_protection)?,
-            dust: recast(&source.dust)?,
+            // Full reset of dust state
+            dust: Sp::new(Default::default()),
         }))
     }
 }
