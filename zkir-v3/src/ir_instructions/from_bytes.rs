@@ -133,6 +133,64 @@ fn check_byte_repr_len(val_t: &IrType, len: usize) -> Result<(), String> {
     }
 }
 
+/// Fixed 32-byte wrappers around [`from_bytes_offcircuit`] and
+/// [`from_bytes_incircuit`], preserving the pre-generalization API.
+pub mod from_bytes32 {
+    use super::*;
+
+    /// Builds (off-circuit) a value of the given type from its 32-byte representation.
+    /// Supported for types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    ///
+    /// **Deprecated:** use [`from_bytes_offcircuit`] instead, which supports
+    /// arbitrary byte representation lengths.
+    ///
+    /// # Errors
+    ///
+    /// Errors if the input is not a supported type.
+    pub fn from_bytes32_offcircuit(
+        val_t: &IrType,
+        bytes: &[u8; 32],
+    ) -> Result<IrValue, anyhow::Error> {
+        from_bytes_offcircuit(val_t, bytes)
+    }
+
+    /// Builds (in-circuit) a value of the given type from its 32-byte representation.
+    /// Supported for types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    ///
+    /// **Deprecated:** use [`from_bytes_incircuit`] instead, which supports
+    /// arbitrary byte representation lengths.
+    ///
+    /// # Errors
+    ///
+    /// Errors if the input is not a supported type.
+    pub fn from_bytes32_incircuit(
+        std_lib: &ZkStdLib,
+        layouter: &mut impl Layouter<F>,
+        val_t: &IrType,
+        bytes: &[AssignedByte<F>; 32],
+    ) -> Result<CircuitValue, plonk::Error> {
+        from_bytes_incircuit(std_lib, layouter, val_t, bytes)
+    }
+}
+
 /// Builds a prime field element from the given bytes by interpreting them
 /// in little-endian as an integer. The integer can be bigger than field order.
 pub(crate) fn from_le_bytes_with_reduction<F: CircuitField>(bytes: &[u8]) -> F {
@@ -209,6 +267,27 @@ mod tests {
             from_bytes_offcircuit(&IrType::Curve25519Scalar, &wide).unwrap(),
             IrValue::Curve25519Scalar(curve25519::Scalar::from_bytes_mod_order_wide(&wide))
         );
+    }
+
+    // The 32-byte wrappers behave identically to the generic functions for
+    // all the types they historically supported, and reject Curve25519Scalar,
+    // which needs 64 bytes.
+    #[test]
+    fn test_from_bytes32_wrapper() {
+        use from_bytes32::from_bytes32_offcircuit;
+
+        let bytes = [0xffu8; 32];
+        for val_t in [
+            IrType::Native,
+            IrType::Secp256k1Base,
+            IrType::Secp256k1Scalar,
+        ] {
+            assert_eq!(
+                from_bytes32_offcircuit(&val_t, &bytes).unwrap(),
+                from_bytes_offcircuit(&val_t, &bytes).unwrap()
+            );
+        }
+        assert!(from_bytes32_offcircuit(&IrType::Curve25519Scalar, &bytes).is_err());
     }
 
     // The number of input bytes must match the byte representation length of
