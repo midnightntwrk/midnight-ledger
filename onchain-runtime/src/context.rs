@@ -963,7 +963,7 @@ impl<D: DB> QueryContext<D> {
         state.state = new_charged_state;
         let gas_cost = res.gas_cost + state_cost;
         if let Some(gas_limit) = gas_limit
-            && gas_cost > gas_limit
+            && !gas_cost.within_bounds(&gas_limit)
         {
             // TODO?: return a more specific error, explaining that gas
             // limit was exceeded by write+delete vs by cpu during vm eval?

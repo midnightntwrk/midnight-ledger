@@ -15,7 +15,6 @@
 
 #[cfg(feature = "proving")]
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::{Signature, SigningKey};
 use coin_structure::contract::ContractAddress;
 #[cfg(feature = "proving")]
 use midnight_ledger::test_utilities::{Resolver, test_resolver, tx_prove};
@@ -25,19 +24,20 @@ use midnight_ledger::{
     semantics::TransactionResult,
     structure::{
         ContractDeploy, ContractOperationVersion, ContractOperationVersionedVerifierKey,
-        MaintenanceUpdate, ProofPreimageMarker, SingleUpdate, Transaction,
+        MaintenanceUpdate, ProofPreimageMarker, Signature, SingleUpdate, Transaction,
     },
     verify::WellFormedStrictness,
 };
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::state::{
-    ContractMaintenanceAuthority, ContractOperation, ContractState, EntryPointBuf, StateValue,
+    ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey, ContractOperation,
+    ContractState, EntryPointBuf, IrBuf, StateValue,
 };
 use rand::{CryptoRng, Rng, SeedableRng, rngs::StdRng};
 use serialize::{Deserializable, tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::proofs::VerifierKey;
 
 fn update_tx<R: Rng + CryptoRng, D: DB>(
     rng: &mut R,
@@ -127,24 +127,28 @@ fn maintenance() {
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     let mut strictness = WellFormedStrictness::default();
     strictness.enforce_balancing = false;
-    let fake_vk = VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0).unwrap();
+    let fake_vk =
+        transient_crypto_old::proofs::VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0)
+            .unwrap();
 
-    let committee_sks: Vec<_> = (0..4).map(|_| SigningKey::sample(&mut rng)).collect();
+    let committee_sks: Vec<_> = (0..4)
+        .map(|_| base_crypto::schnorr::SigningKey::sample(&mut rng))
+        .collect();
     let committee_pks = committee_sks
         .iter()
-        .map(SigningKey::verifying_key)
+        .map(base_crypto::schnorr::SigningKey::verifying_key)
+        .map(ContractMaintenanceVerifyingKey::Schnorr)
         .collect::<Vec<_>>();
     let authority = ContractMaintenanceAuthority {
         committee: committee_pks.clone(),
         threshold: 2,
         counter: 0,
     };
+    let mut foo_op = ContractOperation::new(None, None);
+    foo_op.v2 = Some(fake_vk.clone());
     let cstate = ContractState::new(
         StateValue::Null,
-        HashMap::new().insert(
-            b"foo"[..].to_owned().into(),
-            ContractOperation::new(Some(fake_vk.clone())),
-        ),
+        HashMap::new().insert(b"foo"[..].to_owned().into(), foo_op),
         authority.clone(),
     );
     let deploy = ContractDeploy::new(&mut rng, cstate);
@@ -174,9 +178,10 @@ fn maintenance() {
     // Then replace with sufficient signatures
     {
         let data = update.data_to_sign();
-        let mut update = update
-            .clone()
-            .add_signature(1, committee_sks[1].sign(&mut rng, &data));
+        let mut update = update.clone().add_signature(
+            1,
+            Signature::Schnorr(committee_sks[1].sign(&mut rng, &data)),
+        );
 
         let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
             Transaction::new(
@@ -196,8 +201,14 @@ fn maintenance() {
             Err(MalformedTransaction::ThresholdMissed { .. })
         ));
 
-        update = update.add_signature(3, committee_sks[3].sign(&mut rng, &data));
-        update = update.add_signature(2, committee_sks[2].sign(&mut rng, &data));
+        update = update.add_signature(
+            3,
+            Signature::Schnorr(committee_sks[3].sign(&mut rng, &data)),
+        );
+        update = update.add_signature(
+            2,
+            Signature::Schnorr(committee_sks[2].sign(&mut rng, &data)),
+        );
 
         let mut tx = update_tx(&mut rng, update.clone(), &state);
         let mut tx_ser = Vec::new();
@@ -222,7 +233,10 @@ fn maintenance() {
         update.address = ContractAddress(rng.r#gen());
         let data = update.data_to_sign();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         assert!(matches!(
@@ -237,7 +251,10 @@ fn maintenance() {
         data[0] = 0;
         let mut update = update.clone();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         assert!(matches!(
@@ -251,8 +268,8 @@ fn maintenance() {
         let data = update.data_to_sign();
         let mut update = update.clone();
         for i in 0..2 {
-            let key = SigningKey::sample(&mut rng);
-            update = update.add_signature(i, key.sign(&mut rng, &data));
+            let key = base_crypto::schnorr::SigningKey::sample(&mut rng);
+            update = update.add_signature(i, Signature::Schnorr(key.sign(&mut rng, &data)));
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         assert!(matches!(
@@ -266,7 +283,10 @@ fn maintenance() {
         let data = update.data_to_sign();
         let mut update = update.clone();
         for i in 0..2 {
-            update = update.add_signature(i + 10, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i + 10,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         assert!(matches!(
@@ -280,7 +300,10 @@ fn maintenance() {
         let data = update.data_to_sign();
         let mut update = update.clone();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[3 - i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[3 - i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -295,7 +318,10 @@ fn maintenance() {
         let data = update.data_to_sign();
         let mut update = update.clone();
         for _ in 0..2 {
-            update = update.add_signature(0, committee_sks[0].sign(&mut rng, &data));
+            update = update.add_signature(
+                0,
+                Signature::Schnorr(committee_sks[0].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -311,7 +337,10 @@ fn maintenance() {
         update.counter = 1;
         let data = update.data_to_sign();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -345,7 +374,10 @@ fn maintenance() {
         .into();
         let data = update.data_to_sign();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -386,7 +418,10 @@ fn maintenance() {
         .into();
         let data = update.data_to_sign();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -414,7 +449,10 @@ fn maintenance() {
         .into();
         let data = update.data_to_sign();
         for i in 0..2 {
-            update = update.add_signature(i, committee_sks[i as usize].sign(&mut rng, &data));
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
         }
         let tx = update_tx(&mut rng, update.clone(), &state);
         dbg!(&tx);
@@ -429,6 +467,99 @@ fn maintenance() {
         assert!(matches!(
             dbg!(res),
             Err(TransactionInvalid::VerifierKeyAlreadyPresent(..))
+        ));
+    }
+
+    let fake_ir: IrBuf = b"fake-ir"[..].to_owned().into();
+
+    // ir insert + remove
+    {
+        let mut update = update.clone();
+        update.updates = vec![
+            // Insert IR alongside the existing verifier key on "foo".
+            SingleUpdate::IrInsert(b"foo"[..].to_owned().into(), fake_ir.clone()),
+            // Insert IR on a fresh entry point, creating a vk-less operation...
+            SingleUpdate::IrInsert(b"qux"[..].to_owned().into(), fake_ir.clone()),
+            // ...then remove it again, which should drop the now-empty operation.
+            SingleUpdate::IrRemove(b"qux"[..].to_owned().into()),
+        ]
+        .into();
+        let data = update.data_to_sign();
+        for i in 0..2 {
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
+        }
+        let tx = update_tx(&mut rng, update.clone(), &state);
+        dbg!(&tx);
+        assert!(dbg!(tx.well_formed(&state.ledger, strictness, state.time)).is_ok());
+        let mut state2 = state.clone();
+        state2.assert_apply(&tx, strictness);
+        let cstate = state2.ledger.index(addr).unwrap();
+        let foo = cstate
+            .operations
+            .get(&EntryPointBuf(b"foo"[..].to_owned()))
+            .expect("foo operation should still be present");
+        assert!(foo.ir.is_some());
+        assert!(foo.v2.is_some());
+        assert!(
+            cstate
+                .operations
+                .get(&EntryPointBuf(b"qux"[..].to_owned()))
+                .is_none()
+        );
+    }
+
+    // ir remove not present
+    {
+        let mut update = update.clone();
+        update.updates = vec![SingleUpdate::IrRemove(b"bar"[..].to_owned().into())].into();
+        let data = update.data_to_sign();
+        for i in 0..2 {
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
+        }
+        let tx = update_tx(&mut rng, update.clone(), &state);
+        dbg!(&tx);
+        let res: Result<_, TransactionInvalid<InMemoryDB>> =
+            match dbg!(state.apply(&tx, strictness)) {
+                Ok(TransactionResult::PartialSuccess(hash_map, ..)) => {
+                    hash_map.get(&1).unwrap().clone()
+                }
+                _ => panic!("unexpected result structure from state.apply"),
+            };
+        assert!(matches!(dbg!(res), Err(TransactionInvalid::IrNotFound(..))));
+    }
+
+    // ir insert already present
+    {
+        let mut update = update.clone();
+        update.updates = vec![
+            SingleUpdate::IrInsert(b"foo"[..].to_owned().into(), fake_ir.clone()),
+            SingleUpdate::IrInsert(b"foo"[..].to_owned().into(), fake_ir.clone()),
+        ]
+        .into();
+        let data = update.data_to_sign();
+        for i in 0..2 {
+            update = update.add_signature(
+                i,
+                Signature::Schnorr(committee_sks[i as usize].sign(&mut rng, &data)),
+            );
+        }
+        let tx = update_tx(&mut rng, update.clone(), &state);
+        dbg!(&tx);
+        let res: Result<_, TransactionInvalid<InMemoryDB>> = match state.apply(&tx, strictness) {
+            Ok(TransactionResult::PartialSuccess(hash_map, ..)) => {
+                hash_map.get(&1).unwrap().clone()
+            }
+            _ => panic!("unexpected result structure from state.apply"),
+        };
+        assert!(matches!(
+            dbg!(res),
+            Err(TransactionInvalid::IrAlreadyPresent(..))
         ));
     }
 }

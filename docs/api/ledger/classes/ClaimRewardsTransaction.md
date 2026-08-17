@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.1**](../README.md)
+[**@midnight/ledger v1.0.0-rc.3**](../README.md)
 
 ***
 
@@ -45,7 +45,7 @@ kind?): ClaimRewardsTransaction<S>;
 
 ##### owner
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ##### nonce
 
@@ -98,7 +98,7 @@ The rewarded coin's randomness, preventing it from colliding with other coins.
 ### owner
 
 ```ts
-readonly owner: string;
+readonly owner: SignatureVerifyingKey;
 ```
 
 The signing key owning this coin.
@@ -137,7 +137,7 @@ addSignature(signature): ClaimRewardsTransaction<SignatureEnabled>;
 
 ##### signature
 
-`string`
+[`Signature`](../type-aliases/Signature.md)
 
 #### Returns
 
@@ -238,7 +238,7 @@ kind): ClaimRewardsTransaction<SignatureErased>;
 
 ##### owner
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ##### nonce
 

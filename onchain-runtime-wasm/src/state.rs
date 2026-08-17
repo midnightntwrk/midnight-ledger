@@ -14,7 +14,7 @@
 use std::ops::Deref;
 
 use crate::context::CostModel;
-use crate::conversions::{token_type_to_value, value_to_token_type};
+use crate::conversions::{PreSignature, token_type_to_value, value_to_token_type};
 use crate::{
     ensure_ops_valid, from_value, from_value_hex_ser, from_value_ser, to_value, to_value_hex_ser,
     to_value_ser,
@@ -26,6 +26,7 @@ use onchain_runtime::contract_state_ext::ContractStateExt;
 use onchain_runtime::ops::Op;
 use onchain_runtime::result_mode::ResultModeGather;
 use onchain_runtime::state;
+use serialize::{peek_tag, tagged_deserialize};
 use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::fab::ValueReprAlignedValue;
@@ -494,20 +495,29 @@ impl From<ContractOperation> for state::ContractOperation {
 impl ContractOperation {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<ContractOperation, JsError> {
-        Ok(ContractOperation(state::ContractOperation::new(None)))
+        Ok(ContractOperation(state::ContractOperation::new(None, None)))
     }
 
     #[wasm_bindgen(getter = verifierKey)]
     pub fn verifier_key(&self) -> Result<JsValue, JsError> {
-        match self.0.latest() {
-            Some(vk) => to_value_ser(vk),
-            None => Ok(JsValue::UNDEFINED),
+        if let Some(vk) = &self.0.v3 {
+            to_value_ser(vk)
+        } else if let Some(vk) = &self.0.v2 {
+            to_value_ser(vk)
+        } else {
+            Ok(JsValue::UNDEFINED)
         }
     }
 
     #[wasm_bindgen(setter = verifierKey)]
     pub fn set_verifier_key(&mut self, key: Uint8Array) -> Result<(), JsError> {
-        *self.0.latest_mut() = Some(from_value_ser(key, "ContractOperation")?);
+        let data = key.to_vec();
+        let tag = peek_tag(&mut std::io::Cursor::new(&data))?;
+        match tag.as_str() {
+            "verifier-key[v6]" => self.0.v2 = Some(tagged_deserialize(&mut &data[..])?),
+            "verifier-key[v7]" => self.0.v3 = Some(tagged_deserialize(&mut &data[..])?),
+            _ => return Err(JsError::new("unknown verifier key tag: '{tag}'")),
+        }
         Ok(())
     }
 
@@ -556,10 +566,15 @@ impl ContractMaintenanceAuthority {
         let committee = committee
             .iter()
             .map(|val| {
-                from_value_hex_ser(
-                    &val.as_string()
-                        .ok_or_else(|| JsError::new("expected string"))?,
-                )
+                let pre_vk: PreSignature = from_value(val)?;
+                Ok(match pre_vk {
+                    PreSignature::Schnorr(raw) => {
+                        state::ContractMaintenanceVerifyingKey::Schnorr(from_value_hex_ser(&raw)?)
+                    }
+                    PreSignature::ECDSA(raw) => {
+                        state::ContractMaintenanceVerifyingKey::ECDSA(from_value_hex_ser(&raw)?)
+                    }
+                })
             })
             .collect::<Result<Vec<_>, JsError>>()?;
         let counter = u32::try_from(
@@ -583,7 +598,14 @@ impl ContractMaintenanceAuthority {
     pub fn committee(&self) -> Result<Array, JsError> {
         let com_arr = Array::new();
         for member in self.0.committee.iter() {
-            com_arr.push(&to_value_hex_ser(member)?.into());
+            com_arr.push(&to_value(&match member {
+                state::ContractMaintenanceVerifyingKey::Schnorr(vk) => {
+                    PreSignature::Schnorr(to_value_hex_ser(vk)?)
+                }
+                state::ContractMaintenanceVerifyingKey::ECDSA(vk) => {
+                    PreSignature::ECDSA(to_value_hex_ser(vk)?)
+                }
+            })?);
         }
         Ok(com_arr)
     }
