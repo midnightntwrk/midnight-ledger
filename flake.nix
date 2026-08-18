@@ -520,7 +520,11 @@
           devShells.ci = mkShell {
             inputsFrom = with packages; [ledger];
             packages = [
-              fenix.packages.${system}.minimal.toolchain
+              # The default profile (not minimal) so the nightly toolchain also
+              # provides clippy; otherwise `cargo clippy` mixes nightly rustc
+              # with the stable clippy-driver from the ledger package's
+              # toolchain, and the two reject each other's artifacts (E0514).
+              fenix.packages.${system}.default.toolchain
               pkgs.nodejs_22
               pkgs.yarn
               pkgs.jq
