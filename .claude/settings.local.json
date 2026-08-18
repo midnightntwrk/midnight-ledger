@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check *)",
+      "Bash(awk 'NR>=741 && /^impl<.*>/ && NR>741 {print NR; exit}' /Users/jegorsidorenko/Sites/midnight-ledger-master/ledger/src/verify.rs)",
+      "Bash(cargo test *)",
+      "Bash(git -C /Users/jegorsidorenko/Sites/midnight-ledger-master log --oneline -20)"
+    ]
+  }
+}

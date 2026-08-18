@@ -88,7 +88,15 @@ impl AggregableIrSource {
     pub fn aggregation_arch() -> ZkStdLibArch {
         ZkStdLibArch {
             poseidon: true,
-            nr_pow2range_cols: 4,
+            // sha2_256 is required by circuits that contain PersistentHash
+            // instructions (e.g. any circuit that calls persistent_commit).
+            // Enabling this increases the outer IVC circuit from ~517K to ~628K
+            // rows, so the outer SRS must be K=20 (not K=19).
+            sha2_256: true,
+            // Keep nr_pow2range_cols at the default (1) rather than the 4 used
+            // by IrSource::used_chips(). Using 4 adds 3 extra advice columns to
+            // the inner circuit's constraint system, which makes the IVC outer
+            // circuit's PLONK verifier too large to synthesise at K=19/20.
             ..ZkStdLibArch::default()
         }
     }

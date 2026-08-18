@@ -25,11 +25,15 @@ use coin_structure::contract::ContractAddress;
 use coin_structure::transfer::{Recipient, SenderEvidence};
 use futures::FutureExt;
 use lazy_static::lazy_static;
-use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
+use midnight_ledger::construct::{
+    ContractCallExt, ContractCallPrototype, PreTranscript, communication_commitment,
+    partition_transcripts,
+};
 use midnight_ledger::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
 use midnight_ledger::structure::Signature;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofKind, ProofMarker, Transaction,
+    ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofKind, ProofMarker,
+    ProofPreimageVersioned, Transaction,
 };
 use midnight_ledger::test_utilities::{Resolver, contract_operation};
 use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
@@ -57,7 +61,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
 use transient_crypto::proofs::PARAMS_VERIFIER;
-use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+use transient_crypto::proofs::{KeyLocation, ProofPreimage, Resolver as ResolverTrait};
 use zswap::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
 use zswap::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
@@ -101,29 +105,42 @@ fn context_with_offer<D: DB>(
 async fn proof_aggregation_verify() {
     use midnight_ledger::structure::{ContractProofEvidence, ProofKind, ProofMarker};
     use transient_crypto::aggregation::{
-        AggregatedContractProof, AggregationVerifier, AggregationVerify, AggregationWitness,
-        InnerCircuitsContext, IvcInstance, ProofAggregation,
+        AggregatedContractProof, AggregationTranscript, AggregationVerifier, AggregationVerify,
+        AggregationWitness, InnerCircuitsContext, IvcInstance, ProofAggregation,
     };
     use zkir_v3::ir_aggregation::AggregableIrSource;
 
     // Skip if the outer aggregation SRS is not available locally.
-    let srs_dir = match std::env::var("SRS_DIR") {
+    // $MIDNIGHT_PP
+    let srs_dir = std::path::PathBuf::from(
+        "/nix/store/dh2bkkbh384z7f507bd04b0cmwipzjvq-midnight-local-params-10-dust-zswap-v3/"
+            .to_string(),
+    );
+    /* match std::env::var("SRS_DIR") {
         Ok(d) => std::path::PathBuf::from(d),
         Err(_) => {
             eprintln!("proof_aggregation_verify: SRS_DIR not set — skipping");
             return;
         }
-    };
+    };*/
 
-    const IVC_K: u32 = 19;
-    const INNER_K: u32 = 14;
+    // K=20 is required because sha2_256 in aggregation_arch() inflates the outer
+    // IVC circuit to ~628K rows, exceeding K=19's 524K-row limit.
+    const IVC_K: u32 = 20;
+    // K=13 matches the SHA-256 chip's design ("the table fits in a K=13 domain")
+    // and matches the multi_circuit_aggregation example's INNER_K=13.
+    const INNER_K: u32 = 13;
 
-    // Inner-circuit verifier params (embedded K=14 Midnight SRS).
-    let inner_params = transient_crypto::aggregation::inner_verifier_params();
+    // Inner-circuit verifier params (K=13 from SRS_DIR).
+    let inner_srs = transient_crypto::aggregation::load_midnight_srs(&srs_dir, INNER_K)
+        .unwrap_or_else(|e| {
+            panic!("failed to load bls_midnight_2p{INNER_K} from {srs_dir:?}: {e}")
+        });
+    let inner_params = inner_srs.verifier_params();
     let arch = AggregableIrSource::aggregation_arch();
     let inner_ctx = InnerCircuitsContext::new(arch, INNER_K, inner_params);
 
-    // Outer aggregator SRS (K=19, from SRS_DIR).
+    // Outer aggregator SRS (K=20, from SRS_DIR).
     let aggregator_srs = transient_crypto::aggregation::load_midnight_srs(&srs_dir, IVC_K)
         .unwrap_or_else(|e| panic!("failed to load midnight-srs-2p{IVC_K} from {srs_dir:?}: {e}"));
 
@@ -142,7 +159,28 @@ async fn proof_aggregation_verify() {
     let advance_op = contract_operation(&RESOLVER, "advance").await;
     let buy_in_op = contract_operation(&RESOLVER, "buyIn").await;
     let cash_out_op = contract_operation(&RESOLVER, "cashOut").await;
-    let set_topic_op = contract_operation(&RESOLVER, "setTopic").await;
+    // Load setTopic once: build the ContractOperation (for on-chain) and keep
+    // ir_source bytes (for aggregation) so we avoid a second resolver round-trip.
+    let (set_topic_op, set_topic_ir_bytes) = {
+        use transient_crypto::proofs::Resolver as ResolverTrait;
+        let mat = RESOLVER
+            .resolve_key(KeyLocation(Cow::Borrowed("setTopic")))
+            .await
+            .expect("resolver error")
+            .expect("setTopic not found");
+        let mut op = onchain_runtime::state::ContractOperation::new(None, None);
+        if let Ok(vk) = serialize::tagged_deserialize::<transient_crypto::proofs::VerifierKey>(
+            &mut &mat.verifier_key[..],
+        ) {
+            op.v3 = Some(vk);
+        } else {
+            op.v2 = Some(
+                serialize::tagged_deserialize(&mut &mat.verifier_key[..])
+                    .expect("verifier key should deserialize"),
+            );
+        }
+        (op, mat.ir_source)
+    };
     let vote_commit_op = contract_operation(&RESOLVER, "voteCommit").await;
     let vote_reveal_op = contract_operation(&RESOLVER, "voteReveal").await;
 
@@ -190,7 +228,6 @@ async fn proof_aggregation_verify() {
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
     let tx = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
     let addr = tx.deploys().map(|(_, d)| d).next().unwrap().address();
-    dbg!(&tx);
     tx.well_formed(&state.ledger, balanced_strictness, state.time)
         .unwrap();
     let strictness = WellFormedStrictness::default();
@@ -241,6 +278,24 @@ async fn proof_aggregation_verify() {
         communication_commitment_rand: rng.r#gen(),
         key_location: KeyLocation(std::borrow::Cow::Borrowed("setTopic")),
     };
+
+    // Capture the ProofPreimage before `call` is consumed by test_intents.
+    // IrSource proofs (produced by tx_prove_bind below) have N raw public inputs
+    // and cannot be fed directly to the IVC aggregator, which requires
+    // AggregableIrSource proofs with a single Poseidon-hashed public input.
+    // We build the ProofPreimage here so we can re-prove with AggregableIrSource.
+    let agg_preimage = {
+        let comm_commit = communication_commitment(
+            call.input.clone(),
+            call.output.clone(),
+            call.communication_commitment_rand,
+        );
+        match <ProofPreimage as ContractCallExt<InMemoryDB>>::construct_proof(&call, comm_commit) {
+            ProofPreimageVersioned::V2(p) => (*p).clone(),
+            _ => unreachable!("construct_proof always returns V2"),
+        }
+    };
+
     let tx = Transaction::from_intents(
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
@@ -249,35 +304,102 @@ async fn proof_aggregation_verify() {
         .unwrap();
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
     let tx = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
+    tx.well_formed(&state.ledger, balanced_strictness, state.time)
+        .unwrap();
+    // Capture dust spend preimages (with correct binding_input) before they're consumed.
+    let dust_preimages = state.captured_dust_preimages.clone();
+    state.assert_apply(&tx, balanced_strictness);
 
-    // Collect V3 contract-call proof evidence from the setTopic transaction.
-    let evidence = tx.collect_proof_evidence(&state.ledger).unwrap();
+    // ── Re-prove setTopic with AggregableIrSource ─────────────────────────────
+    // Wrap the IrSource we already loaded at the top in AggregableIrSource.
+    // AggregableIrSource::preprocess is identical to IrSource::preprocess; the
+    // circuit differs only in that it adds an extra Poseidon step to hash all
+    // public inputs down to one.
+    let ir_v3: zkir_v3::IrSource =
+        serialize::tagged_deserialize(std::io::Cursor::new(&set_topic_ir_bytes[..]))
+            .expect("IrSource tagged deserialize must succeed");
+    let agg_ir = AggregableIrSource(ir_v3);
 
-    // ── Aggregate all V3 proofs ──────────────────────────────────────────────
-    let mut last_ivc_proof: Option<Vec<u8>> = None;
-    for ev in &evidence {
-        if let ContractProofEvidence::V3 { vk, proof, pis } = ev {
-            let midnight_vk = vk
-                .midnight_vk()
-                .expect("verifier key must be valid after proving");
-            // AggregableIrSource::Instance = Vec<outer::Scalar>; Fr(pub outer::Scalar) via .0
-            let instance: Vec<transient_crypto::curve::outer::Scalar> =
-                pis.iter().map(|f| f.0).collect();
+    // Load K=13 SRS for inner proof (matching INNER_K=13 in InnerCircuitsContext).
+    let inner_srs = std::sync::Arc::new(
+        transient_crypto::aggregation::load_midnight_srs(&srs_dir, INNER_K)
+            .unwrap_or_else(|e| panic!("failed to load inner bls_midnight_2p{INNER_K}: {e}")),
+    );
+
+    let agg_vk = midnight_zk_stdlib::setup_vk(inner_srs.as_ref(), &agg_ir);
+    let agg_pk = midnight_zk_stdlib::setup_pk(&agg_ir, &agg_vk);
+
+    let preproc = agg_ir
+        .preprocess(&agg_preimage)
+        .expect("AggregableIrSource preprocess must succeed");
+    let pis = preproc.pis.clone();
+
+    let inner_proof_bytes = midnight_zk_stdlib::prove::<
+        AggregableIrSource,
+        AggregationTranscript<transient_crypto::curve::outer::Scalar>,
+    >(
+        inner_srs.as_ref(),
+        &agg_pk,
+        &agg_ir,
+        &pis,
+        preproc,
+        rng.split(),
+    )
+    .expect("inner AggregableIrSource prove must succeed");
+
+    // ── Aggregate setTopic ────────────────────────────────────────────────────
+    let witness = AggregationWitness::new::<AggregableIrSource>(agg_vk, pis, inner_proof_bytes);
+    let mut ivc_proof = aggregator
+        .aggregate(witness)
+        .expect("IVC aggregation step must succeed");
+
+    // ── Aggregate dust spend proof(s) ─────────────────────────────────────────
+    // The dust spend circuit is also a V3 IrSource circuit (spend.bzkir).
+    // state.captured_dust_preimages holds the preimages (with the binding_input
+    // already set to the override value used during proving) that balance_tx
+    // populated when it paid the transaction fee.
+    if !dust_preimages.is_empty() {
+        let dust_mat = RESOLVER
+            .resolve_key(KeyLocation(Cow::Borrowed("midnight/dust/spend")))
+            .await
+            .expect("resolver error for dust spend")
+            .expect("midnight/dust/spend IrSource not found");
+        let dust_ir_v3: zkir_v3::IrSource =
+            serialize::tagged_deserialize(std::io::Cursor::new(&dust_mat.ir_source[..]))
+                .expect("dust IrSource tagged deserialize must succeed");
+        let dust_agg_ir = AggregableIrSource(dust_ir_v3);
+
+        let dust_agg_vk = midnight_zk_stdlib::setup_vk(inner_srs.as_ref(), &dust_agg_ir);
+        let dust_agg_pk = midnight_zk_stdlib::setup_pk(&dust_agg_ir, &dust_agg_vk);
+
+        for dust_preimage in &dust_preimages {
+            let preproc = dust_agg_ir
+                .preprocess(dust_preimage)
+                .expect("dust AggregableIrSource preprocess must succeed");
+            let pis = preproc.pis.clone();
+            let proof_bytes = midnight_zk_stdlib::prove::<
+                AggregableIrSource,
+                AggregationTranscript<transient_crypto::curve::outer::Scalar>,
+            >(
+                inner_srs.as_ref(),
+                &dust_agg_pk,
+                &dust_agg_ir,
+                &pis,
+                preproc,
+                rng.split(),
+            )
+            .expect("dust inner AggregableIrSource prove must succeed");
             let witness = AggregationWitness::new::<AggregableIrSource>(
-                midnight_vk,
-                instance,
-                proof.0.clone(),
+                dust_agg_vk.clone(),
+                pis,
+                proof_bytes,
             );
-            last_ivc_proof = Some(
-                aggregator
-                    .aggregate(witness)
-                    .expect("IVC aggregation step must succeed"),
-            );
+            ivc_proof = aggregator
+                .aggregate(witness)
+                .expect("dust IVC aggregation step must succeed");
         }
     }
 
-    let ivc_proof = last_ivc_proof
-        .expect("setTopic transaction must produce at least one V3 proof to aggregate");
     let ivc_instance: IvcInstance<ProofAggregation> = aggregator.instance();
 
     // ── Verify the aggregated proof ──────────────────────────────────────────

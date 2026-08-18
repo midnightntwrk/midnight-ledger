@@ -30,6 +30,7 @@ pub use midnight_aggregation::{
         Verifier as AggregationVerifier,
     },
 };
+pub use midnight_circuits::hash::poseidon::PoseidonState as AggregationTranscript;
 pub use midnight_zk_stdlib::MidnightVK;
 
 use midnight_curves::Bls12;
@@ -47,6 +48,19 @@ pub fn inner_verifier_params() -> ParamsVerifierKZG<Bls12> {
         .expect("embedded inner SRS bytes are valid")
         .0
         .verifier_params()
+}
+
+/// Returns the full K=14 prover params from the embedded Midnight SRS.
+///
+/// The prover params are a superset of the verifier params returned by
+/// [`inner_verifier_params`]. Pass these to `midnight_zk_stdlib::setup_vk`,
+/// `midnight_zk_stdlib::setup_pk`, and `midnight_zk_stdlib::prove` when proving
+/// inner circuits (e.g. [`zkir_v3::AggregableIrSource`]) for aggregation without
+/// loading an external SRS file.
+pub fn inner_prover_params() -> std::sync::Arc<ParamsKZG<Bls12>> {
+    crate::proofs::ParamsProver::read(crate::proofs::PARAMS_VERIFIER_RAW)
+        .expect("embedded inner SRS bytes are valid")
+        .0
 }
 
 /// Reads `{dir}/bls_midnight_2p{k}` and returns the full [`ParamsKZG`].

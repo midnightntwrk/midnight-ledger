@@ -2978,6 +2978,7 @@ dependencies = [
 [[package]]
 name = "midnight-aggregation"
 version = "0.1.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?branch=irakoton%2Fbatch-verify#ae7b9aeb7401fb2396d6f4026a32ec863e01c3a5"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3072,6 +3073,7 @@ dependencies = [
 [[package]]
 name = "midnight-circuits"
 version = "7.2.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?branch=irakoton%2Fbatch-verify#ae7b9aeb7401fb2396d6f4026a32ec863e01c3a5"
 dependencies = [
  "base64 0.13.1",
  "ff",
@@ -3141,6 +3143,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.3.1"
+source = "git+https://github.com/midnightntwrk/midnight-zk?branch=irakoton%2Fbatch-verify#ae7b9aeb7401fb2396d6f4026a32ec863e01c3a5"
 dependencies = [
  "bitvec",
  "blst",
@@ -3198,6 +3201,7 @@ dependencies = [
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
+ "midnight-zk-stdlib 2.3.3",
  "midnight-zkir",
  "midnight-zkir-v3",
  "midnight-zswap",
@@ -3410,6 +3414,7 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.8.1"
+source = "git+https://github.com/midnightntwrk/midnight-zk?branch=irakoton%2Fbatch-verify#ae7b9aeb7401fb2396d6f4026a32ec863e01c3a5"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3688,6 +3693,7 @@ dependencies = [
 [[package]]
 name = "midnight-zk-stdlib"
 version = "2.3.3"
+source = "git+https://github.com/midnightntwrk/midnight-zk?branch=irakoton%2Fbatch-verify#ae7b9aeb7401fb2396d6f4026a32ec863e01c3a5"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
