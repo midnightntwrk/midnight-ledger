@@ -352,6 +352,33 @@ impl Tagged for Operand {
 }
 tag_enforcement_test!(Operand);
 
+/// Serde helpers for the `Constant` instruction's `encoding` field. The
+/// encoding is stored as `Vec<Fr>` but (de)serialized as a list of hex
+/// immediates, reusing `Operand`'s immediate format (e.g. `["0x2a", "0x01"]`).
+mod constant_encoding {
+    use super::{Fr, Operand};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+    pub(super) fn serialize<S: Serializer>(values: &[Fr], serializer: S) -> Result<S::Ok, S::Error> {
+        let immediates: Vec<Operand> = values.iter().map(|f| Operand::Immediate(*f)).collect();
+        immediates.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<Fr>, D::Error> {
+        Vec::<Operand>::deserialize(deserializer)?
+            .into_iter()
+            .map(|op| match op {
+                Operand::Immediate(f) => Ok(f),
+                Operand::Variable(_) => Err(de::Error::custom(
+                    "constant encoding entries must be hex immediates (0x..), not variables",
+                )),
+            })
+            .collect()
+    }
+}
+
 /// An individual ZK IR instruction
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
@@ -679,6 +706,31 @@ pub enum Instruction {
         /// The `Byte`/`Bytes` values to concatenate, in order
         inputs: Vec<Operand>,
         /// The output variable name (a `Bytes(n)`)
+        output: Identifier,
+    },
+    /// Loads a fixed (constant) value of the given `type` into the circuit.
+    ///
+    /// `encoding` is the value's encoded form: the list of field elements that
+    /// [`crate::ir_instructions::encode::encode_offcircuit`] would produce for
+    /// it, written as hex immediates (e.g. `["0x2a"]`). Off-circuit the encoding
+    /// is decoded into a typed value; in-circuit that value is baked in with
+    /// `assign_fixed`.
+    ///
+    /// Supported on every `type`.
+    ///
+    /// # Errors
+    ///
+    /// Errors off-circuit (and fails synthesis in-circuit) if `encoding` is not
+    /// a valid, canonical encoding of a value of `type` (wrong number of field
+    /// elements, non-canonical field element, etc.).
+    LoadConstant {
+        /// The type of the constant
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The encoded value, as a list of field-element immediates
+        #[serde(with = "constant_encoding")]
+        encoding: Vec<Fr>,
+        /// The output variable name
         output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).

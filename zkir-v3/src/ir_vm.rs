@@ -13,6 +13,7 @@
 
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::assign_constant::assign_constant_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::ec_mul::{ec_mul_incircuit, ec_mul_offcircuit};
 use crate::ir_instructions::encode::{
@@ -740,6 +741,14 @@ impl IrSource {
                     }
                     memory.insert(output.clone(), IrValue::Bytes(bytes));
                 }
+                I::LoadConstant {
+                    val_t,
+                    encoding,
+                    output,
+                } => {
+                    let value = decode_offcircuit(encoding, val_t)?;
+                    memory.insert(output.clone(), value);
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1373,6 +1382,16 @@ impl Relation for IrSource {
                         )));
                     }
                     mem_insert(output.clone(), CircuitValue::Bytes(bytes), &mut memory)?;
+                }
+                I::LoadConstant {
+                    val_t,
+                    encoding,
+                    output,
+                } => {
+                    let value = decode_offcircuit(encoding, val_t)
+                        .map_err(|e| Error::Synthesis(e.to_string()))?;
+                    let assigned = assign_constant_incircuit(std, layouter, &value)?;
+                    mem_insert(output.clone(), assigned, &mut memory)?;
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
