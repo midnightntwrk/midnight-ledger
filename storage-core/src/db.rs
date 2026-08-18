@@ -51,6 +51,13 @@ pub enum Update<H: WellBehavedHasher> {
     /// Set the root count of a DAG node. Setting this to zero means the node is
     /// no longer a GC root.
     SetRootCount(u32),
+    /// Associate opaque metadata with a GC root. The storage backend issues this
+    /// in the same `batch_update` as the corresponding [`Self::SetRootCount`].
+    #[cfg(feature = "gc-v1")]
+    SetRootMetadata(std::vec::Vec<u8>),
+    /// Delete any opaque metadata associated with a GC root.
+    #[cfg(feature = "gc-v1")]
+    DeleteRootMetadata,
 }
 
 #[cfg(feature = "proptest")]
@@ -145,6 +152,11 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     ///
     /// For `DB`s that use expensive write transactions, implementors should
     /// combine many updates in a single transaction.
+    ///
+    /// Under `gc-v1`, a persist count and its root metadata for the same key
+    /// are issued together in one call. The implementation must commit the
+    /// whole iterator atomically: a crash may apply all of it or none of it,
+    /// never a tag without its count or a count without its tag.
     fn batch_update<I>(&mut self, iter: I)
     where
         I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>;
@@ -278,6 +290,37 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// DB. All mapped root counts will be positive.
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32>;
 
+    #[cfg(feature = "gc-v1")]
+    /// Get the metadata associated with the GC root `key`, if any.
+    ///
+    /// See [`Self::set_root_metadata`].
+    fn get_root_metadata(&self, key: &ArenaHash<Self::Hasher>) -> Option<Vec<u8>>;
+
+    #[cfg(feature = "gc-v1")]
+    /// Associate opaque `metadata` with the GC root `key`, overwriting any
+    /// existing metadata for `key`.
+    ///
+    /// The metadata is intended to help identify roots for later pruning --
+    /// e.g. record a block height or timestamp when persisting a root, so a
+    /// pruning job can later decide which roots to unpersist. The DB does not
+    /// interpret the metadata, and does not tie its lifecycle to the root
+    /// count: like root counts, metadata may be set for keys that are not (or
+    /// not yet) roots or nodes in the DB.
+    fn set_root_metadata(&mut self, key: ArenaHash<Self::Hasher>, metadata: Vec<u8>);
+
+    #[cfg(feature = "gc-v1")]
+    /// Delete the metadata associated with the GC root `key`, if any.
+    ///
+    /// See [`Self::set_root_metadata`].
+    fn delete_root_metadata(&mut self, key: &ArenaHash<Self::Hasher>);
+
+    #[cfg(feature = "gc-v1")]
+    /// Return a mapping from key to metadata, for all keys with root metadata
+    /// in this DB.
+    ///
+    /// See [`Self::set_root_metadata`].
+    fn get_all_root_metadata(&self) -> HashMap<ArenaHash<Self::Hasher>, Vec<u8>>;
+
     /// Return the number of nodes in this DB.
     fn size(&self) -> usize;
 
@@ -315,6 +358,10 @@ where
             InsertNode(value) => db.insert_node(k, value),
             DeleteNode => db.delete_node(&k),
             SetRootCount(count) => db.set_root_count(k, count),
+            #[cfg(feature = "gc-v1")]
+            SetRootMetadata(metadata) => db.set_root_metadata(k, metadata),
+            #[cfg(feature = "gc-v1")]
+            DeleteRootMetadata => db.delete_root_metadata(&k),
         }
     }
 }
@@ -339,6 +386,8 @@ where
 pub struct InMemoryDB<H: WellBehavedHasher = DefaultHasher> {
     nodes: Arc<Mutex<BTreeMap<ArenaHash<H>, OnDiskObject<H>>>>,
     roots: Arc<Mutex<HashMap<ArenaHash<H>, u32>>>,
+    #[cfg(feature = "gc-v1")]
+    root_metadata: Arc<Mutex<HashMap<ArenaHash<H>, Vec<u8>>>>,
 }
 
 impl<H: WellBehavedHasher> DummyArbitrary for InMemoryDB<H> {}
@@ -398,6 +447,11 @@ impl<H: WellBehavedHasher> InMemoryDB<H> {
     fn lock_roots(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, u32>> {
         self.roots.lock().expect("db lock poisoned")
     }
+
+    #[cfg(feature = "gc-v1")]
+    fn lock_root_metadata(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, Vec<u8>>> {
+        self.root_metadata.lock().expect("db lock poisoned")
+    }
 }
 
 impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
@@ -445,6 +499,26 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
 
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         self.lock_roots().clone()
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_root_metadata(&self, key: &ArenaHash<Self::Hasher>) -> Option<Vec<u8>> {
+        self.lock_root_metadata().get(key).cloned()
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn set_root_metadata(&mut self, key: ArenaHash<Self::Hasher>, metadata: Vec<u8>) {
+        self.lock_root_metadata().insert(key, metadata);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn delete_root_metadata(&mut self, key: &ArenaHash<Self::Hasher>) {
+        self.lock_root_metadata().remove(key);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_all_root_metadata(&self) -> HashMap<ArenaHash<Self::Hasher>, Vec<u8>> {
+        self.lock_root_metadata().clone()
     }
 
     fn size(&self) -> usize {
@@ -497,6 +571,8 @@ impl<H: WellBehavedHasher> Default for InMemoryDB<H> {
         Self {
             nodes: Arc::default(),
             roots: Arc::default(),
+            #[cfg(feature = "gc-v1")]
+            root_metadata: Arc::default(),
         }
     }
 }
@@ -956,6 +1032,56 @@ mod tests {
         assert_eq!(keys, db.get_unreachable_keys().into_iter().collect());
         db.set_root_count(n11.key.clone(), 0);
         db.set_root_count(n22.key.clone(), 0);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    #[test]
+    fn root_metadata_inmemorydb() {
+        test_root_metadata::<InMemoryDB>();
+    }
+    #[cfg(all(feature = "gc-v1", feature = "sqlite"))]
+    #[test]
+    fn root_metadata_sqldb() {
+        test_root_metadata::<crate::db::SqlDB>();
+    }
+    #[cfg(all(feature = "gc-v1", feature = "parity-db"))]
+    #[test]
+    fn root_metadata_paritydb() {
+        test_root_metadata::<crate::db::ParityDb>();
+    }
+    /// Test the root-metadata API: set, overwrite, get, get-all, and delete,
+    /// including for keys that have no corresponding node or root count in the
+    /// DB (metadata is independent of both, like root counts are independent
+    /// of nodes).
+    #[cfg(feature = "gc-v1")]
+    fn test_root_metadata<D: DB<Hasher = DefaultHasher>>() {
+        let mut db = D::default();
+        let mut rng = rand::thread_rng();
+        let k1: ArenaHash<DefaultHasher> = rng.r#gen();
+        let k2: ArenaHash<DefaultHasher> = rng.r#gen();
+
+        assert_eq!(db.get_root_metadata(&k1), None);
+        assert!(db.get_all_root_metadata().is_empty());
+
+        db.set_root_metadata(k1.clone(), vec![1, 2, 3]);
+        db.set_root_metadata(k2.clone(), vec![4]);
+        assert_eq!(db.get_root_metadata(&k1), Some(vec![1, 2, 3]));
+        assert_eq!(db.get_root_metadata(&k2), Some(vec![4]));
+
+        // Overwriting replaces the previous metadata.
+        db.set_root_metadata(k1.clone(), vec![9]);
+        assert_eq!(db.get_root_metadata(&k1), Some(vec![9]));
+
+        let all = db.get_all_root_metadata();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[&k1], vec![9]);
+        assert_eq!(all[&k2], vec![4]);
+
+        db.delete_root_metadata(&k1);
+        assert_eq!(db.get_root_metadata(&k1), None);
+        // Deleting metadata that doesn't exist is a no-op.
+        db.delete_root_metadata(&k1);
+        assert_eq!(db.get_all_root_metadata().len(), 1);
     }
 
     #[test]
