@@ -753,7 +753,7 @@ impl ProofPreimage {
             .await?
             .ok_or(anyhow::Error::msg(format!(
                 "failed to find proving key for '{}'",
-                &self.key_location.0
+                self.key_location.0
             )))?;
         let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;
