@@ -2,8 +2,16 @@
 # inferno 0.12 dropped quick-xml, but pprof 0.15 (latest) pins inferno 0.11 and
 # cargo [patch] can't cross semver boundaries for pre-1.0 crates.
 # These are not exploitable in our context as they only affect benchmark flamegraph generation.
+#
+# h2 0.3 is pulled in via actix-web's "http2" feature (proof-server). The advisory
+# is only patched in h2 >=0.4.16; the 0.3 line is EOL with no fixed release, and
+# even the latest actix-http (3.13.3) still requires h2 ^0.3. Low-severity DoS
+# (unbounded queueing of empty DATA frames). Remove this once actix migrates to
+# h2 0.4, or drop the "http2" feature from proof-server/Cargo.toml if HTTP/2
+# support is not needed.
 [advisories]
 ignore = [
     "RUSTSEC-2026-0194", # quick-xml: quadratic duplicate attribute check
     "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
+    "RUSTSEC-2026-0258", # h2 0.3: unbounded empty DATA frames (no 0.3.x fix; via actix-web http2)
 ]
