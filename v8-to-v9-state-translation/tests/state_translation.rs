@@ -58,7 +58,7 @@ fn test_contract_preserved_after_translation() {
     let contract = create_test_contract(&mut rng);
     let addr: ContractAddress = rng.r#gen();
     let entry_count = contract.operations.iter().count();
-    v8.contract = v8.contract.insert(addr.clone(), contract);
+    v8.contract = v8.contract.insert(addr, contract);
 
     let v9 = translate_to_completion(v8);
 
@@ -98,7 +98,7 @@ fn test_multiple_contracts_translated() {
     for _ in 0..5 {
         let contract = create_test_contract(&mut rng);
         let addr: ContractAddress = rng.r#gen();
-        addresses.push(addr.clone());
+        addresses.push(addr);
         v8.contract = v8.contract.insert(addr, contract);
     }
 
@@ -124,7 +124,7 @@ fn test_contract_with_empty_operations() {
 
     let contract = ContractState::new(StateValue::Null, HashMap::new(), Default::default());
     let addr: ContractAddress = rng.r#gen();
-    v8.contract = v8.contract.insert(addr.clone(), contract);
+    v8.contract = v8.contract.insert(addr, contract);
 
     let v9 = translate_to_completion(v8);
 
@@ -148,7 +148,7 @@ fn test_contract_balance_preserved() {
     contract.balance = contract.balance.insert(TokenType::Dust, amount);
 
     let addr: ContractAddress = rng.r#gen();
-    v8.contract = v8.contract.insert(addr.clone(), contract);
+    v8.contract = v8.contract.insert(addr, contract);
 
     let v9 = translate_to_completion(v8);
 
@@ -179,7 +179,7 @@ fn test_maintenance_authority_preserved() {
     ops = ops.insert(ENTRY_OP_A.into(), ContractOperation::new(Some(rng.r#gen())));
     let contract = ContractState::new(StateValue::Null, ops, authority);
     let addr: ContractAddress = rng.r#gen();
-    v8.contract = v8.contract.insert(addr.clone(), contract);
+    v8.contract = v8.contract.insert(addr, contract);
 
     let v9 = translate_to_completion(v8);
 
@@ -251,7 +251,7 @@ fn test_bridge_receiving_preserved() {
     let vk: base_crypto::schnorr::VerifyingKey = rng.r#gen();
     let addr = UserAddress::from(vk);
     let amount: u128 = 12_345;
-    v8.bridge_receiving = v8.bridge_receiving.insert(addr.clone(), amount);
+    v8.bridge_receiving = v8.bridge_receiving.insert(addr, amount);
 
     let v9 = translate_to_completion(v8);
 
@@ -345,7 +345,7 @@ fn create_large_state(
     for _ in 0..num_contracts {
         let contract = create_test_contract(&mut rng);
         let addr: ContractAddress = rng.r#gen();
-        addresses.push(addr.clone());
+        addresses.push(addr);
         v8.contract = v8.contract.insert(addr, contract);
     }
     (v8, addresses)
@@ -402,13 +402,13 @@ fn translates_serialized_non_trivial_state_preserving_invariants() {
     // Each move keeps total NIGHT == MAX_SUPPLY.
     v8.reserve_pool -= bridge_amount;
     let bridge_addr = UserAddress::from(rng.r#gen::<base_crypto::schnorr::VerifyingKey>());
-    v8.bridge_receiving = v8.bridge_receiving.insert(bridge_addr.clone(), bridge_amount);
+    v8.bridge_receiving = v8.bridge_receiving.insert(bridge_addr, bridge_amount);
 
     v8.reserve_pool -= reward_amount;
     let reward_addr = UserAddress::from(rng.r#gen::<base_crypto::schnorr::VerifyingKey>());
     v8.unclaimed_block_rewards = v8
         .unclaimed_block_rewards
-        .insert(reward_addr.clone(), reward_amount);
+        .insert(reward_addr, reward_amount);
 
     // Three contracts. They carry no NIGHT (their balance maps are empty),
     // so they don't perturb the invariant.
@@ -416,7 +416,7 @@ fn translates_serialized_non_trivial_state_preserving_invariants() {
     for _ in 0..3 {
         let contract = create_test_contract(&mut rng);
         let addr: ContractAddress = rng.r#gen();
-        contract_addrs.push(addr.clone());
+        contract_addrs.push(addr);
         v8.contract = v8.contract.insert(addr, contract);
     }
 

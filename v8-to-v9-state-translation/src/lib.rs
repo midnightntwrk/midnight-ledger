@@ -78,7 +78,7 @@ fn recast<A: Storable<D> + Tagged, B: Storable<D> + Tagged, D: DB>(
     a: &Sp<A, D>,
 ) -> io::Result<Sp<B, D>> {
     if A::tag() != B::tag() {
-        return io::Result::Err(io::Error::new(io::ErrorKind::Other, "tags do not match"));
+        return io::Result::Err(io::Error::other("tags do not match"));
     }
     default_storage::<D>().get_lazy(&a.as_child().into())
 }
@@ -262,7 +262,7 @@ impl Ids {
         )
     }
 
-    fn parameters<D: DB>() -> TranslationId {
+    fn parameters() -> TranslationId {
         TranslationId(
             ledger_v8::structure::LedgerParameters::tag(),
             ledger_v9::structure::LedgerParameters::tag(),
@@ -280,7 +280,7 @@ impl<D: DB>
 {
     fn required_translations() -> Vec<TranslationId> {
         vec![
-            Ids::parameters::<D>(),
+            Ids::parameters(),
             Ids::bridge_receiving_mpt::<D>(),
             Ids::contract_mpt::<D>(),
         ]
@@ -290,7 +290,7 @@ impl<D: DB>
         source: &ledger_v8::structure::LedgerState<D>,
     ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![
-            (Ids::parameters::<D>(), source.parameters.upcast()),
+            (Ids::parameters(), source.parameters.upcast()),
             (
                 Ids::bridge_receiving_mpt::<D>(),
                 source.bridge_receiving.mpt.upcast(),
@@ -304,7 +304,7 @@ impl<D: DB>
         _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<ledger_v9::structure::LedgerState<D>>> {
-        let Some(parameters) = cache.lookup(&Ids::parameters::<D>(), source.parameters.as_child())
+        let Some(parameters) = cache.lookup(&Ids::parameters(), source.parameters.as_child())
         else {
             return Ok(None);
         };
@@ -443,7 +443,7 @@ fn recast_base<A: Tagged + serialize::Serializable, B: Tagged + serialize::Deser
     a: &A,
 ) -> io::Result<B> {
     if A::tag() != B::tag() {
-        return Err(io::Error::new(io::ErrorKind::Other, "tags do not match"));
+        return Err(io::Error::other("tags do not match"));
     }
     let mut buf = Vec::new();
     a.serialize(&mut buf)?;
