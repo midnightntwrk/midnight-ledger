@@ -1,8 +1,8 @@
-[**@midnight/ledger v8.1.0**](README.md)
+[**@midnight/ledger v8.1.1**](README.md)
 
 ***
 
-# @midnight/ledger v8.1.0
+# @midnight/ledger v8.1.1
 
 ## Classes
 
@@ -21,6 +21,7 @@
 - [CostModel](classes/CostModel.md)
 - [DustActions](classes/DustActions.md)
 - [DustGenerationState](classes/DustGenerationState.md)
+- [DustGenerationTreeInsertionPath](classes/DustGenerationTreeInsertionPath.md)
 - [DustLocalState](classes/DustLocalState.md)
 - [DustLocalStateWithChanges](classes/DustLocalStateWithChanges.md)
 - [DustParameters](classes/DustParameters.md)
@@ -180,6 +181,7 @@
 - [dummyContractAddress](functions/dummyContractAddress.md)
 - [dummyUserAddress](functions/dummyUserAddress.md)
 - [dustCommitment](functions/dustCommitment.md)
+- [dustFirstNonce](functions/dustFirstNonce.md)
 - [dustInitialNonce](functions/dustInitialNonce.md)
 - [dustNonce](functions/dustNonce.md)
 - [dustNullifier](functions/dustNullifier.md)
@@ -195,9 +197,13 @@
 - [entryPointHash](functions/entryPointHash.md)
 - [feeToken](functions/feeToken.md)
 - [hashToCurve](functions/hashToCurve.md)
+- [jubjubSampleScalar](functions/jubjubSampleScalar.md)
+- [jubjubScalarFromNative](functions/jubjubScalarFromNative.md)
 - [leafHash](functions/leafHash.md)
 - [maxAlignedSize](functions/maxAlignedSize.md)
 - [maxField](functions/maxField.md)
+- [maxJubjubScalar](functions/maxJubjubScalar.md)
+- [nativeFromJubjubScalar](functions/nativeFromJubjubScalar.md)
 - [nativeToken](functions/nativeToken.md)
 - [parseCheckResult](functions/parseCheckResult.md)
 - [partitionTranscripts](functions/partitionTranscripts.md)
@@ -220,6 +226,7 @@
 - [signatureVerifyingKey](functions/signatureVerifyingKey.md)
 - [signData](functions/signData.md)
 - [signingKeyFromBip340](functions/signingKeyFromBip340.md)
+- [successorDustUtxo](functions/successorDustUtxo.md)
 - [transientCommit](functions/transientCommit.md)
 - [transientHash](functions/transientHash.md)
 - [unshieldedToken](functions/unshieldedToken.md)

@@ -20,7 +20,7 @@ import {
   encodeShieldedCoinInfo,
   runtimeCoinCommitment,
   sampleContractAddress
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 export class RuntimeCoinCommitmentUtils {
   static getShieldedCoinInfoAsAlignedValue(): AlignedValue {

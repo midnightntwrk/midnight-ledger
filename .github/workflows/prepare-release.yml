@@ -1,0 +1,246 @@
+name: Prepare Ledger Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'Comma-separated crate=version pairs to bump, e.g. "ledger-wasm=1.0.0-rc.4, ledger=1.0.0, onchain-runtime-wasm=4.0.0-rc.4"'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      # Node is needed to regenerate the wasm markdown API docs (typedoc). Docs
+      # generation is node-only - it runs over the committed .d.ts files.
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        with:
+          node-version: 24
+
+      - name: Update NPM
+        run: npm install -g npm@12.0.2
+
+      - name: Bump crate versions
+        # Pass the input via env (not inline ${{ }}) so it cannot inject shell.
+        env:
+          VERSIONS: ${{ inputs.versions }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra PAIRS <<< "$VERSIONS"
+          # Every crate whose version actually changed, as "<dir> <version>"; used
+          # afterwards to sync internal dependency requirements that point at them.
+          BUMPED=()
+          for pair in "${PAIRS[@]}"; do
+            crate="$(echo "$pair" | cut -d= -f1 | xargs)"
+            ver="$(echo "$pair" | cut -d= -f2 | xargs)"
+            f="${crate}/Cargo.toml"
+            [ -f "$f" ] || { echo "::error::no such crate manifest: $f"; exit 1; }
+            if grep -qE '^version\.workspace = true' "$f"; then
+              # Crate inherits `[workspace] package.version` from the root manifest
+              # (ledger, zswap, proof-server), so bump it there. This moves every
+              # crate that inherits the workspace version together.
+              awk -v v="$ver" '!done && /^package\.version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' Cargo.toml > Cargo.toml.tmp
+              mv Cargo.toml.tmp Cargo.toml
+              grep -qE "^package\.version = \"${ver}\"" Cargo.toml || { echo "::error::failed to set workspace version for ${crate}"; exit 1; }
+              echo "bumped ${crate} (workspace package.version) -> ${ver}"
+              # Record every workspace-inheriting crate - they all moved to $ver.
+              for d in */; do d="${d%/}"; [ -f "$d/Cargo.toml" ] && grep -qE '^version\.workspace = true' "$d/Cargo.toml" && BUMPED+=("$d $ver"); done
+            else
+              # Replace only the first top-level `version = "..."` (the [package] one).
+              awk -v v="$ver" '!done && /^version = / {sub(/"[^"]*"/, "\"" v "\""); done=1} {print}' "$f" > "$f.tmp"
+              mv "$f.tmp" "$f"
+              grep -qE "^version = \"${ver}\"" "$f" || { echo "::error::failed to set version in $f"; exit 1; }
+              echo "bumped ${crate} -> ${ver}"
+              BUMPED+=("${crate} ${ver}")
+            fi
+          done
+
+          # Sync internal dependency requirements to the new crate versions. A
+          # caret requirement (e.g. version = "8.1.0") does not accept a
+          # pre-release like 8.2.0-rc.1, so every internal dependency that points
+          # at a bumped crate (path = "../<dir>") must be pinned to its new exact
+          # version. No-op for deps on crates that were not bumped.
+          for entry in "${BUMPED[@]}"; do
+            read -r bdir bver <<< "$entry"
+            BDIR="$bdir" BVER="$bver" perl -i -pe '
+              my ($c, $v) = ($ENV{BDIR}, $ENV{BVER});
+              s/version = "[^"]*"/version = "$v"/ if /path = "\.\.\/\Q$c\E"/;
+            ' */Cargo.toml
+          done
+
+          # Sync package.json versions for wasm crates whose Cargo.toml was bumped.
+          for entry in "${BUMPED[@]}"; do
+            read -r bdir bver <<< "$entry"
+            pkg="$bdir/package.json"
+            if [ -f "$pkg" ]; then
+              sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$bver\"/" "$pkg"
+              echo "synced $pkg -> $bver"
+            fi
+          done
+
+          # Persist the bumped set for later steps (per-crate changelog drafting).
+          # Kept in $RUNNER_TEMP, outside the repo, so `git add -A` never stages it.
+          printf '%s\n' "${BUMPED[@]}" | sort -u > "${RUNNER_TEMP}/bumped-crates.txt"
+
+      - name: Refresh Cargo.lock
+        run: nix develop .#ci -c cargo metadata --format-version 1 >/dev/null
+
+      - name: Compute display version
+        id: ver
+        run: |
+          set -euo pipefail
+          LW=$(grep -m1 '^version' ledger-wasm/Cargo.toml | awk -F'"' '{print $2}')
+          EPOCH=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$EPOCH" ]; then echo "::error::could not derive ledger epoch from flake.nix"; exit 1; fi
+          # Display version always starts with the epoch, matching the Publish
+          # workflow: ledger-8 already carries it in the crate version (8.2.0 ->
+          # 8.2.0); ledger-9+ decouples it, so prepend (1.0.0-rc.3 -> 9.1.0.0-rc.3).
+          case "$LW" in
+            ${EPOCH}.*) DISPLAY="$LW" ;;
+            *)          DISPLAY="${EPOCH}.${LW}" ;;
+          esac
+          echo "display=${DISPLAY}" >> "$GITHUB_OUTPUT"
+          echo "tag=ledger-${DISPLAY}" >> "$GITHUB_OUTPUT"
+
+      - name: Draft changelog and release notes
+        # Pass step outputs via env (not inline ${{ }}) so they cannot inject shell.
+        env:
+          DISPLAY: ${{ steps.ver.outputs.display }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Promote the curated "## Unreleased" section into the release heading,
+          # leaving a fresh empty "## Unreleased" - the dev-curated bullets become
+          # the release changelog, matching the manual process. Fall back to a
+          # git-log draft only if there is no "## Unreleased" section.
+          if grep -q "^## Ledger ${DISPLAY}$" CHANGELOG.md; then
+            echo "CHANGELOG.md already has the ${DISPLAY} section - skipping"
+          elif grep -q '^## Unreleased' CHANGELOG.md; then
+            awk -v d="$DISPLAY" '!done && /^## Unreleased/ {print; print ""; printf "## Ledger %s\n", d; done=1; next} {print}' \
+              CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+          else
+            BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+            printf '## Ledger %s\n\n%s\n\n' "$DISPLAY" "$BULLETS" > "${RUNNER_TEMP}/section.md"
+            awk 'FNR==NR{sec = sec $0 "\n"; next} /^## /&&!ins{printf "%s", sec; ins=1} {print}' \
+              "${RUNNER_TEMP}/section.md" CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+          fi
+
+          # Scaffold the release-notes file from the template (idempotent), seeded
+          # with a git-log draft as a starting point for the human-written summary.
+          # Pre-releases don't get curated release notes.
+          case "${DISPLAY}" in
+            *-rc*|*-alpha*|*-beta*|*-performance*) echo "Pre-release detected - skipping release notes scaffold." ;;
+            *)
+              NOTES=".github/release-notes/${TAG}.md"
+              if [ ! -f "$NOTES" ]; then
+                BULLETS="$(.github/scripts/draft-release-bullets.sh)"
+                sed -e "s/<VERSION>/${DISPLAY}/g" .github/release-notes/TEMPLATE.md > "$NOTES"
+                printf '\n<!-- Draft bullets from commits since the last tag: -->\n%s\n' "$BULLETS" >> "$NOTES"
+              fi
+              ;;
+          esac
+
+      - name: Draft per-crate changelogs
+        run: |
+          set -euo pipefail
+          [ -f "${RUNNER_TEMP}/bumped-crates.txt" ] || exit 0
+          while read -r dir ver; do
+            [ -n "$dir" ] || continue
+            # storage-core's changelog file uses an underscore; others match the dir.
+            case "$dir" in
+              storage-core) file="CHANGELOG_storage_core.md" ;;
+              *)            file="CHANGELOG_${dir}.md" ;;
+            esac
+            [ -f "$file" ] || continue                            # crate has no dedicated changelog
+            grep -q "^## Version \`${ver}\`" "$file" && continue   # idempotent on re-dispatch
+            if grep -q '^## Unreleased' "$file"; then
+              # Promote the curated "## Unreleased" bullets into this version.
+              awk -v v="$ver" '!done && /^## Unreleased/ {print; print ""; printf "## Version `%s`\n", v; done=1; next} {print}' \
+                "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            else
+              # No "## Unreleased" section - insert a git-log draft above the first version.
+              BULLETS="$(.github/scripts/draft-release-bullets.sh "$dir" "$dir")"
+              printf '## Version `%s`\n\n%s\n\n' "$ver" "$BULLETS" > "${RUNNER_TEMP}/crate-section.md"
+              awk 'FNR==NR{sec = sec $0 "\n"; next} /^## Version /&&!ins{printf "%s", sec; ins=1} {print}' \
+                "${RUNNER_TEMP}/crate-section.md" "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            fi
+          done < "${RUNNER_TEMP}/bumped-crates.txt"
+
+      # Regenerate the wasm markdown API docs so they land in the reviewable
+      # release PR (via the existing `git add -A` below). Node-only; runs over
+      # the committed .d.ts files - no cargo/nix needed.
+      - name: Regenerate API docs
+        run: |
+          set -euo pipefail
+          for pkg in ledger-wasm onchain-runtime-wasm zkir-wasm; do
+            ( cd "$pkg" && npm install && npm run build:markdown-docs )
+          done
+
+      - name: Open release PR
+        # TAG via env (not inline ${{ }}) so it cannot inject shell.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/${TAG}"
+          # Exclude .cargo/ (configure-cargo.sh writes an untracked config there)
+          # so the generated file is not committed into the release PR.
+          git add -A -- ':!.cargo'
+          # Create the branch at the checked-out commit, then commit the bumps onto
+          # it as a GitHub-signed (verified) commit so branch protection that
+          # requires signed commits accepts the PR.
+          gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${BRANCH}" -f sha="$(git rev-parse HEAD)" >/dev/null 2>&1 \
+            || echo "branch ${BRANCH} already exists; committing onto it"
+          .github/scripts/gh-commit.sh "$BRANCH" "chore: prepare ${TAG}"
+          gh pr create --base "${GITHUB_REF_NAME}" --head "$BRANCH" \
+            --title "Prepare ${TAG}" \
+            --body "$(
+              ITEMS=()
+              ITEMS+=("- [ ] Versions correct (see \`Cargo.toml\` / \`Cargo.lock\` diff)")
+              ITEMS+=("- [ ] \`CHANGELOG.md\` + per-crate \`CHANGELOG_*.md\` drafts reviewed and edited")
+              ITEMS+=("- [ ] Regenerated \`docs/api/**\` diff looks right")
+              case "${TAG}" in
+                *-rc*|*-alpha*|*-beta*|*-performance*) ;;
+                *) ITEMS+=("- [ ] \`.github/release-notes/${TAG}.md\` prose written") ;;
+              esac
+              printf '%s\n' \
+                "Automated release prep for \`${TAG}\`." \
+                "" \
+                "${ITEMS[@]}" \
+                "" \
+                "After merge, run **Publish Ledger Release** on \`${GITHUB_REF_NAME}\`."
+            )"

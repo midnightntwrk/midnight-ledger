@@ -1,10 +1,39 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v8.1.1**](../README.md)
 
 ***
 
 [@midnight/ledger](../globals.md) / DustStateChanges
 
 # Class: DustStateChanges
+
+## Constructors
+
+### Constructor
+
+```ts
+new DustStateChanges(
+   source, 
+   receivedUtxos, 
+   spentUtxos): DustStateChanges;
+```
+
+#### Parameters
+
+##### source
+
+`string`
+
+##### receivedUtxos
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)[]
+
+##### spentUtxos
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)[]
+
+#### Returns
+
+`DustStateChanges`
 
 ## Properties
 
@@ -35,3 +64,21 @@ readonly spentUtxos: QualifiedDustOutput[];
 ```
 
 The UTXOs that were spent in this state change
+
+## Methods
+
+### toString()
+
+```ts
+toString(compact?): string;
+```
+
+#### Parameters
+
+##### compact?
+
+`boolean`
+
+#### Returns
+
+`string`

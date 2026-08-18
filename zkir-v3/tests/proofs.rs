@@ -100,14 +100,14 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let pk_fmt = format!("{:#?}", pk);
+        let vk_fmt = format!("{:#?}", vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
         vk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        dbg!(vk_fmt == format!("{:#?}", &vk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
+        dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -159,10 +159,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -216,10 +216,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -266,10 +266,10 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -323,18 +323,18 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let mut pk_data = Vec::new();
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
+        let pk_fmt = format!("{:#?}", pk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
         let p = EmbeddedGroupAffine::generator();
         let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
@@ -388,14 +388,14 @@ mod proof_tests {
         let mut vk_data = Vec::new();
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
-        let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let pk_fmt = format!("{:#?}", pk);
+        let vk_fmt = format!("{:#?}", vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
         vk.init().unwrap();
-        dbg!(pk_fmt == format!("{:#?}", &pk));
-        dbg!(vk_fmt == format!("{:#?}", &vk));
+        dbg!(pk_fmt == format!("{:#?}", pk));
+        dbg!(vk_fmt == format!("{:#?}", vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -1029,54 +1029,33 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_secp256k1_proof() {
         // Single circuit exercising all three Secp256k1 types.
-        // Base and Scalar values are decoded from native limbs, added, then
-        // encoded back; a round-trip decode verifies encode is its inverse.
-        // Points are typed inputs; their sum is checked via a private input.
+        // Base, Scalar and Point values are typed inputs; arithmetic results
+        // are checked via private inputs.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%id",   "type": "Point<Secp256k1>"  },
-              { "name": "%p0",   "type": "Point<Secp256k1>"  },
-              { "name": "%p1",   "type": "Point<Secp256k1>"  },
-              { "name": "%b0_0", "type": "Scalar<BLS12-381>" },
-              { "name": "%b0_1", "type": "Scalar<BLS12-381>" },
-              { "name": "%b0_2", "type": "Scalar<BLS12-381>" },
-              { "name": "%b0_3", "type": "Scalar<BLS12-381>" },
-              { "name": "%b1_0", "type": "Scalar<BLS12-381>" },
-              { "name": "%b1_1", "type": "Scalar<BLS12-381>" },
-              { "name": "%b1_2", "type": "Scalar<BLS12-381>" },
-              { "name": "%b1_3", "type": "Scalar<BLS12-381>" },
-              { "name": "%s0_0", "type": "Scalar<BLS12-381>" },
-              { "name": "%s0_1", "type": "Scalar<BLS12-381>" },
-              { "name": "%s0_2", "type": "Scalar<BLS12-381>" },
-              { "name": "%s0_3", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1_0", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1_1", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1_2", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1_3", "type": "Scalar<BLS12-381>" }
+              { "name": "%id", "type": "Point<Secp256k1>"  },
+              { "name": "%p0", "type": "Point<Secp256k1>"  },
+              { "name": "%p1", "type": "Point<Secp256k1>"  },
+              { "name": "%b0", "type": "Base<Secp256k1>"   },
+              { "name": "%b1", "type": "Base<Secp256k1>"   },
+              { "name": "%s0", "type": "Scalar<Secp256k1>" },
+              { "name": "%s1", "type": "Scalar<Secp256k1>" }
            ],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b0_0","%b0_1","%b0_2","%b0_3"], "output": "%b0" },
-               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b1_0","%b1_1","%b1_2","%b1_3"], "output": "%b1" },
-               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s0_0","%s0_1","%s0_2","%s0_3"], "output": "%s0" },
-               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s1_0","%s1_1","%s1_2","%s1_3"], "output": "%s1" },
                { "op": "add", "a": "%p0", "b": "%p1", "output": "%p2" },
                { "op": "add", "a": "%b0", "b": "%b1", "output": "%b2" },
                { "op": "add", "a": "%s0", "b": "%s1", "output": "%s2" },
                { "op": "mul", "a": "%b0", "b": "%b1", "output": "%b_prod" },
                { "op": "mul", "a": "%s0", "b": "%s1", "output": "%s_prod" },
-               { "op": "encode", "input": "%b2", "outputs": ["%b2_0","%b2_1","%b2_2","%b2_3"] },
-               { "op": "encode", "input": "%s2", "outputs": ["%s2_0","%s2_1","%s2_2","%s2_3"] },
-               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b2_0","%b2_1","%b2_2","%b2_3"], "output": "%b2_rt" },
-               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s2_0","%s2_1","%s2_2","%s2_3"], "output": "%s2_rt" },
-               { "op": "neg", "a": "%p0",  "output": "%p0_neg" },
-               { "op": "neg", "a": "%b0",  "output": "%b0_neg" },
-               { "op": "neg", "a": "%s0",  "output": "%s0_neg" },
-               { "op": "inv", "a": "%b0",  "output": "%b0_inv" },
-               { "op": "inv", "a": "%s0",  "output": "%s0_inv" },
-               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"    },
+               { "op": "neg", "a": "%p0", "output": "%p0_neg" },
+               { "op": "neg", "a": "%b0", "output": "%b0_neg" },
+               { "op": "neg", "a": "%s0", "output": "%s0_neg" },
+               { "op": "inv", "a": "%b0", "output": "%b0_inv" },
+               { "op": "inv", "a": "%s0", "output": "%s0_inv" },
+               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"     },
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b_prod_priv" },
                { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s_prod_priv" },
                { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p0_neg_priv" },
@@ -1085,12 +1064,9 @@ mod proof_tests {
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_inv_priv" },
                { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_inv_priv" },
                { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
-               { "op": "constrain_eq", "a": "%b2",     "b": "%b2_rt"       },
                { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
                { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" },
                { "op": "constrain_eq", "a": "%b0_neg", "b": "%b0_neg_priv" },
-               { "op": "test_eq",      "a": "%s2",     "b": "%s2_rt",    "output": "%s_eq"   },
-               { "op": "assert",       "cond": "%s_eq" },
                { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
                { "op": "assert",       "cond": "%sp_eq" },
                { "op": "test_eq",      "a": "%s0_neg", "b": "%s0_neg_priv", "output": "%sn_eq" },
@@ -1117,8 +1093,6 @@ mod proof_tests {
                 .collect()
         };
 
-        // p0, p1 are typed Point<Secp256k1> inputs (8 limbs each);
-        // b0, b1, s0, s1 are passed as raw native limbs (4 each) for decode.
         let inputs: Vec<transient_crypto::curve::Fr> = [
             encode(IrValue::Secp256k1Point(id)),
             encode(IrValue::Secp256k1Point(p0)),
@@ -1141,6 +1115,277 @@ mod proof_tests {
             encode(IrValue::Secp256k1Scalar(Option::from(s0.invert()).unwrap())),
         ]
         .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_coordinates_proof() {
+        // Exercises affine coordinates polymorphically across the
+        // supported curve point types. Each extracted coordinate is
+        // checked against a private input carrying the expected value.
+        // A point is then reconstructed from the extracted coordinates
+        // and compared to the original point.
+        use midnight_zkir_v3::ir_instructions::into_coordinates::into_coordinates_offcircuit;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%jp", "type": "Point<Jubjub>"    },
+              { "name": "%sp", "type": "Point<Secp256k1>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_coordinates", "point": "%jp", "outputs": ["%jx", "%jy"] },
+               { "op": "into_coordinates", "point": "%sp", "outputs": ["%sx", "%sy"] },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jx_exp" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jy_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%sx_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%sy_exp" },
+               { "op": "constrain_eq", "a": "%jx", "b": "%jx_exp" },
+               { "op": "constrain_eq", "a": "%jy", "b": "%jy_exp" },
+               { "op": "constrain_eq", "a": "%sx", "b": "%sx_exp" },
+               { "op": "constrain_eq", "a": "%sy", "b": "%sy_exp" },
+               { "op": "from_coordinates", "inputs": ["%jx", "%jy"], "output": "%jp_reconstructed" },
+               { "op": "from_coordinates", "inputs": ["%sx", "%sy"], "output": "%sp_reconstructed" },
+               { "op": "constrain_eq", "a": "%jp_reconstructed", "b": "%jp" },
+               { "op": "constrain_eq", "a": "%sp_reconstructed", "b": "%sp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let jp = JubjubSubgroup::random(OsRng);
+        let sp = secp256k1::Secp256k1::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::JubjubPoint(jp)),
+            encode(IrValue::Secp256k1Point(sp)),
+        ]
+        .concat();
+
+        let (px, py) = into_coordinates_offcircuit(&IrValue::JubjubPoint(jp)).unwrap();
+        let (sx, sy) = into_coordinates_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(px), encode(py), encode(sx), encode(sy)].concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_bytes32_proof() {
+        // Exercises into_bytes32 / from_bytes32 across all three currently
+        // supported types (Native, Secp256k1Base, Secp256k1Scalar):
+        //   1. Round-trips a typed value through into_bytes32 then
+        //      from_bytes32 and checks it matches the original.
+        //   2. Converts a fixed, non-canonical 32-byte string (all 0xff,
+        //      which exceeds every one of these fields' moduli) via
+        //      from_bytes32 and checks the in-circuit result against the
+        //      off-circuit reference implementation, exercising the
+        //      modular-reduction behavior documented on the instruction.
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%native",      "type": "Scalar<BLS12-381>" },
+              { "name": "%secp_base",   "type": "Base<Secp256k1>"   },
+              { "name": "%secp_scalar", "type": "Scalar<Secp256k1>" },
+              { "name": "%raw",         "type": "Bytes<32>"         }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_bytes32", "input": "%native",      "output": "%native_bytes" },
+               { "op": "into_bytes32", "input": "%secp_base",   "output": "%base_bytes"   },
+               { "op": "into_bytes32", "input": "%secp_scalar", "output": "%scalar_bytes" },
+
+               { "op": "from_bytes32", "bytes": "%native_bytes", "type": "Scalar<BLS12-381>", "output": "%native_back" },
+               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<Secp256k1>",   "output": "%base_back"   },
+               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<Secp256k1>", "output": "%scalar_back" },
+
+               { "op": "constrain_eq", "a": "%native_back", "b": "%native"      },
+               { "op": "constrain_eq", "a": "%base_back",   "b": "%secp_base"   },
+               { "op": "constrain_eq", "a": "%scalar_back", "b": "%secp_scalar" },
+
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<BLS12-381>", "output": "%raw_native" },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<Secp256k1>",   "output": "%raw_base"   },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<Secp256k1>", "output": "%raw_scalar" },
+
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%raw_native_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%raw_base_exp"   },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%raw_scalar_exp" },
+
+               { "op": "constrain_eq", "a": "%raw_native", "b": "%raw_native_exp" },
+               { "op": "constrain_eq", "a": "%raw_base",   "b": "%raw_base_exp"   },
+               { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let native_val: transient_crypto::curve::Fr = rand::random();
+        let base_val = secp256k1::Fp::random(OsRng);
+        let scalar_val = secp256k1::Fq::random(OsRng);
+        let raw_bytes = [0xffu8; 32];
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Native(native_val)),
+            encode(IrValue::Secp256k1Base(base_val)),
+            encode(IrValue::Secp256k1Scalar(scalar_val)),
+            encode(IrValue::Bytes32(raw_bytes)),
+        ]
+        .concat();
+
+        let raw_native_exp = from_bytes32_offcircuit(&IrType::Native, &raw_bytes).unwrap();
+        let raw_base_exp = from_bytes32_offcircuit(&IrType::Secp256k1Base, &raw_bytes).unwrap();
+        let raw_scalar_exp = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &raw_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(raw_native_exp),
+            encode(raw_base_exp),
+            encode(raw_scalar_exp),
+        ]
+        .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_bytes32_low_high_proof() {
+        // Exercises bytes32_into_low_high / bytes32_from_low_high:
+        //   1. Splits a Bytes32 into its low (first 31 bytes) and high (byte 31) native
+        //      field elements and checks each against the off-circuit reference.
+        //   2. Reconstructs the original Bytes32 via bytes32_from_low_high and checks
+        //      equality with the original value, exercising the full roundtrip.
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%b", "type": "Bytes<32>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "bytes32_into_low_high", "bytes": "%b", "outputs": ["%lo", "%hi"] },
+               { "op": "bytes32_from_low_high", "inputs": ["%lo", "%hi"], "output": "%b_back" },
+               { "op": "constrain_eq", "a": "%b_back", "b": "%b" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%lo_exp" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%hi_exp" },
+               { "op": "constrain_eq", "a": "%lo", "b": "%lo_exp" },
+               { "op": "constrain_eq", "a": "%hi", "b": "%hi_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        // bytes with a non-zero MSB (byte 31 == 32) to exercise the high part.
+        let bytes: [u8; 32] = std::array::from_fn(|i| (i + 1) as u8);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = encode(IrValue::Bytes32(bytes));
+
+        // Compute expected lo and hi using the same logic as the off-circuit VM.
+        let mut lo_bytes = bytes;
+        lo_bytes[31] = 0;
+        let lo_exp = from_bytes32_offcircuit(&IrType::Native, &lo_bytes).unwrap();
+        let mut hi_bytes = [0u8; 32];
+        hi_bytes[0] = bytes[31];
+        let hi_exp = from_bytes32_offcircuit(&IrType::Native, &hi_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(lo_exp), encode(hi_exp)].concat();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {
@@ -1200,7 +1445,11 @@ mod proof_tests {
             .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
-                &TestResolver { pk, vk: vk.clone(), ir },
+                &TestResolver {
+                    pk,
+                    vk: vk.clone(),
+                    ir,
+                },
             )
             .await
             .unwrap();

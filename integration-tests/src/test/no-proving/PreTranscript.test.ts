@@ -18,7 +18,7 @@ import {
   QueryContext,
   StateValue,
   communicationCommitmentRandomness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random, Static } from '@/test-objects';
 
 describe('Ledger API - PreTranscript', () => {

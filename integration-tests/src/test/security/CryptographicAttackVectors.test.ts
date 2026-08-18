@@ -39,7 +39,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 
 describe('Cryptographic Attack Vector Tests', () => {

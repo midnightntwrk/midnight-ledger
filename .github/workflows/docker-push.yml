@@ -6,11 +6,15 @@ on:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
-      ATTIC_CACHE_TOKEN:
-        required: true
       GH_USERNAME:
         required: true
       GH_PASSWORD:
+        required: true
+      GCP_WORKLOAD_IDENTITY_PROVIDER:
+        required: true
+      GCP_SIGNING_SERVICE_ACCOUNT:
+        required: true
+      PROOF_SERVER_SIGNING_KEY_PASSPHRASE:
         required: true
 
 jobs:
@@ -32,7 +36,7 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ntwrk-bot
@@ -47,23 +51,24 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout ledger repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
         with:
           extra_nix_config: |
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Cache Nix
-        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          endpoint: https://attic.ci.iog.io
-          cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
 
       - name: Create proof-server images
         run: |
@@ -93,30 +98,31 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ntwrk-bot
           password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
 
       - name: Checkout ledger repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
         with:
           extra_nix_config: |
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Cache Nix
-        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          endpoint: https://attic.ci.iog.io
-          cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
 
       - name: Build and push arm64 image
         run: |
@@ -128,6 +134,9 @@ jobs:
   docker-manifest:
     runs-on: ubuntu-latest
     needs: [docker-amd64, docker-arm64]
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Setup api.github.com credentials
@@ -145,34 +154,36 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
         with:
           registry: ghcr.io
           username: ntwrk-bot
           password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
 
       - name: Checkout ledger repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
         with:
           extra_nix_config: |
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Cache Nix
-        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@v7
         with:
-          nix_path: nixpkgs=channel:nixos-unstable
-          endpoint: https://attic.ci.iog.io
-          cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
 
       - name: Create and push manifest
         run: |
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          echo "PROOF_SERVER_VERSION=$PROOF_SERVER_VERSION" >> $GITHUB_ENV
 
           docker manifest create ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
             ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
@@ -180,9 +191,97 @@ jobs:
 
           docker manifest push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION
 
-          if [[ "$VERSION" != *"-"* ]]; then
+          # Only a final release moves `latest`; a pre-release version contains a
+          # '-' (e.g. 8.2.0-rc.1). ($VERSION was undefined here, so `latest` was
+          # always pushed - guard on the actual proof-server version instead.)
+          if [[ "$PROOF_SERVER_VERSION" != *"-"* ]]; then
             docker manifest create ghcr.io/midnight-ntwrk/proof-server:latest \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
               ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
             docker manifest push ghcr.io/midnight-ntwrk/proof-server:latest
           fi
+
+          IMAGE_DIGEST=$(docker buildx imagetools inspect \
+            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
+            --format '{{.Manifest.Digest}}')
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> $GITHUB_ENV
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
+
+      - name: Fetch signing key from Secret Manager
+        id: fetch-key
+        uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
+        with:
+          secrets: |-
+            SIGNING_KEY:projects/mnf-federated-node-operator/secrets/midnight-proof-server-signing-key/versions/latest
+
+      - name: Sign proof-server build manifest
+        env:
+          SIGNING_KEY: ${{ steps.fetch-key.outputs.SIGNING_KEY }}
+          SIGNING_KEY_PASSPHRASE: ${{ secrets.PROOF_SERVER_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          export GNUPGHOME=$(mktemp -d)
+
+          # CI runners have no TTY, so gpg-agent can't launch an interactive
+          # pinentry to collect the key passphrase (it would fail with
+          # "Inappropriate ioctl for device"). Configure loopback pinentry so
+          # the passphrase is fed directly on stdin instead. Written before the
+          # first gpg call so the agent picks it up on launch.
+          printf 'pinentry-mode loopback\n' > "$GNUPGHOME/gpg.conf"
+          printf 'allow-loopback-pinentry\n' > "$GNUPGHOME/gpg-agent.conf"
+
+          # Runs on every exit path (success or failure) so the imported
+          # signing key never outlives this step. Batch-mode secret-key
+          # deletion requires the full fingerprint, not the key ID.
+          cleanup() {
+            if [[ -n "${KEY_FPR:-}" ]]; then
+              gpg --batch --yes --delete-secret-keys "$KEY_FPR" || true
+            fi
+            rm -rf "$GNUPGHOME"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$SIGNING_KEY" | gpg --batch --import
+          KEY_ID=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^sec:/ {print $5; exit}')
+          KEY_FPR=$(gpg --list-secret-keys --with-colons \
+            | awk -F: '/^fpr:/ {print $10; exit}')
+
+          cat > build-manifest.json <<EOF
+          {
+            "version": "${PROOF_SERVER_VERSION}",
+            "image": "ghcr.io/midnight-ntwrk/proof-server:${PROOF_SERVER_VERSION}",
+            "image_digest": "${IMAGE_DIGEST}",
+            "git_commit": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF}",
+            "workflow_run": "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "signed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+          # --passphrase-fd 0 reads the passphrase from stdin (not argv, which
+          # would leak it via the process list); loopback keeps gpg from
+          # prompting.
+          printf '%s' "$SIGNING_KEY_PASSPHRASE" \
+            | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+                --armor --local-user "$KEY_ID" \
+                --detach-sign --output build-manifest.json.asc build-manifest.json
+
+          gpg --verify build-manifest.json.asc build-manifest.json
+
+      - name: Upload signed build manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: proof-server-build-manifest-${{ env.PROOF_SERVER_VERSION }}
+          path: |
+            build-manifest.json
+            build-manifest.json.asc
+            proof-server/midnight-proof-server-public.asc
+          if-no-files-found: error

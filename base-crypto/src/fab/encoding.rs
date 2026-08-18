@@ -462,7 +462,7 @@ impl TryFrom<AlignedValueUnchecked> for AlignedValue {
         if !unchecked.alignment.fits(&unchecked.value) {
             Err(format!(
                 "value deserialized as aligned failed alignment check (value: {:?}; alignment: {:?})",
-                &unchecked.value, &unchecked.alignment
+                unchecked.value, unchecked.alignment
             ))
         } else if !unchecked.value.0.iter().all(ValueAtom::is_in_normal_form) {
             Err("aligned value is not in normal form (has trailing zero bytes)".into())

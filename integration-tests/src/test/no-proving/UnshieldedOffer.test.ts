@@ -21,7 +21,7 @@ import {
   UnshieldedOffer,
   type UtxoOutput,
   type UtxoSpend
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getNewUnshieldedOffer, Random } from '@/test-objects';
 
 describe('Ledger API - UnshieldedOffer', () => {
