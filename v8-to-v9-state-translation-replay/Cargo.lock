@@ -3860,7 +3860,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 2.0.1",
- "midnight-ledger-static",
+ "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 2.0.1",
  "midnight-serialize",
  "midnight-storage 1.1.1",
@@ -3895,7 +3895,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 2.0.1",
- "midnight-ledger-static",
+ "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 3.1.0",
  "midnight-serialize",
  "midnight-storage 2.0.2",
@@ -3924,9 +3924,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-ledger-static"
+version = "10.0.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=crate-ledger-9.1.0.0-rc.4#f30197539495f3e66750167a47f21c9e6a53a5ba"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.46",
+]
+
+[[package]]
 name = "midnight-ledger-v9"
 version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=crate-ledger-9.1.0.0-rc.3#85e769a0e352518c979cb6f7a07901b63e1c124d"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=crate-ledger-9.1.0.0-rc.4#f30197539495f3e66750167a47f21c9e6a53a5ba"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3940,17 +3949,15 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 3.0.0",
- "midnight-ledger-static",
+ "midnight-ledger-static 10.0.0",
  "midnight-onchain-runtime 4.0.0",
  "midnight-serialize",
  "midnight-storage 2.0.2",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
  "midnight-zswap 9.0.0",
  "rand 0.8.6",
  "rayon",
- "reqwest 0.13.4",
  "serde",
  "sha2 0.11.0",
  "tokio",
@@ -4573,7 +4580,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 2.0.1",
- "midnight-ledger-static",
+ "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 2.0.1",
  "midnight-serialize",
  "midnight-storage 1.1.1",
@@ -4598,7 +4605,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 2.0.1",
- "midnight-ledger-static",
+ "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 3.1.0",
  "midnight-serialize",
  "midnight-storage 2.0.2",
@@ -4612,7 +4619,7 @@ dependencies = [
 [[package]]
 name = "midnight-zswap"
 version = "9.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=zswap-9.0.0-rc.3#d495446e618ea92577d920bfdf01f3eb1118a322"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=zswap-9.0.0-rc.4#f6f1d2460763d50a6390c793157a34b8bc185a0e"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -4623,7 +4630,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure 3.0.0",
- "midnight-ledger-static",
+ "midnight-ledger-static 10.0.0",
  "midnight-onchain-runtime 4.0.0",
  "midnight-serialize",
  "midnight-storage 2.0.2",
@@ -9415,6 +9422,11 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "midnight-zkir-v3"
+version = "3.0.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=zkir-v3-3.0.0-rc.1#9c54da5569a10e76d78b6239998ebb6f33e50111"
 
 [[patch.unused]]
 name = "yamux"
