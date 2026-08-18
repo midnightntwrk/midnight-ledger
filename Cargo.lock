@@ -2895,9 +2895,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.0"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -3477,7 +3477,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "konst",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-serialize",
  "midnight-storage-core 1.2.0",
@@ -3569,7 +3569,7 @@ dependencies = [
  "group",
  "k256",
  "lazy_static",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.0.0",
  "midnight-circuits 6.3.0",
@@ -3605,7 +3605,7 @@ dependencies = [
  "group",
  "k256",
  "lazy_static",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.1.0",
  "midnight-circuits 7.2.4",
