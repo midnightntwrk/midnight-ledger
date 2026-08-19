@@ -1,1 +1,1 @@
-((vec(fr-bls),vec(fr-bls),vec(fr-bls),vec(fr-bls),fr-bls,option((fr-bls,fr-bls)),string))
+((vec(fr-bls),vec(fr-bls),vec(fr-bls),vec(fr-bls),vec(vec(u8)),fr-bls,option((fr-bls,fr-bls)),string))
