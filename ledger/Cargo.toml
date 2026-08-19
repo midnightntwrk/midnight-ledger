@@ -73,6 +73,11 @@ tempfile = "3.20"
 pastey = "0.2.1"
 serde_json = "^1.0.140"
 hex = "^0.4.3"
+# Only needed to build a local, offline (unsafe) KZG SRS for the dust V2 vs V3
+# proving comparison test, so it doesn't depend on fetching the production
+# trusted setup over the network.
+midnight-curves = { version = "^0.3.1" }
+midnight-proofs = { version = "^0.8.1" }
 
 [[bench]]
 name = "benchmarking"
