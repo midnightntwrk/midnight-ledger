@@ -116,16 +116,16 @@ fn decode_bytes(encoded: &[F], n: usize) -> Option<IrValue> {
         return None;
     }
     let mut bytes = Vec::with_capacity(n);
-    for (i, f) in encoded.iter().enumerate() {
+    let mut remaining = n; 
+    for f in encoded {
         let buf = f.to_bytes_le();
-        // Bytes contributed by this chunk: `BYTES_PER_FIELD_ELEMENT`, or fewer
-        // for the final chunk when `n` is not a multiple.
-        let chunk_len = (n - i * BYTES_PER_FIELD_ELEMENT).min(BYTES_PER_FIELD_ELEMENT);
+        let chunk_len = remaining.min(BYTES_PER_FIELD_ELEMENT);
         // The remaining high bytes must be zero (canonical form).
         if buf[chunk_len..].iter().any(|b| *b != 0) {
             return None;
         }
         bytes.extend_from_slice(&buf[..chunk_len]);
+        remaining -= BYTES_PER_FIELD_ELEMENT;
     }
     Some(IrValue::Bytes(bytes))
 }
