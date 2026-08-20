@@ -3727,6 +3727,7 @@ version = "3.0.0"
 dependencies = [
  "actix-rt",
  "anyhow",
+ "blake2b_simd",
  "clap",
  "console 0.16.3",
  "const-hex",
