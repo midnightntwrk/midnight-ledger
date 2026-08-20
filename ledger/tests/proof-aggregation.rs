@@ -474,7 +474,7 @@ async fn aggregate_dust_proofs() {
             .to_string(),
     );
 
-    const IVC_K: u32 = 20;
+    const IVC_K: u32 = 19;
     const INNER_K: u32 = 13;
 
     // ── Produce N independent, real dust spend proofs ─────────────────────────

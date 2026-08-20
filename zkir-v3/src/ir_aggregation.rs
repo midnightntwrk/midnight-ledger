@@ -92,7 +92,7 @@ impl AggregableIrSource {
             // instructions (e.g. any circuit that calls persistent_commit).
             // Enabling this increases the outer IVC circuit from ~517K to ~628K
             // rows, so the outer SRS must be K=20 (not K=19).
-            sha2_256: true,
+            // sha2_256: true,
             // Keep nr_pow2range_cols at the default (1) rather than the 4 used
             // by IrSource::used_chips(). Using 4 adds 3 extra advice columns to
             // the inner circuit's constraint system, which makes the IVC outer
@@ -156,8 +156,9 @@ impl Relation for AggregableIrSource {
         instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
-        let public_inputs: Vec<AssignedNative<outer::Scalar>> =
-            self.0.assign_public_inputs(std, layouter, instance, witness)?;
+        let public_inputs: Vec<AssignedNative<outer::Scalar>> = self
+            .0
+            .assign_public_inputs(std, layouter, instance, witness)?;
         let digest = std.poseidon(layouter, &public_inputs)?;
         std.constrain_as_public_input(layouter, &digest)
     }
