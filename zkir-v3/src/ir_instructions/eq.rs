@@ -26,7 +26,7 @@ use crate::{
 ///   - `Native`
 ///   - `Bool`
 ///   - `Byte`
-///   - `Bytes32`
+///   - `Bytes(n)`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -41,7 +41,7 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
         (Native(x), Native(y)) => Ok(x == y),
         (Bool(a), Bool(b)) => Ok(a == b),
         (Byte(a), Byte(b)) => Ok(a == b),
-        (Bytes32(xs), Bytes32(ys)) => Ok(xs == ys),
+        (Bytes(xs), Bytes(ys)) => Ok(xs == ys),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(p == q),
 
         (Secp256k1Point(p), Secp256k1Point(q)) => Ok(p == q),
@@ -61,6 +61,7 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Erro
 ///   - `Native`
 ///   - `Bool`
 ///   - `Byte`
+///   - `Bytes(n)` (both operands must have the same length)
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -83,7 +84,7 @@ pub fn test_eq_incircuit(
 
         (Byte(x), Byte(y)) => std_lib.is_equal(layouter, x, y),
 
-        (Bytes32(xs), Bytes32(ys)) => {
+        (Bytes(xs), Bytes(ys)) if xs.len() == ys.len() => {
             let pair_wise_eqs = (xs.iter().zip(ys.iter()))
                 .map(|(x, y)| std_lib.is_equal(layouter, x, y))
                 .collect::<Result<Vec<_>, plonk::Error>>()?;
@@ -133,8 +134,9 @@ mod tests {
         assert!(!test_eq_offcircuit(&Byte(7), &Byte(8)).unwrap());
         assert!(test_eq_offcircuit(&Native(x), &Byte(7)).is_err());
 
-        let bytes: [u8; 32] = std::array::from_fn(|_| rand::thread_rng().r#gen());
-        assert!(test_eq_offcircuit(&Bytes32(bytes), &Bytes32(bytes)).unwrap());
+        let bytes: Vec<u8> = (0..32).map(|_| rand::thread_rng().r#gen()).collect();
+        assert!(test_eq_offcircuit(&Bytes(bytes.clone()), &Bytes(bytes.clone())).unwrap());
+        assert!(!test_eq_offcircuit(&Bytes(bytes), &Bytes(vec![0u8; 32])).unwrap());
 
         let p = JubjubSubgroup::random(OsRng);
         assert!(test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap());

@@ -25,7 +25,7 @@ use crate::{
 ///   - `Native`
 ///   - `Bool`
 ///   - `Byte`
-///   - `Bytes32`
+///   - `Bytes(n)`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -58,7 +58,7 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
 ///   - `Native`
 ///   - `Bool`
 ///   - `Byte`
-///   - `Bytes32`
+///   - `Bytes(n)`
 ///   - `JubjubPoint`
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
@@ -81,7 +81,7 @@ pub fn constrain_eq_incircuit(
 
         (Byte(a), Byte(b)) => std_lib.assert_equal(layouter, a, b),
 
-        (Bytes32(xs), Bytes32(ys)) => xs
+        (Bytes(xs), Bytes(ys)) if xs.len() == ys.len() => xs
             .iter()
             .zip(ys.iter())
             .try_for_each(|(x, y)| std_lib.assert_equal(layouter, x, y)),
@@ -130,8 +130,9 @@ mod tests {
         assert!(constrain_eq_offcircuit(&Byte(7), &Byte(8)).is_err());
         assert!(constrain_eq_offcircuit(&Native(x), &Byte(7)).is_err());
 
-        let bytes: [u8; 32] = std::array::from_fn(|_| rand::thread_rng().r#gen());
-        assert!(constrain_eq_offcircuit(&Bytes32(bytes), &Bytes32(bytes)).is_ok());
+        let bytes: Vec<u8> = (0..32).map(|_| rand::thread_rng().r#gen()).collect();
+        assert!(constrain_eq_offcircuit(&Bytes(bytes.clone()), &Bytes(bytes.clone())).is_ok());
+        assert!(constrain_eq_offcircuit(&Bytes(bytes), &Bytes(vec![0u8; 32])).is_err());
 
         let p = JubjubSubgroup::random(OsRng);
         assert!(constrain_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).is_ok());

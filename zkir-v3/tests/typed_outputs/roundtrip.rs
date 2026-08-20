@@ -153,6 +153,39 @@ async fn byte_identity() {
 }
 
 #[actix_rt::test]
+async fn bytes_n_identity() {
+    // Output a Bytes(n) input directly for several n (spanning the 31-byte
+    // chunk boundary), exercising encode_incircuit / encode_offcircuit and the
+    // Bytes(n) input assignment.
+    use midnight_zkir_v3::ir_instructions::encode::encode_offcircuit;
+    for n in [1usize, 31, 32, 48, 63] {
+        let bytes: Vec<u8> = (0..n as u8).collect();
+        let inputs: Vec<Fr> = encode_offcircuit(&IrValue::Bytes(bytes.clone()))
+            .into_iter()
+            .map(|v| v.try_into().unwrap())
+            .collect();
+        assert_typed_output_roundtrip(
+            &format!(
+                r#"{{
+               "version": {{ "major": 3, "minor": 0 }},
+               "inputs": [
+                  {{ "name": "%b", "type": "Bytes<{n}>" }}
+               ],
+               "outputs": ["Bytes<{n}>"],
+               "do_communications_commitment": true,
+               "instructions": [
+                   {{ "op": "output", "vals": ["%b"] }}
+               ]
+            }}"#
+            ),
+            inputs,
+            vec![IrValue::Bytes(bytes)],
+        )
+        .await;
+    }
+}
+
+#[actix_rt::test]
 async fn multi_output_native_pair() {
     // Two Native outputs from the same input. Exercises the per-position
     // arity & type loop in the Output arm.
