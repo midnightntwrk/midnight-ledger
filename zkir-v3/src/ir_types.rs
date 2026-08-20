@@ -21,7 +21,11 @@ use midnight_circuits::{
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256};
 use midnight_proofs::{circuit::Value, plonk::Error};
 #[cfg(feature = "proptest")]
-use proptest_derive::Arbitrary;
+use proptest::{
+    prelude::{Arbitrary, Strategy},
+    prop_oneof,
+    strategy::{BoxedStrategy, Just},
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serialize::{Deserializable, Serializable, Tagged};
 use transient_crypto::curve::{Fr, outer};
@@ -46,7 +50,6 @@ pub const MAX_BYTES_LEN: u32 = 1 << 24;
 /// `Serialize`/`Deserialize` impls below) rather than through
 /// `#[serde(rename)]`, so that the parametrized `Bytes<n>` form is supported
 /// for every `n >= 1`.
-#[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serializable)]
 #[tag = "ir-type[v1]"]
 pub enum IrType {
@@ -65,7 +68,7 @@ pub enum IrType {
     /// Serializes as `"Bytes<n>"`; `Bytes(32)` is the former `Bytes32` type.
     /// `u32` (rather than `usize`) so the binary encoding is platform
     /// independent, matching the `u32` convention used for bit widths.
-    Bytes(#[cfg_attr(feature = "proptest", proptest(strategy = "1u32..=1024u32"))] u32),
+    Bytes(u32),
 
     /// Point of the Jubjub elliptic curve.
     JubjubPoint,
@@ -159,6 +162,37 @@ impl<'de> Deserialize<'de> for IrType {
         let s = <String as Deserialize>::deserialize(deserializer)?;
         IrType::from_type_string(&s)
             .ok_or_else(|| de::Error::custom(format!("invalid IR type: {s:?}")))
+    }
+}
+
+/// Written by hand rather than derived because [`IrType::Bytes`] carries an
+/// invariant a derived `Arbitrary` would not respect: it would sample the whole
+/// `u32` range, including lengths outside `1..=`[`MAX_BYTES_LEN`].
+#[cfg(feature = "proptest")]
+impl Arbitrary for IrType {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<IrType>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        // Biased towards short lengths, so that the `BYTES_PER_FIELD_ELEMENT`
+        // chunking boundary is exercised often.
+        let bytes_len = prop_oneof![
+            3 => 1u32..=2 * BYTES_PER_FIELD_ELEMENT as u32,
+            1 => 1u32..=MAX_BYTES_LEN,
+        ];
+
+        prop_oneof![
+            Just(IrType::Native),
+            Just(IrType::Bool),
+            Just(IrType::Byte),
+            bytes_len.prop_map(IrType::Bytes),
+            Just(IrType::JubjubPoint),
+            Just(IrType::JubjubScalar),
+            Just(IrType::Secp256k1Point),
+            Just(IrType::Secp256k1Base),
+            Just(IrType::Secp256k1Scalar),
+        ]
+        .boxed()
     }
 }
 
