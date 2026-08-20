@@ -19,11 +19,7 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
-    # zkir lives in a sibling checkout ahead of its move to its own repository;
-    # switch to github:midnightntwrk/midnight-zkir once that repository exists.
-    # (An absolute path is required: nix resolves relative path inputs against
-    # the store copy of this flake, so "path:../zkir" does not work.)
-    zkir.url = "path:/home/midnight/zkir";
+    zkir.url = "github:midnightntwrk/midnight-zkir";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -91,12 +87,6 @@
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
-        # Cargo's [patch.crates-io] entries point at the sibling zkir checkout
-        # ("../zkir/..."), which is outside the nix source tree; rewrite them
-        # to the zkir flake input for nix builds.
-        zkirCargoPatchFixup = ''
-          sed -i 's|"\.\./zkir/|"${zkir}/|g' Cargo.toml
-        '';
         rust-build = self.packages.${system}.rust-build-toolchain;
         ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
@@ -112,7 +102,6 @@
               # clang doesn't support 'zerocallusedregs' for wasm, but nix tries to set it
               # anyway. The stack protector tries to pull in OS code that doesn't exist.
               hardeningDisable = ["zerocallusedregs" "stackprotector"];
-              postPatch = zkirCargoPatchFixup;
             } // (if require-artifacts then {
               MIDNIGHT_PP = "${self.packages.${system}.local-params}";
             } else {}) // (if experimental then {
@@ -137,7 +126,6 @@
               src = rustWorkspaceSrc;
               cargoLock.lockFile = ./Cargo.lock;
               cargoLock.allowBuiltinFetchGit = true;
-              postPatch = zkirCargoPatchFixup;
 
               CARGO_BUILD_TARGET = {
                 "x86_64-linux" = "x86_64-unknown-linux-musl";
