@@ -440,3 +440,242 @@ async fn proof_aggregation_verify() {
     <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&agg_evidence, &verifier)
         .expect("aggregated proof verification must succeed");
 }
+
+/// Aggregates `n` independent dust spend proofs into a single IVC proof, verifies
+/// it, and reports the metrics that matter for evaluating aggregation as a
+/// fee-payment scaling strategy:
+/// - wall-clock time to fold `n` real dust proofs into one aggregated proof,
+/// - the resulting aggregated proof's size in bytes, and
+/// - how verification time is affected by the number of folded proofs, by
+///   comparing against a second aggregation containing just 1 of the same
+///   dust proofs (built from the same already-proven inner witness, so the
+///   comparison isolates the IVC fold/verify cost from proving cost).
+///
+/// Each dust proof comes from a *separate* `balance_tx` fee payment (one dust
+/// UTXO spent per empty transaction), which is how aggregation would actually
+/// be used in production: folding the fee proofs of several transactions in a
+/// block into one succinct proof, rather than shipping N separate ones.
+#[tokio::test]
+async fn aggregate_dust_proofs() {
+    use midnight_ledger::structure::{ContractProofEvidence, ProofKind, ProofMarker};
+    use std::time::Instant;
+    use transient_crypto::aggregation::{
+        AggregatedContractProof, AggregationTranscript, AggregationVerifier, AggregationVerify,
+        AggregationWitness, InnerCircuitsContext, IvcInstance, ProofAggregation,
+    };
+    use zkir_v3::ir_aggregation::AggregableIrSource;
+
+    const N: usize = 5;
+
+    // Skip if the outer aggregation SRS is not available locally (see
+    // `proof_aggregation_verify` above for context on this path).
+    let srs_dir = std::path::PathBuf::from(
+        "/nix/store/dh2bkkbh384z7f507bd04b0cmwipzjvq-midnight-local-params-10-dust-zswap-v3"
+            .to_string(),
+    );
+
+    const IVC_K: u32 = 20;
+    const INNER_K: u32 = 13;
+
+    // ── Produce N independent, real dust spend proofs ─────────────────────────
+    // Each iteration balances a fresh, otherwise-empty transaction, which still
+    // incurs a (small) Dust fee, so `balance_tx` spends exactly one Dust UTXO
+    // and captures its proof preimage in `state.captured_dust_preimages`. We
+    // loop (rather than assuming 1 UTXO per round) so this doesn't depend on
+    // the exact relationship between per-UTXO generation caps and per-tx fees.
+    let mut rng = StdRng::seed_from_u64(0x44);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    // Headroom for up to ~20 balancing rounds of tiny empty-tx fees, mirroring
+    // the over-provisioning `proof_aggregation_verify` uses for a single fee.
+    state.give_fee_token(&mut rng, 25).await;
+
+    let strictness = WellFormedStrictness::default();
+    let mut dust_preimages: Vec<ProofPreimage> = Vec::new();
+    let mut rounds = 0usize;
+    while dust_preimages.len() < N {
+        rounds += 1;
+        assert!(
+            rounds <= 30,
+            "only accumulated {}/{N} dust spend proofs after {rounds} balancing rounds",
+            dust_preimages.len()
+        );
+        let empty_tx: Transaction<Signature, _, _, _> =
+            Transaction::new("local-test", Default::default(), None, Default::default());
+        let tx = state
+            .balance_tx(rng.split(), empty_tx, &RESOLVER)
+            .await
+            .unwrap();
+        dust_preimages.extend(state.captured_dust_preimages.clone());
+        state.assert_apply(&tx, strictness);
+    }
+    dust_preimages.truncate(N);
+    assert_eq!(
+        dust_preimages.len(),
+        N,
+        "expected exactly {N} dust spend proofs"
+    );
+
+    // ── Load the dust-spend circuit once, wrapped for aggregation ─────────────
+    let dust_mat = RESOLVER
+        .resolve_key(KeyLocation(Cow::Borrowed("midnight/dust/spend")))
+        .await
+        .expect("resolver error for dust spend")
+        .expect("midnight/dust/spend IrSource not found");
+    let dust_ir_v3: zkir_v3::IrSource =
+        serialize::tagged_deserialize(std::io::Cursor::new(&dust_mat.ir_source[..]))
+            .expect("dust IrSource tagged deserialize must succeed");
+    let dust_agg_ir = AggregableIrSource(dust_ir_v3);
+
+    let inner_srs = std::sync::Arc::new(
+        transient_crypto::aggregation::load_midnight_srs(&srs_dir, INNER_K)
+            .unwrap_or_else(|e| panic!("failed to load inner bls_midnight_2p{INNER_K}: {e}")),
+    );
+    let dust_agg_vk = midnight_zk_stdlib::setup_vk(inner_srs.as_ref(), &dust_agg_ir);
+    let dust_agg_pk = midnight_zk_stdlib::setup_pk(&dust_agg_ir, &dust_agg_vk);
+
+    // ── Aggregate all N dust proofs into one, timing the whole pipeline ───────
+    let inner_arch = AggregableIrSource::aggregation_arch();
+    let inner_params = inner_srs.verifier_params();
+    let inner_ctx = InnerCircuitsContext::new(inner_arch, INNER_K, inner_params);
+    let aggregator_srs = transient_crypto::aggregation::load_midnight_srs(&srs_dir, IVC_K)
+        .unwrap_or_else(|e| panic!("failed to load midnight-srs-2p{IVC_K} from {srs_dir:?}: {e}"));
+    let (mut aggregator, agg_verifier) = ProofAggregation::setup(aggregator_srs, IVC_K, inner_ctx);
+
+    // Stash the first dust proof's (vk, pis, inner-proof-bytes) so the size-1
+    // baseline below can reuse it without re-running the expensive halo2
+    // proving step a second time — only the (cheap) IVC fold and verification
+    // steps are re-run for the comparison.
+    let mut first_witness_ingredients = None;
+
+    let agg_start = Instant::now();
+    let mut ivc_proof = None;
+    for (i, dust_preimage) in dust_preimages.iter().enumerate() {
+        let preproc = dust_agg_ir
+            .preprocess(dust_preimage)
+            .expect("dust AggregableIrSource preprocess must succeed");
+        let pis = preproc.pis.clone();
+        let proof_bytes = midnight_zk_stdlib::prove::<
+            AggregableIrSource,
+            AggregationTranscript<transient_crypto::curve::outer::Scalar>,
+        >(
+            inner_srs.as_ref(),
+            &dust_agg_pk,
+            &dust_agg_ir,
+            &pis,
+            preproc,
+            rng.split(),
+        )
+        .expect("dust inner AggregableIrSource prove must succeed");
+        if i == 0 {
+            first_witness_ingredients =
+                Some((dust_agg_vk.clone(), pis.clone(), proof_bytes.clone()));
+        }
+        let witness =
+            AggregationWitness::new::<AggregableIrSource>(dust_agg_vk.clone(), pis, proof_bytes);
+        ivc_proof = Some(
+            aggregator
+                .aggregate(witness)
+                .expect("dust IVC aggregation step must succeed"),
+        );
+    }
+    let aggregation_time = agg_start.elapsed();
+    let ivc_proof = ivc_proof.expect("must aggregate at least one dust proof");
+    let proof_size_bytes = ivc_proof.len();
+
+    let ivc_instance: IvcInstance<ProofAggregation> = aggregator.instance();
+
+    // DirectVerifier holds IvcInstance directly — no public serialization API exists.
+    //
+    // SAFETY: `IvcInstance` is `!Send` only because `Box<dyn Statement>` lacks the `Send`
+    // bound, but every concrete statement stored here is `TypedStatement<AggregableIrSource>`
+    // whose inner type `Vec<outer::Scalar>` is `Send + Sync`. The instance is never actually
+    // moved to another thread.
+    struct DirectVerifier {
+        verifier: AggregationVerifier,
+        instance: IvcInstance<ProofAggregation>,
+    }
+    unsafe impl Send for DirectVerifier {}
+    unsafe impl Sync for DirectVerifier {}
+    impl AggregationVerify for DirectVerifier {
+        fn verify_aggregated_proof(
+            &self,
+            proof: &AggregatedContractProof,
+        ) -> Result<(), anyhow::Error> {
+            self.verifier
+                .verify_aggregation(&self.instance, &proof.ivc_proof)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        }
+    }
+
+    let agg_proof = AggregatedContractProof {
+        ivc_proof,
+        ivc_instance: vec![],
+    };
+    let verifier = DirectVerifier {
+        verifier: agg_verifier,
+        instance: ivc_instance,
+    };
+
+    let agg_evidence = vec![ContractProofEvidence::Aggregated { proof: agg_proof }];
+    let verify_start = Instant::now();
+    <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&agg_evidence, &verifier)
+        .expect("aggregated proof verification must succeed");
+    let verify_time = verify_start.elapsed();
+
+    // ── Baseline: aggregate just 1 of the same dust proofs ────────────────────
+    // Same circuit, same vk/pk, same already-computed inner proof — only the
+    // IVC fold count differs (1 vs N) — to isolate how *that* affects the
+    // resulting proof's size and verification time.
+    let (vk0, pis0, proof_bytes0) =
+        first_witness_ingredients.expect("at least one dust proof must have been folded");
+
+    let inner_params_1 = inner_srs.verifier_params();
+    let inner_ctx_1 = InnerCircuitsContext::new(
+        AggregableIrSource::aggregation_arch(),
+        INNER_K,
+        inner_params_1,
+    );
+    let aggregator_srs_1 = transient_crypto::aggregation::load_midnight_srs(&srs_dir, IVC_K)
+        .unwrap_or_else(|e| panic!("failed to load midnight-srs-2p{IVC_K} from {srs_dir:?}: {e}"));
+    let (mut aggregator_1, agg_verifier_1) =
+        ProofAggregation::setup(aggregator_srs_1, IVC_K, inner_ctx_1);
+
+    let agg_start_1 = Instant::now();
+    let witness_1 = AggregationWitness::new::<AggregableIrSource>(vk0, pis0, proof_bytes0);
+    let ivc_proof_1 = aggregator_1
+        .aggregate(witness_1)
+        .expect("single-proof IVC aggregation step must succeed");
+    let aggregation_time_1 = agg_start_1.elapsed();
+    let proof_size_bytes_1 = ivc_proof_1.len();
+
+    let ivc_instance_1: IvcInstance<ProofAggregation> = aggregator_1.instance();
+    let agg_proof_1 = AggregatedContractProof {
+        ivc_proof: ivc_proof_1,
+        ivc_instance: vec![],
+    };
+    let verifier_1 = DirectVerifier {
+        verifier: agg_verifier_1,
+        instance: ivc_instance_1,
+    };
+    let agg_evidence_1 = vec![ContractProofEvidence::Aggregated { proof: agg_proof_1 }];
+    let verify_start_1 = Instant::now();
+    <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&agg_evidence_1, &verifier_1)
+        .expect("single-proof aggregated verification must succeed");
+    let verify_time_1 = verify_start_1.elapsed();
+
+    // ── Report ─────────────────────────────────────────────────────────────
+    println!(
+        "[proof aggregation] N={N} dust proofs: aggregation took {aggregation_time:?}, \
+         resulting proof = {proof_size_bytes} bytes, verification took {verify_time:?}"
+    );
+    println!(
+        "[proof aggregation] N=1 dust proof (baseline): aggregation took {aggregation_time_1:?}, \
+         resulting proof = {proof_size_bytes_1} bytes, verification took {verify_time_1:?}"
+    );
+    println!(
+        "[proof aggregation] verification time for N={N} vs N=1: {:.2}x \
+         (IVC aggregation makes verification ~O(1) in the number of folded proofs, \
+         so this should stay close to 1x rather than scale with N)",
+        verify_time.as_secs_f64() / verify_time_1.as_secs_f64().max(f64::EPSILON)
+    );
+}
