@@ -116,7 +116,9 @@ fn decode_bytes(encoded: &[F], n: usize) -> Option<IrValue> {
         return None;
     }
     let mut bytes = Vec::with_capacity(n);
-    let mut remaining = n; 
+    // Bytes still to be decoded; the final chunk is short when `n` is not a
+    // multiple of `BYTES_PER_FIELD_ELEMENT`.
+    let mut remaining = n;
     for f in encoded {
         let buf = f.to_bytes_le();
         let chunk_len = remaining.min(BYTES_PER_FIELD_ELEMENT);
@@ -125,7 +127,7 @@ fn decode_bytes(encoded: &[F], n: usize) -> Option<IrValue> {
             return None;
         }
         bytes.extend_from_slice(&buf[..chunk_len]);
-        remaining -= BYTES_PER_FIELD_ELEMENT;
+        remaining -= chunk_len;
     }
     Some(IrValue::Bytes(bytes))
 }
@@ -234,7 +236,9 @@ mod tests {
         // Cover lengths straddling the field-element chunk boundary.
         let c = BYTES_PER_FIELD_ELEMENT;
         for n in [1, c - 1, c, c + 1, 2 * c, 2 * c + 1, 100] {
-            let bytes: Vec<u8> = (0..n).map(|i| (i as u8).wrapping_mul(7).wrapping_add(1)).collect();
+            let bytes: Vec<u8> = (0..n)
+                .map(|i| (i as u8).wrapping_mul(7).wrapping_add(1))
+                .collect();
             let value = IrValue::Bytes(bytes);
             let encoded: Vec<Fr> = encode_offcircuit(&value)
                 .into_iter()
