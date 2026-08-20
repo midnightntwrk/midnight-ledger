@@ -2385,7 +2385,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3681,6 +3681,7 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "2.2.0"
+source = "git+https://github.com/midnightntwrk/midnight-zkir#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
  "anyhow",
  "const-hex",
@@ -3710,6 +3711,7 @@ dependencies = [
 [[package]]
 name = "midnight-zkir-v3"
 version = "3.0.0"
+source = "git+https://github.com/midnightntwrk/midnight-zkir#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
  "anyhow",
  "const-hex",
@@ -3738,6 +3740,7 @@ dependencies = [
 [[package]]
 name = "midnight-zkir-wasm"
 version = "2.2.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-zkir#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",

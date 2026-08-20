@@ -286,13 +286,16 @@
       },
       "locked": {
         "lastModified": 1787223174,
-        "narHash": "sha256-P0jq+Vh3cHn0OntKtK7JzOxNAAEBBBiPRDzBw0J94JY=",
-        "path": "/home/midnight/zkir",
-        "type": "path"
+        "narHash": "sha256-hhI4aDwlEE5LZH1ckZBeQsHK727yWugJBVjCSpfVG90=",
+        "owner": "midnightntwrk",
+        "repo": "midnight-zkir",
+        "rev": "a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc",
+        "type": "github"
       },
       "original": {
-        "path": "/home/midnight/zkir",
-        "type": "path"
+        "owner": "midnightntwrk",
+        "repo": "midnight-zkir",
+        "type": "github"
       }
     }
   },

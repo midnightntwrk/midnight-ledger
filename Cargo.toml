@@ -65,12 +65,11 @@ panic = "abort"
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
 midnight-transient-crypto = { path = "transient-crypto" }
-# The zkir crates now live in a sibling checkout, ahead of their move to their
-# own repository (midnight-zkir). Once they are published to crates.io, these
-# patches can be dropped.
-midnight-zkir = { path = "../zkir/zkir" }
-midnight-zkir-v3 = { path = "../zkir/zkir-v3" }
-midnight-zkir-wasm = { path = "../zkir/zkir-wasm" }
+# The zkir crates now live in their own repository. Once they are published
+# to crates.io, these patches can be dropped.
+midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-zkir" }
+midnight-zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-zkir" }
+midnight-zkir-wasm = { git = "https://github.com/midnightntwrk/midnight-zkir" }
 # Because we rely on additions in 2.2
 midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto" }
 
