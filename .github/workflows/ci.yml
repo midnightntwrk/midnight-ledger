@@ -49,7 +49,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -124,7 +125,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -194,7 +196,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -217,6 +220,7 @@ jobs:
 
       - name: Build and Test (default features)
         run: |
+          set -eo pipefail
           cargo install cargo2junit
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results.json
           # Filter is a workaround for johnterickson/cargo2junit#85
@@ -256,7 +260,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -279,6 +284,7 @@ jobs:
 
       - name: Build and Test - Proof server (default features)
         run: |
+          set -eo pipefail
           cargo install cargo2junit
           cd proof-server
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results-proof-server.json
