@@ -19,7 +19,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [ubuntu-latest-8-core-x64]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -164,7 +164,7 @@ jobs:
   build-ledger:
     strategy:
       matrix:
-        os: [ubuntu-latest-8-core-x64, ubuntu-24.04-arm, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -226,7 +226,7 @@ jobs:
   build-proof-server:
     strategy:
       matrix:
-        os: [ubuntu-latest-8-core-x64, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
