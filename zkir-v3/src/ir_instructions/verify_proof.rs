@@ -23,7 +23,7 @@ use anyhow::anyhow;
 use group::Group;
 use midnight_circuits::hash::poseidon::PoseidonState;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
-use midnight_circuits::types::{AssignedNative, Instantiable};
+use midnight_circuits::types::{AssignedBit, AssignedNative, Instantiable};
 use midnight_circuits::verifier::{Accumulator, AssignedAccumulator, SelfEmulation, fixed_bases};
 use midnight_curves::Bls12;
 use midnight_proofs::{
@@ -40,22 +40,41 @@ use transient_crypto::proofs::S;
 /// A fixed, arbitrary name used to label the inner verifying key's fixed bases.
 const VK_NAME: &str = "inner_vk";
 
-/// Number of public-input field elements occupied by one fully-collapsed,
-/// single-point-per-side accumulator.
-pub fn accumulator_pi_len() -> usize {
+/// Public-input encoding of the accumulator a guarded-off `verify_proof`
+/// exposes: the trivial accumulator, whose sides both evaluate to the identity
+/// and which therefore satisfies the pairing invariant by construction.
+///
+/// It is a fixed, proof-independent encoding, which is what lets a guarded-off
+/// instruction accept any inner proof witness at all — including an empty one.
+pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
     <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(
         &Accumulator::<S>::trivial(&[]),
     )
-    .len()
+}
+
+/// Number of public-input field elements occupied by one fully-collapsed,
+/// single-point-per-side accumulator.
+pub fn accumulator_pi_len() -> usize {
+    trivial_accumulator_pis().len()
 }
 
 /// Off-circuit partial verification of an inner proof into a single-point
 /// accumulator, encoded as public-input field elements.
+///
+/// If `guard` is `false` the proof is not read at all, and the trivial
+/// accumulator's encoding is returned instead. That is what the in-circuit pass
+/// reduces a guarded-off accumulator to, so the public inputs of the two runs
+/// agree.
 pub fn verify_proof_offcircuit(
     vk_blob: &[u8],
     instance: &[outer::Scalar],
     proof: &[u8],
+    guard: bool,
 ) -> anyhow::Result<Vec<outer::Scalar>> {
+    if !guard {
+        return Ok(trivial_accumulator_pis());
+    }
+
     let vk = MidnightVK::read(&mut { vk_blob }, SerdeFormat::Processed)
         .map_err(|e| anyhow!("reading inner verifying key: {e}"))?;
     let plonk_vk = vk.vk();
@@ -84,12 +103,20 @@ pub fn verify_proof_offcircuit(
 /// In-circuit mirror of [`verify_proof_offcircuit`]: verifies the inner proof
 /// in-circuit and constrains the resulting single-point accumulator as public
 /// inputs.
+///
+/// The proof is prepared in-circuit whatever `guard` is — that is fixed circuit
+/// structure — but if `guard` is `0` the accumulator that preparation produces
+/// is reduced to the trivial one, so the pairing check the outer verifier defers
+/// on it holds regardless of what (if anything) the prover supplied as the
+/// proof. The transcript gadget assigns default points and zero scalars for
+/// bytes it cannot read, so an empty witness is admissible.
 pub fn verify_proof_incircuit(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
     vk_blob: &[u8],
     instance: &[&[AssignedNative<outer::Scalar>]],
     proof: Value<Vec<u8>>,
+    guard: &AssignedBit<outer::Scalar>,
 ) -> Result<(), Error> {
     let vk = MidnightVK::read(&mut { vk_blob }, SerdeFormat::Processed)
         .map_err(|e| Error::Synthesis(format!("reading inner verifying key: {e}")))?;
@@ -119,6 +146,23 @@ pub fn verify_proof_incircuit(
     let mut acc = verifier.prepare(layouter, &assigned_vk, &committed, instance, proof)?;
     acc.collapse(layouter, bls, bls.scalar_field_chip())?;
     acc.resolve_fixed_bases(&assigned_bases);
+    acc.collapse(layouter, bls, bls.scalar_field_chip())?;
+
+    // Guard the accumulator. Scaling by the bit zeroes each side's scalar but
+    // leaves its (proof-derived) base in place, so collapse once more to
+    // evaluate `0 * base` down to the identity. A guarded-on accumulator is
+    // unchanged by the pair of operations — each side is a single base with
+    // scalar one either way — while a guarded-off one becomes exactly
+    // `Accumulator::trivial`: the identity with scalar one, on both sides.
+    //
+    // A guarded-off instruction therefore exposes a fixed encoding, independent
+    // of the proof, that satisfies the pairing invariant by construction. That
+    // is what lets the off-circuit pass skip preparation entirely, and so accept
+    // any inner proof witness, including an empty one.
+    //
+    // The scaled scalar is bounded by one, so this second collapse costs a
+    // conditional selection and a point addition, not a scalar multiplication.
+    AssignedAccumulator::scale_by_bit(layouter, bls.scalar_field_chip(), guard, &mut acc)?;
     acc.collapse(layouter, bls, bls.scalar_field_chip())?;
 
     verifier.constrain_as_public_input(layouter, &acc)?;

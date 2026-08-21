@@ -77,8 +77,9 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
-    /// The prover-supplied inner-proof witnesses, in `InnerProof` order. Used
-    /// to run the in-circuit verifier.
+    /// The inner-proof witnesses each `InnerProof` bound, one per instruction in
+    /// instruction order — empty for a guarded-off one. Used to run the
+    /// in-circuit verifier, which indexes them the same way.
     pub inner_proof_witnesses: Vec<Vec<u8>>,
 }
 
@@ -295,6 +296,11 @@ impl IrSource {
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
         let mut proof_witnesses_idx: usize = 0;
+        // One entry per `InnerProof` instruction, in instruction order — which is
+        // how the `synthesize` run indexes them. It is *not* the preimage's
+        // witness vector: a guarded-off instruction consumes nothing from that
+        // one, and contributes the empty blob here.
+        let mut inner_proof_witnesses: Vec<Vec<u8>> = Vec::new();
         let mut outputs = Vec::new();
         let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
             let res = memory
@@ -715,10 +721,12 @@ impl IrSource {
                     }
                 }
                 I::VerifyProof {
+                    guard,
                     vk_hash,
                     instance,
                     proof,
                 } => {
+                    let guard = resolve_operand_bool(&memory, guard)?;
                     let instance = instance
                         .iter()
                         .map(|op| resolve_operand(&memory, op))
@@ -736,23 +744,32 @@ impl IrSource {
                         )
                     })?;
 
-                    let acc_pis = verify_proof_offcircuit(vk_blob, &instance, proof)?;
+                    let acc_pis = verify_proof_offcircuit(vk_blob, &instance, proof, guard)?;
                     for f in acc_pis {
                         pis.push(Fr(f));
                     }
                 }
-                I::InnerProof { output } => {
-                    let proof = preimage
-                        .proof_witnesses
-                        .get(proof_witnesses_idx)
-                        .ok_or_else(|| {
-                            anyhow!(
-                                "Not enough proof witnesses: ran out at index {}",
-                                proof_witnesses_idx
-                            )
-                        })?
-                        .clone();
-                    proof_witnesses_idx += 1;
+                I::InnerProof { guard, output } => {
+                    let proof = if resolve_operand_bool(&memory, guard)? {
+                        let proof = preimage
+                            .proof_witnesses
+                            .get(proof_witnesses_idx)
+                            .ok_or_else(|| {
+                                anyhow!(
+                                    "Not enough proof witnesses: ran out at index {}",
+                                    proof_witnesses_idx
+                                )
+                            })?
+                            .clone();
+                        proof_witnesses_idx += 1;
+                        proof
+                    } else {
+                        // Guarded off: consume nothing, and bind the empty blob.
+                        // The `VerifyProof` under the same guard discards the
+                        // accumulator it produces from it.
+                        Vec::new()
+                    };
+                    inner_proof_witnesses.push(proof.clone());
                     proofs.insert(output.clone(), proof);
                 }
             }
@@ -774,7 +791,7 @@ impl IrSource {
         }
         if preimage.proof_witnesses.len() != proof_witnesses_idx {
             bail!(
-                "Expected {} proof witnesses (one per InnerProof), received {}",
+                "Expected {} proof witnesses (one per active InnerProof), received {}",
                 proof_witnesses_idx,
                 preimage.proof_witnesses.len()
             );
@@ -807,7 +824,7 @@ impl IrSource {
             comm_comm: preimage
                 .communications_commitment
                 .map(|(comm, rand)| (comm.0, rand.0)),
-            inner_proof_witnesses: preimage.proof_witnesses.clone(),
+            inner_proof_witnesses,
         })
     }
 }
@@ -1304,10 +1321,17 @@ impl Relation for IrSource {
                     }
                 }
                 I::VerifyProof {
+                    guard,
                     vk_hash,
                     instance,
                     proof,
                 } => {
+                    let guard: AssignedBit<_> = {
+                        let guard = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
+                        std.convert(layouter, &guard)?
+                    };
+
                     let mut assigned_instance = Vec::new();
                     for op in instance {
                         let v = resolve_operand(std, layouter, &memory, op)?;
@@ -1333,10 +1357,14 @@ impl Relation for IrSource {
                         vk_blob,
                         &[assigned_instance.as_slice()],
                         proof_value,
+                        &guard,
                     )?;
                     pi_idx += accumulator_pi_len();
                 }
-                I::InnerProof { output } => {
+                // The guard is off-circuit bookkeeping only: `preprocess` already
+                // resolved it, binding the empty blob where it was off, and
+                // recorded one witness per instruction for us to index.
+                I::InnerProof { guard: _, output } => {
                     let idx = inner_proof_idx;
                     inner_proof_idx += 1;
                     let proof_value = witness

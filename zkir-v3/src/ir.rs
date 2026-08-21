@@ -924,16 +924,27 @@ pub enum Instruction {
         /// The values returned, one per `IrSource::outputs[i]`.
         vals: Vec<Operand>,
     },
-    /// Verifies an inner Plonk proof in-circuit. The resulting accumulator
-    /// is exposed as public inputs (its in-circuit value is constrained
-    /// equal to them). The final pairing check on that accumulator is
-    /// deferred to the outer verifier.
+    /// Verifies an inner Plonk proof in-circuit, under a guard condition. The
+    /// resulting accumulator is exposed as public inputs (its in-circuit value
+    /// is constrained equal to them). The final pairing check on that
+    /// accumulator is deferred to the outer verifier.
+    ///
+    /// If `guard` is `false`, the trivial accumulator is exposed instead of the
+    /// one the proof produces, which makes the outer verifier's deferred pairing
+    /// check hold whatever the prover supplied as the proof. This is enforced
+    /// with in-circuit constraints. The proof is still prepared in-circuit —
+    /// that is fixed circuit structure — but the witness it consumes may be
+    /// anything, including empty: a guarded-off instruction still consumes one
+    /// `InnerProof` binding, but never depends on its contents.
     ///
     /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
     /// which VK the circuit was compiled against.
     ///
     /// No outputs.
     VerifyProof {
+        /// The boolean condition under which the inner proof is verified. A
+        /// variable reference, or a `0x`-hex immediate for a constant guard.
+        guard: Operand,
         /// Hash of the inner proof verifying key.
         #[serde(with = "const_hex::serde")]
         vk_hash: Vec<u8>,
@@ -945,14 +956,25 @@ pub enum Instruction {
     /// Off-circuit (preprocessing):
     /// Binds `output` to the next inner proof from
     /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage),
-    /// consumed in instruction order.
+    /// consumed in instruction order. If `guard` is `false`, nothing is consumed
+    /// and `output` is bound to the empty blob, so the witness vector only ever
+    /// carries proofs for the path actually taken.
     ///
     /// In-circuit:
     /// Binds `output` to the same blob as a free prover witness. It carries no
-    /// constraints of its own.
+    /// constraints of its own, and the `guard` DOES NOT participate in in-circuit
+    /// constraints — the empty blob a guarded-off instruction binds is a
+    /// perfectly good witness for `VerifyProof`, whose accumulator is discarded
+    /// under the same guard.
+    ///
+    /// The `guard` should be the one of the `VerifyProof` that consumes this
+    /// binding: verifying for real against an empty blob yields an accumulator
+    /// that fails the outer verifier's deferred pairing check.
     ///
     /// One output, the inner proof.
     InnerProof {
+        /// The boolean condition under which a proof witness is consumed
+        guard: Operand,
         /// The output variable name.
         output: Identifier,
     },

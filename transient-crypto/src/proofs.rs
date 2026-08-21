@@ -870,10 +870,13 @@ pub struct ProofPreimage {
     /// A public statement vector encoding statement call results in the IR.
     pub public_transcript_outputs: Vec<Fr>,
     /// Opaque, prover-supplied byte blobs consumed positionally by `InnerProof`
-    /// instructions — one blob per `InnerProof`, in instruction order. These are
-    /// the inner proofs verified in-circuit by the `VerifyProof` instructions
-    /// that consume them; the proof system does not interpret them (they are
-    /// handed verbatim to the decider as a witness).
+    /// instructions — one blob per *active* `InnerProof`, in instruction order.
+    /// A guarded-off `InnerProof` consumes nothing and binds the empty blob, so
+    /// this vector carries proofs only for the path actually taken, and a blob
+    /// left unconsumed is an error. These are the inner proofs verified
+    /// in-circuit by the `VerifyProof` instructions that consume them; the proof
+    /// system does not interpret them (they are handed verbatim to the decider
+    /// as a witness).
     pub proof_witnesses: Vec<Vec<u8>>,
     /// An arbitrary input to be bound to in the proof.
     pub binding_input: Fr,
