@@ -476,6 +476,7 @@ async fn aggregate_dust_proofs() {
 
     const IVC_K: u32 = 19;
     const INNER_K: u32 = 13;
+    const CONSTRUCT_TX: bool = true;
 
     // ── Produce N independent, real dust spend proofs ─────────────────────────
     // Each iteration balances a fresh, otherwise-empty transaction, which still
@@ -499,14 +500,25 @@ async fn aggregate_dust_proofs() {
             "only accumulated {}/{N} dust spend proofs after {rounds} balancing rounds",
             dust_preimages.len()
         );
-        let empty_tx: Transaction<Signature, _, _, _> =
-            Transaction::new("local-test", Default::default(), None, Default::default());
-        let tx = state
-            .balance_tx(rng.split(), empty_tx, &RESOLVER)
-            .await
-            .unwrap();
-        dust_preimages.extend(state.captured_dust_preimages.clone());
-        state.assert_apply(&tx, strictness);
+        if CONSTRUCT_TX {
+            let empty_tx: Transaction<Signature, _, _, _> =
+                Transaction::new("local-test", Default::default(), None, Default::default());
+            let tx = state
+                .balance_tx(rng.split(), empty_tx, &RESOLVER)
+                .await
+                .unwrap();
+            dust_preimages.extend(state.captured_dust_preimages.clone());
+            state.assert_apply(&tx, strictness);
+        } else {
+            let utxo = state.dust.utxos().next().unwrap();
+            let (new_state, dust_spend) = state
+                .dust
+                .spend(&state.dust_key, &utxo, 42, state.time)
+                .expect("building the dust spend witness should succeed");
+            let preimage = dust_spend.proof;
+            dust_preimages.push(preimage);
+            state.dust = new_state;
+        }
     }
     dust_preimages.truncate(N);
     assert_eq!(
