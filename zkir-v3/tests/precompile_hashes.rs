@@ -33,7 +33,7 @@ struct TestParams;
 
 impl transient_crypto::proofs::ParamsProverProvider for TestParams {
     async fn get_params(&self, k: u8) -> std::io::Result<transient_crypto::proofs::ParamsProver> {
-        const DIR: &str = "/nix/store/qg7gf1wk39zibbsc1kxg2ak7h4zw5nxs-midnight-local-params-10"; //env!("MIDNIGHT_PP");
+        const DIR: &str = env!("MIDNIGHT_PP");
         transient_crypto::proofs::ParamsProver::read(BufReader::new(File::open(format!(
             "{DIR}/bls_midnight_2p{k}"
         ))?))
