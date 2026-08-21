@@ -93,6 +93,7 @@ impl AggregableIrSource {
             // Enabling this increases the outer IVC circuit from ~517K to ~628K
             // rows, so the outer SRS must be K=20 (not K=19).
             // sha2_256: true,
+            // bls12_381: true,
             // Keep nr_pow2range_cols at the default (1) rather than the 4 used
             // by IrSource::used_chips(). Using 4 adds 3 extra advice columns to
             // the inner circuit's constraint system, which makes the IVC outer
