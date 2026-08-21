@@ -11,17 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Zkir } from '@midnightntwrk/zkir-v2';
+import { Zkir } from '@midnightntwrk/zkir-v3';
 import { describe, it, expect } from 'vitest';
 import { keyMaterialProvider } from '../../test-objects';
 
-const keys = [
-  { keyLocation: 'midnight/zswap/spend', k: 15 },
-  { keyLocation: 'midnight/zswap/output', k: 14 },
-  { keyLocation: 'midnight/zswap/sign', k: 13 }
-];
+const keys = [{ keyLocation: 'midnight/dust/spend', k: 13 }];
 
-describe('ZKIRV2', () => {
+describe('ZKIRV3', () => {
   it.concurrent.each(keys)('reports the correct k value for $keyLocation', async ({ keyLocation, k }) => {
     const rawKeyMaterial = await keyMaterialProvider.lookupKey(keyLocation);
 

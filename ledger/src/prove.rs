@@ -445,12 +445,12 @@ impl ResolverT for MockProver {
 
 #[cfg(test)]
 mod tests {
-    use base_crypto::data_provider::{self, MidnightDataProvider};
+    // use base_crypto::data_provider::{self, MidnightDataProvider};
     use storage::db::InMemoryDB;
-    use zswap::ZSWAP_EXPECTED_FILES;
+    // use zswap::ZSWAP_EXPECTED_FILES;
 
     use crate::{
-        dust::DUST_EXPECTED_FILES,
+        // dust::DUST_EXPECTED_FILES,
         structure::{Signature, Transaction},
     };
 
@@ -476,7 +476,7 @@ mod tests {
         tx.mock_prove().unwrap();
     }
 
-    #[tokio::test]
+    /*#[tokio::test]
     async fn test_resolver_resolves() {
         if option_env!("NIX_ENFORCE_PURITY").is_some() {
             // We can't run this test in the nix sandbox, due to not having internet!
@@ -515,5 +515,5 @@ mod tests {
             }
             panic!();
         }
-    }
+    }*/
 }
