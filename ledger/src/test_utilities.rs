@@ -52,6 +52,7 @@ use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
+#[cfg(feature = "proving")]
 use std::env;
 use std::io;
 use storage::Storable;
@@ -61,11 +62,13 @@ use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-#[cfg(feature = "proving")]
 use transient_crypto::curve::Fr;
+use transient_crypto::hash::transient_hash;
 use transient_crypto::proofs::KeyLocation;
+use transient_crypto::proofs::ProofPreimage;
 #[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProverKey, ProvingProvider, Resolver as ResolverT, WrappedIr};
+use transient_crypto::repr::FieldRepr;
 #[cfg(feature = "proving")]
 use zkir_v2::{IrSource, LocalProvingProvider};
 use zswap::keys::SecretKeys;
@@ -127,6 +130,11 @@ pub struct TestState<D: DB> {
     pub past_state_window: VecDeque<ArenaHash<D::Hasher>>,
     pub past_state_window_len: usize,
     pub debug_print: bool,
+
+    /// Preimages from the dust spends in the most recent `balance_tx` call,
+    /// with `binding_input` already set to the value used during proving, so
+    /// callers can re-prove them with `AggregableIrSource`.
+    pub captured_dust_preimages: Vec<ProofPreimage>,
 }
 
 impl<D: DB> TestState<D> {
@@ -148,6 +156,8 @@ impl<D: DB> TestState<D> {
             past_state_window: VecDeque::new(),
             past_state_window_len: 20,
             debug_print: false,
+
+            captured_dust_preimages: vec![],
         }
     }
 
@@ -592,6 +602,7 @@ impl<D: DB> TestState<D> {
                 );
             }
             let mut spends = storage::storage::Array::new();
+            let mut raw_preimages: Vec<ProofPreimage> = Vec::new();
             let mut utxos = old_dust.utxos().collect::<Vec<_>>();
             utxos.shuffle(&mut rng);
             for qdo in utxos.into_iter() {
@@ -613,6 +624,7 @@ impl<D: DB> TestState<D> {
                     .dust
                     .spend(&self.dust_key, &qdo, v_fee, self.time)
                     .unwrap(); // TODO unwrap
+                raw_preimages.push(spend.proof.clone());
                 self.dust = new_dust;
                 spends = spends.push(spend);
             }
@@ -620,6 +632,24 @@ impl<D: DB> TestState<D> {
                 panic!("failed to balance testing transaction's dust");
             }
             let mut intent = Intent::empty(&mut rng, self.time);
+            // Apply the same binding_input override that DustSpend::prove uses,
+            // so callers can re-prove these preimages with AggregableIrSource.
+            let binding: Pedersen = intent.binding_commitment.into();
+            const DUST_SEGMENT_ID: u16 = 0xFEED;
+            self.captured_dust_preimages = raw_preimages
+                .into_iter()
+                .map(|mut p| {
+                    p.binding_input = transient_hash(
+                        &(
+                            Fr::from_le_bytes(b"midnight:dust:proof"),
+                            DUST_SEGMENT_ID,
+                            binding,
+                        )
+                            .field_vec(),
+                    );
+                    p
+                })
+                .collect();
             intent.dust_actions = Some(Sp::new(DustActions {
                 spends,
                 registrations: vec![].into(),
@@ -667,8 +697,11 @@ pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> Cont
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
-    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
-        .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
+    let test_dir =
+        "/nix/store/w08850rhh1ijis509fh7qwbcqyx1s7nm-midnight-ledger-test-artifacts-1.0.0"
+            .to_string();
+    // env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
+    // .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
 
     Resolver::new(
         PUBLIC_PARAMS.clone(),
@@ -875,7 +908,12 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                     let size_based_error_margin =
                         allowed_error_margin.saturating_mul(serialized_size_delta + 5);
 
-                    assert!(real_fees <= mocked_fees);
+                    assert!(
+                        real_fees <= mocked_fees,
+                        "mocked_fees = {}, real_fees = {}",
+                        mocked_fees,
+                        real_fees
+                    );
                     assert!(
                         mocked_fees <= real_fees + size_based_error_margin,
                         "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}, serialized_size_delta = {}, size_based_error_margin = {}",
@@ -1003,6 +1041,11 @@ impl ProvingProvider for ProofServerProvider<'_> {
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
                 ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => Ok(proof),
+                #[cfg(feature = "proof-aggregation")]
+                ProofVersioned::Aggregated(_) => anyhow::bail!(
+                    "proving server returned an aggregated proof; \
+                     only V2/V3 proofs are expected here"
+                ),
             }
         } else {
             anyhow::bail!(

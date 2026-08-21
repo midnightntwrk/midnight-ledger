@@ -691,24 +691,27 @@ impl IrSource {
     }
 }
 
-impl Relation for IrSource {
-    type Instance = Vec<outer::Scalar>;
-    type Witness = Preprocessed;
-    type Error = midnight_proofs::plonk::Error;
-
-    fn format_instance(
-        instance: &Self::Instance,
-    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
-        Ok(instance.clone())
-    }
-
-    fn circuit(
+impl IrSource {
+    /// Assigns this circuit's logic and returns the ordered list of
+    /// public-input cells it produced, *without* constraining them as
+    /// public inputs.
+    ///
+    /// Extracted from [`Relation::circuit`] (below) so that alternative
+    /// `Relation` wrappers around an `IrSource` — e.g.
+    /// [`crate::ir_aggregation::AggregableIrSource`], used for IVC proof
+    /// aggregation — can reuse exactly this in-circuit logic while choosing
+    /// a different way to expose the result as a public input (for
+    /// aggregation, hashed down to a single value). This split is a pure
+    /// refactor: [`Relation::circuit`] below still constrains each entry
+    /// individually, so the behavior, proof shape, and VK for `IrSource`
+    /// itself are unchanged.
+    pub(crate) fn assign_public_inputs(
         &self,
         std: &ZkStdLib,
         layouter: &mut impl Layouter<outer::Scalar>,
-        _instance: Value<Self::Instance>,
-        witness: Value<Self::Witness>,
-    ) -> Result<(), Error> {
+        _instance: Value<Vec<outer::Scalar>>,
+        witness: Value<Preprocessed>,
+    ) -> Result<Vec<AssignedNative<outer::Scalar>>, Error> {
         let mut input_values = Vec::new();
         for id in &self.inputs {
             let value = witness.as_ref().map(|preproc| {
@@ -1204,6 +1207,29 @@ impl Relation for IrSource {
             std.assert_equal(layouter, &comm_comm, &public_inputs[1])?;
         }
 
+        Ok(public_inputs)
+    }
+}
+
+impl Relation for IrSource {
+    type Instance = Vec<outer::Scalar>;
+    type Witness = Preprocessed;
+    type Error = midnight_proofs::plonk::Error;
+
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.clone())
+    }
+
+    fn circuit(
+        &self,
+        std: &ZkStdLib,
+        layouter: &mut impl Layouter<outer::Scalar>,
+        instance: Value<Self::Instance>,
+        witness: Value<Self::Witness>,
+    ) -> Result<(), Error> {
+        let public_inputs = self.assign_public_inputs(std, layouter, instance, witness)?;
         public_inputs
             .iter()
             .try_for_each(|x| std.constrain_as_public_input(layouter, x))

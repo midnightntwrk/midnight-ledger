@@ -482,6 +482,9 @@
               (pkgs.fetchurl { url = param-for 15; hash = "sha256-ckx8PXeRSLsRPH7pwDSy8n2xbmvfMV/ekBBam60Asd4="; })
               (pkgs.fetchurl { url = param-for 16; hash = "sha256-Cch3IW1libNwJj4Yr0CgMKkBtBp6fDfvWMmQHbQfBcY="; })
               (pkgs.fetchurl { url = param-for 17; hash = "sha256-Sp72x8Bhmqt07t5EsT51PjulRQigLdO3EGqUmqu3O3Q="; })
+              (pkgs.fetchurl { url = param-for 18; hash = "sha256-6ENtxdi1mPFpwSfHRRNdiJdEAH5tOE/xJt+NEzJSL4Y="; })
+              (pkgs.fetchurl { url = param-for 19; hash = "sha256-jo3BXENi8FyRLx53BVmjlF2z5Yo3Te9BbtXT5lrVsQ4="; })
+              (pkgs.fetchurl { url = param-for 20; hash = "sha256-HMYpeFWP3B5EXNcM/ZqG7DwuIVG210gRIy03+vkTP/E="; })
             ];
 
             dontUnpack = true;

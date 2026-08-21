@@ -15,9 +15,13 @@
 extern crate tracing;
 
 pub mod ir;
+#[cfg(feature = "proof-aggregation")]
+pub mod ir_aggregation;
 pub mod ir_instructions;
 pub mod ir_types;
 pub mod ir_vm;
 
 pub use ir::{Identifier, Instruction, IrSource};
+#[cfg(feature = "proof-aggregation")]
+pub use ir_aggregation::AggregableIrSource;
 pub use ir_vm::Preprocessed;

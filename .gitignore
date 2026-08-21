@@ -15,3 +15,4 @@ logs
 **/.yarn/install-state.gz
 **/.yarn/cache
 .midnight-pp
+,claude
