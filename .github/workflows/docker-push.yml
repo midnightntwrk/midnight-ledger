@@ -68,7 +68,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Create proof-server images
         run: |
@@ -122,7 +123,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Build and push arm64 image
         run: |
@@ -178,7 +180,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Create and push manifest
         run: |

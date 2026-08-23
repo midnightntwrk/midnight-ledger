@@ -46,7 +46,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
