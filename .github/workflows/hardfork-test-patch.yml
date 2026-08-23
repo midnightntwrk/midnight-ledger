@@ -14,7 +14,7 @@ env:
 
 jobs:
   patch:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Setup api.github.com credentials
         uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68

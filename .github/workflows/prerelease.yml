@@ -70,7 +70,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Get project versions
         run: |
@@ -277,7 +278,7 @@ jobs:
 
   integration:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
@@ -307,7 +308,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -401,7 +403,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -422,7 +425,7 @@ jobs:
     # irreversible job create/announce the release anyway.
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
     needs: [ build, coverage, integration, unit-tests, publish-npm ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -448,8 +451,8 @@ jobs:
 
           for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
           for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-latest/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-latest/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-junit.xml"; done
           for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
 
           if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then
