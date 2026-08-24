@@ -1,24 +1,44 @@
 # Ledger 8.1.2 Release Notes
 
 **Version:** 8.1.2
-**Date:** <YYYY-MM-DD>
+**Date:** 2026-08-24
 
 ## High-level summary
 
-<One or two paragraphs: what kind of release this is and the headline changes.>
+Ledger 8.1.2 fixes multiple encoding strictness issues that could have led to
+security issues down the line. This release was delivered to mainnet nodes
+prior to this public release.
 
 ## Audience
 
 This release note is important for:
 
-- <e.g. Node developers>
-- <e.g. Developers using the ledger WASM bindings>
+- Node developers
 
 ## Summary of updates
 
-### <Component or area> Updates
+### Ledger Updates
 
-- <feat/fix/breaking bullet>
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an 8.1.2 node rejects data an 8.1.1 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
 
 ## New features requiring configuration updates
 
@@ -30,13 +50,35 @@ This release note is important for:
 
 ## Breaking changes or required actions for developers
 
-*None in this release.*
+The security changes are breaking to an environment containing maliciously
+formed transactions.
 
 ## Fixed defect list
 
 | **Component** | **Description** |
 |---------------|-----------------|
-| <component>   | <description>   |
-
-<!-- Draft bullets from commits since the last tag: -->
-- No conventional-commit changes detected since ledger-9.1.0.0-rc.4 - fill in manually.
+| serialize | `HashMap` and `HashSet` deserialization requires a normalized encoding (sorted, no duplicate keys); the non-canonical encodings that previously decoded to the same value are rejected. |
+| serialize | Non-canonical `ScaleBigInt` encodings, which use the 4-byte form for a value that fits a smaller form, are rejected. |
+| serialize | `Box<T>` deserialization counts against the recursion depth budget. |
+| serialize | `Vec::with_bounded_capacity` no longer divides by zero for zero-sized types. |
+| serialize | `serialized_size` for `HashMap` and `HashSet` accounts for the actual width of the length prefix. |
+| base-crypto | Non-canonical `Value` and `ValueAtom` encodings are rejected: a singleton value encoded in the multi-entry form, and an atom that fits the single-byte form encoded as multiple bytes. |
+| base-crypto | `AlignedValue` deserialization rejects a value that does not fit its declared alignment. |
+| base-crypto | `Duration::from_hours` saturates instead of overflowing. |
+| storage | `MerklePatriciaTrie` deserialization enforces full structural canonicity rather than annotation consistency alone; a trie whose structure is not uniquely determined by its contents no longer decodes. |
+| storage | An `Extension` node whose declared nibble length disagrees with the length of its encoded path is rejected. |
+| storage | `MultiSet` rejects zero-count entries. |
+| storage | `TimeFilterMap` rejects an encoding whose set and time-map representations disagree. |
+| storage | Nibble-encoded keys reject trailing bytes left over after decoding. |
+| onchain-runtime | `Op` deserialization rejects operands outside their legal encoding bound: `dup`, `swap` and `ins` with `n >= 16`, and `idx` with a path length outside `1..=16`. |
+| onchain-runtime | serde `StateValue` deserialization enforces the type's invariant. |
+| onchain-runtime | Taking the `type` of an array with more than 16 entries is a type error instead of producing an out-of-range tag byte. |
+| onchain-runtime | The Merkle tree bound checks in `idx` and `ins` no longer overflow for large tree heights. |
+| transient-crypto | `VerifierKey` serialization is independent of whether the key has been initialized; initializing in place no longer changes what the key serializes to. |
+| transient-crypto | A verifier key with trailing bytes after the encoded key is rejected, so two encodings cannot map to the same key. |
+| ledger | `DustParameters::time_to_cap` guards against a zero `generation_decay_rate` instead of dividing by zero. |
+| ledger | Dust `seq` increments saturate. |
+| ledger | Contract call cost accounting counts public inputs via `ContractCall::public_inputs_len`, with saturating arithmetic, rather than materializing the inputs to take their length. |
+| zswap | Binding randomness extraction no longer panics on a proof preimage with no witness to extract from. |
+| zswap | Delta accumulation in `normalize_deltas` saturates. |
+| coin-structure, storage-core, zkir | Pull in the hardened `serialize`, `base-crypto`, `storage-core` and `transient-crypto` deserialization. |
