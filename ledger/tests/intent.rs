@@ -32,7 +32,7 @@ use midnight_ledger::test_utilities::{
 };
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger::{structure::StandardTransaction, test_utilities::TestState};
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use onchain_runtime::ops::Key;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};

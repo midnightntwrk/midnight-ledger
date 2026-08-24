@@ -22,7 +22,7 @@ use midnight_ledger::test_utilities::{
     Resolver, contract_operation, test_intents, test_resolver, tx_prove,
 };
 use midnight_ledger::verify::WellFormedStrictness;
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::state::{ContractState, StateValue, stval};
 use rand::SeedableRng;
 use rand::rngs::StdRng;

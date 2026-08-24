@@ -396,7 +396,7 @@
 
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v9"; package-name = "ledger-v9"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 

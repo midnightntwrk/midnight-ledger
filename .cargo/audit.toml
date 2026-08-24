@@ -6,4 +6,5 @@
 ignore = [
     "RUSTSEC-2026-0194", # quick-xml: quadratic duplicate attribute check
     "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
+    "RUSTSEC-2026-0258", # Temporary until https://github.com/actix/actix-web/issues/4199 resolved 
 ]
