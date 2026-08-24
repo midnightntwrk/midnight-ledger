@@ -867,17 +867,25 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 })
                 .unwrap_or(u128::MAX);
                 let mocked_fees = mocked.fees(&INITIAL_PARAMETERS, false);
-                let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS, false);
+                let real = proven.clone().seal(_rng.split());
+                let real_fees = real.fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
+                    let serialized_size_delta =
+                        mocked.serialized_size().abs_diff(real.serialized_size()) as u128;
+                    let size_based_error_margin =
+                        allowed_error_margin.saturating_mul(serialized_size_delta + 5);
+
                     assert!(real_fees <= mocked_fees);
                     assert!(mocked_fees <= real_fees + allowed_error_margin);
                     /*
                     assert!(
-                        mocked_fees <= real_fees + allowed_error_margin * 100,
-                        "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}",
+                        mocked_fees <= real_fees + size_based_error_margin,
+                        "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}, serialized_size_delta = {}, size_based_error_margin = {}",
                         mocked_fees,
                         real_fees,
-                        allowed_error_margin
+                        allowed_error_margin,
+                        serialized_size_delta,
+                        size_based_error_margin
                     );
                      */
                 }

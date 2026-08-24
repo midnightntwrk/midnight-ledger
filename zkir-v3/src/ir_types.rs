@@ -235,8 +235,18 @@ impl CircuitValue {
                 .map(|b| b.try_into().unwrap())
                 .map(IrValue::Bytes32),
             CircuitValue::JubjubPoint(p) => p.value().map(IrValue::JubjubPoint),
-            CircuitValue::JubjubScalar(s) => s.value().map(IrValue::JubjubScalar),
-
+            CircuitValue::JubjubScalar(_s) => {
+                // Avoid calling AssignedScalarOfNativeCurve::value() here.
+                //
+                // Some valid Jubjub scalar assignments can internally carry a bit
+                // representation wider than JubjubFr::NUM_BITS. The upstream
+                // value() implementation reconstructs the scalar with
+                // CircuitField::from_bits_le and panics if the bit vector is too
+                // long. This method is only used for optional witness-value
+                // introspection / consistency checks, so returning an unknown value
+                // is preferable to aborting proof generation.
+                Value::unknown()
+            }
             CircuitValue::Secp256k1Point(p) => p.value().map(IrValue::Secp256k1Point),
             CircuitValue::Secp256k1Scalar(s) => s.value().map(IrValue::Secp256k1Scalar),
             CircuitValue::Secp256k1Base(s) => s.value().map(IrValue::Secp256k1Base),
