@@ -359,7 +359,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              self.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -367,7 +367,7 @@
               mkdir -p zswap/zkir
               mkdir -p zswap/keys
               cp zkir-precompiles/zswap/* zswap/zkir
-              zkir compile-many zswap/zkir zswap/keys
+              ${self.packages.${system}.zkir-v3}/bin/zkir compile-many zswap/zkir zswap/keys
               #compactc --no-communications-commitment zswap/zswap.compact zswap
               for file in zswap/keys/* zswap/zkir/*; do
                 sha256sum "$file" > "$file.sha256"

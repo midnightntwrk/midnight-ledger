@@ -1,32 +1,94 @@
 {
-  "version": { "major": 2, "minor": 0 },
+  "version": {
+    "major": 3,
+    "minor": 0
+  },
   "do_communications_commitment": false,
-  "num_inputs": 2,
+  "inputs": [
+    {
+      "name": "%secretKey.0",
+      "type": "Scalar<BLS12-381>"
+    },
+    {
+      "name": "%secretKey.1",
+      "type": "Scalar<BLS12-381>"
+    }
+  ],
+  "outputs": [
+  ],
   "instructions": [
-    { "op": "constrain_bits", "var": 0, "bits": 8 },
-    { "op": "constrain_bits", "var": 1, "bits": 248 },
-    { "op": "load_imm", "imm": "01" },
-    { "op": "load_imm", "imm": "6D69646E696768743A7A737761702D706B5B76315D" },
-    { "op": "persistent_hash", "alignment": [{ "tag": "atom", "value": { "length": 21, "tag": "bytes" } }, { "tag": "atom", "value": { "length": 32, "tag": "bytes" } }], "inputs": [3, 0, 1] },
-    { "op": "load_imm", "imm": "10" },
-    { "op": "load_imm", "imm": "04" },
-    { "op": "declare_pub_input", "var": 6 },
-    { "op": "declare_pub_input", "var": 2 },
-    { "op": "declare_pub_input", "var": 2 },
-    { "op": "declare_pub_input", "var": 2 },
-    { "op": "declare_pub_input", "var": 7 },
-    { "op": "pi_skip", "guard": 2, "count": 5 },
-    { "op": "load_imm", "imm": "11" },
-    { "op": "load_imm", "imm": "20" },
-    { "op": "declare_pub_input", "var": 8 },
-    { "op": "declare_pub_input", "var": 2 },
-    { "op": "declare_pub_input", "var": 2 },
-    { "op": "declare_pub_input", "var": 9 },
-    { "op": "declare_pub_input", "var": 4 },
-    { "op": "declare_pub_input", "var": 5 },
-    { "op": "pi_skip", "guard": 2, "count": 6 },
-    { "op": "load_imm", "imm": "91" },
-    { "op": "declare_pub_input", "var": 10 },
-    { "op": "pi_skip", "guard": 2, "count": 1 }
+    {
+      "op": "constrain_bits",
+      "val": "%secretKey.0",
+      "bits": 8
+    },
+    {
+      "op": "constrain_bits",
+      "val": "%secretKey.1",
+      "bits": 248
+    },
+    {
+      "op": "persistent_hash",
+      "output": "%bytes.2",
+      "alignment": [
+        {
+          "tag": "atom",
+          "value": {
+            "length": 21,
+            "tag": "bytes"
+          }
+        },
+        {
+          "tag": "atom",
+          "value": {
+            "length": 32,
+            "tag": "bytes"
+          }
+        }
+      ],
+      "inputs": [
+        "0x6d69646e696768743a7a737761702d706b5b76315d",
+        "%secretKey.0",
+        "%secretKey.1"
+      ]
+    },
+    {
+      "op": "bytes32_into_low_high",
+      "outputs": [
+        "%t.3",
+        "%t.4"
+      ],
+      "bytes": "%bytes.2"
+    },
+    {
+      "op": "impact",
+      "guard": "0x01",
+      "inputs": [
+        "0x10",
+        "0x01",
+        "0x01",
+        "0x01",
+        "0x04"
+      ]
+    },
+    {
+      "op": "impact",
+      "guard": "0x01",
+      "inputs": [
+        "0x11",
+        "0x01",
+        "0x01",
+        "0x20",
+        "%t.4",
+        "%t.3"
+      ]
+    },
+    {
+      "op": "impact",
+      "guard": "0x01",
+      "inputs": [
+        "0x91"
+      ]
+    }
   ]
 }
