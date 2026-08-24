@@ -29,7 +29,7 @@ use midnight_ledger::{
     test_utilities::{Resolver, TestState, dbg_fees_with_state, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
 };
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use serialize::tagged_serialize;
 use std::collections::VecDeque;
