@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- fix: VM `lt` now compares operands as `u128`, matching protocol unshielded
+  balances and Compact `unshieldedBalance*` builtins that take `Uint<128>`.
+  Values above `u64::MAX` no longer fail with `InvalidBuiltinDecode("u64")`.
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 
 ## Version `3.1.0`

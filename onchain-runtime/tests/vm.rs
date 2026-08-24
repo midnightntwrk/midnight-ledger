@@ -60,6 +60,16 @@ mod tests {
     fn individual_vm_instructions() {
         let logic_operands = vec![(true, true), (true, false), (false, true), (false, false)];
         let cmp_operands = vec![(4u64, 5u64), (5u64, 5u64), (6u64, 5u64)];
+        // u128 operands cover the unshielded-balance comparison path: balances
+        // and Compact `unshieldedBalance*` thresholds are Uint<128>, including
+        // values above u64::MAX (e.g. UINT128_MAX - amount overflow guards).
+        let cmp_operands_u128 = vec![
+            (4u128, 5u128),
+            (u64::MAX as u128, (u64::MAX as u128) + 1),
+            (u128::MAX - 1, u128::MAX),
+            (u128::MAX, u128::MAX),
+            (u128::MAX, 0u128),
+        ];
         let arithmetic_operands = vec![(5u64, 4u64)];
 
         let run_program = run_program::<InMemoryDB, ResultModeGather>;
@@ -81,6 +91,13 @@ mod tests {
             assert_eq!(
                 run_program(&[vmval!((ops.0)), vmval!((ops.1))], &ops![eq]),
                 Ok((vec![vmval!((ops.0 == ops.1))], vec![]))
+            );
+        }
+
+        for ops in cmp_operands_u128 {
+            assert_eq!(
+                run_program(&[vmval!((ops.0)), vmval!((ops.1))], &ops![lt]),
+                Ok((vec![vmval!((ops.0 < ops.1))], vec![]))
             );
         }
 
