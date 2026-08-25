@@ -3826,7 +3826,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir-v3",
  "pastey",
  "rand 0.8.6",
  "rayon",
