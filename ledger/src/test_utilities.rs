@@ -872,11 +872,26 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
                     let serialized_size_delta =
                         mocked.serialized_size().abs_diff(real.serialized_size()) as u128;
-                    let size_based_error_margin =
+                    // Only used by the assertion commented out below; kept so
+                    // restoring it needs no rework.
+                    let _size_based_error_margin =
                         allowed_error_margin.saturating_mul(serialized_size_delta + 5);
 
-                    assert!(real_fees <= mocked_fees);
-                    assert!(mocked_fees <= real_fees + allowed_error_margin);
+                    assert!(
+                        real_fees <= mocked_fees,
+                        "mocked fees should bound the real ones: real_fees = {}, mocked_fees = {}, real_size = {}, mocked_size = {}",
+                        real_fees,
+                        mocked_fees,
+                        real.serialized_size(),
+                        mocked.serialized_size()
+                    );
+                    assert!(
+                        mocked_fees <= real_fees + allowed_error_margin,
+                        "mocked fees should be within the margin: real_fees = {}, mocked_fees = {}, allowed_error_margin = {}",
+                        real_fees,
+                        mocked_fees,
+                        allowed_error_margin
+                    );
                     /*
                     assert!(
                         mocked_fees <= real_fees + size_based_error_margin,
