@@ -16,6 +16,7 @@
 //! Downloading is behind the non-default `fetch` feature; without it this serves the local cache
 //! only, so consumers that never prove do not pay for an HTTP stack.
 
+use crate::hash::hexhash;
 #[cfg(feature = "cli")]
 use indicatif::MultiProgress;
 #[cfg(all(feature = "cli", feature = "fetch"))]
@@ -72,14 +73,6 @@ pub struct MidnightDataProvider {
 lazy_static! {
     /// The default base URL to use for the Midnight data provider.
     pub static ref BASE_URL: Url = Url::parse(&std::env::var("MIDNIGHT_PARAM_SOURCE").unwrap_or("https://srs.midnight.network/".to_owned())).expect("$MIDNIGHT_PARAM_SOURCE should be a valid URL");
-}
-
-/// Parse a 256-bit hex hash at const time.
-pub const fn hexhash(hex: &[u8]) -> [u8; 32] {
-    match const_hex::const_decode_to_array(hex) {
-        Ok(hash) => hash,
-        Err(_) => panic!("hash should be correct format"),
-    }
 }
 
 const EXPECTED_DATA: &[(&str, [u8; 32], &str)] = &[

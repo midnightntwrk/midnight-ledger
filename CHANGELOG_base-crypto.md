@@ -7,6 +7,10 @@
   and returns an `Unsupported` error naming the feature when an artifact is
   missing. This takes `reqwest`, and with it tokio, hyper and rustls (~40
   crates), out of the default dependency tree of consumers that do not prove.
+- breaking: `hexhash` moves from `data_provider` to `hash`. It is a pure
+  const-time hex parser and had nothing to do with fetching; `ledger` and
+  `zswap` used it to build `const` digest tables, which no longer means naming
+  the HTTP-fetching module.
 - chore: drop the unused `flate2` and `anyhow` dependencies, and move `pastey`
   (test macros only) to dev-dependencies
 - feat: add `within_bounds` on `RunningCost`
