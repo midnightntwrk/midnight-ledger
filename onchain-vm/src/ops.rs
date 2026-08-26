@@ -34,14 +34,67 @@ use storage::{DefaultDB, Storable, arena::ArenaKey};
 use transient_crypto::curve::Fr;
 use transient_crypto::repr::FieldRepr;
 
-#[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize, Serializable, Storable)]
+#[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize, Storable)]
 #[storable(base)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[serde(tag = "tag", content = "value", rename_all = "camelCase")]
-#[tag = "impact-idx-key"]
 pub enum Key {
     Value(AlignedValue),
     Stack,
+}
+
+// Manual `Serializable`/`Deserializable` so that deserialization can reject misaligned
+// `AlignedValue`s (which `AlignedValue`'s own `Deserializable` does not check).
+impl Serializable for Key {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            Key::Value(v) => {
+                <u8 as Serializable>::serialize(&0u8, writer)?;
+                <AlignedValue as Serializable>::serialize(v, writer)?;
+            }
+            Key::Stack => {
+                <u8 as Serializable>::serialize(&1u8, writer)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        match self {
+            Key::Value(v) => 1 + <AlignedValue as Serializable>::serialized_size(v),
+            Key::Stack => 1,
+        }
+    }
+}
+
+impl Deserializable for Key {
+    fn deserialize(
+        reader: &mut impl std::io::Read,
+        recursion_depth: u32,
+    ) -> std::io::Result<Self> {
+        let discriminant = <u8 as Deserializable>::deserialize(reader, recursion_depth)?;
+        match discriminant {
+            0 => {
+                let v = <AlignedValue as Deserializable>::deserialize(reader, recursion_depth)?;
+                v.check_well_formed()?;
+                Ok(Key::Value(v))
+            }
+            1 => Ok(Key::Stack),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unrecognised discriminant",
+            )),
+        }
+    }
+}
+
+impl Tagged for Key {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("impact-idx-key")
+    }
+    fn tag_unique_factor() -> String {
+        format!("[({}),()]", <AlignedValue as Tagged>::tag())
+    }
 }
 tag_enforcement_test!(Key);
 
@@ -578,5 +631,27 @@ mod tests {
         let op2: Op<ResultModeGather, DefaultDB> =
             serialize::Deserializable::deserialize(&mut &ser[..], 0).unwrap();
         assert_eq!(op, op2);
+    }
+
+    #[test]
+    fn test_key_wire_deser_rejects_misaligned() {
+        use crate::ops::Key;
+        use base_crypto::fab::{
+            AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value, ValueAtom,
+        };
+
+        // 10-byte value with alignment that only permits up to 4 bytes.
+        let bad = AlignedValue {
+            value: Value(vec![ValueAtom(vec![0xff; 10])]),
+            alignment: Alignment(vec![AlignmentSegment::Atom(AlignmentAtom::Bytes {
+                length: 4,
+            })]),
+        };
+        let key = Key::Value(bad);
+        let mut bytes = Vec::new();
+        <Key as serialize::Serializable>::serialize(&key, &mut bytes).unwrap();
+        let err = <Key as serialize::Deserializable>::deserialize(&mut bytes.as_slice(), 0)
+            .expect_err("Key wire deserialization should reject misaligned AlignedValue");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 }

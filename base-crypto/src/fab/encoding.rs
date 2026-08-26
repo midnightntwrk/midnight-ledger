@@ -535,6 +535,26 @@ impl AlignedValue {
         }
     }
 
+    /// Checks that the value matches its alignment and is in normal form. This is the same
+    /// invariant enforced by `serde` deserialization, but `Deserializable::deserialize` does not
+    /// enforce it for backwards-compatibility reasons; callers that want to reject malformed
+    /// values from untrusted input should invoke this explicitly.
+    pub fn check_well_formed(&self) -> std::io::Result<()> {
+        if !self.alignment.fits(&self.value) {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "value deserialized as aligned failed alignment check",
+            ))
+        } else if !self.value.0.iter().all(ValueAtom::is_in_normal_form) {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "aligned value is not in normal form (has trailing zero bytes)",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Concatenates two aligned values.
     pub fn concat<'a, I: IntoIterator<Item = &'a AlignedValue>>(iter: I) -> AlignedValue {
         let mut val = Vec::new();
