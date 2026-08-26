@@ -11,6 +11,10 @@ default = []
 proptest = ["dep:proptest", "dep:proptest-derive", "serialize/proptest"]
 cli = ["dep:indicatif"]
 fixed-point-custom-serde = []
+# Ability to download missing parameters/keys over HTTPS. Off by default: it
+# pulls in reqwest and, with it, the whole tokio/hyper/rustls stack, which only
+# provers need. Without it the data provider serves the local cache only.
+fetch = ["dep:reqwest", "dep:futures", "dep:atomic-write-file"]
 
 [dependencies]
 derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
@@ -18,20 +22,18 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 
 ff = "^0.13.1"
 group = "^0.13.0"
-anyhow = { version = "^1.0.102" }
-
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
 lazy_static = "^1.5.0"
 const-hex = "^1.14.1"
 sha2 = "^0.11.0"
-flate2 = "^1.1.2"
 k256 = { version = "^0.13.4", features = ["serde"] }
 signature = "^2.2.0"
-reqwest = { version = "^0.13.4", default-features = false, features = ["rustls", "stream"] }
-atomic-write-file = { version = "^0.3.0" }
-futures = { version = "^0.3.31" }
+url = "^2.5.8"
+reqwest = { version = "^0.13.4", default-features = false, features = ["rustls", "stream"], optional = true }
+atomic-write-file = { version = "^0.3.0", optional = true }
+futures = { version = "^0.3.31", optional = true }
 indicatif = { version = "^0.18.4", optional = true }
 tracing = { version = "^0.1.41" }
 ethnum = "^1.5.2"
@@ -42,12 +44,13 @@ serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_bytes = { version = "^0.11.17" }
 serde_json = { version = "^1.0.140" }
 fake = { version = "^2.10.0", features = ["derive"] }
-pastey = "0.2.1"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
 
 [dev-dependencies]
+# Only used by the serialization test macros.
+pastey = "0.2.1"
 midnight-base-crypto = { path = ".", features = ["proptest"] }
 actix-rt = "^2.10.0"
 rand_chacha = "^0.3.1"

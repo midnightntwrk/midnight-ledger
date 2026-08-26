@@ -38,6 +38,7 @@ serde = { version = "^1.0.219", features = ["derive"] }
 derive-where = "^1.6.1"
 
 [dev-dependencies]
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto", features = ["fetch"] }
 fake = { version = "^2.10.0", features = ["derive"] }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 futures = "^0.3.31"

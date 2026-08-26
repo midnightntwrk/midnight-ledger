@@ -2,6 +2,13 @@
 
 ## Version `1.1.0`
 
+- breaking: downloading in `data_provider` is now behind the new, non-default
+  `fetch` feature. Without it `MidnightDataProvider` serves the local cache only
+  and returns an `Unsupported` error naming the feature when an artifact is
+  missing. This takes `reqwest`, and with it tokio, hyper and rustls (~40
+  crates), out of the default dependency tree of consumers that do not prove.
+- chore: drop the unused `flate2` and `anyhow` dependencies, and move `pastey`
+  (test macros only) to dev-dependencies
 - feat: add `within_bounds` on `RunningCost`
 - feat: add `Envelope` trait derive macro, for building signing envelopes
 - feat: add `Mul` implementation of `CostDuration` and `FixedPoint`
