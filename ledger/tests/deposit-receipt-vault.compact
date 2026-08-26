@@ -1,0 +1,189 @@
+// This file is part of midnight-ledger.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Token vault with per-deposit receipts
+//!
+//! **REFERENCE IMPLEMENTATION ONLY** -- see token-vault.compact.
+//!
+//! `token-vault.compact` records nothing about who deposited: every coin is
+//! merged into one pot and `totalShieldedDeposits` is a bare counter, so after
+//! two deposits the state is indistinguishable from one deposit of the sum.
+//! A depositor therefore cannot later prove that a particular deposit was
+//! theirs -- and, equally, nothing stops a stranger from claiming it was.
+//!
+//! This variant adds the missing binding at deposit time. `depositShielded`
+//! inserts a *receipt* -- a commitment to (deposit id, depositor, value),
+//! blinded with an opening only the depositor can derive -- into a
+//! `HistoricMerkleTree`. `proveDeposit` later proves, in zero knowledge, that
+//! the caller holds the opening of a leaf under some root the tree really had.
+//! The leaf and the depositor's key never enter the public transcript: all
+//! that becomes public is one historic root, which every leaf under it shares.
+//! That is the unlinkability -- the claim names a set, not a deposit.
+//!
+//! Fields 0..7 are laid out exactly as in token-vault.compact, so the circuits
+//! not repeated here (`withdrawShielded`, the unshielded half) carry over
+//! unchanged; the receipt tree is appended at 8.
+//!
+//! Compiles with compactc (`compact 0.5.1`, compiler 0.34.0):
+//!
+//!     compact compile --feature-zkir-v3 \
+//!         ledger/tests/deposit-receipt-vault.compact .build/deposit-receipt-vault
+//!
+//! Not `--no-communications-commitment`: that flag drops the communication
+//! commitment from the circuit's public inputs and with it the in-circuit
+//! check that the commitment opens to the call's (input, output). This design
+//! rests on that binding, and every contract artifact the repository ships
+//! carries `do_communications_commitment: true` -- only zswap and dust, which
+//! are never called across contracts, are built without it.
+//!
+//! The repository's own build has no compactc (see the commented-out
+//! `compactc` inputs in flake.nix), so the checked-in test artifacts do not
+//! carry keys for these circuits and `deposit_receipt_airdrop.rs` deploys them with
+//! placeholder verifier keys -- sound there because the ledger tests run with
+//! erased proofs. The hand-written transcripts in that test were checked
+//! op-for-op against the `contract/index.js` this command emits.
+
+export { depositShielded, getShieldedBalance, proveDeposit }
+
+import CompactStandardLibrary;
+
+// ============================================================================
+// Ledger State
+// ============================================================================
+
+ledger shieldedVault: QualifiedShieldedCoinInfo;   // 0
+ledger hasShieldedTokens: Boolean;                 // 1
+ledger owner: Bytes<32>;                           // 2
+ledger authorized: Set<Bytes<32>>;                 // 3
+ledger totalShieldedDeposits: Counter;             // 4
+ledger totalShieldedWithdrawals: Counter;          // 5
+ledger totalUnshieldedDeposits: Counter;           // 6
+ledger totalUnshieldedWithdrawals: Counter;        // 7
+
+/// One leaf per shielded deposit. Historic, so a receipt proved against an
+/// older root stays provable after later deposits move the root on -- and so a
+/// depositor can pick the *latest* root, whose leaf set is the largest.
+ledger receipts: HistoricMerkleTree<10, Bytes<32>>; // 8
+
+// ============================================================================
+// Witness Functions
+// ============================================================================
+
+witness localSecretKey(): Bytes<32>;
+/// The receipt this wallet is claiming, recovered from its own deposit
+/// records. Its opening is recomputed from `localSecretKey()`, so the wallet
+/// needs to remember no blinding factor of its own.
+witness localReceipt(): Receipt;
+witness localReceiptPath(leaf: Bytes<32>): MerkleTreePath<10, Bytes<32>>;
+
+// ============================================================================
+// Receipts
+// ============================================================================
+
+/// What a deposit receipt commits to.
+///
+/// `nonce` is the deposited coin's nonce: the deposit's unique handle, and the
+/// only part of a shielded coin that is not derived from the others. A
+/// multi-token vault would commit to `color` here as well.
+struct Receipt {
+    nonce: Bytes<32>;
+    pk: Bytes<32>;
+    value: Uint<128>;
+}
+
+circuit publicKey(sk: Bytes<32>): Bytes<32> {
+    return persistentCommit<Bytes<14>>("token:vault:pk", disclose(sk));
+}
+
+/// The receipt's blinding factor, derived rather than stored: recomputable
+/// from the depositor's key and public chain data, and computable by nobody
+/// else. Domain separation keeps it clear of `publicKey`.
+circuit receiptOpening(sk: Bytes<32>, nonce: Bytes<32>): Bytes<32> {
+    return persistentCommit<Bytes<32>>(disclose(nonce), disclose(sk));
+}
+
+circuit receiptLeaf(r: Receipt, opening: Bytes<32>): Bytes<32> {
+    return persistentCommit<Receipt>(r, opening);
+}
+
+// ============================================================================
+// Circuits
+// ============================================================================
+
+/// Deposit shielded tokens, and record a receipt for the depositor.
+///
+/// Identical to token-vault.compact's `depositShielded` up to the last two
+/// lines. The receipt is inserted by the same circuit that received the coin,
+/// so a leaf can only exist for a deposit the vault was actually paid.
+circuit depositShielded(coin: ShieldedCoinInfo): [] {
+    assert(coin.value > 0, "Deposit amount must be positive");
+
+    receiveShielded(disclose(coin));
+
+    if (!hasShieldedTokens) {
+        shieldedVault.writeCoin(
+            disclose(coin),
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+        hasShieldedTokens = true;
+    } else {
+        shieldedVault.writeCoin(
+            mergeCoinImmediate(shieldedVault, disclose(coin)),
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+    }
+
+    totalShieldedDeposits.increment(1);
+
+    const sk = localSecretKey();
+    const r = Receipt {
+        nonce: coin.nonce,
+        pk: publicKey(sk),
+        value: coin.value
+    };
+    receipts.insert(disclose(receiptLeaf(r, receiptOpening(sk, coin.nonce))));
+}
+
+circuit getShieldedBalance(): Uint<128> {
+    if (hasShieldedTokens) {
+        return shieldedVault.value;
+    }
+    return 0;
+}
+
+/// Prove ownership of one deposit, without saying which.
+///
+/// The receipt travels to the caller as this circuit's return value, so it
+/// crosses contracts inside the communication commitment rather than in the
+/// clear (an on-chain `ContractCall` carries only that commitment). The single
+/// public effect is the root check: `receipts.checkRoot` reveals which
+/// historic root was used, and nothing that distinguishes leaves under it.
+export circuit proveDeposit(): Receipt {
+    const sk = localSecretKey();
+    const r = localReceipt();
+    assert(r.pk == publicKey(sk), "receipt belongs to another depositor");
+
+    const leaf = receiptLeaf(r, receiptOpening(sk, r.nonce));
+    const path = localReceiptPath(leaf);
+    assert(path.leaf == leaf, "path proves another leaf");
+    assert(
+        receipts.checkRoot(disclose(merkleTreePathRoot<10, Bytes<32>>(path))),
+        "no such receipt in this vault"
+    );
+
+    // The receipt leaves this circuit, so the disclosure is declared here. It
+    // does not become public: a cross-contract return travels inside the
+    // communication commitment, and an on-chain `ContractCall` carries only
+    // that commitment.
+    return disclose(r);
+}

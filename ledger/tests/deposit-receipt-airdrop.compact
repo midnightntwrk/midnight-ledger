@@ -1,0 +1,193 @@
+// This file is part of midnight-ledger.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Shielded airdrop paid against a proven deposit
+//!
+//! **REFERENCE IMPLEMENTATION ONLY** -- see token-vault.compact.
+//!
+//! The counterpart of `deposit-receipt-vault.compact`. Where
+//! `shielded-airdrop.compact` pays anyone who can show the vault's *balance*
+//! is over a threshold -- which is a property of the vault, not of the
+//! claimer, so the first passer-by can take the payout, repeatedly -- this
+//! contract pays the depositor of one particular deposit, once.
+//!
+//! Two checks carry that, and both are needed:
+//!
+//!  - `r.pk == publicKey(localSecretKey())`. `proveDeposit` already proved
+//!    that *somebody* holds the receipt's key, but transactions merge: without
+//!    re-checking against this circuit's own witness, an observer could lift a
+//!    `proveDeposit` call out of the mempool, merge it with a `claimAirdrop`
+//!    of their own, and be paid at `ownPublicKey()` -- theirs.
+//!  - the nullifier. Keyed on the secret key as well as the deposit, so the
+//!    thief above cannot compute it either, and domain-separated to this
+//!    airdrop, so a receipt can still prove itself once to every other
+//!    consumer. It lives here rather than in the vault for that reason: a
+//!    nullifier in the vault would burn the receipt globally on first use.
+//!
+//! Fields 0..7 are laid out as in token-vault.compact so that the pot can be
+//! funded with that contract's plain `depositShielded` -- the receipt tree
+//! belongs to the vault, and the pot needs no receipts.
+//!
+//! Compiles with compactc (`compact 0.5.1`, compiler 0.34.0):
+//!
+//!     compact compile --feature-zkir-v3 \
+//!         ledger/tests/deposit-receipt-airdrop.compact .build/deposit-receipt-airdrop
+//!
+//! Not `--no-communications-commitment`: that flag drops the communication
+//! commitment from the circuit's public inputs and with it the in-circuit
+//! check that the commitment opens to the call's (input, output). This design
+//! rests on that binding, and every contract artifact the repository ships
+//! carries `do_communications_commitment: true` -- only zswap and dust, which
+//! are never called across contracts, are built without it.
+//!
+//! The repository's own build has no compactc (see the commented-out
+//! `compactc` inputs in flake.nix), so the checked-in test artifacts do not
+//! carry keys for these circuits and `deposit_receipt_airdrop.rs` deploys them with
+//! placeholder verifier keys -- sound there because the ledger tests run with
+//! erased proofs. The hand-written transcripts in that test were checked
+//! op-for-op against the `contract/index.js` this command emits.
+
+export { depositShielded, claimAirdrop }
+
+import CompactStandardLibrary;
+
+// ============================================================================
+// Ledger State
+// ============================================================================
+
+ledger shieldedVault: QualifiedShieldedCoinInfo;   // 0  (the airdrop pot)
+ledger hasShieldedTokens: Boolean;                 // 1
+ledger owner: Bytes<32>;                           // 2
+ledger authorized: Set<Bytes<32>>;                 // 3
+ledger totalShieldedDeposits: Counter;             // 4
+ledger totalShieldedWithdrawals: Counter;          // 5
+ledger totalUnshieldedDeposits: Counter;           // 6
+ledger totalUnshieldedWithdrawals: Counter;        // 7
+
+/// The one vault whose receipts this airdrop honours. Read from public state,
+/// so the claimer cannot substitute a vault of their own: the entry the
+/// transcript reads is verified against the real state on chain.
+ledger vault: ContractAddress;                     // 8
+ledger proveEntryPoint: Bytes<32>;                 // 9
+ledger minDeposit: Uint<128>;                      // 10
+ledger airdropAmount: Uint<128>;                   // 11
+/// Spent claim nullifiers.
+ledger claimed: Set<Bytes<32>>;                    // 12
+
+// ============================================================================
+// Witness Functions
+// ============================================================================
+
+// As in shielded-airdrop.compact, these stand in for a cross-contract call
+// until Compact has syntax for it. See composable-outer.compact.
+witness tmpDoCall(): Receipt;
+witness tmpCallRand(): Field;
+
+witness localSecretKey(): Bytes<32>;
+
+struct Receipt {
+    nonce: Bytes<32>;
+    pk: Bytes<32>;
+    value: Uint<128>;
+}
+
+struct ClaimPreimage {
+    nonce: Bytes<32>;
+    domainSep: Bytes<8>;
+}
+
+circuit publicKey(sk: Bytes<32>): Bytes<32> {
+    return persistentCommit<Bytes<14>>("token:vault:pk", disclose(sk));
+}
+
+/// One nullifier per (deposit, claimer, airdrop).
+circuit claimNullifier(nonce: Bytes<32>, sk: Bytes<32>): Bytes<32> {
+    return persistentCommit<ClaimPreimage>(
+        ClaimPreimage { nonce: nonce, domainSep: pad(8, "adrp:cn") },
+        disclose(sk)
+    );
+}
+
+// ============================================================================
+// Circuits
+// ============================================================================
+
+/// Fund the airdrop pot. Identical to token-vault.compact's depositShielded.
+circuit depositShielded(coin: ShieldedCoinInfo): [] {
+    assert(coin.value > 0, "Deposit amount must be positive");
+
+    receiveShielded(disclose(coin));
+
+    if (!hasShieldedTokens) {
+        shieldedVault.writeCoin(
+            disclose(coin),
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+        hasShieldedTokens = true;
+    } else {
+        shieldedVault.writeCoin(
+            mergeCoinImmediate(shieldedVault, disclose(coin)),
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+    }
+
+    totalShieldedDeposits.increment(1);
+}
+
+/// Claim the airdrop against one deposit into `vault`.
+///
+/// The receipt is not read out of the vault's state -- it is returned by a
+/// call to the vault's `proveDeposit`, which this circuit claims, so the
+/// ledger will only accept this transaction if that call is really part of it
+/// and really returned this receipt.
+export circuit claimAirdrop(): ShieldedCoinInfo {
+    const r = tmpDoCall();
+    assert(r.value >= minDeposit, "deposit below airdrop threshold");
+
+    const sk = localSecretKey();
+    assert(r.pk == publicKey(sk), "only the depositor may claim");
+
+    const cc = transientCommit<Receipt>(disclose(r), tmpCallRand());
+    kernel.claimContractCall(vault.bytes, proveEntryPoint, cc);
+
+    const nul = claimNullifier(r.nonce, sk);
+    assert(!claimed.member(disclose(nul)), "airdrop already claimed for this deposit");
+    claimed.insert(disclose(nul));
+
+    assert(hasShieldedTokens, "airdrop pot is empty");
+    assert(shieldedVault.value >= airdropAmount, "airdrop pot exhausted");
+    const result = sendShielded(
+        shieldedVault,
+        left<ZswapCoinPublicKey, ContractAddress>(ownPublicKey()),
+        airdropAmount
+    );
+
+    if (result.change.is_some) {
+        shieldedVault.writeCoin(
+            result.change.value,
+            right<ZswapCoinPublicKey, ContractAddress>(kernel.self())
+        );
+    } else {
+        hasShieldedTokens = false;
+        shieldedVault = QualifiedShieldedCoinInfo {
+            nonce: pad(32, ""),
+            color: pad(32, ""),
+            value: 0,
+            mt_index: 0
+        };
+    }
+
+    totalShieldedWithdrawals.increment(1);
+
+    return result.sent;
+}
