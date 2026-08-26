@@ -66,7 +66,7 @@ pub type TranscriptHash = blake2b_simd::State;
 
 /// Sources prover parameters from the on-disk/remote Midnight parameter cache.
 ///
-/// Behind the `fetch` feature: verifiers have no use for prover parameters, and this is the only
+/// Behind the `fetch` feature: a verifier has no use for prover parameters, and this is the only
 /// thing tying this crate to `base-crypto`'s data provider.
 #[cfg(feature = "fetch")]
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {

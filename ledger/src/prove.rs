@@ -51,10 +51,10 @@ pub type ExternalResolver = Box<
         + Sync,
 >;
 
-/// The standard resolver: zswap's and dust's built-in keys, plus a caller-supplied fallback for
-/// contract circuits.
+/// The standard resolver: the built-in `zswap` and `dust` keys, plus a caller-supplied fallback
+/// for contract circuits.
 ///
-/// Behind the `proving` feature, as are the resolvers it composes.
+/// Behind the `proving` feature, as are the two it composes.
 #[cfg(feature = "proving")]
 pub struct Resolver {
     pub zswap_resolver: ZswapResolver,

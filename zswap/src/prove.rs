@@ -29,7 +29,7 @@ use transient_crypto::proofs::{
 };
 use transient_crypto::proofs::{ParamsProver, ProvingKeyMaterial, ProvingProvider};
 
-/// Resolves zswap's built-in prover keys, verifier keys and IR out of the Midnight parameter
+/// Resolves the built-in `zswap` prover keys, verifier keys and IR out of the Midnight parameter
 /// cache.
 ///
 /// Behind the `proving` feature: this is prover-side machinery, and it is the only thing in this
