@@ -46,12 +46,11 @@
 //! carries `do_communications_commitment: true` -- only zswap and dust, which
 //! are never called across contracts, are built without it.
 //!
-//! The repository's own build has no compactc (see the commented-out
-//! `compactc` inputs in flake.nix), so the checked-in test artifacts do not
-//! carry keys for these circuits and `deposit_receipt_airdrop.rs` deploys them with
-//! placeholder verifier keys -- sound there because the ledger tests run with
-//! erased proofs. The hand-written transcripts in that test were checked
-//! op-for-op against the `contract/index.js` this command emits.
+//! The compiled zkir is checked in under `zkir-precompiles/deposit-receipt-vault`,
+//! from which the `test-artifacts` derivation builds this contract's proving
+//! and verifier keys -- `deposit_receipt_airdrop.rs` deploys it with its own.
+//! The hand-written transcripts in that test were checked op-for-op against
+//! the `contract/index.js` this command emits.
 
 export { depositShielded, getShieldedBalance, proveDeposit }
 

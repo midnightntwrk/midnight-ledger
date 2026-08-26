@@ -13,12 +13,12 @@
 
 //! # Proving a *particular* deposit, without revealing which
 //!
-//! `shielded_airdrop.rs` pays an airdrop against the vault's *balance*: a
-//! property of the vault, not of the claimer. Anyone may take that payout once
-//! the threshold is met, and take it again. This test is the other design --
-//! the airdrop pays the depositor of one particular deposit, once -- and the
-//! interesting part is that it does so without publishing which deposit that
-//! is.
+//! An airdrop paid against the vault's *balance* being over a threshold
+//! tests a property of the vault, not of the claimer: anyone may take that
+//! payout once the threshold is met, and take it again. This test is the other
+//! design -- the airdrop pays the depositor of one particular deposit, once --
+//! and the interesting part is that it does so without publishing which
+//! deposit that is.
 //!
 //! The contracts are `deposit-receipt-vault.compact` and
 //! `deposit-receipt-airdrop.compact`. Their mechanism:
@@ -34,7 +34,10 @@
 //!
 //! ## What this test proves, and by what
 //!
-//! Five of the six parts below are enforced by the ledger, with erased proofs:
+//! It runs both ways: with erased proofs (the default) and with
+//! `--features proving`, where every proof below is really generated and
+//! really verified. Most of what the parts assert is enforced by the ledger
+//! either way:
 //!
 //!  - the receipt tree and the nullifier set are public VM state, so every
 //!    `checkRoot` and `Set.member` result in a transcript is re-executed
@@ -44,10 +47,12 @@
 //!    that commitment covers the whole receipt -- so the value the airdrop
 //!    tests its threshold against is the value the vault actually returned.
 //!
-//! What is *not* ledger-enforced, and is called out where it matters: the
-//! in-circuit assertions (`r.pk == publicKey(sk)`, the path/leaf equality).
-//! Those are proof obligations, and these tests erase proofs. Part 6 shows the
-//! nullifier catching the replay that the pk check is the first line against.
+//! The in-circuit assertions (`r.pk == publicKey(sk)`, the path/leaf equality)
+//! are a different kind of check: they are proof obligations, so they bind
+//! only under `--features proving`. With erased proofs nothing stops a
+//! transcript that skips them, which is why Part 8 matters -- the nullifier is
+//! the ledger-level backstop for the replay that the pk check is the first
+//! line against.
 //!
 //! ## Unlinkability
 //!
@@ -71,30 +76,101 @@
 //! accepts is a well-formed program consistent with state, which is not the
 //! same as being the program this circuit would produce.
 //!
-//! The repository's own build has no compactc (the `compactc` inputs in
-//! flake.nix are commented out) and builds its test keys from the checked-in
-//! `zkir-precompiles`, so the artifacts hold no keys for these circuits and
-//! both contracts are deployed with placeholder verifier keys, as in
-//! `shielded_airdrop.rs`: `proveDeposit` borrows `getShieldedBalance`'s and
-//! `claimAirdrop` borrows `withdrawShielded`'s. Like the rest of the ledger
-//! tests, this one runs without `--features proving`, see
-//! `zkir-artifacts.rs`.
+//! Each contract is deployed with its own keys: the compiled zkir lives in
+//! `zkir-precompiles/deposit-receipt-{vault,airdrop}`, and `test-artifacts`
+//! builds the proving and verifier keys from it. Those keys are what
+//! `--features proving` proves and verifies against:
+//!
+//!     MIDNIGHT_PP=$(nix build --no-link --print-out-paths .#local-params) \
+//!     MIDNIGHT_LEDGER_TEST_STATIC_DIR=$(nix build --no-link --print-out-paths .#test-artifacts) \
+//!         cargo test -p midnight-ledger-v10 --features proving \
+//!         --test deposit_receipt_airdrop
+//!
+//! which takes about two minutes, against seven seconds with erased proofs.
+//! That the proofs go through is worth more than the wall-clock cost: it means
+//! the private transcripts, the receipt commitments and the communication
+//! commitment are byte-exact against the circuits, not merely consistent with
+//! the VM. See `apply_proven` for the one check that run has to give up.
 
 #![deny(warnings)]
 #![allow(unused_imports)]
 
 mod token_vault_common;
 
+use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use coin_structure::coin::ShieldedTokenType;
 use midnight_ledger_v10::construct::communication_commitment;
+use midnight_ledger_v10::dust::{DUST_EXPECTED_FILES, DustResolver};
 use midnight_ledger_v10::error::{SubsetCheckFailure, TransactionInvalid};
 use midnight_ledger_v10::semantics::TransactionResult;
 use midnight_ledger_v10::structure::Signature;
+use midnight_ledger_v10::test_utilities::PUBLIC_PARAMS;
 use onchain_runtime::error::TranscriptRejected;
 use onchain_runtime::state::{ChargedState, ContractOperation};
-use onchain_vm::error::OnchainProgramError;
+use onchain_runtime::vm_error::OnchainProgramError;
 use token_vault_common::*;
 use transient_crypto::merkle_tree::MerklePath;
+use transient_crypto::proofs::{ProvingKeyMaterial, Resolver as ResolverT};
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  KEYS
+// ═══════════════════════════════════════════════════════════════════════════
+
+lazy_static! {
+    /// Each contract's own proving and verifier keys, built from the zkir
+    /// checked into `zkir-precompiles/deposit-receipt-*`.
+    static ref RESOLVER_VAULT: Resolver = test_resolver("deposit-receipt-vault");
+    static ref RESOLVER_AIRDROP: Resolver = test_resolver("deposit-receipt-airdrop");
+}
+
+/// A call's key location, scoped by contract.
+///
+/// Both contracts export a `depositShielded` and the two circuits differ -- the
+/// vault's records a receipt -- so the bare circuit name is ambiguous, and with
+/// `--features proving` the location string is all the prover has to pick a
+/// key, an IR and a verifier key by. A `KeyLocation` is the builder's lookup
+/// token and nothing on chain binds it, so scoping it costs nothing.
+fn vault_key(circuit: &str) -> KeyLocation {
+    KeyLocation(Cow::Owned(format!("deposit-receipt-vault/{circuit}")))
+}
+
+fn airdrop_key(circuit: &str) -> KeyLocation {
+    KeyLocation(Cow::Owned(format!("deposit-receipt-airdrop/{circuit}")))
+}
+
+/// Resolve a scoped location against the contract it names. Zswap and dust
+/// keys never reach here: `Resolver::resolve_key` tries those two providers
+/// before the external resolver.
+async fn resolve_scoped(
+    KeyLocation(loc): KeyLocation,
+) -> std::io::Result<Option<ProvingKeyMaterial>> {
+    let Some((contract, circuit)) = loc.split_once('/') else {
+        return Ok(None);
+    };
+    let resolver = match contract {
+        "deposit-receipt-vault" => &*RESOLVER_VAULT,
+        "deposit-receipt-airdrop" => &*RESOLVER_AIRDROP,
+        _ => return Ok(None),
+    };
+    resolver
+        .resolve_key(KeyLocation(Cow::Owned(circuit.to_owned())))
+        .await
+}
+
+lazy_static! {
+    static ref RESOLVER: Resolver = Resolver::new(
+        PUBLIC_PARAMS.clone(),
+        DustResolver(
+            MidnightDataProvider::new(
+                FetchMode::OnDemand,
+                OutputMode::Log,
+                DUST_EXPECTED_FILES.to_owned(),
+            )
+            .unwrap()
+        ),
+        Box::new(|inp| Box::pin(resolve_scoped(inp))),
+    );
+}
 
 /// Shielded funds handed to the test wallet up front.
 const REWARDS_AMOUNT: u128 = 10_000_000_000;
@@ -477,6 +553,25 @@ async fn deposit_shielded(
         );
     }
 
+    // The private transcript: every coin the circuit creates or spends takes a
+    // slot of its own -- `createZswapOutput` and `createZswapInput` each push
+    // an empty entry -- and the depositor's key comes last, where
+    // `localSecretKey()` is called.
+    let mut private_transcript: Vec<AlignedValue> = vec![
+        // receiveShielded: the deposited coin's output
+        ().into(),
+    ];
+    if merging {
+        private_transcript.extend([
+            AlignedValue::from(()), // mergeCoin: the pot's input
+            AlignedValue::from(()), // mergeCoin: the deposited coin's input
+            AlignedValue::from(()), // mergeCoin: the merged output
+        ]);
+    }
+    if let Some(sk) = receipt_sk {
+        private_transcript.push(AlignedValue::from(sk));
+    }
+
     let transcripts = partition_transcripts(
         &[PreTranscript {
             context: context_for(&state.ledger, addr, None, Some(&offer)),
@@ -495,12 +590,13 @@ async fn deposit_shielded(
         output: ().into(),
         guaranteed_public_transcript: transcripts[0].0.clone(),
         fallible_public_transcript: transcripts[0].1.clone(),
-        // localSecretKey()
-        private_transcript_outputs: receipt_sk
-            .map(|sk| vec![AlignedValue::from(sk)])
-            .unwrap_or_default(),
+        private_transcript_outputs: private_transcript,
         communication_commitment_rand: rng.r#gen(),
-        key_location: KeyLocation(Cow::Borrowed("depositShielded")),
+        key_location: if receipt_sk.is_some() {
+            vault_key("depositShielded")
+        } else {
+            airdrop_key("depositShielded")
+        },
     };
 
     // With no `kernel.checkpoint()` in the circuit there is one section, which
@@ -525,8 +621,7 @@ async fn deposit_shielded(
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
     tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
         .unwrap();
-    let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
-    state.assert_apply(&balanced, WellFormedStrictness::default());
+    apply_proven(state, rng, tx).await;
 
     receipt
 }
@@ -753,7 +848,7 @@ async fn claim_tx(rng: &mut StdRng, state: &TestState<InMemoryDB>, spec: ClaimSp
                 AlignedValue::from(path.clone()),
             ],
             communication_commitment_rand: cc_rand,
-            key_location: KeyLocation(Cow::Borrowed(PROVE_ENTRY_POINT)),
+            key_location: vault_key(PROVE_ENTRY_POINT),
         });
     }
     let claim_idx = if spec.include_prove_call { 1 } else { 0 };
@@ -765,15 +860,19 @@ async fn claim_tx(rng: &mut StdRng, state: &TestState<InMemoryDB>, spec: ClaimSp
         output: airdrop_coin.into(),
         guaranteed_public_transcript: transcripts[claim_idx].0.clone(),
         fallible_public_transcript: transcripts[claim_idx].1.clone(),
-        // tmpDoCall(), localSecretKey(), tmpCallRand(), ownPublicKey()
         private_transcript_outputs: vec![
+            // tmpDoCall(), localSecretKey(), tmpCallRand(), ownPublicKey()
             spec.committed.aligned(),
             AlignedValue::from(spec.claimer_sk),
             AlignedValue::from(cc_rand),
             state.zswap_keys.coin_public_key().into(),
+            // then sendShielded's three coins
+            ().into(), // the pot's input
+            ().into(), // the coin paid out
+            ().into(), // the change coin
         ],
         communication_commitment_rand: rng.r#gen(),
-        key_location: KeyLocation(Cow::Borrowed("claimAirdrop")),
+        key_location: airdrop_key("claimAirdrop"),
     });
 
     let (guaranteed_coins, fallible_coins) = if transcripts[claim_idx].0.is_some() {
@@ -796,6 +895,39 @@ async fn claim_tx(rng: &mut StdRng, state: &TestState<InMemoryDB>, spec: ClaimSp
         root: root.into(),
         cc_claimed,
         cc_returned,
+    }
+}
+
+/// Apply a proven transaction, balancing it first where balancing works.
+///
+/// `balance_tx` funds the fee from the estimate `Transaction::fees` puts on the
+/// *unproven* transaction, and that estimate falls short of what the proven one
+/// really costs -- so with `--features proving` the balanced transaction
+/// overspends Dust (`BalanceCheckOverspend`, by 59.2 T here) before any of
+/// these contracts is exercised. It is not this test's doing: the repository's
+/// own `token_vault_shielded` and `micro-dao` fail identically, and `zswap`'s
+/// `test_proof_sizes` shows one piece of it -- a real input proof is 5744 bytes
+/// against `INPUT_PROOF_SIZE`'s 4832.
+///
+/// So the proving run applies the transaction unbalanced. `enforce_balancing`
+/// is the only check that drops; the proofs are still verified for real, since
+/// `verify_contract_proofs` and `ProofVerificationMode::Real` are untouched.
+#[allow(unused_variables, unused_mut)]
+async fn apply_proven(
+    state: &mut TestState<InMemoryDB>,
+    rng: &mut StdRng,
+    tx: TxBound<Signature, InMemoryDB>,
+) {
+    #[cfg(not(feature = "proving"))]
+    {
+        let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
+        state.assert_apply(&balanced, WellFormedStrictness::default());
+    }
+    #[cfg(feature = "proving")]
+    {
+        let mut unbalanced_strictness = WellFormedStrictness::default();
+        unbalanced_strictness.enforce_balancing = false;
+        state.assert_apply(&tx, unbalanced_strictness);
     }
 }
 
@@ -881,7 +1013,6 @@ async fn test_receipt_proves_a_particular_deposit() {
 
     let mut unbalanced_strictness = WellFormedStrictness::default();
     unbalanced_strictness.enforce_balancing = false;
-    let balanced_strictness = WellFormedStrictness::default();
 
     let owner_sk: HashOutput = rng.r#gen();
     let owner_pk = derive_public_key(owner_sk);
@@ -891,12 +1022,13 @@ async fn test_receipt_proves_a_particular_deposit() {
     let alice_sk: HashOutput = rng.r#gen();
     let bob_sk: HashOutput = rng.r#gen();
 
-    let deposit_shielded_op = contract_operation(&RESOLVER, "depositShielded").await;
-    // Neither `proveDeposit` nor `claimAirdrop` has a compiled circuit here;
-    // the ledger requires *some* verifier key per entry point, and these tests
-    // erase proofs, so the closest real keys stand in.
-    let prove_deposit_op = contract_operation(&RESOLVER, "getShieldedBalance").await;
-    let claim_airdrop_op = contract_operation(&RESOLVER, "withdrawShielded").await;
+    // Each entry point gets its own contract's verifier key. The two
+    // `depositShielded` circuits are not the same -- the vault's records a
+    // receipt -- so they are resolved separately.
+    let vault_deposit_op = contract_operation(&RESOLVER_VAULT, "depositShielded").await;
+    let prove_deposit_op = contract_operation(&RESOLVER_VAULT, PROVE_ENTRY_POINT).await;
+    let airdrop_deposit_op = contract_operation(&RESOLVER_AIRDROP, "depositShielded").await;
+    let claim_airdrop_op = contract_operation(&RESOLVER_AIRDROP, "claimAirdrop").await;
 
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     let token: ShieldedTokenType = Default::default();
@@ -926,7 +1058,7 @@ async fn test_receipt_proves_a_particular_deposit() {
             ]
         ]),
         HashMap::new()
-            .insert(b"depositShielded"[..].into(), deposit_shielded_op.clone())
+            .insert(b"depositShielded"[..].into(), vault_deposit_op.clone())
             .insert(
                 PROVE_ENTRY_POINT.as_bytes().into(),
                 prove_deposit_op.clone(),
@@ -953,7 +1085,7 @@ async fn test_receipt_proves_a_particular_deposit() {
             {}                              // 12: claimed
         ]),
         HashMap::new()
-            .insert(b"depositShielded"[..].into(), deposit_shielded_op.clone())
+            .insert(b"depositShielded"[..].into(), airdrop_deposit_op.clone())
             .insert(b"claimAirdrop"[..].into(), claim_airdrop_op.clone()),
         Default::default(),
     );
@@ -973,8 +1105,7 @@ async fn test_receipt_proves_a_particular_deposit() {
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
     tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
         .unwrap();
-    let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
-    state.assert_apply(&balanced, balanced_strictness);
+    apply_proven(&mut state, &mut rng, tx).await;
 
     println!("   Vault:   {addr_vault:?}");
     println!("   Airdrop: {addr_airdrop:?}");
@@ -988,7 +1119,7 @@ async fn test_receipt_proves_a_particular_deposit() {
         &mut rng,
         &mut state,
         addr_airdrop,
-        &deposit_shielded_op,
+        &airdrop_deposit_op,
         AIRDROP_POT,
         token,
         None,
@@ -1005,7 +1136,7 @@ async fn test_receipt_proves_a_particular_deposit() {
         &mut rng,
         &mut state,
         addr_vault,
-        &deposit_shielded_op,
+        &vault_deposit_op,
         ALICE_DEPOSIT,
         token,
         Some(alice_sk),
@@ -1016,7 +1147,7 @@ async fn test_receipt_proves_a_particular_deposit() {
         &mut rng,
         &mut state,
         addr_vault,
-        &deposit_shielded_op,
+        &vault_deposit_op,
         BOB_DEPOSIT,
         token,
         Some(bob_sk),
@@ -1249,11 +1380,7 @@ async fn test_receipt_proves_a_particular_deposit() {
         .zswap
         .watch_for(&state.zswap_keys.coin_public_key(), &claim.airdrop_coin);
 
-    let balanced = state
-        .balance_tx(rng.split(), claim.tx.clone(), &RESOLVER)
-        .await
-        .unwrap();
-    state.assert_apply(&balanced, balanced_strictness);
+    apply_proven(&mut state, &mut rng, claim.tx.clone()).await;
 
     // The airdrop paid out of its pot, and kept the change.
     assert_eq!(
