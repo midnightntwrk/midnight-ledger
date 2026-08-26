@@ -12,7 +12,7 @@ path = "src/main.rs"
 required-features = ["binary"]
 
 [features]
-binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor", "base-crypto/fetch"]
+binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor", "base-crypto/fetch", "transient-crypto/fetch"]
 mock-verify = ["transient-crypto-old/mock-verify", "transient-crypto/mock-verify"]
 proptest = [
   "dep:pastey",
