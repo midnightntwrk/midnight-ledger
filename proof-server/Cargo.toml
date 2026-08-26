@@ -12,7 +12,7 @@ default = []
 
 [dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features = false, features = ["proving"] }
-zswap = { path = "../zswap", package = "midnight-zswap" }
+zswap = { path = "../zswap", package = "midnight-zswap", features = ["proving"] }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto", features = ["fetch"] }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }

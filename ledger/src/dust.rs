@@ -23,15 +23,14 @@ use crate::structure::{
 };
 use crate::utils::VecEnvelope;
 use crate::verify::{StateReference, WellFormedStrictness};
+#[cfg(feature = "proving")]
+use base_crypto::data_provider::MidnightDataProvider;
 use base_crypto::envelope::Envelope;
+use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
     time::{Duration, Timestamp},
-};
-use base_crypto::{
-    data_provider::MidnightDataProvider,
-    fab::{Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value},
 };
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
@@ -63,13 +62,15 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
-use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
+use transient_crypto::proofs::ProvingProvider;
+#[cfg(feature = "proving")]
+use transient_crypto::proofs::{ProvingKeyMaterial, Resolver};
 use transient_crypto::{
     curve::Fr,
     hash::{transient_hash, upgrade_from_transient},
     merkle_tree,
     merkle_tree::{MerkleTree, MerkleTreeDigest},
-    proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
+    proofs::{KeyLocation, ProofPreimage, ProvingError},
     repr::FieldRepr,
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -85,8 +86,13 @@ lazy_static! {
             .expect("Dust Spend VK should be valid");
 }
 
+/// Resolves dust's built-in prover key, verifier key and IR out of the Midnight parameter cache.
+///
+/// Behind the `proving` feature: verifying dust spends needs none of it.
+#[cfg(feature = "proving")]
 pub struct DustResolver(pub MidnightDataProvider);
 
+#[cfg(feature = "proving")]
 impl Resolver for DustResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {

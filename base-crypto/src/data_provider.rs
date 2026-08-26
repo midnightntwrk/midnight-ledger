@@ -35,13 +35,8 @@ use tracing::warn;
 use url::Url;
 
 #[cfg(feature = "fetch")]
-use {
-    std::io::Write,
-    std::time::Duration,
-    std::time::Instant,
-    futures::StreamExt,
-    tracing::info,
-}
+use {futures::StreamExt, std::io::Write, std::time::Duration, std::time::Instant, tracing::info};
+
 /// Retrieves various static cryptographic artifacts from a data server.
 /// This keeps a local file system cache of the parameters, prover keys, verifier keys, and IR, that
 /// can also be fetched remotely.

@@ -9,6 +9,9 @@ description = "Implementation of the Zswap shielded token atomic swap mechanism.
 [features]
 default = ["proof-verifying"]
 proof-verifying = ["dep:zkir_v2"]
+# The built-in `ZswapResolver`, which sources prover keys and parameters from
+# `base-crypto`'s data provider. Verifiers do not need it.
+proving = ["base-crypto/fetch", "transient-crypto/fetch"]
 
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
@@ -38,6 +41,7 @@ serde = { version = "^1.0.219", features = ["derive"] }
 derive-where = "^1.6.1"
 
 [dev-dependencies]
+midnight-zswap = { path = ".", features = ["proving"] }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto", features = ["fetch"] }
 fake = { version = "^2.10.0", features = ["derive"] }
 rand = { version = "^0.8.4", features = ["getrandom"] }
