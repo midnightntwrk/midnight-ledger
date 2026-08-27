@@ -39,7 +39,7 @@ use tracing::{debug, info};
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
-use uuid::Uuid;
+
 #[cfg(feature = "gcp_cs")]
 use {
     crate::ServerEncryptionKey,
@@ -54,6 +54,7 @@ use {
     hyperlocal::{UnixConnector, Uri},
     std::time::Duration,
     tracing::warn,
+    uuid::Uuid,
 };
 
 use zkir as zkir_v2;
@@ -279,6 +280,7 @@ enum Status {
     Busy,
 }
 
+#[cfg(feature = "gcp_cs")]
 #[derive(Clone, Copy, serde::Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 enum ProofJobState {
@@ -289,12 +291,14 @@ enum ProofJobState {
     Cancelled,
 }
 
+#[cfg(feature = "gcp_cs")]
 impl ProofJobState {
     fn done(self) -> bool {
         matches!(self, Self::Success | Self::Error | Self::Cancelled)
     }
 }
 
+#[cfg(feature = "gcp_cs")]
 impl From<&JobStatus> for ProofJobState {
     fn from(value: &JobStatus) -> Self {
         match value {
@@ -326,6 +330,7 @@ struct ReadyResponse {
     timestamp: time::OffsetDateTime,
 }
 
+#[cfg(feature = "gcp_cs")]
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProofStatusResponse {
@@ -334,6 +339,7 @@ struct ProofStatusResponse {
     done: bool,
 }
 
+#[cfg(feature = "gcp_cs")]
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProofStatusQuery {
@@ -361,6 +367,7 @@ pub(crate) async fn ready(pool: web::Data<Arc<WorkerPool>>) -> Result<HttpRespon
     Ok(builder)
 }
 
+#[cfg(feature = "gcp_cs")]
 #[get("/status")]
 pub(crate) async fn proof_status(
     query: web::Query<ProofStatusQuery>,
