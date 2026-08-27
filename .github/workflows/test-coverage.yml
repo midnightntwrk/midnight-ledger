@@ -65,7 +65,8 @@ jobs:
           export CARGO_INCREMENTAL=0
           export RUSTFLAGS='-Cinstrument-coverage'
           export LLVM_PROFILE_FILE='cargo-test-%p-%m.profraw'
-          nix develop -c cargo test --all --all-features --verbose -- --nocapture --test-threads=1
+          nix develop -c cargo test --workspace --all-features --exclude midnight-proof-server --verbose -- --nocapture --test-threads=1
+          nix develop -c cargo test --package midnight-proof-server --features experimental --verbose -- --nocapture --test-threads=1
 
       - name: Generate HTML report
         run: |
