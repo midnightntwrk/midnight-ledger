@@ -26,9 +26,6 @@ proptest = [
 mock-verify = []
 public-internal-structure = []
 
-# Only for the PolkaVM target, and only to declare one host-call import. A guest that runs
-# where an expensive primitive is available as a host call should say so; everywhere else this
-# is absent and `transient_hash` is unchanged.
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
