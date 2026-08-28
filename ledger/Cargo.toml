@@ -7,7 +7,10 @@ repository.workspace = true
 description = "Provides the transaction format and semantics for Midnight."
 
 [features]
-default = ["proof-verifying"]
+default = ["proof-verifying", "proving"]
+# The prover. On by default, so nothing changes for an existing consumer; off, a
+# verify-only build does not compile it. Verifying and proving are different jobs with very
+# different dependency weights, and a consumer that only ever verifies should not pay for both.
 proving = []
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []

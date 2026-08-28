@@ -23,7 +23,24 @@
 //! any specific implementation.
 
 pub mod cost_model;
+#[cfg(feature = "data-provider")]
 pub mod data_provider;
+
+/// The part of the data provider that is not a data provider.
+///
+/// `hexhash` is a `const fn` over a literal and has nothing to do with fetching anything, but
+/// it lives beside the code that does. Without `data-provider` the module is this and only
+/// this, so callers of `hexhash` need no feature and no HTTP client.
+#[cfg(not(feature = "data-provider"))]
+pub mod data_provider {
+    /// Parse a 256-bit hex hash at const time.
+    pub const fn hexhash(hex: &[u8]) -> [u8; 32] {
+        match const_hex::const_decode_to_array(hex) {
+            Ok(hash) => hash,
+            Err(_) => panic!("hash should be correct format"),
+        }
+    }
+}
 pub mod fab;
 pub mod hash;
 pub mod repr;

@@ -28,6 +28,7 @@ pub mod events;
 mod ledger_tracing;
 mod primitive;
 mod prior_versions;
+#[cfg(feature = "proving")]
 pub mod prove;
 pub mod semantics;
 pub mod structure;

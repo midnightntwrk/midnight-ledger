@@ -7,7 +7,14 @@ repository.workspace = true
 description = "Cryptographic primitives for Midnight that may change over time."
 
 [features]
-default = []
+default = ["embed-params", "data-provider"]
+# The KZG verifier parameters, compiled in. On by default so nothing changes for an existing
+# consumer; off, they are supplied at run time through `PARAMS_VERIFIER_SOURCE` and the binary
+# is 3,146,116 octets smaller -- which the doc comment on `PARAMS_VERIFIER` already suggests
+# for anyone who does not want them embedded.
+embed-params = []
+# The HTTP data provider, which only a prover needs.
+data-provider = ["base-crypto/data-provider"]
 cli = ["base-crypto/cli"]
 proptest = [
   "dep:proptest",
@@ -18,6 +25,10 @@ proptest = [
 ]
 mock-verify = []
 public-internal-structure = []
+
+# Only for the PolkaVM target, and only to declare one host-call import. A guest that runs
+# where an expensive primitive is available as a host call should say so; everywhere else this
+# is absent and `transient_hash` is unchanged.
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }

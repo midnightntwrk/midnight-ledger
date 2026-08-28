@@ -7,7 +7,12 @@ repository.workspace = true
 description = "Provides foundational cryptographic primitives for Midnight's ledger."
 
 [features]
-default = []
+default = ["data-provider"]
+# Fetching public parameters over HTTP. On by default, so nothing changes for an existing
+# consumer; off, the crate has no HTTP client and no filesystem writer at all. A verifier
+# never fetches -- public parameters are a *proving* input -- and an embedded target may not
+# be able to build reqwest in the first place.
+data-provider = ["dep:reqwest", "dep:atomic-write-file"]
 proptest = ["dep:proptest", "dep:proptest-derive", "serialize/proptest"]
 cli = ["dep:indicatif"]
 fixed-point-custom-serde = []
@@ -29,8 +34,8 @@ sha2 = "^0.10.9"
 flate2 = "^1.1.2"
 k256  = { version = "^0.13.4", features = ["serde"] }
 signature = "^2.2.0"
-reqwest = { version = "^0.13.0", default-features = false, features = ["rustls", "stream"] }
-atomic-write-file = { version = "^0.3.0" }
+reqwest = { version = "^0.13.0", default-features = false, features = ["rustls", "stream"], optional = true }
+atomic-write-file = { version = "^0.3.0", optional = true }
 futures = { version = "^0.3.31" }
 indicatif = { version = "^0.18.4", optional = true }
 tracing = { version = "^0.1.41" }

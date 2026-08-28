@@ -17,7 +17,7 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
+    ErasedIntent, IntentHash, ProofKind, ProofPreimageMarker, SPECKS_PER_DUST,
     STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
     UtxoState,
 };
@@ -34,6 +34,7 @@ use base_crypto::{
 };
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
+#[cfg(feature = "proving")]
 use futures::future::join_all;
 #[cfg(feature = "proof-verifying")]
 use lazy_static::lazy_static;
@@ -65,13 +66,18 @@ use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
 #[cfg(feature = "proof-verifying")]
 use transient_crypto::proofs::VerifierKey;
-use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
+use transient_crypto::proofs::ProvingKeyMaterial;
+// Prover-only, but referenced by the gated methods below, so gated the same way.
+#[cfg(feature = "proving")]
+use crate::structure::ProofMarker;
+#[cfg(feature = "proving")]
+use transient_crypto::proofs::{ProvingError, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
     hash::{transient_hash, upgrade_from_transient},
     merkle_tree,
     merkle_tree::{MerkleTree, MerkleTreeDigest},
-    proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
+    proofs::{KeyLocation, ProofPreimage, Resolver},
     repr::FieldRepr,
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -507,6 +513,8 @@ impl<P: ProofKind<D>, D: DB> From<DustSpend<P, D>> for Value {
 }
 
 impl<D: DB> DustSpend<ProofPreimageMarker, D> {
+    // Only the prover calls this.
+    #[cfg(feature = "proving")]
     async fn prove(
         &self,
         prover: impl ProvingProvider,
@@ -711,6 +719,8 @@ pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
 tag_enforcement_test!(DustActions<(), (), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustActions<S, ProofPreimageMarker, D> {
+    // Only the prover calls this.
+    #[cfg(feature = "proving")]
     pub(crate) async fn prove(
         &self,
         mut prover: impl ProvingProvider,

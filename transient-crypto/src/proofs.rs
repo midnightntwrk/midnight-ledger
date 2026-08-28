@@ -63,6 +63,7 @@ pub trait ParamsProverProvider {
 /// The hash used during proof transcript processing
 pub type TranscriptHash = blake2b_simd::State;
 
+#[cfg(feature = "data-provider")]
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
         let name = Self::name_k(k);
@@ -115,16 +116,53 @@ impl ParamsVerifier {
     pub fn read<R: Read>(reader: R) -> io::Result<Self> {
         Ok(ParamsProver::read(reader)?.as_verifier())
     }
+
+    /// Reads *only* the verifier parameters.
+    ///
+    /// [`read`](Self::read) is `ParamsProver::read(..)?.as_verifier()`: it deserialises the
+    /// whole prover parameter set — 3,146,116 octets of powers-of-tau — and then keeps one G2
+    /// point. `ParamsVerifierKZG` has four fields and derives three of them from the fourth,
+    /// so the verifier parameters are 192 octets, and a consumer that only ever verifies has
+    /// no reason to pay for the rest.
+    pub fn read_verifier(mut reader: &[u8]) -> io::Result<Self> {
+        Ok(ParamsVerifier(Arc::new(ParamsVerifierKZG::<Bls12>::read(
+            &mut reader,
+            SerdeFormat::RawBytesUnchecked,
+        )?)))
+    }
 }
 
+#[cfg(feature = "embed-params")]
 const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_midnight_2p14");
 
+#[cfg(feature = "embed-params")]
 lazy_static! {
     /// The midnight verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
     ///
     /// Note that using this *will* embed these into the binary at compile time, if that's not what
     /// you want, please use `ParamsVerifier::read` instead.
     pub static ref PARAMS_VERIFIER: ParamsVerifier = ParamsVerifier::read(PARAMS_VERIFIER_RAW).expect("Static verifier parameters should be valid.");
+}
+
+/// Where the verifier parameters come from when they are not embedded.
+///
+/// `embed-params` is on by default, so this is invisible to an existing consumer. Off, the
+/// 3,146,116 octets of `bls_midnight_2p14` are not in the binary and the caller supplies them
+/// once at start-up instead — which matters wherever the binary has a size limit, and is what
+/// the doc comment above already recommends for that case.
+#[cfg(not(feature = "embed-params"))]
+pub static PARAMS_VERIFIER_SOURCE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
+#[cfg(not(feature = "embed-params"))]
+lazy_static! {
+    /// The midnight verifier parameters, from [`PARAMS_VERIFIER_SOURCE`].
+    pub static ref PARAMS_VERIFIER: ParamsVerifier = ParamsVerifier::read_verifier(
+        PARAMS_VERIFIER_SOURCE
+            .get()
+            .expect("verifier parameters were never supplied")
+            .as_slice(),
+    )
+    .expect("Supplied verifier parameters should be valid.");
 }
 
 /// A zero-knowledge proof.
