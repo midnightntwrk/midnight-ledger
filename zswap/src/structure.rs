@@ -469,6 +469,84 @@ pub struct Delta {
 }
 tag_enforcement_test!(Delta);
 
+/// What applying a spend actually needs: the root it was proven against, the nullifier it
+/// burns, and the contract that owns it.
+///
+/// Not the `Pedersen` value commitment and not the proof. Both are checked when the offer is
+/// verified and neither is read again when it is applied.
+#[derive(Storable, Serialize)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[tag = "zswap-spend-effect[v1]"]
+#[storable(db = D)]
+pub struct SpendEffect<D: DB> {
+    /// The Merkle root this spend was proven against.
+    pub merkle_tree_root: MerkleTreeDigest,
+    /// The nullifier it burns.
+    pub nullifier: Nullifier,
+    /// The owning contract, if any.
+    pub contract_address: Option<Sp<ContractAddress, D>>,
+}
+tag_enforcement_test!(SpendEffect<InMemoryDB>);
+
+/// What applying an output actually needs: the commitment, and the contract that owns it.
+///
+/// Not the value commitment and not the ciphertext — the ciphertext is the recipient's
+/// encrypted note and the apply path never opens it.
+#[derive(Storable, Serialize)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[tag = "zswap-create-effect[v1]"]
+#[storable(db = D)]
+pub struct CreateEffect<D: DB> {
+    /// The coin commitment to insert.
+    pub coin_com: Commitment,
+    /// The owning contract, if any.
+    pub contract_address: Option<Sp<ContractAddress, D>>,
+}
+tag_enforcement_test!(CreateEffect<InMemoryDB>);
+
+/// A coin created and spent inside one transaction, so both at once.
+#[derive(Storable, Serialize)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[tag = "zswap-transient-effect[v1]"]
+#[storable(db = D)]
+pub struct TransientEffect<D: DB> {
+    /// The nullifier it burns.
+    pub nullifier: Nullifier,
+    /// The commitment it creates.
+    pub coin_com: Commitment,
+    /// The owning contract, if any.
+    pub contract_address: Option<Sp<ContractAddress, D>>,
+}
+tag_enforcement_test!(TransientEffect<InMemoryDB>);
+
+/// An [`Offer`] reduced to the fields [`State::try_apply_effects`] reads.
+///
+/// [`Offer`] carries what is needed to *verify* it as well as what is needed to *apply* it, and
+/// the two sets barely overlap. Every `Input` and `Output` holds a `Pedersen` value commitment,
+/// and every `Output`'s `CoinCiphertext` holds a second curve point; neither is read by the
+/// apply path. Decoding them is not free — `EmbeddedGroupAffine` deserialises through
+/// `embedded::Affine::from_bytes`, a point decompression with subgroup validation, since the
+/// type is `JubjubSubgroup` — and it dominates decoding the offer. For an offer of one output,
+/// the fields apply reads are 64 octets of 373.
+///
+/// So a consumer that has already verified an offer, or that never held the proofs, can apply
+/// it from this without carrying or decoding the parts it does not need.
+///
+/// [`State::try_apply_effects`]: crate::ledger::State::try_apply_effects
+#[derive(Storable, Serialize)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[tag = "zswap-effects[v1]"]
+#[storable(db = D)]
+pub struct ZswapEffects<D: DB> {
+    /// The spends, in the offer's order.
+    pub spends: Array<SpendEffect<D>, D>,
+    /// The creates, in the offer's order.
+    pub creates: Array<CreateEffect<D>, D>,
+    /// The transients, in the offer's order.
+    pub transients: Array<TransientEffect<D>, D>,
+}
+tag_enforcement_test!(ZswapEffects<InMemoryDB>);
+
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
 #[tag = "zswap-offer[v5]"]
@@ -506,6 +584,42 @@ impl<D: DB> Offer<ProofPreimage, D> {
 }
 
 impl<P: Storable<D>, D: DB> Offer<P, D> {
+    /// The parts of this offer that applying it reads, and nothing else.
+    ///
+    /// The counterpart of [`crate::ledger::State::try_apply_effects`]: this derives what
+    /// crosses, that consumes it. Keeping the pair together is the point — a caller that
+    /// re-derived the shape by hand could drift from what apply actually reads.
+    pub fn effects(&self) -> ZswapEffects<D> {
+        ZswapEffects {
+            spends: self
+                .inputs
+                .iter_deref()
+                .map(|i| SpendEffect {
+                    merkle_tree_root: i.merkle_tree_root,
+                    nullifier: i.nullifier,
+                    contract_address: i.contract_address.clone(),
+                })
+                .collect(),
+            creates: self
+                .outputs
+                .iter_deref()
+                .map(|o| CreateEffect {
+                    coin_com: o.coin_com,
+                    contract_address: o.contract_address.clone(),
+                })
+                .collect(),
+            transients: self
+                .transient
+                .iter_deref()
+                .map(|t| TransientEffect {
+                    nullifier: t.nullifier,
+                    coin_com: t.coin_com,
+                    contract_address: t.contract_address.clone(),
+                })
+                .collect(),
+        }
+    }
+
     pub fn erase_proofs(&self) -> Offer<(), D> {
         Offer {
             inputs: self.inputs.iter_deref().map(Input::erase_proof).collect(),

@@ -64,104 +64,123 @@ impl<D: DB> State<D> {
     pub fn new() -> Self {
         Default::default()
     }
+    // ── the apply primitives ────────────────────────────────────────────────────────────
+    //
+    // Each takes the fields it reads rather than the struct they arrived in, so that applying
+    // an `Offer` and applying a `ZswapEffects` run the same code. A second implementation of
+    // "what applying does" is how the two could quietly disagree.
 
-    fn apply_input<P: Storable<D>>(
+    fn apply_spend(
         mut self,
-        inp: Input<P, D>,
+        merkle_tree_root: MerkleTreeDigest,
+        nullifier: Nullifier,
+        contract_address: Option<Sp<ContractAddress, D>>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<Self, TransactionInvalid> {
-        if !self.past_roots.contains(&inp.merkle_tree_root) {
+        if !self.past_roots.contains(&merkle_tree_root) {
             warn!(
-                ?inp.merkle_tree_root,
+                ?merkle_tree_root,
                 "attempted spend with unknown Merkle tree"
             );
-            return Err(TransactionInvalid::UnknownMerkleRoot(inp.merkle_tree_root));
+            return Err(TransactionInvalid::UnknownMerkleRoot(merkle_tree_root));
         };
 
-        if self.nullifiers.contains_key(&inp.nullifier) {
-            warn!(?inp.nullifier, "attempted double spend");
-            return Err(TransactionInvalid::NullifierAlreadyPresent(inp.nullifier));
+        if self.nullifiers.contains_key(&nullifier) {
+            warn!(?nullifier, "attempted double spend");
+            return Err(TransactionInvalid::NullifierAlreadyPresent(nullifier));
         }
 
-        if Self::on_whitelist(
-            whitelist,
-            &(inp.contract_address.as_ref().map(|x| *x.deref())),
-        ) {
-            self.nullifiers = self.nullifiers.insert(inp.nullifier, ());
+        if Self::on_whitelist(whitelist, &(contract_address.as_ref().map(|x| *x.deref()))) {
+            self.nullifiers = self.nullifiers.insert(nullifier, ());
         }
         Ok(self)
     }
 
-    fn apply_output<P: Storable<D>>(
+    fn apply_create(
         mut self,
+        coin_com: Commitment,
+        contract_address: Option<Sp<ContractAddress, D>>,
+        whitelist: &Option<Map<ContractAddress, ()>>,
+    ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
+        if self.coin_coms_set.contains_key(&coin_com) {
+            warn!(?coin_com, "attempted faerie gold");
+            return Err(TransactionInvalid::CommitmentAlreadyPresent(coin_com));
+        }
+        self.coin_coms_set = self.coin_coms_set.insert(coin_com, ());
+        let first_free = self.first_free;
+        self.coin_coms = self
+            .coin_coms
+            .try_update_hash(
+                first_free,
+                coin_com.0,
+                contract_address.as_ref().map(|x| Sp::new(*x.deref())),
+            )
+            .map_err(TransactionInvalid::MerkleTreeError)?;
+
+        if !Self::on_whitelist(whitelist, &contract_address.as_ref().map(|x| *x.deref())) {
+            self.coin_coms = self.coin_coms.collapse(first_free, first_free);
+        }
+
+        self.first_free = first_free + 1;
+        Ok((self, coin_com, first_free)) // Different from the spec because I'm referring to the pre-plus-1 value
+    }
+
+    fn apply_transient_effect(
+        mut self,
+        nullifier: Nullifier,
+        coin_com: Commitment,
+        contract_address: Option<Sp<ContractAddress, D>>,
+        whitelist: &Option<Map<ContractAddress, ()>>,
+    ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
+        // Checked here as well as in `apply_create`, deliberately: a transient that is
+        // both a faerie gold and a double spend must report the commitment, as it did
+        // before this was factored. One extra lookup buys unchanged error ordering.
+        if self.coin_coms_set.contains_key(&coin_com) {
+            warn!(?coin_com, "attempted faerie gold");
+            return Err(TransactionInvalid::CommitmentAlreadyPresent(coin_com));
+        }
+
+        if self.nullifiers.contains_key(&nullifier) {
+            return Err(TransactionInvalid::NullifierAlreadyPresent(nullifier));
+        } else if Self::on_whitelist(whitelist, &contract_address.as_ref().map(|x| *x.deref())) {
+            self.nullifiers = self.nullifiers.insert(nullifier, ());
+        }
+
+        self.apply_create(coin_com, contract_address, whitelist)
+    }
+
+    fn apply_input<P: Storable<D>>(
+        self,
+        inp: Input<P, D>,
+        whitelist: &Option<Map<ContractAddress, ()>>,
+    ) -> Result<Self, TransactionInvalid> {
+        self.apply_spend(
+            inp.merkle_tree_root,
+            inp.nullifier,
+            inp.contract_address,
+            whitelist,
+        )
+    }
+
+    fn apply_output<P: Storable<D>>(
+        self,
         out: Output<P, D>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
-        if self.coin_coms_set.contains_key(&out.coin_com) {
-            warn!(?out.coin_com, "attempted faerie gold");
-            return Err(TransactionInvalid::CommitmentAlreadyPresent(out.coin_com));
-        }
-        self.coin_coms_set = self.coin_coms_set.insert(out.coin_com, ());
-        let first_free = self.first_free;
-        self.coin_coms = self
-            .coin_coms
-            .try_update_hash(
-                first_free,
-                out.coin_com.0,
-                out.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
-            )
-            .map_err(TransactionInvalid::MerkleTreeError)?;
-
-        if !Self::on_whitelist(
-            whitelist,
-            &out.contract_address.as_ref().map(|x| *x.deref()),
-        ) {
-            self.coin_coms = self.coin_coms.collapse(first_free, first_free);
-        }
-
-        self.first_free = first_free + 1;
-        Ok((self, out.coin_com, first_free)) // Different from the spec because I'm referring to the pre-plus-1 value
+        self.apply_create(out.coin_com, out.contract_address, whitelist)
     }
 
     fn apply_transient<P: Storable<D>>(
-        mut self,
+        self,
         trans: Transient<P, D>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
-        if self.coin_coms_set.contains_key(&trans.coin_com) {
-            warn!(?trans.coin_com, "attempted faerie gold");
-            return Err(TransactionInvalid::CommitmentAlreadyPresent(trans.coin_com));
-        }
-
-        if self.nullifiers.contains_key(&trans.nullifier) {
-            return Err(TransactionInvalid::NullifierAlreadyPresent(trans.nullifier));
-        } else if Self::on_whitelist(
+        self.apply_transient_effect(
+            trans.nullifier,
+            trans.coin_com,
+            trans.contract_address,
             whitelist,
-            &trans.contract_address.as_ref().map(|x| *x.deref()),
-        ) {
-            self.nullifiers = self.nullifiers.insert(trans.nullifier, ());
-        }
-
-        self.coin_coms_set = self.coin_coms_set.insert(trans.coin_com, ());
-        let first_free = self.first_free;
-        self.coin_coms = self
-            .coin_coms
-            .try_update_hash(
-                first_free,
-                trans.coin_com.0,
-                trans.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
-            )
-            .map_err(TransactionInvalid::MerkleTreeError)?;
-
-        if !Self::on_whitelist(
-            whitelist,
-            &trans.contract_address.as_ref().map(|x| *x.deref()),
-        ) {
-            self.coin_coms = self.coin_coms.collapse(first_free, first_free);
-        }
-
-        self.first_free = first_free + 1;
-        Ok((self, trans.coin_com, first_free)) // Different from the spec because I'm referring to the pre-plus-1 value
+        )
     }
 
     #[instrument(skip(whitelist))]
@@ -202,6 +221,65 @@ impl<D: DB> State<D> {
             (new_st, com_indicies),
             |(state, indicies), trans| {
                 let (state, com, index) = state.apply_transient(trans.clone(), &whitelist)?;
+                Ok((state, indicies.insert(com, index)))
+            },
+        )?;
+        Ok((new_st, com_indicies))
+    }
+
+    /// Apply an offer's effects without the offer.
+    ///
+    /// [`try_apply`] needs a whole [`Offer`], which carries what is needed to *verify* it as
+    /// well as what is needed to apply it — and the two sets barely overlap. Every `Input` and
+    /// `Output` holds a `Pedersen` value commitment, and every `Output`'s `CoinCiphertext`
+    /// holds a second curve point; the apply path reads none of them. Decoding them is not
+    /// free: `EmbeddedGroupAffine` deserialises through `embedded::Affine::from_bytes`, a
+    /// point decompression with subgroup validation, and it dominates decoding the offer.
+    ///
+    /// So a consumer that has already verified an offer — or that never held its proofs — can
+    /// apply it from [`ZswapEffects`] alone, and never carry or decode the rest.
+    ///
+    /// Identical to [`try_apply`] in what it checks: the same three primitives, in the same
+    /// order, over the same state. `Offer::effects` derives the input; the pair is meant to be
+    /// read together.
+    ///
+    /// [`try_apply`]: Self::try_apply
+    /// [`Offer`]: crate::structure::Offer
+    #[instrument(skip(self, effects, whitelist))]
+    pub fn try_apply_effects(
+        &self,
+        effects: &ZswapEffects<D>,
+        whitelist: Option<Map<ContractAddress, ()>>,
+    ) -> Result<(Self, Map<Commitment, u64>), TransactionInvalid> {
+        let mut com_indicies = Map::new();
+        let mut new_st = effects
+            .spends
+            .iter_deref()
+            .try_fold(self.clone(), |state, s| {
+                state.apply_spend(
+                    s.merkle_tree_root,
+                    s.nullifier,
+                    s.contract_address.clone(),
+                    &whitelist,
+                )
+            })?;
+        (new_st, com_indicies) = effects.creates.iter_deref().try_fold(
+            (new_st, com_indicies),
+            |(state, indicies), c| {
+                let (state, com, index) =
+                    state.apply_create(c.coin_com, c.contract_address.clone(), &whitelist)?;
+                Ok((state, indicies.insert(com, index)))
+            },
+        )?;
+        (new_st, com_indicies) = effects.transients.iter_deref().try_fold(
+            (new_st, com_indicies),
+            |(state, indicies), t| {
+                let (state, com, index) = state.apply_transient_effect(
+                    t.nullifier,
+                    t.coin_com,
+                    t.contract_address.clone(),
+                    &whitelist,
+                )?;
                 Ok((state, indicies.insert(com, index)))
             },
         )?;
@@ -267,6 +345,75 @@ mod tests {
     use rand::rngs::ThreadRng;
     use rand::{CryptoRng, Rng};
     use storage::db::InMemoryDB;
+
+    /// `try_apply_effects` must agree with `try_apply` on every observable: the resulting
+    /// state, the commitment indices, and the errors.
+    ///
+    /// This is the property that makes the split safe. `Offer::effects` drops the value
+    /// commitments, the ciphertexts and the proofs, and the claim is that apply never read
+    /// them — so the two paths must be indistinguishable from outside, including when they
+    /// fail. A second implementation of "what applying does" would be free to drift; this is
+    /// what stops that.
+    #[test]
+    fn effects_apply_exactly_as_the_offer_does() {
+        let mut rng = rand::thread_rng();
+        let offer_of = |rng: &mut ThreadRng, n: usize| -> Offer<(), InMemoryDB> {
+            let (mut outputs, mut deltas) = (Vec::new(), Vec::new());
+            for _ in 0..n {
+                let (type_, value): (ShieldedTokenType, u128) = (rng.r#gen(), rng.r#gen());
+                let info = CoinInfo {
+                    nonce: rng.r#gen(),
+                    type_,
+                    value,
+                };
+                let cpk = coin_structure::coin::PublicKey(rng.r#gen());
+                outputs.push(
+                    Output::new(rng, &info, None, &cpk, None)
+                        .unwrap()
+                        .erase_proof(),
+                );
+                deltas.push(Delta {
+                    token_type: type_,
+                    value: value as i128,
+                });
+            }
+            Offer {
+                inputs: vec![].into(),
+                outputs: outputs.into(),
+                transient: vec![].into(),
+                deltas: deltas.into(),
+            }
+        };
+
+        let base = State::<InMemoryDB>::new();
+        let offer = offer_of(&mut rng, 4);
+
+        let (via_offer, idx_offer) = base.try_apply(&offer, None).unwrap();
+        let (via_effects, idx_effects) = base.try_apply_effects(&offer.effects(), None).unwrap();
+
+        assert_eq!(idx_offer, idx_effects, "commitment indices must agree");
+        assert_eq!(
+            via_offer.coin_coms.root(),
+            via_effects.coin_coms.root(),
+            "the commitment tree root must agree"
+        );
+        assert_eq!(via_offer.first_free, via_effects.first_free);
+        assert_eq!(via_offer.coin_coms_set, via_effects.coin_coms_set);
+        assert_eq!(via_offer.nullifiers, via_effects.nullifiers);
+
+        // ⌖ And they must agree when they *fail*. Replaying the same offer is faerie gold, and
+        // an error that differed between the two paths would be a difference a caller could
+        // observe — which is the whole thing this test exists to rule out.
+        let replay_offer = via_offer.try_apply(&offer, None).unwrap_err();
+        let replay_effects = via_effects
+            .try_apply_effects(&offer.effects(), None)
+            .unwrap_err();
+        assert_eq!(
+            format!("{replay_offer:?}"),
+            format!("{replay_effects:?}"),
+            "a rejected apply must fail identically either way"
+        );
+    }
 
     #[test]
     fn test_filtered_spend() {
