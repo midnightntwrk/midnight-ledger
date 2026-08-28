@@ -63,10 +63,31 @@ pub static TCONSTRUCT: std::sync::Mutex<
     Option<HashMap<&'static str, (usize, std::time::Duration)>>,
 > = std::sync::Mutex::new(None);
 
+/// Counts every node the arena content-addresses, and the octets fed to the hasher.
+///
+/// ⌖ Behind `hash-counter` and off by default: two relaxed atomic increments are nothing beside
+/// a ꜱʜᴀ-256, but a counter nobody reads is still a counter nobody should pay for.
+///
+/// The reason it exists: hashing dominates cost in environments where ꜱʜᴀ-256 is not a hardware
+/// instruction, and "the structure is 1.4 KB" tells you nothing about how many times it gets
+/// hashed on the way in. This makes that number observable instead of inferred by division.
+#[cfg(feature = "hash-counter")]
+pub static HASHES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Octets fed to the hasher across all [`HASHES`] calls, including child hashes.
+#[cfg(feature = "hash-counter")]
+pub static HASH_BYTES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
     child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
 ) -> ArenaHash<H> {
+    #[cfg(feature = "hash-counter")]
+    {
+        use core::sync::atomic::Ordering::Relaxed;
+        HASHES.fetch_add(1, Relaxed);
+        HASH_BYTES.fetch_add(4 + root_binary_repr.len() as u64, Relaxed);
+    }
     let mut hasher = H::default();
     hasher.update((root_binary_repr.len() as u32).to_le_bytes());
     hasher.update(root_binary_repr);
