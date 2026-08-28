@@ -23,8 +23,8 @@ mock-verify = ["transient-crypto/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
-coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure", default-features = false }
-onchain-runtime = { version = "3.1.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", default-features = false }
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { version = "3.1.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { version = "8.1.1", path = "../zswap", package = "midnight-zswap", default-features = false }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto", default-features = false }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", default-features = false }
