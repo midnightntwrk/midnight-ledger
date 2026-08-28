@@ -30,13 +30,16 @@ use base_crypto::{
 };
 #[cfg(feature = "proving")]
 use base_crypto::data_provider::MidnightDataProvider;
-use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value};
+use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment, Value};
+#[cfg(feature = "proof-verifying")]
+use base_crypto::fab::AlignedValue;
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
 #[cfg(feature = "proving")]
 use futures::future::join_all;
 #[cfg(feature = "proof-verifying")]
 use lazy_static::lazy_static;
+#[cfg(feature = "proof-verifying")]
 use onchain_runtime::{
     Cell_read, HistoricMerkleTree_check_root, HistoricMerkleTree_insert_hash, Set_insert,
     ops::{Key, Op},
@@ -77,10 +80,12 @@ use transient_crypto::{
     hash::{transient_hash, upgrade_from_transient},
     merkle_tree,
     merkle_tree::{MerkleTree, MerkleTreeDigest},
-    proofs::{KeyLocation, ProofPreimage},
     repr::FieldRepr,
 };
+#[cfg(feature = "proof-verifying")]
+use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+#[cfg(feature = "proof-verifying")]
 use zswap::verify::with_outputs;
 
 #[cfg(feature = "proof-verifying")]
@@ -1697,6 +1702,11 @@ impl<D: DB> DustLocalState<D> {
         })
     }
 
+    /// Constructs a dust spend.
+    ///
+    /// Behind `proof-verifying` because it reaches `zswap::verify::with_outputs`, which is: an
+    /// applier never constructs spends, it only applies ones a checker already accepted.
+    #[cfg(feature = "proof-verifying")]
     pub fn spend(
         &self,
         sk: &DustSecretKey,
