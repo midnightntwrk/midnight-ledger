@@ -382,7 +382,7 @@ fn accumulator_pi_len() -> usize {
 /// Reconstructs a single-point-per-side accumulator from its public-input
 /// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`). 
 fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<S>> {
-    if fields.len() % 2 != 0 || fields.len() < 4 {
+    if !fields.len().is_multiple_of(2) || fields.len() < 4 {
         return None;
     }
     let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<S>> {
