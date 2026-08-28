@@ -1293,6 +1293,28 @@ pub struct VerifiedTransaction<D: DB> {
     pub(crate) hash: TransactionHash,
 }
 
+impl<D: DB> VerifiedTransaction<D> {
+    /// The transaction's hash, fixed when it was checked.
+    pub fn hash(&self) -> TransactionHash {
+        self.hash
+    }
+
+    /// Rebuild from a transaction whose proofs a checker has already discarded, together with
+    /// the hash that checker computed.
+    ///
+    /// The type is the guarantee: `Transaction<(), (), Pedersen, D>` cannot carry a proof or a
+    /// signature, so the data an applier needs is strictly smaller than the data a checker
+    /// needed. This exists so the two halves can run apart — one side checks and keeps only the
+    /// erased form, the other applies it — without the applying side having to re-verify, or
+    /// hold the proofs in order to be handed the transaction at all.
+    ///
+    /// The caller asserts the check happened. Constructing this from an unchecked transaction
+    /// applies it unchecked.
+    pub fn from_verified(inner: Transaction<(), (), Pedersen, D>, hash: TransactionHash) -> Self {
+        Self { inner, hash }
+    }
+}
+
 impl<D: DB> Deref for VerifiedTransaction<D> {
     type Target = Transaction<(), (), Pedersen, D>;
     fn deref(&self) -> &Self::Target {
