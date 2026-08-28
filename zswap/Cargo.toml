@@ -10,7 +10,7 @@ description = "Implementation of the Zswap shielded token atomic swap mechanism.
 default = ["proof-verifying", "proving"]
 proof-verifying = []
 # The prover -- see the note in ../ledger/Cargo.toml. On by default.
-proving = []
+proving = ["base-crypto/data-provider", "transient-crypto/data-provider"]
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto", default-features = false }
