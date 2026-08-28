@@ -2818,6 +2818,7 @@ dependencies = [
  "signature",
  "subtle",
  "tracing",
+ "url",
  "zeroize",
 ]
 

@@ -2073,7 +2073,7 @@ macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
             concat!("dust/", midnight_ledger_static::version!(), "/", $name),
-            base_crypto::data_provider::hexhash(
+            base_crypto::hash::hexhash(
                 &include_bytes!(concat!("../static/dust/", $name, ".sha256"))
                     .split_at(64)
                     .0,
