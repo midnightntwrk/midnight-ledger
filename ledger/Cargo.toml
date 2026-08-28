@@ -11,7 +11,8 @@ default = ["proof-verifying", "proving"]
 # The prover. On by default, so nothing changes for an existing consumer; off, a
 # verify-only build does not compile it. Verifying and proving are different jobs with very
 # different dependency weights, and a consumer that only ever verifies should not pay for both.
-proving = []
+proving = ["zswap/proving"]
+data-provider = ["base-crypto/data-provider", "transient-crypto/data-provider"]
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
 proof-verifying = ["zswap/proof-verifying"]
@@ -24,9 +25,9 @@ fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 [dependencies]
 coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { version = "3.1.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { version = "8.1.1", path = "../zswap", package = "midnight-zswap" }
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+zswap = { version = "8.1.1", path = "../zswap", package = "midnight-zswap", default-features = false }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto", default-features = false }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", default-features = false }
 storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
