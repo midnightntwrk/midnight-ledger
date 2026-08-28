@@ -28,10 +28,9 @@ use base_crypto::{
     signatures::VerifyingKey,
     time::{Duration, Timestamp},
 };
-use base_crypto::{
-    data_provider::MidnightDataProvider,
-    fab::{Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value},
-};
+#[cfg(feature = "proving")]
+use base_crypto::data_provider::MidnightDataProvider;
+use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value};
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
 #[cfg(feature = "proving")]
@@ -66,7 +65,8 @@ use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
 #[cfg(feature = "proof-verifying")]
 use transient_crypto::proofs::VerifierKey;
-use transient_crypto::proofs::ProvingKeyMaterial;
+#[cfg(feature = "proving")]
+use transient_crypto::proofs::{ProvingKeyMaterial, Resolver};
 // Prover-only, but referenced by the gated methods below, so gated the same way.
 #[cfg(feature = "proving")]
 use crate::structure::ProofMarker;
@@ -77,7 +77,7 @@ use transient_crypto::{
     hash::{transient_hash, upgrade_from_transient},
     merkle_tree,
     merkle_tree::{MerkleTree, MerkleTreeDigest},
-    proofs::{KeyLocation, ProofPreimage, Resolver},
+    proofs::{KeyLocation, ProofPreimage},
     repr::FieldRepr,
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -93,8 +93,13 @@ lazy_static! {
             .expect("Zswap Output VK should be valid");
 }
 
+/// Resolves dust's built-in prover key, verifier key and IR out of the Midnight parameter cache.
+///
+/// Behind the `proving` feature: verifying dust spends needs none of it.
+#[cfg(feature = "proving")]
 pub struct DustResolver(pub MidnightDataProvider);
 
+#[cfg(feature = "proving")]
 impl Resolver for DustResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
