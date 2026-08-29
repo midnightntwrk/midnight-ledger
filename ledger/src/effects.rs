@@ -507,6 +507,128 @@ where
 
 // ── appliers ────────────────────────────────────────────────────────────────────────────
 
+impl<D: storage::db::DB> crate::structure::LedgerState<D> {
+    /// Apply a [`TransactionEffects`] without the transaction it came from.
+    ///
+    /// The order is `apply_section`'s: the guaranteed pass first — replay, the single
+    /// guaranteed shielded offer, then every intent's unshielded changes and dust spends —
+    /// followed by each fallible segment.
+    ///
+    /// ⚠︎ **This refuses anything it cannot apply completely.** An intent whose contract
+    /// actions or dust registrations are not represented in the effects returns an error
+    /// rather than applying the part it understands. Silently applying a prefix of a
+    /// transaction is the worst failure available here: the state would advance, look valid,
+    /// and disagree with every node that took the ordinary path.
+    ///
+    /// ⚠︎ And it assumes the caller has already verified the transaction — proofs,
+    /// signatures, balance. That is the same contract `try_apply_effects` makes, and it holds
+    /// only where something attests the producing computation.
+    pub fn apply_effects(
+        &self,
+        fx: &TransactionEffects,
+        context: &crate::semantics::TransactionContext<D>,
+    ) -> Result<Self, crate::error::TransactionInvalid<D>> {
+        let tblock = context.block_context.tblock;
+        let global_ttl = self.parameters.global_ttl;
+        let mut state = self.clone();
+
+        // ── the guaranteed pass ─────────────────────────────────────────────────────────
+        for intent in &fx.guaranteed.intents {
+            Self::refuse_if_incomplete(intent)?;
+        }
+        for intent in &fx.guaranteed.intents {
+            state.replay_protection = storage::arena::Sp::new(
+                state
+                    .replay_protection
+                    .apply_member(intent.intent_hash, intent.ttl, tblock, global_ttl)
+                    .map_err(crate::error::TransactionInvalid::ReplayProtectionViolation)?,
+            );
+        }
+        state = state.apply_zswap_delta(&fx.guaranteed.zswap)?;
+        for intent in &fx.guaranteed.intents {
+            state.utxo = storage::arena::Sp::new(
+                state
+                    .utxo
+                    .apply_unshielded_delta(&intent.unshielded, tblock)?,
+            );
+            state = state.apply_dust_spends(&intent.dust, tblock, context)?;
+        }
+
+        // ── each fallible segment ───────────────────────────────────────────────────────
+        for seg in &fx.fallible {
+            if seg.contracts != ContractsPresent::None {
+                return Err(crate::error::TransactionInvalid::EffectsIncomplete);
+            }
+            state = state.apply_zswap_delta(&seg.zswap)?;
+            if let Some(u) = &seg.unshielded {
+                state.utxo = storage::arena::Sp::new(state.utxo.apply_unshielded_delta(u, tblock)?);
+            }
+        }
+        Ok(state)
+    }
+
+    /// Refuse an intent carrying anything the effects do not represent.
+    fn refuse_if_incomplete(
+        intent: &IntentEffects,
+    ) -> Result<(), crate::error::TransactionInvalid<D>> {
+        if intent.contracts != ContractsPresent::None {
+            return Err(crate::error::TransactionInvalid::EffectsIncomplete);
+        }
+        if !intent.dust.registrations.is_empty() {
+            // Registrations need the parent intent's ɴɪɢʜᴛ inputs and outputs threaded
+            // through a running fee allowance; see the note on `DustRegistrationEffect`.
+            return Err(crate::error::TransactionInvalid::EffectsIncomplete);
+        }
+        Ok(())
+    }
+
+    fn apply_zswap_delta(
+        mut self,
+        d: &ZswapDelta,
+    ) -> Result<Self, crate::error::TransactionInvalid<D>> {
+        let spends: Vec<_> = d
+            .spends
+            .iter()
+            .map(|s| (s.merkle_tree_root, s.nullifier, s.contract_address))
+            .collect();
+        let creates: Vec<_> = d
+            .creates
+            .iter()
+            .map(|c| (c.coin_com, c.contract_address))
+            .collect();
+        let transients: Vec<_> = d
+            .transients
+            .iter()
+            .map(|t| (t.nullifier, t.coin_com, t.contract_address))
+            .collect();
+        let (zs, _idx) = self
+            .zswap
+            .try_apply_flat(&spends, &creates, &transients, None)?;
+        self.zswap = storage::arena::Sp::new(zs);
+        Ok(self)
+    }
+
+    fn apply_dust_spends(
+        mut self,
+        d: &DustDelta,
+        _tblock: Timestamp,
+        context: &crate::semantics::TransactionContext<D>,
+    ) -> Result<Self, crate::error::TransactionInvalid<D>> {
+        for sp in &d.spends {
+            self.dust = storage::arena::Sp::new(self.dust.apply_spend_flat(
+                sp.old_nullifier,
+                sp.new_commitment,
+                sp.v_fee,
+                d.ctime,
+                context,
+                &self.parameters.dust,
+                |_| {},
+            )?);
+        }
+        Ok(self)
+    }
+}
+
 impl<D: storage::db::DB> crate::structure::UtxoState<D> {
     /// Apply an [`UnshieldedDelta`]: check every spend is present, remove it, then insert
     /// every create.
@@ -1457,6 +1579,70 @@ mod tests {
             IntentEffects::from_intent(&with_action, SEG).contracts,
             ContractsPresent::UseFullPath,
             "an intent with actions must route to the full path"
+        );
+    }
+
+    /// ⚠︎ **Incomplete effects must be refused, not partially applied.**
+    ///
+    /// An intent carrying contract actions or dust registrations is not fully represented
+    /// here. Applying the part that *is* represented would advance the state by a prefix of
+    /// the transaction — locally valid-looking, and in disagreement with every node that took
+    /// the ordinary path. That is the worst failure this module can produce, so it is the one
+    /// property tested directly rather than inferred.
+    #[test]
+    fn incomplete_effects_are_refused_rather_than_partly_applied() {
+        let with_contracts = IntentEffects {
+            segment: 0,
+            intent_hash: IntentHash(base_crypto::hash::HashOutput([1; 32])),
+            ttl: Timestamp::from_secs(10),
+            unshielded: UnshieldedDelta::default(),
+            dust: DustDelta::default(),
+            contracts: ContractsPresent::UseFullPath,
+        };
+        assert!(
+            matches!(
+                crate::structure::LedgerState::<storage::db::InMemoryDB>::refuse_if_incomplete(
+                    &with_contracts
+                ),
+                Err(crate::error::TransactionInvalid::EffectsIncomplete)
+            ),
+            "an intent with contract actions must be refused"
+        );
+
+        let with_registrations = IntentEffects {
+            dust: DustDelta {
+                ctime: Timestamp::from_secs(1),
+                spends: vec![],
+                registrations: vec![DustRegistrationEffect {
+                    night_key: VerifyingKey::default(),
+                    dust_address: None,
+                    allow_fee_payment: 1,
+                }],
+            },
+            contracts: ContractsPresent::None,
+            ..with_contracts.clone()
+        };
+        assert!(
+            matches!(
+                crate::structure::LedgerState::<storage::db::InMemoryDB>::refuse_if_incomplete(
+                    &with_registrations
+                ),
+                Err(crate::error::TransactionInvalid::EffectsIncomplete)
+            ),
+            "an intent with dust registrations must be refused"
+        );
+
+        // And an intent carrying neither is accepted, or the guard would be refusing
+        // everything and the two assertions above would prove nothing.
+        let plain = IntentEffects {
+            dust: DustDelta::default(),
+            contracts: ContractsPresent::None,
+            ..with_contracts
+        };
+        assert!(
+            crate::structure::LedgerState::<storage::db::InMemoryDB>::refuse_if_incomplete(&plain)
+                .is_ok(),
+            "an intent with neither must be accepted"
         );
     }
 

@@ -196,6 +196,13 @@ impl Error for SystemTransactionError {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum TransactionInvalid<D: DB> {
+    /// The effects offered do not represent everything the transaction does, so applying them
+    /// would advance the state by a *prefix* of the transaction.
+    ///
+    /// ⚠︎ Raised rather than applying what is understood and ignoring the rest. A partially
+    /// applied transaction would look valid locally and disagree with every node that took
+    /// the ordinary path.
+    EffectsIncomplete,
     EffectsMismatch {
         declared: Box<Effects<D>>,
         actual: Box<Effects<D>>,
@@ -237,6 +244,11 @@ impl<D: DB> Display for TransactionInvalid<D> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         use TransactionInvalid::*;
         match self {
+            EffectsIncomplete => write!(
+                formatter,
+                "the effects offered do not represent everything the transaction does; \
+                 applying them would advance the state by a prefix of it"
+            ),
             EffectsMismatch { declared, actual } => write!(
                 formatter,
                 "declared effects {declared:?} don't match computed effects {actual:?}"
