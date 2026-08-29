@@ -67,15 +67,53 @@ pub struct SegmentEffects {
     pub intents: Vec<IntentEffects>,
 }
 
-/// Shielded changes: what must be absent, and what gets appended.
+/// Shielded changes, mirroring [`ZswapEffects`] field for field but as plain data.
+///
+/// ⚠︎ The merkle root is **per spend**, not per offer: each input was proven against
+/// whichever root the prover held, and `apply_spend` checks each against `past_roots`
+/// separately. A single root per delta would silently accept a spend proven against a root
+/// the state never had.
+///
+/// [`ZswapEffects`]: midnight_zswap::structure::ZswapEffects
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ZswapDelta {
-    /// Precondition: `∈ past_roots`. The root the spends were proven against.
-    pub merkle_root: Option<[u8; 32]>,
-    /// Precondition: absent from the nullifier set. Mutation: inserted.
-    pub nullifiers: Vec<Nullifier>,
+    /// Precondition: each root `∈ past_roots`, each nullifier absent. Mutation: inserted.
+    pub spends: Vec<SpendDelta>,
     /// Mutation: appended to the commitment tree, in this order.
-    pub commitments: Vec<Commitment>,
+    pub creates: Vec<CreateDelta>,
+    /// Spend and create in one, for a coin created and consumed within the same offer.
+    pub transients: Vec<TransientDelta>,
+}
+
+/// One shielded spend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpendDelta {
+    /// Precondition: `∈ past_roots`. The root *this* input was proven against.
+    pub merkle_tree_root: [u8; 32],
+    /// Precondition: absent from the nullifier set. Mutation: inserted.
+    pub nullifier: Nullifier,
+    /// The contract this spend belongs to, if any.
+    pub contract_address: Option<ContractAddress>,
+}
+
+/// One shielded create.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateDelta {
+    /// Mutation: appended to the commitment tree.
+    pub coin_com: Commitment,
+    /// The contract this create belongs to, if any.
+    pub contract_address: Option<ContractAddress>,
+}
+
+/// A coin created and spent within the same offer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransientDelta {
+    /// Precondition: absent from the nullifier set. Mutation: inserted.
+    pub nullifier: Nullifier,
+    /// Mutation: appended to the commitment tree.
+    pub coin_com: Commitment,
+    /// The contract this belongs to, if any.
+    pub contract_address: Option<ContractAddress>,
 }
 
 /// One intent's changes.
@@ -299,17 +337,60 @@ impl Flat for UnshieldedDelta {
     }
 }
 
+impl Flat for SpendDelta {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.merkle_tree_root.put(out);
+        self.nullifier.put(out);
+        self.contract_address.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(SpendDelta {
+            merkle_tree_root: <[u8; 32]>::get(inp)?,
+            nullifier: Nullifier::get(inp)?,
+            contract_address: Option::get(inp)?,
+        })
+    }
+}
+
+impl Flat for CreateDelta {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.coin_com.put(out);
+        self.contract_address.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(CreateDelta {
+            coin_com: Commitment::get(inp)?,
+            contract_address: Option::get(inp)?,
+        })
+    }
+}
+
+impl Flat for TransientDelta {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.nullifier.put(out);
+        self.coin_com.put(out);
+        self.contract_address.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(TransientDelta {
+            nullifier: Nullifier::get(inp)?,
+            coin_com: Commitment::get(inp)?,
+            contract_address: Option::get(inp)?,
+        })
+    }
+}
+
 impl Flat for ZswapDelta {
     fn put(&self, out: &mut Vec<u8>) {
-        self.merkle_root.put(out);
-        self.nullifiers.put(out);
-        self.commitments.put(out);
+        self.spends.put(out);
+        self.creates.put(out);
+        self.transients.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(ZswapDelta {
-            merkle_root: Option::get(inp)?,
-            nullifiers: Vec::get(inp)?,
-            commitments: Vec::get(inp)?,
+            spends: Vec::get(inp)?,
+            creates: Vec::get(inp)?,
+            transients: Vec::get(inp)?,
         })
     }
 }
@@ -526,12 +607,22 @@ mod tests {
             segments: vec![SegmentEffects {
                 segment: 0,
                 guaranteed: ZswapDelta {
-                    merkle_root: Some([7; 32]),
-                    nullifiers: vec![Nullifier(base_crypto::hash::HashOutput([1; 32]))],
-                    commitments: vec![
-                        Commitment(base_crypto::hash::HashOutput([2; 32])),
-                        Commitment(base_crypto::hash::HashOutput([3; 32])),
+                    spends: vec![SpendDelta {
+                        merkle_tree_root: [7; 32],
+                        nullifier: Nullifier(base_crypto::hash::HashOutput([1; 32])),
+                        contract_address: None,
+                    }],
+                    creates: vec![
+                        CreateDelta {
+                            coin_com: Commitment(base_crypto::hash::HashOutput([2; 32])),
+                            contract_address: None,
+                        },
+                        CreateDelta {
+                            coin_com: Commitment(base_crypto::hash::HashOutput([3; 32])),
+                            contract_address: None,
+                        },
                     ],
+                    transients: vec![],
                 },
                 fallible: ZswapDelta::default(),
                 intents: vec![IntentEffects {
