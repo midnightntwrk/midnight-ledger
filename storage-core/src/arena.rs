@@ -609,9 +609,10 @@ impl<D: DB> Arena<D> {
         } else {
             Sp {
                 arena: self.clone(),
-                data: OnceLock::from(Arc::new(value)),
+                data: OnceLock::from(Arc::new(value) as Arc<dyn Any + Send + Sync>),
                 child_repr,
                 root: root_hash.clone(),
+                _t: PhantomData,
             }
         }
     }
@@ -1164,7 +1165,8 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             )),
             ArenaKey::Direct(_) => Ok(Sp {
                 arena: self.arena.clone(),
-                data: OnceLock::from(Arc::new(value)),
+                data: OnceLock::from(Arc::new(value) as Arc<dyn Any + Send + Sync>),
+                _t: PhantomData,
                 child_repr: child.clone(),
                 root: child.hash().clone(),
             }),
@@ -1366,7 +1368,17 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     ///
     /// The `Arc` is to allow sharing of the data with other `Sp`s. The
     /// `OnceLock` is to support lazy loading.
-    data: OnceLock<Arc<T>>,
+    ///
+    /// ⌖ Stored **erased**, as the arena's own sp-cache already stores it. Typed as
+    /// `Arc<T>` this field dragged a private copy of `OnceLock<T>::from`,
+    /// `OnceLock<T>::get_or_try_init` and `Arc<T>`/`Weak<T>` drop glue into every stored
+    /// type -- 29,620 lines of ʟʟᴠᴍ ɪʀ across ~100 instantiations, none of it this crate's
+    /// own code. Erased, each exists once and the type is recovered by `downcast_ref` at
+    /// the access points, all of which are bounded `T: Storable<D>` and therefore `Sized`.
+    data: OnceLock<Arc<dyn Any + Send + Sync>>,
+    /// `T` no longer appears in a field, so it is pinned here. `fn() -> T` rather than `T`
+    /// so the marker imposes no variance, `Send`/`Sync` or drop obligations of its own.
+    _t: PhantomData<fn() -> T>,
     /// This Sp represented as a child node (for easy access)
     pub child_repr: ArenaKey<D::Hasher>,
     /// The arena this Sp points into
@@ -1375,19 +1387,22 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     pub root: ArenaHash<D::Hasher>,
 }
 
-impl<T: Display, D: DB> Display for Sp<T, D> {
+// ⚠︎ These must `downcast_ref` rather than format the stored `Arc` directly. `dyn Any`
+// *implements* `Debug` -- printing `Any { .. }` -- so formatting the erased payload compiles
+// and silently prints the wrong thing. `lazy_load_large_data_structure` is what caught it.
+impl<T: Display + Any, D: DB> Display for Sp<T, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.data.get() {
-            Some(arc) => arc.fmt(f),
+        match self.data.get().and_then(|arc| arc.downcast_ref::<T>()) {
+            Some(v) => v.fmt(f),
             None => write!(f, "<Lazy Sp>"),
         }
     }
 }
 
-impl<T: Debug, D: DB> Debug for Sp<T, D> {
+impl<T: Debug + Any, D: DB> Debug for Sp<T, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.data.get() {
-            Some(arc) => arc.fmt(f),
+        match self.data.get().and_then(|arc| arc.downcast_ref::<T>()) {
+            Some(v) => v.fmt(f),
             None => write!(f, "<Lazy Sp>"),
         }
     }
@@ -1437,9 +1452,12 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         root: ArenaHash<D::Hasher>,
         arc: Arc<T>,
         child_repr: ArenaKey<D::Hasher>,
-    ) -> Self {
+    ) -> Self
+    where
+        T: Sized + Any + Send + Sync,
+    {
         let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
-        let _ = sp.data.set(arc);
+        let _ = sp.data.set(arc as Arc<dyn Any + Send + Sync>);
         sp
     }
 
@@ -1456,14 +1474,14 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
                 let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-                let value = self.force_as_arc();
+                let value = self.force();
                 value
                     .to_binary_repr(&mut data)
                     .expect("Storable data should be able to be represented in binary");
                 let child_repr = ArenaKey::Ref(self.root.clone());
                 self.arena.new_sp_locked(
                     &mut self.arena.lock_metadata(),
-                    value.as_ref().clone(),
+                    value.clone(),
                     self.root.clone(),
                     data,
                     dcn.children.deref().clone(),
@@ -1485,6 +1503,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
             arena,
             root,
             child_repr,
+            _t: PhantomData,
         }
     }
 }
@@ -1528,7 +1547,7 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
     /// Access the inner data, forcing initialization if necessary.
     fn deref(&self) -> &Self::Target {
-        self.force_as_arc()
+        self.force()
     }
 }
 
@@ -1544,6 +1563,7 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
             child_repr: self.child_repr.clone(),
             arena: self.arena.clone(),
             data: self.data.clone(),
+            _t: PhantomData,
         }
     }
 }
@@ -1554,10 +1574,12 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
-        let data: OnceLock<Arc<T>> = match self.data.get() {
+        // The payload is already erased, so the cast is a *check* rather than a conversion:
+        // confirm it really is a `T`, then carry the same `Arc` across.
+        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
             Some(arc) => {
-                let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
-                concrete_arc.into()
+                let _: Arc<T> = arc.clone().downcast().ok()?;
+                OnceLock::from(arc.clone())
             }
             None => OnceLock::new(),
         };
@@ -1566,6 +1588,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
             child_repr: self.child_repr.clone(),
             arena: self.arena.clone(),
             data,
+            _t: PhantomData,
         })
     }
 
@@ -1579,15 +1602,16 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
-        let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
-            Some(Ok(concrete_arc)) => concrete_arc.into(),
-            None | Some(Err(_)) => OnceLock::new(),
+        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
+            Some(arc) if arc.clone().downcast::<T>().is_ok() => OnceLock::from(arc.clone()),
+            _ => OnceLock::new(),
         };
         Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
             arena: self.arena.clone(),
             data,
+            _t: PhantomData,
         }
     }
 }
@@ -1610,6 +1634,7 @@ impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
             child_repr: self.child_repr.clone(),
             arena: self.arena.clone(),
             data,
+            _t: PhantomData,
         }
     }
 }
@@ -1687,7 +1712,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     pub fn into_inner(this: Sp<T, D>) -> Option<T> {
         // Note that we don't want to call `self.force_as_arc()` here, since
         // that could force an uninitialized `Sp` unnecessarily.
-        let data: Option<Arc<T>> = this.data.get().cloned();
+        let data: Option<Arc<T>> = this.data.get().and_then(|a| a.clone().downcast::<T>().ok());
         // The `Sp` gets dropped, decrementing the ref count, but if initialized
         // the content survives, either in another `Arc`, or in the return
         // value.
@@ -1766,7 +1791,7 @@ impl<D: DB> Arena<D> {
 impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Return the inner value as an `Arc` ref, initializing the `OnceLock` if
     /// this is an uninitialized lazy `Sp`.
-    fn force_as_arc(&self) -> &Arc<T> {
+    fn force(&self) -> &T {
         // Initialize `OnceLock` if necessary.
         if self.data.get().is_none() {
             // Acquire metadata before sp_cache to respect the documented lock
@@ -1781,8 +1806,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             let maybe_arc = self
                 .arena
                 .read_sp_cache_locked::<T>(&cache_lock, &self.root);
-            let arc: Arc<T> = match maybe_arc {
-                Some(arc) => arc,
+            let arc: Arc<dyn Any + Send + Sync> = match maybe_arc {
+                Some(arc) => arc, // upcast from Arc<T>
                 None => {
                     let max_depth = Some(1);
                     // All we really want is the inner `Arc` here, but the
@@ -1802,9 +1827,10 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         .take()
                         .expect("result of Sp::from_arena should be initialized");
                     if let ArenaKey::Ref(_) = &self.child_repr {
-                        self.arena.write_sp_cache_locked(
+                        self.arena.write_sp_cache_erased(
                             &cache_lock,
                             self.root.clone(),
+                            TypeId::of::<T>(),
                             arc.clone(),
                         );
                     }
@@ -1815,7 +1841,11 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             // someone else set the same value in another thread.
             let _ = self.data.set(arc);
         }
-        self.data.get().unwrap()
+        self.data
+            .get()
+            .expect("just initialized")
+            .downcast_ref::<T>()
+            .expect("the sp-cache is keyed by TypeId, so the stored type is this one")
     }
 
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
@@ -1959,7 +1989,7 @@ impl<T: PartialOrd + Storable<D>, D: DB> PartialOrd for Sp<T, D> {
         if self.root == other.root {
             return Some(std::cmp::Ordering::Equal);
         }
-        self.force_as_arc().partial_cmp(other.force_as_arc())
+        self.force().partial_cmp(other.force())
     }
 }
 
@@ -1969,7 +1999,7 @@ impl<T: Ord + Storable<D>, D: DB> Ord for Sp<T, D> {
         if self.root == other.root {
             return std::cmp::Ordering::Equal;
         }
-        self.force_as_arc().cmp(other.force_as_arc())
+        self.force().cmp(other.force())
     }
 }
 
@@ -2382,8 +2412,11 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
-            assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
+            let _typed = dyn_arc
+                .clone()
+                .downcast::<[u8; SMALL_OBJECT_LIMIT]>()
+                .expect("the cached value is of the stored type");
+            assert!(Arc::ptr_eq(&dyn_arc, sp1.data.get().unwrap()));
         }
 
         // Clone the `Sp` to increase the strong reference count
@@ -2411,8 +2444,11 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
-            assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
+            let _typed = dyn_arc
+                .clone()
+                .downcast::<[u8; SMALL_OBJECT_LIMIT]>()
+                .expect("the cached value is of the stored type");
+            assert!(Arc::ptr_eq(&dyn_arc, sp1.data.get().unwrap()));
         }
 
         // Drop the last strong reference
@@ -2558,10 +2594,7 @@ mod tests {
             for _ in 0..depth {
                 assert!(p1.unwrap().data.get().is_none());
                 assert!(p2.unwrap().data.get().is_none());
-                assert!(Arc::ptr_eq(
-                    p1.unwrap().force_as_arc(),
-                    p2.unwrap().force_as_arc(),
-                ));
+                assert!(std::ptr::eq(p1.unwrap().force(), p2.unwrap().force()));
                 p1 = p1.unwrap().left.as_ref();
                 p2 = p2.unwrap().right.as_ref();
             }
