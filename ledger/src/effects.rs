@@ -398,6 +398,39 @@ impl DustDelta {
     }
 }
 
+// ── appliers ────────────────────────────────────────────────────────────────────────────
+
+impl<D: storage::db::DB> crate::structure::UtxoState<D> {
+    /// Apply an [`UnshieldedDelta`]: check every spend is present, remove it, then insert
+    /// every create.
+    ///
+    /// ⌖ This is `apply_offer` with the derivation already done. `apply_offer` computes each
+    /// created utxo's identity from the intent hash and the output index; the delta carries
+    /// the derived utxos, so this only checks and mutates. The precondition and the order are
+    /// the same — all spends checked and removed before any create is inserted, so a
+    /// transaction cannot spend a utxo it creates in the same delta.
+    pub fn apply_unshielded_delta(
+        &self,
+        delta: &UnshieldedDelta,
+        ctime: Timestamp,
+    ) -> Result<Self, crate::error::TransactionInvalid<D>> {
+        let mut res = self.clone();
+        for spend in &delta.spends {
+            let utxo = Utxo::from(spend.clone());
+            if !res.utxos.contains_key(&utxo) {
+                return Err(crate::error::TransactionInvalid::InputNotInUtxos(Box::new(
+                    utxo,
+                )));
+            }
+            res = res.remove(&utxo);
+        }
+        for create in &delta.creates {
+            res = res.insert(create.clone(), crate::structure::UtxoMeta { ctime });
+        }
+        Ok(res)
+    }
+}
+
 // ── the flat codec ──────────────────────────────────────────────────────────────────────
 //
 // Fixed-width fields and length-prefixed sequences, little-endian, no tags and no
@@ -1130,6 +1163,129 @@ mod tests {
             "survives the wire"
         );
         assert!(inp.is_empty());
+    }
+
+    /// **The applier's preconditions and mutations, both directions.**
+    #[test]
+    fn applying_an_unshielded_delta_checks_then_mutates() {
+        use crate::structure::{UtxoMeta, UtxoState};
+        use base_crypto::hash::HashOutput;
+        use coin_structure::coin::{UnshieldedTokenType, UserAddress};
+        use storage::db::InMemoryDB;
+
+        let ty = UnshieldedTokenType(HashOutput([8; 32]));
+        // ⚠︎ The owner must be what `Utxo::from(UtxoSpend)` derives — it maps the spend's
+        // `VerifyingKey` through `UserAddress::from`. An unrelated address makes the spend
+        // name a utxo the state does not hold, and the test then proves nothing. The
+        // assertion below exists because the first version of this fixture did exactly that.
+        let spender = VerifyingKey::default();
+        let owner = UserAddress::from(spender.clone());
+        let utxo = |n: u8, v: u128| Utxo {
+            value: v,
+            owner,
+            type_: ty,
+            intent_hash: IntentHash(HashOutput([n; 32])),
+            output_no: 0,
+        };
+        let ctime = Timestamp::from_secs(500);
+
+        let held = utxo(1, 10);
+        let state: UtxoState<InMemoryDB> =
+            UtxoState::default().insert(held.clone(), UtxoMeta { ctime });
+
+        // A spend of something absent is refused, and nothing is mutated.
+        let absent = UnshieldedDelta {
+            spends: vec![UtxoSpend {
+                value: 99,
+                owner: spender.clone(),
+                type_: ty,
+                intent_hash: IntentHash(HashOutput([7; 32])),
+                output_no: 0,
+            }],
+            creates: vec![],
+        };
+        assert!(
+            state.apply_unshielded_delta(&absent, ctime).is_err(),
+            "spending a utxo the state does not hold must be refused"
+        );
+
+        // A spend of something held, plus a create.
+        let made = utxo(2, 20);
+        let d = UnshieldedDelta {
+            spends: vec![UtxoSpend {
+                value: held.value,
+                owner: spender.clone(),
+                type_: ty,
+                intent_hash: held.intent_hash,
+                output_no: held.output_no,
+            }],
+            creates: vec![made.clone()],
+        };
+        // The spend's identity must be the utxo actually held, or this tests nothing.
+        assert_eq!(
+            Utxo::from(d.spends[0].clone()),
+            held,
+            "fixture's spend must name the held utxo"
+        );
+
+        let after = state
+            .apply_unshielded_delta(&d, ctime)
+            .expect("the spend is present, so this applies");
+        assert!(!after.utxos.contains_key(&held), "the spent utxo is gone");
+        assert!(
+            after.utxos.contains_key(&made),
+            "the created utxo is present"
+        );
+    }
+
+    /// ⚠︎ **A delta may not spend what it creates.** Spends are all checked and removed
+    /// before any create is inserted, so a create cannot satisfy a spend in the same delta.
+    /// Reversing those two loops leaves every other assertion in this module passing while
+    /// permitting value to be conjured from nothing — verified by mutation, which is the only
+    /// reason this test exists as well as the one above.
+    #[test]
+    fn a_delta_cannot_spend_the_utxo_it_creates() {
+        use crate::structure::UtxoState;
+        use base_crypto::hash::HashOutput;
+        use coin_structure::coin::{UnshieldedTokenType, UserAddress};
+        use storage::db::InMemoryDB;
+
+        let ty = UnshieldedTokenType(HashOutput([8; 32]));
+        let spender = VerifyingKey::default();
+        let owner = UserAddress::from(spender.clone());
+        let ih = IntentHash(HashOutput([3; 32]));
+
+        // The create and the spend name the *same* utxo.
+        let coin = Utxo {
+            value: 50,
+            owner,
+            type_: ty,
+            intent_hash: ih,
+            output_no: 0,
+        };
+        let d = UnshieldedDelta {
+            spends: vec![UtxoSpend {
+                value: 50,
+                owner: spender,
+                type_: ty,
+                intent_hash: ih,
+                output_no: 0,
+            }],
+            creates: vec![coin.clone()],
+        };
+        assert_eq!(
+            Utxo::from(d.spends[0].clone()),
+            coin,
+            "fixture must have the spend and the create name one utxo"
+        );
+
+        let empty: UtxoState<InMemoryDB> = UtxoState::default();
+        assert!(
+            empty
+                .apply_unshielded_delta(&d, Timestamp::from_secs(1))
+                .is_err(),
+            "a delta must not be able to spend a utxo it creates in the same delta"
+        );
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
