@@ -35,14 +35,44 @@ use serialize::{Deserializable, Serializable};
 
 /// Everything applying one transaction does.
 ///
-/// Segments are separate because their failure modes are: segment 0 failing aborts the whole
-/// transaction, while a later segment failing leaves the others applied.
+/// ⚠︎ **The shape is `apply_section`'s, not an intuitive one.** Applying is not "per segment,
+/// each doing the same thing". Segment 0 is a distinct *guaranteed pass* — replay protection,
+/// the transaction's single guaranteed offer, every intent's guaranteed unshielded offer, and
+/// all dust, which the implementation notes is explicitly "not processed segment-by-segment".
+/// Every later segment applies only its own fallible parts.
+///
+/// A per-segment `guaranteed` field, which this type had first, would apply the guaranteed
+/// offer once per segment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionEffects {
     /// The replay-protection claim: this transaction has not been seen.
     pub replay: ReplayEffect,
-    /// One entry per segment, in application order.
-    pub segments: Vec<SegmentEffects>,
+    /// The segment-0 pass. Applied once; its failure fails the whole transaction.
+    pub guaranteed: GuaranteedEffects,
+    /// One entry per segment above 0, in application order. Each may fail alone.
+    pub fallible: Vec<FallibleSegment>,
+}
+
+/// The guaranteed pass — everything `apply_section` does when `segment == 0`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GuaranteedEffects {
+    /// The transaction's single guaranteed shielded offer.
+    pub zswap: ZswapDelta,
+    /// Per intent, keyed by its physical segment.
+    pub intents: Vec<IntentEffects>,
+}
+
+/// One fallible segment's changes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FallibleSegment {
+    /// Which segment. Never 0.
+    pub segment: u16,
+    /// This segment's fallible shielded offer, if it has one.
+    pub zswap: ZswapDelta,
+    /// This segment's fallible unshielded changes, per intent.
+    pub unshielded: Vec<UnshieldedDelta>,
+    /// Contract transitions from this segment's fallible transcripts.
+    pub contracts: Vec<ContractEffect>,
 }
 
 /// `apply_tx`'s input, reduced to what it reads.
@@ -54,17 +84,21 @@ pub struct ReplayEffect {
     pub ttl: Timestamp,
 }
 
-/// One segment's changes.
+/// One intent's guaranteed changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SegmentEffects {
-    /// Which segment. Segment 0 is the guaranteed one and may not fail alone.
+pub struct IntentEffects {
+    /// Which segment this intent sits in.
     pub segment: u16,
-    /// Shielded changes that must succeed for the transaction to apply at all.
-    pub guaranteed: ZswapDelta,
-    /// Shielded changes that may fail without failing the transaction.
-    pub fallible: ZswapDelta,
-    /// The intents in this segment, in order.
-    pub intents: Vec<IntentEffects>,
+    /// Precondition: unseen. Mutation: recorded until `ttl`.
+    pub intent_hash: IntentHash,
+    /// When this intent stops being replayable.
+    pub ttl: Timestamp,
+    /// Unshielded changes from the guaranteed offer.
+    pub unshielded: UnshieldedDelta,
+    /// Dust changes. Not segment-scoped — see the note on [`TransactionEffects`].
+    pub dust: DustDelta,
+    /// Contract transitions from the guaranteed transcripts.
+    pub contracts: Vec<ContractEffect>,
 }
 
 /// Shielded changes, mirroring [`ZswapEffects`] field for field but as plain data.
@@ -114,23 +148,6 @@ pub struct TransientDelta {
     pub coin_com: Commitment,
     /// The contract this belongs to, if any.
     pub contract_address: Option<ContractAddress>,
-}
-
-/// One intent's changes.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IntentEffects {
-    /// Precondition: unseen. Mutation: recorded until `ttl`.
-    pub intent_hash: IntentHash,
-    /// When this intent stops being replayable.
-    pub ttl: Timestamp,
-    /// Unshielded changes that must succeed.
-    pub guaranteed_unshielded: UnshieldedDelta,
-    /// Unshielded changes that may fail alone.
-    pub fallible_unshielded: UnshieldedDelta,
-    /// Dust changes.
-    pub dust: DustDelta,
-    /// Contract state transitions, in order.
-    pub contracts: Vec<ContractEffect>,
 }
 
 /// Unshielded changes: which utxos are consumed and which are created.
@@ -421,38 +438,51 @@ impl Flat for u8 {
 
 impl Flat for IntentEffects {
     fn put(&self, out: &mut Vec<u8>) {
+        self.segment.put(out);
         self.intent_hash.put(out);
         self.ttl.put(out);
-        self.guaranteed_unshielded.put(out);
-        self.fallible_unshielded.put(out);
+        self.unshielded.put(out);
         self.dust.put(out);
         self.contracts.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(IntentEffects {
+            segment: u16::get(inp)?,
             intent_hash: IntentHash::get(inp)?,
             ttl: Timestamp::get(inp)?,
-            guaranteed_unshielded: UnshieldedDelta::get(inp)?,
-            fallible_unshielded: UnshieldedDelta::get(inp)?,
+            unshielded: UnshieldedDelta::get(inp)?,
             dust: DustDelta::get(inp)?,
             contracts: Vec::get(inp)?,
         })
     }
 }
 
-impl Flat for SegmentEffects {
+impl Flat for GuaranteedEffects {
     fn put(&self, out: &mut Vec<u8>) {
-        self.segment.put(out);
-        self.guaranteed.put(out);
-        self.fallible.put(out);
+        self.zswap.put(out);
         self.intents.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
-        Some(SegmentEffects {
-            segment: u16::get(inp)?,
-            guaranteed: ZswapDelta::get(inp)?,
-            fallible: ZswapDelta::get(inp)?,
+        Some(GuaranteedEffects {
+            zswap: ZswapDelta::get(inp)?,
             intents: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for FallibleSegment {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.segment.put(out);
+        self.zswap.put(out);
+        self.unshielded.put(out);
+        self.contracts.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(FallibleSegment {
+            segment: u16::get(inp)?,
+            zswap: ZswapDelta::get(inp)?,
+            unshielded: Vec::get(inp)?,
+            contracts: Vec::get(inp)?,
         })
     }
 }
@@ -473,12 +503,14 @@ impl Flat for ReplayEffect {
 impl Flat for TransactionEffects {
     fn put(&self, out: &mut Vec<u8>) {
         self.replay.put(out);
-        self.segments.put(out);
+        self.guaranteed.put(out);
+        self.fallible.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(TransactionEffects {
             replay: ReplayEffect::get(inp)?,
-            segments: Vec::get(inp)?,
+            guaranteed: GuaranteedEffects::get(inp)?,
+            fallible: Vec::get(inp)?,
         })
     }
 }
@@ -599,14 +631,14 @@ mod tests {
     /// If this were to come out at tens of kilobytes the design would be in trouble.
     #[test]
     fn a_whole_record_round_trips_and_stays_small() {
+        let h = |n| IntentHash(base_crypto::hash::HashOutput([n; 32]));
         let fx = TransactionEffects {
             replay: ReplayEffect {
-                tx_hash: IntentHash(base_crypto::hash::HashOutput([9; 32])),
+                tx_hash: h(9),
                 ttl: Timestamp::from_secs(1000),
             },
-            segments: vec![SegmentEffects {
-                segment: 0,
-                guaranteed: ZswapDelta {
+            guaranteed: GuaranteedEffects {
+                zswap: ZswapDelta {
                     spends: vec![SpendDelta {
                         merkle_tree_root: [7; 32],
                         nullifier: Nullifier(base_crypto::hash::HashOutput([1; 32])),
@@ -624,12 +656,11 @@ mod tests {
                     ],
                     transients: vec![],
                 },
-                fallible: ZswapDelta::default(),
                 intents: vec![IntentEffects {
-                    intent_hash: IntentHash(base_crypto::hash::HashOutput([4; 32])),
+                    segment: 0,
+                    intent_hash: h(4),
                     ttl: Timestamp::from_secs(2000),
-                    guaranteed_unshielded: UnshieldedDelta::default(),
-                    fallible_unshielded: UnshieldedDelta::default(),
+                    unshielded: UnshieldedDelta::default(),
                     dust: DustDelta {
                         ctime: Timestamp::from_secs(1500),
                         spends: vec![DustSpendEffect {
@@ -641,6 +672,12 @@ mod tests {
                     },
                     contracts: vec![],
                 }],
+            },
+            fallible: vec![FallibleSegment {
+                segment: 1,
+                zswap: ZswapDelta::default(),
+                unshielded: vec![UnshieldedDelta::default()],
+                contracts: vec![],
             }],
         };
         let mut buf = Vec::new();
