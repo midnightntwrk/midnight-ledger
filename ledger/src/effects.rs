@@ -52,8 +52,6 @@ use transient_crypto::merkle_tree::MerkleTreeDigest;
 /// offer once per segment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionEffects {
-    /// The replay-protection claim: this transaction has not been seen.
-    pub replay: ReplayEffect,
     /// The segment-0 pass. Applied once; its failure fails the whole transaction.
     pub guaranteed: GuaranteedEffects,
     /// One entry per segment above 0, in application order. Each may fail alone.
@@ -85,15 +83,6 @@ pub struct FallibleSegment {
     pub unshielded: Option<UnshieldedDelta>,
     /// Whether this segment's contract actions make the effects path unusable.
     pub contracts: ContractsPresent,
-}
-
-/// `apply_tx`'s input, reduced to what it reads.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReplayEffect {
-    /// Precondition: absent from the replay set.
-    pub tx_hash: IntentHash,
-    /// The transaction's time-to-live.
-    pub ttl: Timestamp,
 }
 
 /// One intent's guaranteed changes.
@@ -465,9 +454,13 @@ where
     /// - A fallible segment applies its own `fallible_coins` and **at most one** intent —
     ///   `tx.intents.get(&segment)`, not an iteration.
     ///
-    /// `tx_hash` and `ttl` are the replay claim, passed in because they come from the
-    /// transaction's envelope rather than its body.
-    pub fn effects(&self, tx_hash: IntentHash, ttl: Timestamp) -> TransactionEffects {
+    /// ⚠︎ There is no transaction-level replay claim. `ReplayProtectionState::apply_tx` folds
+    /// over the intents calling `apply_intent`, which is
+    /// `apply_member(intent.intent_hash(0), intent.ttl, ..)` — so replay is recorded **per
+    /// intent**, and `IntentEffects` already carries both halves. An earlier version of this
+    /// type had a `ReplayEffect { tx_hash, ttl }`, which was a concept the ledger does not
+    /// have.
+    pub fn effects(&self) -> TransactionEffects {
         let guaranteed = GuaranteedEffects {
             zswap: self
                 .guaranteed_coins
@@ -506,7 +499,6 @@ where
             })
             .collect();
         TransactionEffects {
-            replay: ReplayEffect { tx_hash, ttl },
             guaranteed,
             fallible,
         }
@@ -817,28 +809,13 @@ impl Flat for FallibleSegment {
     }
 }
 
-impl Flat for ReplayEffect {
-    fn put(&self, out: &mut Vec<u8>) {
-        self.tx_hash.put(out);
-        self.ttl.put(out);
-    }
-    fn get(inp: &mut &[u8]) -> Option<Self> {
-        Some(ReplayEffect {
-            tx_hash: IntentHash::get(inp)?,
-            ttl: Timestamp::get(inp)?,
-        })
-    }
-}
-
 impl Flat for TransactionEffects {
     fn put(&self, out: &mut Vec<u8>) {
-        self.replay.put(out);
         self.guaranteed.put(out);
         self.fallible.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(TransactionEffects {
-            replay: ReplayEffect::get(inp)?,
             guaranteed: GuaranteedEffects::get(inp)?,
             fallible: Vec::get(inp)?,
         })
@@ -966,10 +943,6 @@ mod tests {
     fn a_whole_record_round_trips_and_stays_small() {
         let h = |n| IntentHash(base_crypto::hash::HashOutput([n; 32]));
         let fx = TransactionEffects {
-            replay: ReplayEffect {
-                tx_hash: h(9),
-                ttl: Timestamp::from_secs(1000),
-            },
             guaranteed: GuaranteedEffects {
                 zswap: ZswapDelta {
                     spends: vec![SpendDelta {
