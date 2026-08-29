@@ -27,7 +27,9 @@
 //! [`Offer::effects`]: zswap::structure::Offer::effects
 //! [`State::try_apply_effects`]: zswap::ledger::State::try_apply_effects
 
+use crate::dust::{DustCommitment, DustNullifier, DustPublicKey};
 use crate::structure::{IntentHash, Utxo, UtxoSpend};
+use base_crypto::signatures::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Commitment, Nullifier};
 use coin_structure::contract::ContractAddress;
@@ -185,20 +187,29 @@ pub struct DustDelta {
 /// One dust spend, with its proof dropped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DustSpendEffect {
-    /// The fee this spend pays.
+    /// The fee this spend pays, deducted from the running fee allowance.
     pub v_fee: u128,
-    /// Precondition: absent from the dust nullifier set.
-    pub old_nullifier: [u8; 32],
-    /// Mutation: appended to the dust commitment tree.
-    pub new_commitment: [u8; 32],
+    /// Precondition: absent from `utxo.nullifiers`. Mutation: inserted.
+    pub old_nullifier: DustNullifier,
+    /// Mutation: appended at `commitments_first_free`.
+    pub new_commitment: DustCommitment,
 }
 
-/// One dust registration, with its signature dropped.
+/// One dust registration, with only its signature dropped.
+///
+/// ⚠︎ **Inputs, not an outcome.** `apply_registration` threads a running `fees_remaining`
+/// through the registrations in order, and the implementation applies all spends first "to
+/// make sure registration outputs get the maximum dust they can". A registration's result
+/// therefore depends on everything before it, so this carries what the ledger's own rule needs
+/// and lets it run, rather than a precomputed answer that would have to be trusted and could
+/// not be checked.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DustRegistrationEffect {
-    /// The key being registered.
-    pub key: [u8; 32],
-    /// The value allowed.
+    /// The night key being registered; `UserAddress::from` of this is the account touched.
+    pub night_key: VerifyingKey,
+    /// The dust key, absent for a deregistration.
+    pub dust_address: Option<DustPublicKey>,
+    /// The ceiling this registration allows to be spent on fees.
     pub allow_fee_payment: u128,
 }
 
@@ -301,6 +312,46 @@ impl UnshieldedDelta {
                     intent_hash,
                     // Cast safe, as `apply_offer` assumes fewer than 4B outputs.
                     output_no: output_no as u32,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl DustDelta {
+    /// Project an intent's dust actions onto what applying them needs.
+    ///
+    /// Proofs and signatures are dropped; whoever produced these has already checked them.
+    ///
+    /// ⚠︎ **Order is part of the meaning.** The applier must run every spend before any
+    /// registration — `apply_section` does so explicitly, "to make sure registration outputs
+    /// get the maximum dust they can" — and must keep each sequence in the order given, since
+    /// `apply_registration` threads a running fee allowance through them. Two `DustDelta`s
+    /// with the same members in a different order are not the same effects.
+    pub fn from_actions<S, P, D>(a: &crate::dust::DustActions<S, P, D>) -> Self
+    where
+        D: storage::db::DB,
+        S: crate::structure::SignatureKind<D>,
+        P: crate::structure::ProofKind<D>,
+    {
+        DustDelta {
+            ctime: a.ctime,
+            spends: a
+                .spends
+                .iter_deref()
+                .map(|s| DustSpendEffect {
+                    v_fee: s.v_fee,
+                    old_nullifier: s.old_nullifier,
+                    new_commitment: s.new_commitment,
+                })
+                .collect(),
+            registrations: a
+                .registrations
+                .iter_deref()
+                .map(|r| DustRegistrationEffect {
+                    night_key: r.night_key.clone(),
+                    dust_address: r.dust_address.as_ref().map(|d| *d.clone()),
+                    allow_fee_payment: r.allow_fee_payment,
                 })
                 .collect(),
         }
@@ -434,6 +485,10 @@ macro_rules! flat_via_serializable {
 }
 
 flat_via_serializable!(
+    DustNullifier,
+    DustCommitment,
+    DustPublicKey,
+    VerifyingKey,
     MerkleTreeDigest,
     UtxoSpend,
     Utxo,
@@ -626,20 +681,22 @@ impl Flat for DustSpendEffect {
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(DustSpendEffect {
             v_fee: u128::get(inp)?,
-            old_nullifier: <[u8; 32]>::get(inp)?,
-            new_commitment: <[u8; 32]>::get(inp)?,
+            old_nullifier: DustNullifier::get(inp)?,
+            new_commitment: DustCommitment::get(inp)?,
         })
     }
 }
 
 impl Flat for DustRegistrationEffect {
     fn put(&self, out: &mut Vec<u8>) {
-        self.key.put(out);
+        self.night_key.put(out);
+        self.dust_address.put(out);
         self.allow_fee_payment.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(DustRegistrationEffect {
-            key: <[u8; 32]>::get(inp)?,
+            night_key: VerifyingKey::get(inp)?,
+            dust_address: Option::get(inp)?,
             allow_fee_payment: u128::get(inp)?,
         })
     }
@@ -692,11 +749,12 @@ mod tests {
             ctime: Timestamp::from_secs(1234),
             spends: vec![DustSpendEffect {
                 v_fee: 5,
-                old_nullifier: [1; 32],
-                new_commitment: [2; 32],
+                old_nullifier: DustNullifier(Default::default()),
+                new_commitment: DustCommitment(Default::default()),
             }],
             registrations: vec![DustRegistrationEffect {
-                key: [3; 32],
+                night_key: VerifyingKey::default(),
+                dust_address: None,
                 allow_fee_payment: 11,
             }],
         });
@@ -709,8 +767,8 @@ mod tests {
             ctime: Timestamp::from_secs(1),
             spends: vec![DustSpendEffect {
                 v_fee: 1,
-                old_nullifier: [4; 32],
-                new_commitment: [5; 32],
+                old_nullifier: DustNullifier(Default::default()),
+                new_commitment: DustCommitment(Default::default()),
             }],
             registrations: vec![],
         };
@@ -767,8 +825,8 @@ mod tests {
                         ctime: Timestamp::from_secs(1500),
                         spends: vec![DustSpendEffect {
                             v_fee: 42,
-                            old_nullifier: [5; 32],
-                            new_commitment: [6; 32],
+                            old_nullifier: DustNullifier(Default::default()),
+                            new_commitment: DustCommitment(Default::default()),
                         }],
                         registrations: vec![],
                     },
@@ -991,6 +1049,61 @@ mod tests {
         d.put(&mut buf);
         let mut inp = &buf[..];
         assert_eq!(UnshieldedDelta::get(&mut inp).as_ref(), Some(&d));
+        assert!(inp.is_empty());
+    }
+
+    /// **The dust gate.** Field correspondence, and — the part that matters here — that
+    /// order is preserved. `apply_registration` threads a running fee allowance through the
+    /// registrations, so a projection that reordered them would produce different outcomes
+    /// from the same inputs while every individual field still matched.
+    #[test]
+    fn the_dust_projection_preserves_fields_and_order() {
+        use crate::dust::{DustActions, DustRegistration, DustSpend};
+        use storage::db::InMemoryDB;
+
+        let spend = |fee: u128| DustSpend::<(), InMemoryDB> {
+            v_fee: fee,
+            old_nullifier: DustNullifier(Default::default()),
+            new_commitment: DustCommitment(Default::default()),
+            proof: (),
+        };
+        let reg = |allow: u128| DustRegistration::<(), InMemoryDB> {
+            night_key: VerifyingKey::default(),
+            dust_address: None,
+            allow_fee_payment: allow,
+            signature: None,
+        };
+        let actions = DustActions::<(), (), InMemoryDB> {
+            spends: vec![spend(1), spend(2), spend(3)].into(),
+            registrations: vec![reg(10), reg(20)].into(),
+            ctime: Timestamp::from_secs(777),
+        };
+
+        let d = DustDelta::from_actions(&actions);
+
+        assert_eq!(d.ctime, Timestamp::from_secs(777));
+        assert_eq!(
+            d.spends.iter().map(|s| s.v_fee).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "spends keep the order the fee allowance is threaded in"
+        );
+        assert_eq!(
+            d.registrations
+                .iter()
+                .map(|r| r.allow_fee_payment)
+                .collect::<Vec<_>>(),
+            vec![10, 20],
+            "registrations keep their order"
+        );
+
+        let mut buf = Vec::new();
+        d.put(&mut buf);
+        let mut inp = &buf[..];
+        assert_eq!(
+            DustDelta::get(&mut inp).as_ref(),
+            Some(&d),
+            "survives the wire"
+        );
         assert!(inp.is_empty());
     }
 
