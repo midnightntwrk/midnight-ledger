@@ -80,10 +80,16 @@ pub trait Loader<D: DB> {
         &self,
         iter: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
     ) -> Result<Sp<T, D>, std::io::Error> {
-        self.get(&iter.next().ok_or(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "iterator should not yield None".to_string(),
-        ))?)
+        // `ok_or_else`, not `ok_or`: this runs once per child edge of every node being
+        // deserialized, and the eager form built the error -- allocating the `String` and
+        // boxing it into an `io::Error` -- on every *successful* traversal. The `&'static str`
+        // needs no `to_string`; `io::Error::new` takes anything `Into<Box<dyn Error>>`.
+        self.get(&iter.next().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "iterator should not yield None",
+            )
+        })?)
     }
 }
 

@@ -763,7 +763,8 @@ impl<D: DB> Arena<D> {
             .borrow_mut()
             .get(key)
             .ok_or_else(|| missing_key(key))?
-            .children.clone())
+            .children
+            .clone())
     }
 
     /// Get a pointer into the arena.
@@ -951,7 +952,7 @@ impl<D: DB> Arena<D> {
                 .map(|h| {
                     key_to_child_repr
                         .get(h)
-                        .ok_or(std::io::Error::other("child not in key_to_child_repr"))
+                        .ok_or_else(|| std::io::Error::other("child not in key_to_child_repr"))
                 })
                 .map(|r| r.cloned())
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1031,6 +1032,47 @@ impl<'a, D: DB> BackendLoader<'a, D> {
             recursion_depth: 0,
         }
     }
+
+    /// The binary representation and child keys for `child`: inline for a direct node, from
+    /// the backend for a reference.
+    ///
+    /// ⌖ Outlined from `Loader::get` deliberately. `get` is generic over the stored type, so
+    /// everything left inside it is duplicated once per `Storable` -- a ledger instantiates it
+    /// around a hundred times and a guest several hundred, and `cargo llvm-lines` put `get` at
+    /// **13.2% of the crate's entire ʟʟᴠᴍ ɪʀ**, four times the next entry. None of this
+    /// function depends on that type, so as a method on `BackendLoader<D>` it exists once per
+    /// back end instead.
+    fn repr(
+        &self,
+        child: &ArenaKey<<D as DB>::Hasher>,
+    ) -> Result<(Arc<Vec<u8>>, Arc<Vec<ArenaKey<<D as DB>::Hasher>>>), std::io::Error> {
+        match child {
+            ArenaKey::Direct(direct_node) => {
+                Ok((direct_node.data.clone(), direct_node.children.clone()))
+            }
+            ArenaKey::Ref(key) => {
+                let obj = self
+                    .arena
+                    .lock_backend()
+                    .borrow_mut()
+                    .get(key)
+                    .ok_or_else(|| missing_key(key))?
+                    .clone();
+                Ok((Arc::new(obj.data), Arc::new(obj.children)))
+            }
+        }
+    }
+
+    /// The loader for one level down: same arena, one less depth budget, one deeper.
+    ///
+    /// Outlined for the same reason as [`Self::repr`] -- it is independent of the stored type.
+    fn child_loader(&self) -> BackendLoader<'a, D> {
+        BackendLoader {
+            arena: self.arena,
+            max_depth: self.max_depth.map(|max_depth| max_depth - 1),
+            recursion_depth: self.recursion_depth + 1,
+        }
+    }
 }
 
 #[cfg(feature = "test-utilities")]
@@ -1070,48 +1112,29 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         }
         #[cfg(feature = "test-utilities")]
         let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
-        let (data, children) = match child {
-            ArenaKey::Direct(direct_node) => {
-                (direct_node.data.clone(), direct_node.children.clone())
+        // Build from an existing cached value if possible. This is the only part of the
+        // lookup that depends on `T` -- the cache is keyed by type -- so it stays here; the
+        // fetch that follows does not, and lives in `repr`.
+        if let ArenaKey::Ref(key) = child {
+            // Avoid race: keep the metadata locked until we call `Sp::eager` below, so that
+            // no one can sneak in and remove `key` from the metadata in the mean time.
+            let metadata_lock = self.arena.lock_metadata();
+            let maybe_arc = self
+                .arena
+                .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
+            if let Some(arc) = maybe_arc {
+                return Ok(Sp::eager(
+                    self.arena.clone(),
+                    key.clone(),
+                    arc,
+                    child.clone(),
+                ));
             }
-            ArenaKey::Ref(key) => {
-                // Build from existing cached value if possible.
-
-                // Avoid race: keep the metadata locked until we call `Sp::eager` //
-                // below, so that no one can sneak in and remove `key` from the
-                // metadata in the mean time.
-                let metadata_lock = self.arena.lock_metadata();
-                let maybe_arc = self
-                    .arena
-                    .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
-                if let Some(arc) = maybe_arc {
-                    return Ok(Sp::eager(
-                        self.arena.clone(),
-                        key.clone(),
-                        arc,
-                        child.clone(),
-                    ));
-                }
-                drop(metadata_lock);
-
-                // Otherwise, deserialize new sp from backend.
-                let obj = self
-                    .arena
-                    .lock_backend()
-                    .borrow_mut()
-                    .get(key)
-                    .ok_or_else(|| missing_key(key))?
-                    .clone();
-                (Arc::new(obj.data), Arc::new(obj.children))
-            }
-        };
-
+            drop(metadata_lock);
+        }
+        let (data, children) = self.repr(child)?;
         // If not at max depth, then deserialize recursively.
-        let loader = BackendLoader {
-            arena: self.arena,
-            max_depth: self.max_depth.map(|max_depth| max_depth - 1),
-            recursion_depth: self.recursion_depth + 1,
-        };
+        let loader = self.child_loader();
         let value =
             T::from_binary_repr::<&[u8]>(&mut &data[..], &mut children.iter().cloned(), &loader)?;
         match child {
@@ -1229,9 +1252,10 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         }
 
         // Otherwise, deserialize Sp from the IRs.
-        let ir = self.all.get(key).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "IR not found in `all` map")
-        })?;
+        let ir = self
+            .all
+            .get(key)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "IR not found in `all` map"))?;
         if self.recursion_depth > serialize::RECURSION_LIMIT {
             return Err(std::io::Error::other("Reached recursion limit".to_string()));
         }
