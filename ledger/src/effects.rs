@@ -74,8 +74,8 @@ pub struct FallibleSegment {
     pub zswap: ZswapDelta,
     /// This segment's fallible unshielded changes, per intent.
     pub unshielded: Vec<UnshieldedDelta>,
-    /// Contract transitions from this segment's fallible transcripts.
-    pub contracts: Vec<ContractEffect>,
+    /// Whether this segment's contract actions make the effects path unusable.
+    pub contracts: ContractsPresent,
 }
 
 /// `apply_tx`'s input, reduced to what it reads.
@@ -100,8 +100,8 @@ pub struct IntentEffects {
     pub unshielded: UnshieldedDelta,
     /// Dust changes. Not segment-scoped — see the note on [`TransactionEffects`].
     pub dust: DustDelta,
-    /// Contract transitions from the guaranteed transcripts.
-    pub contracts: Vec<ContractEffect>,
+    /// Whether this intent's contract actions make the effects path unusable.
+    pub contracts: ContractsPresent,
 }
 
 /// Shielded changes, mirroring [`ZswapEffects`] field for field but as plain data.
@@ -213,20 +213,49 @@ pub struct DustRegistrationEffect {
     pub allow_fee_payment: u128,
 }
 
-/// One contract state transition.
+/// Whether a transaction's contract actions can be applied from effects at all.
 ///
-/// ⌖ The transcript already carries its declared effects and the applier re-runs it to check
-/// them. Where the producing computation is attested, the declaration can be taken on trust
-/// provided the state it ran against is the state the applier holds — which is what
-/// `prior_state` is for.
+/// ✗ **Contract actions do not fit this transport, and pretending otherwise would be worse
+/// than admitting it.** Every variant of `ContractAction` ends by setting the contract's
+/// state at an address — `Call` to the transcript's result, `Deploy` to an initial state,
+/// `Maintain` to the state after its update ops. That state is itself a `Storable` graph, so
+/// carrying it as a flat blob reintroduces exactly the reconstruction cost this module
+/// exists to remove, only for a larger payload.
+///
+/// The three also have genuinely different preconditions — `Call` needs the contract present
+/// and its declared effects to match a re-run, `Deploy` needs the address *absent*, `Maintain`
+/// needs a matching maintenance counter — so a single "prior state hash" precondition, which
+/// this type carried at first, is wrong for two of the three.
+///
+/// ⌖ So a transaction carrying contract actions declares itself unfit for the effects path
+/// and the caller applies it the ordinary way. Most transactions have none, and those pay
+/// nothing; the ones that do pay exactly what they pay today. That is a scoping decision, not
+/// a gap to be filled later without thought: making contracts fit needs a state *delta*
+/// representation, or the trust argument for skipping `run_transcript` entirely, and both are
+/// larger questions than this transport.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContractEffect {
-    /// Which contract.
-    pub address: ContractAddress,
-    /// Precondition: the applier's current state for `address` hashes to this.
-    pub prior_state: [u8; 32],
-    /// Mutation: the contract's state becomes this.
-    pub new_state: Vec<u8>,
+pub enum ContractsPresent {
+    /// No contract actions; the effects above are the whole transaction.
+    None,
+    /// Contract actions are present. These effects are incomplete — apply the transaction
+    /// through `LedgerState::apply` instead.
+    UseFullPath,
+}
+
+impl Flat for ContractsPresent {
+    fn put(&self, out: &mut Vec<u8>) {
+        out.push(match self {
+            ContractsPresent::None => 0,
+            ContractsPresent::UseFullPath => 1,
+        });
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        match take(inp, 1)?[0] {
+            0 => Some(ContractsPresent::None),
+            1 => Some(ContractsPresent::UseFullPath),
+            _ => None,
+        }
+    }
 }
 
 // ── producers ───────────────────────────────────────────────────────────────────────────
@@ -569,21 +598,6 @@ impl Flat for ZswapDelta {
     }
 }
 
-impl Flat for ContractEffect {
-    fn put(&self, out: &mut Vec<u8>) {
-        self.address.put(out);
-        self.prior_state.put(out);
-        self.new_state.put(out);
-    }
-    fn get(inp: &mut &[u8]) -> Option<Self> {
-        Some(ContractEffect {
-            address: ContractAddress::get(inp)?,
-            prior_state: <[u8; 32]>::get(inp)?,
-            new_state: Vec::get(inp)?,
-        })
-    }
-}
-
 impl Flat for u8 {
     fn put(&self, out: &mut Vec<u8>) {
         out.push(*self);
@@ -609,7 +623,7 @@ impl Flat for IntentEffects {
             ttl: Timestamp::get(inp)?,
             unshielded: UnshieldedDelta::get(inp)?,
             dust: DustDelta::get(inp)?,
-            contracts: Vec::get(inp)?,
+            contracts: ContractsPresent::get(inp)?,
         })
     }
 }
@@ -639,7 +653,7 @@ impl Flat for FallibleSegment {
             segment: u16::get(inp)?,
             zswap: ZswapDelta::get(inp)?,
             unshielded: Vec::get(inp)?,
-            contracts: Vec::get(inp)?,
+            contracts: ContractsPresent::get(inp)?,
         })
     }
 }
@@ -830,14 +844,14 @@ mod tests {
                         }],
                         registrations: vec![],
                     },
-                    contracts: vec![],
+                    contracts: ContractsPresent::None,
                 }],
             },
             fallible: vec![FallibleSegment {
                 segment: 1,
                 zswap: ZswapDelta::default(),
                 unshielded: vec![UnshieldedDelta::default()],
-                contracts: vec![],
+                contracts: ContractsPresent::None,
             }],
         };
         let mut buf = Vec::new();
