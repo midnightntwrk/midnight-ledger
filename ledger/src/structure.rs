@@ -1924,6 +1924,8 @@ where
         params: &LedgerParameters,
         enforce_time_to_dismiss: bool,
     ) -> Result<u128, FeeCalculationError> {
+        #[cfg(feature = "hash-counter")]
+        crate::counters::FEES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let synthetic = self.cost(params, enforce_time_to_dismiss)?;
         let normalized = synthetic
             .normalize(params.limits.block_limits)
@@ -2014,6 +2016,9 @@ where
     }
 
     pub fn application_cost(&self, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
+        #[cfg(feature = "hash-counter")]
+        crate::counters::APPLICATION_COST
+            .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let mut g_cost = model.baseline_cost;
         let mut f_cost = RunningCost::ZERO;
         for (_, intent) in self.intents() {

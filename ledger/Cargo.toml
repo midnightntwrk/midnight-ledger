@@ -7,6 +7,8 @@ repository.workspace = true
 description = "Provides the transaction format and semantics for Midnight."
 
 [features]
+# Forwarded from storage-core — see `arena::counters`.
+hash-counter = ["storage-core/hash-counter"]
 point-counter = ["transient-crypto/point-counter"]
 default = ["proof-verifying", "proving"]
 # The prover. On by default, so nothing changes for an existing consumer; off, a
