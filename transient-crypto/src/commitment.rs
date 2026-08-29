@@ -106,6 +106,22 @@ impl From<Pedersen> for PedersenVerified {
     }
 }
 
+impl Tagged for PedersenVerified {
+    /// ⚠︎ **Deliberately the same tag as [`Pedersen`], and load-bearing.**
+    ///
+    /// The two are one type on the wire: refine writes a `Pedersen`, an applier reads a
+    /// `PedersenVerified` from the very same octets. A distinct tag would make
+    /// `tagged_deserialize` refuse those octets, and — because the binding is in the intent-hash
+    /// preimage — a distinct *encoding* would move every transaction hash.
+    fn tag() -> std::borrow::Cow<'static, str> {
+        <Pedersen as Tagged>::tag()
+    }
+
+    fn tag_unique_factor() -> String {
+        <Pedersen as Tagged>::tag_unique_factor()
+    }
+}
+
 impl PedersenVerified {
     /// Materialise the point — the square root, paid here and only if asked.
     ///
@@ -324,6 +340,11 @@ mod pedersen_verified_tests {
             let mut b = Vec::new();
             Serializable::serialize(&v, &mut b).expect("verified");
             assert_eq!(a, b, "the wire form must not move — it feeds the tx hash");
+            assert_eq!(
+                <PedersenVerified as Tagged>::tag(),
+                <Pedersen as Tagged>::tag(),
+                "one type on the wire: a different tag makes tagged_deserialize refuse these octets"
+            );
             assert_eq!(a.len(), 32);
             assert_eq!(v.serialized_size(), p.serialized_size());
 
