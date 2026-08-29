@@ -596,7 +596,7 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
         intent: &IntentEffects,
     ) -> Result<(), crate::error::TransactionInvalid<D>> {
         if intent.contracts != ContractsPresent::None {
-            return Err(crate::error::TransactionInvalid::EffectsIncomplete);
+            return Err(crate::error::TransactionInvalid::EffectsIncompleteContracts);
         }
         if !intent.dust.registrations.is_empty() {
             // Registrations need the parent intent's ɴɪɢʜᴛ inputs and outputs threaded
@@ -1628,7 +1628,7 @@ mod tests {
                 crate::structure::LedgerState::<storage::db::InMemoryDB>::refuse_if_incomplete(
                     &with_contracts
                 ),
-                Err(crate::error::TransactionInvalid::EffectsIncomplete)
+                Err(crate::error::TransactionInvalid::EffectsIncompleteContracts)
             ),
             "an intent with contract actions must be refused"
         );

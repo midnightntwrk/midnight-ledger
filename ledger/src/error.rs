@@ -203,6 +203,11 @@ pub enum TransactionInvalid<D: DB> {
     /// applied transaction would look valid locally and disagree with every node that took
     /// the ordinary path.
     EffectsIncomplete,
+    /// As [`Self::EffectsIncomplete`], but specifically because contract actions are not
+    /// represented. Distinguished from the dust-registration case because the two point at
+    /// different work: contracts need the transcript carried, registrations need
+    /// `apply_registration`'s interface narrowed.
+    EffectsIncompleteContracts,
     EffectsMismatch {
         declared: Box<Effects<D>>,
         actual: Box<Effects<D>>,
@@ -244,6 +249,10 @@ impl<D: DB> Display for TransactionInvalid<D> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         use TransactionInvalid::*;
         match self {
+            EffectsIncompleteContracts => write!(
+                formatter,
+                "the effects omit this transaction's contract actions"
+            ),
             EffectsIncomplete => write!(
                 formatter,
                 "the effects offered do not represent everything the transaction does; \
