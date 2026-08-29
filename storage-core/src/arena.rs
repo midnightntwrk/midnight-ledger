@@ -692,11 +692,28 @@ impl<D: DB> Arena<D> {
         key: ArenaHash<D::Hasher>,
         value: Arc<T>,
     ) {
-        let type_id = TypeId::of::<T>();
-        let cache_key = (key, type_id);
-        // Upcast.
-        let arc: Arc<dyn Any + Send + Sync> = value;
-        RefCell::borrow_mut(sp_cache).insert(cache_key, Arc::downgrade(&arc));
+        // Upcast, then hand off. The shim is what keeps this call type-safe: it derives the
+        // `TypeId` from the same `T` as the value, so the pair cannot disagree.
+        self.write_sp_cache_erased(sp_cache, key, TypeId::of::<T>(), value)
+    }
+
+    /// The body of [`Self::write_sp_cache_locked`], with the stored type already erased.
+    ///
+    /// ⌖ The cache is `Arc<dyn Any + Send + Sync>` keyed by `(hash, TypeId)`, so it is erased
+    /// *already*; the type parameter above exists only to produce the `TypeId` and satisfy the
+    /// upcast. Carrying it into the body duplicated a four-statement map insert once per
+    /// `Storable` -- 12,625 lines of ʟʟᴠᴍ ɪʀ over 101 copies. Nothing here is a downcast that
+    /// was not being made before, so this trades no type safety for the saving: the generic
+    /// shim above is the only way in, and it cannot pass a `TypeId` that disagrees with the
+    /// value.
+    fn write_sp_cache_erased(
+        &self,
+        sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
+        key: ArenaHash<D::Hasher>,
+        type_id: TypeId,
+        value: Arc<dyn Any + Send + Sync>,
+    ) {
+        RefCell::borrow_mut(sp_cache).insert((key, type_id), Arc::downgrade(&value));
     }
 
     /// Returns the number of unique elements stored in the Arena
@@ -1702,9 +1719,19 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
     fn gc_weak_pointer(&mut self) {
-        let sp_cache_guard = self.arena.lock_sp_cache();
+        // As with the sp-cache write: `T` is used for its `TypeId` and nothing else, so the
+        // body lives on `Arena<D>` and exists once rather than once per stored type.
+        self.arena
+            .gc_weak_pointer_erased(self.root.clone(), TypeId::of::<T>());
+    }
+}
+
+impl<D: DB> Arena<D> {
+    /// The body of `Sp::gc_weak_pointer`, with the stored type erased to its `TypeId`.
+    fn gc_weak_pointer_erased(&self, root: ArenaHash<D::Hasher>, type_id: TypeId) {
+        let sp_cache_guard = self.lock_sp_cache();
         let mut sp_cache = sp_cache_guard.borrow_mut();
-        let key = (self.root.clone(), TypeId::of::<T>());
+        let key = (root, type_id);
         // NOTE: Here, we rely on the `Arc` reference count to perform the cleanup if and only if
         // the underlying `Arc` is no longer allocated. This relies on the `Sp`s internal `Arc`
         // not leaking, as this ensures this check will be made during each `Arc` drop, including
