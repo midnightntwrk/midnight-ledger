@@ -966,15 +966,56 @@ pub struct DustState<D: DB> {
 }
 tag_enforcement_test!(DustState<InMemoryDB>);
 
+/// The three fields `apply_spend` reads, so its body can be shared between the
+/// `DustSpend` entry point and the plain one without duplicating the rule.
+struct FlatSpend {
+    old_nullifier: DustNullifier,
+    new_commitment: DustCommitment,
+    v_fee: u128,
+}
+
 impl<D: DB> DustState<D> {
     pub(crate) fn apply_spend<P: ProofKind<D>>(
         &self,
         spend: &DustSpend<P, D>,
         time: Timestamp,
         context: &TransactionContext<D>,
+        params: &DustParameters,
+        event_push: impl FnMut(EventDetails<D>),
+    ) -> Result<Self, TransactionInvalid<D>> {
+        self.apply_spend_flat(
+            spend.old_nullifier,
+            spend.new_commitment,
+            spend.v_fee,
+            time,
+            context,
+            params,
+            event_push,
+        )
+    }
+
+    /// [`Self::apply_spend`] driven by the three fields it actually reads.
+    ///
+    /// ⌖ A `DustSpend` also carries a proof, and this never touches it — whoever produced the
+    /// spend has already checked it. Exposing the plain form lets a consumer that holds
+    /// effects rather than a transaction apply them without reconstructing a `DustSpend`, and
+    /// keeps this the only implementation of the rule.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn apply_spend_flat(
+        &self,
+        old_nullifier: DustNullifier,
+        new_commitment: DustCommitment,
+        v_fee: u128,
+        time: Timestamp,
+        context: &TransactionContext<D>,
         _params: &DustParameters,
         mut event_push: impl FnMut(EventDetails<D>),
     ) -> Result<Self, TransactionInvalid<D>> {
+        let spend = FlatSpend {
+            old_nullifier,
+            new_commitment,
+            v_fee,
+        };
         let mut state = self.clone();
         if state.utxo.nullifiers.member(&spend.old_nullifier) {
             warn!(?spend.old_nullifier, "dust double spend");
