@@ -398,6 +398,47 @@ impl DustDelta {
     }
 }
 
+impl IntentEffects {
+    /// Project one intent's *guaranteed* changes.
+    ///
+    /// ⚠︎ Two different hashes come off an intent and they are not interchangeable:
+    /// `intent_hash(segment)` identifies the utxos this intent creates, while replay
+    /// protection uses `intent_hash(0)` — segment-independent, so a replay cannot be
+    /// relocated to another segment. Both are computed here, from the **erased** intent,
+    /// because that is what `apply_section` hashes; hashing the unerased form gives a
+    /// different value and utxos nothing else in the system agrees with.
+    ///
+    /// Contract actions are not projected — see [`ContractsPresent`].
+    pub fn from_intent<B, D>(intent: &crate::structure::Intent<(), (), B, D>, segment: u16) -> Self
+    where
+        D: storage::db::DB,
+        B: storage::storable::Storable<D> + serialize::Serializable,
+    {
+        let creating_hash = intent.intent_hash(segment);
+        IntentEffects {
+            segment,
+            // ⌖ `intent_hash(0)`, not `intent_hash(segment)`.
+            intent_hash: intent.intent_hash(0),
+            ttl: intent.ttl,
+            unshielded: intent
+                .guaranteed_unshielded_offer
+                .as_ref()
+                .map(|o| UnshieldedDelta::from_offer(o, creating_hash))
+                .unwrap_or_default(),
+            dust: intent
+                .dust_actions
+                .as_ref()
+                .map(|d| DustDelta::from_actions(d))
+                .unwrap_or_default(),
+            contracts: if intent.actions.is_empty() {
+                ContractsPresent::None
+            } else {
+                ContractsPresent::UseFullPath
+            },
+        }
+    }
+}
+
 // ── appliers ────────────────────────────────────────────────────────────────────────────
 
 impl<D: storage::db::DB> crate::structure::UtxoState<D> {
@@ -1285,6 +1326,68 @@ mod tests {
                 .apply_unshielded_delta(&d, Timestamp::from_secs(1))
                 .is_err(),
             "a delta must not be able to spend a utxo it creates in the same delta"
+        );
+    }
+
+    /// ⚠︎ **The two hashes must not be swapped.** `intent_hash(segment)` identifies the
+    /// utxos an intent creates; replay protection uses `intent_hash(0)`, segment-independent
+    /// so a replay cannot be relocated. They differ for any non-zero segment, and swapping
+    /// them yields utxos under identities nothing else agrees with — silently, since both are
+    /// well-formed hashes of the same intent.
+    #[test]
+    fn the_creating_hash_and_the_replay_hash_are_not_the_same() {
+        use crate::structure::{Intent, UnshieldedOffer, UtxoOutput};
+        use base_crypto::hash::HashOutput;
+        use coin_structure::coin::{UnshieldedTokenType, UserAddress};
+        use storage::db::InMemoryDB;
+        use transient_crypto::commitment::Pedersen;
+
+        let ty = UnshieldedTokenType(HashOutput([8; 32]));
+        let owner = UserAddress(HashOutput([9; 32]));
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![].into(),
+            outputs: vec![UtxoOutput {
+                value: 7,
+                owner,
+                type_: ty,
+            }]
+            .into(),
+            signatures: vec![].into(),
+        };
+        let intent: Intent<(), (), Pedersen, InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: Some(storage::arena::Sp::new(offer)),
+            fallible_unshielded_offer: None,
+            actions: vec![].into(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(1234),
+            binding_commitment: Pedersen::default(),
+        };
+
+        const SEG: u16 = 3;
+        let by_segment = intent.intent_hash(SEG);
+        let by_zero = intent.intent_hash(0);
+        assert_ne!(
+            by_segment, by_zero,
+            "the fixture must use a segment where the two hashes differ, or this proves nothing"
+        );
+
+        let e = IntentEffects::from_intent(&intent, SEG);
+
+        assert_eq!(
+            e.intent_hash, by_zero,
+            "replay uses the segment-independent hash"
+        );
+        assert_eq!(e.segment, SEG);
+        assert_eq!(e.ttl, Timestamp::from_secs(1234));
+        assert_eq!(e.unshielded.creates.len(), 1, "fixture must create a utxo");
+        assert_eq!(
+            e.unshielded.creates[0].intent_hash, by_segment,
+            "created utxos use the segment-dependent hash"
+        );
+        assert_eq!(
+            e.contracts,
+            ContractsPresent::None,
+            "no actions in the fixture"
         );
     }
 
