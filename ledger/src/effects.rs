@@ -27,7 +27,7 @@
 //! [`Offer::effects`]: zswap::structure::Offer::effects
 //! [`State::try_apply_effects`]: zswap::ledger::State::try_apply_effects
 
-use crate::structure::{IntentHash, UtxoOutput, UtxoSpend};
+use crate::structure::{IntentHash, Utxo, UtxoSpend};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Commitment, Nullifier};
 use coin_structure::contract::ContractAddress;
@@ -152,12 +152,23 @@ pub struct TransientDelta {
 }
 
 /// Unshielded changes: which utxos are consumed and which are created.
+///
+/// ⚠︎ **`creates` carries whole [`Utxo`]s, not [`UtxoOutput`]s, on purpose.** `apply_offer`
+/// derives a created utxo's identity from `parent.intent_hash(segment_id)` plus its output
+/// index, and that hash is *not* the one replay protection uses — replay deliberately takes
+/// `intent_hash(0)`, segment-independent, so a replay cannot be moved to another segment.
+/// Two different hashes off the same intent. Carrying the derived utxo means the applier
+/// never has to pick, and the equivalence test compares identities directly rather than
+/// re-deriving them the same wrong way on both sides.
+///
+/// [`Utxo`]: crate::structure::Utxo
+/// [`UtxoOutput`]: crate::structure::UtxoOutput
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UnshieldedDelta {
-    /// Precondition: present in `utxo`, and owned by the spender. Mutation: removed.
+    /// Precondition: `Utxo::from(spend)` is present in `utxo`. Mutation: removed.
     pub spends: Vec<UtxoSpend>,
-    /// Mutation: created.
-    pub outputs: Vec<UtxoOutput>,
+    /// Mutation: inserted, with `ctime` from the block context.
+    pub creates: Vec<Utxo>,
 }
 
 /// Dust changes.
@@ -386,7 +397,7 @@ macro_rules! flat_via_serializable {
 flat_via_serializable!(
     MerkleTreeDigest,
     UtxoSpend,
-    UtxoOutput,
+    Utxo,
     Nullifier,
     Commitment,
     IntentHash,
@@ -396,12 +407,12 @@ flat_via_serializable!(
 impl Flat for UnshieldedDelta {
     fn put(&self, out: &mut Vec<u8>) {
         self.spends.put(out);
-        self.outputs.put(out);
+        self.creates.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(UnshieldedDelta {
             spends: Vec::get(inp)?,
-            outputs: Vec::get(inp)?,
+            creates: Vec::get(inp)?,
         })
     }
 }
