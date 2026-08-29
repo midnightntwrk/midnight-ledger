@@ -29,6 +29,10 @@
 
 use crate::dust::{DustCommitment, DustNullifier, DustPublicKey};
 use crate::structure::{IntentHash, Utxo, UtxoSpend};
+// ⌖ The ledger's own sorted iteration, not `HashMap::iter`. Order reaches the effects record
+// and therefore the applied state, and in a consensus system a nondeterministic order is a
+// fault rather than a flaky test.
+use crate::utils::SortedIter;
 use base_crypto::signatures::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Commitment, Nullifier};
@@ -72,8 +76,13 @@ pub struct FallibleSegment {
     pub segment: u16,
     /// This segment's fallible shielded offer, if it has one.
     pub zswap: ZswapDelta,
-    /// This segment's fallible unshielded changes, per intent.
-    pub unshielded: Vec<UnshieldedDelta>,
+    /// This segment's fallible unshielded changes.
+    ///
+    /// ⚠︎ At most **one**. The guaranteed pass iterates every intent
+    /// (`tx.intents.sorted_iter()`), but a fallible segment takes only the intent at that
+    /// segment (`tx.intents.get(&segment)`). A `Vec` here would admit a shape the ledger
+    /// cannot produce and an applier could not faithfully consume.
+    pub unshielded: Option<UnshieldedDelta>,
     /// Whether this segment's contract actions make the effects path unusable.
     pub contracts: ContractsPresent,
 }
@@ -439,6 +448,71 @@ impl IntentEffects {
     }
 }
 
+impl<B, D, C> crate::structure::StandardTransaction<(), (), B, D, C>
+where
+    D: storage::db::DB,
+    B: storage::storable::Storable<D> + serialize::Serializable,
+    C: storage::storable::Storable<D> + Tagged + transient_crypto::commitment::CommitmentRepr<D>,
+{
+    /// Project a whole transaction onto what applying it needs.
+    ///
+    /// The shape follows `apply_section` exactly, and the two asymmetries in it are the ones
+    /// worth stating, because neither is guessable:
+    ///
+    /// - Segment 0 is a *guaranteed pass*, not a segment like the others. It applies the
+    ///   transaction's single `guaranteed_coins` offer and **every** intent's guaranteed
+    ///   unshielded offer, whatever segment those intents sit in.
+    /// - A fallible segment applies its own `fallible_coins` and **at most one** intent —
+    ///   `tx.intents.get(&segment)`, not an iteration.
+    ///
+    /// `tx_hash` and `ttl` are the replay claim, passed in because they come from the
+    /// transaction's envelope rather than its body.
+    pub fn effects(&self, tx_hash: IntentHash, ttl: Timestamp) -> TransactionEffects {
+        let guaranteed = GuaranteedEffects {
+            zswap: self
+                .guaranteed_coins
+                .as_ref()
+                .map(|o| ZswapDelta::from_offer(o))
+                .unwrap_or_default(),
+            intents: self
+                .intents
+                .sorted_iter()
+                .map(|(seg, intent)| IntentEffects::from_intent(&intent, *seg))
+                .collect(),
+        };
+        let fallible = self
+            .segments()
+            .into_iter()
+            .filter(|s| *s != 0)
+            .map(|segment| {
+                let intent = self.intents.get(&segment);
+                FallibleSegment {
+                    segment,
+                    zswap: self
+                        .fallible_coins
+                        .get(&segment)
+                        .map(|o| ZswapDelta::from_offer(&o))
+                        .unwrap_or_default(),
+                    unshielded: intent.as_ref().and_then(|i| {
+                        i.fallible_unshielded_offer
+                            .as_ref()
+                            .map(|o| UnshieldedDelta::from_offer(o, i.intent_hash(segment)))
+                    }),
+                    contracts: match intent.as_ref() {
+                        Some(i) if !i.actions.is_empty() => ContractsPresent::UseFullPath,
+                        _ => ContractsPresent::None,
+                    },
+                }
+            })
+            .collect();
+        TransactionEffects {
+            replay: ReplayEffect { tx_hash, ttl },
+            guaranteed,
+            fallible,
+        }
+    }
+}
+
 // ── appliers ────────────────────────────────────────────────────────────────────────────
 
 impl<D: storage::db::DB> crate::structure::UtxoState<D> {
@@ -737,7 +811,7 @@ impl Flat for FallibleSegment {
         Some(FallibleSegment {
             segment: u16::get(inp)?,
             zswap: ZswapDelta::get(inp)?,
-            unshielded: Vec::get(inp)?,
+            unshielded: Option::get(inp)?,
             contracts: ContractsPresent::get(inp)?,
         })
     }
@@ -935,7 +1009,7 @@ mod tests {
             fallible: vec![FallibleSegment {
                 segment: 1,
                 zswap: ZswapDelta::default(),
-                unshielded: vec![UnshieldedDelta::default()],
+                unshielded: Some(UnshieldedDelta::default()),
                 contracts: ContractsPresent::None,
             }],
         };
