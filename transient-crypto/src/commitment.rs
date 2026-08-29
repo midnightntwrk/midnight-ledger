@@ -38,6 +38,7 @@ use storage_core::storable::Loader;
 /// Homomorphic Pedersen commitment.
 /// a) Summed commitments should verify against their summed randomness.
 /// b) Summed commitments should be equal to a sum of (for each type) the value sum.
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 #[derive(
     Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serializable, Serialize, Storable,
 )]
@@ -46,6 +47,90 @@ use storage_core::storable::Loader;
 #[serde(transparent)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Pedersen(pub EmbeddedGroupAffine);
+
+/// The same commitment, kept as the octets it arrived as.
+///
+/// ⌖ **A representation switch, not a decoder switch — and that distinction is the whole
+/// design.** The wire form is *compressed*: 32 octets carrying `v` and the sign of `u`. `y` is
+/// not in there, so recovering it is a modular square root and no amount of cleverness in a
+/// decoder can skip it. The only way not to pay is not to build a point.
+///
+/// An applier never needs one. It hashes commitments and compares them; the arithmetic that
+/// makes them *binding* — summing inputs against outputs — belongs to whoever verifies. So under
+/// this feature the arithmetic is **absent rather than slow**, and a build that tries to balance
+/// commitments fails to compile instead of quietly decompressing two points per addition.
+///
+/// ⚠︎ Enable only in a binary whose commitments have already been accepted by a verifier. See
+/// the guard below, and prefer [`PedersenVerified`] where a *type* can carry the distinction —
+/// this exists for the places one cannot reach without churning every signature it appears in.
+#[cfg(feature = "unsafe-commitments-as-octets")]
+#[derive(
+    Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Storable,
+)]
+#[storable(base)]
+#[tag = "pedersen[v1]"]
+#[serde(transparent)]
+pub struct Pedersen(pub [u8; 32]);
+
+#[cfg(feature = "unsafe-commitments-as-octets")]
+impl Tagged for Pedersen {
+    /// The same tag as the point representation: one type on the wire, two representations of it.
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("pedersen[v1]")
+    }
+
+    fn tag_unique_factor() -> String {
+        String::from("pedersen[v1]")
+    }
+}
+
+#[cfg(feature = "unsafe-commitments-as-octets")]
+impl std::fmt::Display for Pedersen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for b in self.0 {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "unsafe-commitments-as-octets")]
+impl Serializable for Pedersen {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(&self.0)
+    }
+
+    fn serialized_size(&self) -> usize {
+        32
+    }
+}
+
+#[cfg(feature = "unsafe-commitments-as-octets")]
+impl Deserializable for Pedersen {
+    fn deserialize(reader: &mut impl std::io::Read, _recursion_depth: u32) -> std::io::Result<Self> {
+        let mut b = [0u8; 32];
+        reader.read_exact(&mut b)?;
+        Ok(Pedersen(b))
+    }
+}
+
+// ⚠︎ **The guard.** Cargo features are additive: anything in the graph turning this on turns it
+// on for everyone. A build that fetches parameters, embeds them, or offers a CLI is not an
+// applier, so its presence alongside any of those means the feature has been unified in by
+// accident — which would silently remove the check that makes commitments binding.
+#[cfg(all(
+    feature = "unsafe-commitments-as-octets",
+    any(feature = "data-provider", feature = "embed-params", feature = "cli")
+))]
+compile_error!(
+    "`unsafe-commitments-as-octets` replaces Pedersen commitments with their unvalidated wire \
+     octets and removes the arithmetic that makes them binding. It is for a binary that only \
+     *applies* transactions a verifier has already accepted. It is enabled here alongside \
+     `data-provider`, `embed-params` or `cli`, none of which an applier needs — so it has most \
+     likely been unified in from another crate's feature set rather than chosen. Build the \
+     applier with `default-features = false`."
+);
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 wrap_display!(Pedersen);
 tag_enforcement_test!(Pedersen);
 
@@ -149,12 +234,14 @@ impl From<PedersenVerified> for Pedersen {
 /// field.
 pub type PedersenRandomness = EmbeddedFr;
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl From<PedersenRandomness> for Pedersen {
     fn from(rand: PedersenRandomness) -> Pedersen {
         Pedersen(EmbeddedGroupAffine::generator() * rand)
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl FieldRepr for Pedersen {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
         writer.write(&[
@@ -167,6 +254,7 @@ impl FieldRepr for Pedersen {
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl Pedersen {
     /// Create a Pedersen commitment purely for randomizing powers of
     /// independent generators.
@@ -180,6 +268,7 @@ impl Pedersen {
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl Add<Pedersen> for Pedersen {
     type Output = Pedersen;
     fn add(self, other: Self) -> Self {
@@ -187,6 +276,7 @@ impl Add<Pedersen> for Pedersen {
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl Neg for Pedersen {
     type Output = Pedersen;
     fn neg(self) -> Self {
@@ -194,6 +284,7 @@ impl Neg for Pedersen {
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl Sub<Pedersen> for Pedersen {
     type Output = Pedersen;
     fn sub(self, other: Self) -> Self {
@@ -205,6 +296,7 @@ impl Sub<Pedersen> for Pedersen {
 // a two-to-one hash. The result should be in `x: P::ScalarField` (conversion check needed). Find
 // `y: P::ScalarField` such that `(x, y)` is a valid curve point. `(ctr, y)` are witnesses to
 // `type_`.
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl Pedersen {
     /// Homomorphically commits to a value of a type.
     ///
@@ -241,6 +333,7 @@ impl From<PureGeneratorPedersen> for Pedersen {
     }
 }
 
+#[cfg(not(feature = "unsafe-commitments-as-octets"))]
 impl PureGeneratorPedersen {
     /// Returns an instance of the largest representable instance of this type, for use in
     /// estimating fee computations down the line.
@@ -370,5 +463,27 @@ mod pedersen_verified_tests {
             v.to_pedersen().is_err(),
             "materialising it must fail — the check is deferred, not deleted"
         );
+    }
+}
+
+#[cfg(test)]
+mod commitment_representation_tests {
+    use super::*;
+    use serialize::Serializable;
+
+    /// Whichever representation is compiled, the wire form must be the same 32 octets under the
+    /// same tag — the two are one type on the wire, and the encoding reaches transaction hashes.
+    ///
+    /// The two representations cannot coexist in one build, so this runs in both and asserts the
+    /// invariant each can see. Cross-checking the actual octets is `PedersenVerified`'s job,
+    /// which *can* sit beside a point.
+    #[test]
+    fn the_wire_form_is_32_octets_under_pedersens_tag() {
+        assert_eq!(<Pedersen as Tagged>::tag(), "pedersen[v1]");
+        let p = Pedersen::default();
+        let mut b = Vec::new();
+        Serializable::serialize(&p, &mut b).expect("pedersen");
+        assert_eq!(b.len(), 32, "the wire form must not change with representation");
+        assert_eq!(p.serialized_size(), 32);
     }
 }

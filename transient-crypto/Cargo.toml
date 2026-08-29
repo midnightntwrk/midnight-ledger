@@ -16,6 +16,8 @@ embed-params = []
 # The HTTP data provider, which only a prover needs.
 data-provider = ["base-crypto/data-provider"]
 cli = ["base-crypto/cli"]
+# ⚠︎ See the doc on the octet representation of `Pedersen`. For appliers only.
+unsafe-commitments-as-octets = []
 proptest = [
   "dep:proptest",
   "dep:proptest-derive",
