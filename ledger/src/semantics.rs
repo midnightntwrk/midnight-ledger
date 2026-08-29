@@ -45,7 +45,6 @@ use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
-use transient_crypto::commitment::PedersenVerified;
 use storage::storage::HashSet;
 use storage::storage::Map;
 use transient_crypto::commitment::{PedersenRandomness, PureGeneratorPedersen};
@@ -343,9 +342,9 @@ pub type MaybeEvents<D> = (LedgerState<D>, Vec<Event<D>>);
 
 impl<D: DB> LedgerState<D> {
     #[allow(unused_variables)]
-    fn apply_zswap<P: Storable<D> + Deserializable, C: Clone + Storable<D>>(
+    fn apply_zswap<P: Storable<D> + Deserializable>(
         &self,
-        offer: &ZswapOffer<P, D, C>,
+        offer: &ZswapOffer<P, D>,
         whitelist: Option<Map<ContractAddress, ()>>,
         com_indices: &mut Map<Commitment, u64>,
         transaction_hash: TransactionHash,
@@ -928,12 +927,9 @@ impl<D: DB> LedgerState<D> {
     // `apply` is the sole caller and passes `tx.inner`, whose proof and signature parameters are
     // `()` by construction. Erasing again was a no-op that nonetheless *downgraded* the binding
     // -- forcing a curve point to be reconstructed per intent for a value this path only hashes.
-    fn apply_section<
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
-        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified>,
-    >(
+    fn apply_section<B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged>(
         &self,
-        tx: &StandardTransaction<(), (), B, D, C>,
+        tx: &StandardTransaction<(), (), B, D>,
         transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
@@ -1208,12 +1204,9 @@ impl<D: DB> LedgerState<D> {
     /// ⌖ Generic in the binding, defaulted to [`Pedersen`] so existing callers are unchanged.
     /// It varies so an already-verified transaction can carry commitments in the form they
     /// arrived in rather than as reconstructed curve points -- applying only ever hashes them.
-    pub fn apply<
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
-        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified>,
-    >(
+    pub fn apply<B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged + Debug>(
         &self,
-        tx: &VerifiedTransaction<D, B, C>,
+        tx: &VerifiedTransaction<D, B>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
         let res = match &tx.inner {
@@ -1272,7 +1265,7 @@ impl<D: DB> LedgerState<D> {
             "transaction result: {:?}",
             ErasedTransactionResult::from(&res.1)
         );
-        trace!(hash = ?tx.hash(), "transaction details");
+        trace!(?tx, "transaction details");
         res
     }
 
@@ -1754,10 +1747,9 @@ impl<D: DB> ReplayProtectionState<D> {
         S: SignatureKind<D>,
         P: ProofKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Storable<D> + Serializable,
     >(
         &self,
-        stx: &StandardTransaction<S, P, B, D, C>,
+        stx: &StandardTransaction<S, P, B, D>,
         tblock: Timestamp,
         global_ttl: Duration,
     ) -> Result<Self, TransactionApplicationError> {

@@ -426,9 +426,8 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
     >(
-        tx: &Transaction<S, Self, B, D, C>,
+        tx: &Transaction<S, Self, B, D>,
     ) -> usize;
 }
 
@@ -524,9 +523,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
     >(
-        tx: &Transaction<S, Self, B, D, C>,
+        tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         tx.serialized_size()
     }
@@ -574,9 +572,8 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
     >(
-        tx: &Transaction<S, Self, B, D, C>,
+        tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         <()>::estimated_tx_size(&tx.erase_proofs())
     }
@@ -618,9 +615,8 @@ impl<D: DB> ProofKind<D> for () {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
     >(
-        tx: &Transaction<S, Self, B, D, C>,
+        tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         let size = tx.serialized_size();
         let calls = tx.calls().count();
@@ -1326,25 +1322,19 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[tag = "transaction[v9]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
-pub enum Transaction<
-    S: SignatureKind<D>,
-    P: ProofKind<D>,
-    B: Storable<D>,
-    D: DB,
-    C: Storable<D> = Pedersen,
-> {
-    Standard(StandardTransaction<S, P, B, D, C>),
+pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
+    Standard(StandardTransaction<S, P, B, D>),
     ClaimRewards(ClaimRewardsTransaction<S, D>),
 }
 tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 
-#[derive_where(Clone; B, C)]
-pub struct VerifiedTransaction<D: DB, B: Storable<D> = Pedersen, C: Storable<D> = Pedersen> {
-    pub(crate) inner: Transaction<(), (), B, D, C>,
+#[derive_where(Debug, Clone; B)]
+pub struct VerifiedTransaction<D: DB, B: Storable<D> = Pedersen> {
+    pub(crate) inner: Transaction<(), (), B, D>,
     pub(crate) hash: TransactionHash,
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D>> VerifiedTransaction<D, B, C> {
+impl<D: DB, B: Storable<D>> VerifiedTransaction<D, B> {
     /// The transaction's hash, fixed when it was checked.
     pub fn hash(&self) -> TransactionHash {
         self.hash
@@ -1361,13 +1351,13 @@ impl<D: DB, B: Storable<D>, C: Storable<D>> VerifiedTransaction<D, B, C> {
     ///
     /// The caller asserts the check happened. Constructing this from an unchecked transaction
     /// applies it unchecked.
-    pub fn from_verified(inner: Transaction<(), (), B, D, C>, hash: TransactionHash) -> Self {
+    pub fn from_verified(inner: Transaction<(), (), B, D>, hash: TransactionHash) -> Self {
         Self { inner, hash }
     }
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D>> Deref for VerifiedTransaction<D, B, C> {
-    type Target = Transaction<(), (), B, D, C>;
+impl<D: DB, B: Storable<D>> Deref for VerifiedTransaction<D, B> {
+    type Target = Transaction<(), (), B, D>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -1389,10 +1379,9 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
-> Transaction<S, P, B, D, C>
+> Transaction<S, P, B, D>
 {
-    pub fn erase_proofs(&self) -> Transaction<S, (), Pedersen, D, C> {
+    pub fn erase_proofs(&self) -> Transaction<S, (), Pedersen, D> {
         match self {
             Transaction::Standard(StandardTransaction {
                 network_id,
@@ -1425,7 +1414,7 @@ impl<
         }
     }
 
-    pub fn erase_signatures(&self) -> Transaction<(), P, B, D, C> {
+    pub fn erase_signatures(&self) -> Transaction<(), P, B, D> {
         match self {
             Transaction::Standard(StandardTransaction {
                 network_id,
@@ -1494,7 +1483,7 @@ impl<
                     fallible_coins: {
                         let mut result: std::collections::BTreeMap<
                             u16,
-                            ZswapOffer<P::LatestProof, D, C>,
+                            ZswapOffer<P::LatestProof, D>,
                         > = stx1.fallible_coins.clone().into_iter().collect();
                         for (key, offer2) in stx2.fallible_coins.clone() {
                             match result.get(&key) {
@@ -1592,10 +1581,9 @@ impl<
     }
 }
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB, C: Storable<D>>
-    Transaction<S, P, B, D, C>
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Transaction<S, P, B, D>
 where
-    Transaction<S, P, B, D, C>: Serializable,
+    Transaction<S, P, B, D>: Serializable,
 {
     pub fn segments(&self) -> Vec<u16> {
         match self {
@@ -1629,30 +1617,19 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[derive_where(Clone, Debug; S, P, B, C)]
+#[derive_where(Clone, Debug; S, P, B)]
 #[tag = "standard-transaction[v9]"]
-pub struct StandardTransaction<
-    S: SignatureKind<D>,
-    P: ProofKind<D>,
-    B: Storable<D>,
-    D: DB,
-    C: Storable<D> = Pedersen,
-> {
+pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
-    pub guaranteed_coins: Option<Sp<ZswapOffer<P::LatestProof, D, C>, D>>,
-    pub fallible_coins: HashMap<u16, ZswapOffer<P::LatestProof, D, C>, D>,
+    pub guaranteed_coins: Option<Sp<ZswapOffer<P::LatestProof, D>, D>>,
+    pub fallible_coins: HashMap<u16, ZswapOffer<P::LatestProof, D>, D>,
     pub binding_randomness: PedersenRandomness,
 }
 tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
 
-impl<
-    S: SignatureKind<D>,
-    P: ProofKind<D> + Serializable + Deserializable,
-    B: Storable<D>,
-    D: DB,
-    C: Storable<D>,
-> StandardTransaction<S, P, B, D, C>
+impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: Storable<D>, D: DB>
+    StandardTransaction<S, P, B, D>
 {
     pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
         self.intents
@@ -1718,14 +1695,14 @@ impl<
 
     pub fn inputs(
         &self,
-    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_inputs().chain(self.fallible_inputs())
     }
 
     pub fn guaranteed_inputs(
         &self,
-    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_coins
             .iter()
@@ -1734,7 +1711,7 @@ impl<
 
     pub fn fallible_inputs(
         &self,
-    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D, C>> {
+    ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D>> {
         self.fallible_coins
             .iter()
             .flat_map(|sp| Vec::from(&sp.1.inputs).into_iter())
@@ -1742,14 +1719,14 @@ impl<
 
     pub fn outputs(
         &self,
-    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_outputs().chain(self.fallible_outputs())
     }
 
     pub fn guaranteed_outputs(
         &self,
-    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_coins
             .iter()
@@ -1758,7 +1735,7 @@ impl<
 
     pub fn fallible_outputs(
         &'_ self,
-    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D, C>> {
+    ) -> impl Iterator<Item = Output<<P as ProofKind<D>>::LatestProof, D>> {
         self.fallible_coins
             .iter()
             .flat_map(|sp| Vec::from(&sp.1.outputs).into_iter())
@@ -1766,7 +1743,7 @@ impl<
 
     pub fn transients(
         &self,
-    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_transients()
             .chain(self.fallible_transients())
@@ -1774,7 +1751,7 @@ impl<
 
     pub fn guaranteed_transients(
         &self,
-    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.guaranteed_coins
             .iter()
@@ -1783,7 +1760,7 @@ impl<
 
     pub fn fallible_transients(
         &self,
-    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D, C>> + use<'_, S, P, B, D, C>
+    ) -> impl Iterator<Item = Transient<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
         self.fallible_coins
             .iter()
@@ -1887,10 +1864,9 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
-> Transaction<S, P, B, D, C>
+> Transaction<S, P, B, D>
 where
-    Transaction<S, P, B, D, C>: Serializable,
+    Transaction<S, P, B, D>: Serializable,
 {
     pub fn fees_with_margin(
         &self,

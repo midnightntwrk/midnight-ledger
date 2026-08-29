@@ -230,11 +230,11 @@ impl<P> Debug for AuthorizedClaim<P> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Input<P, D, B> {
-    pub fn erase_proof(&self) -> Input<(), D, B> {
+impl<P: Storable<D>, D: DB> Input<P, D> {
+    pub fn erase_proof(&self) -> Input<(), D> {
         Input {
             nullifier: self.nullifier,
-            value_commitment: self.value_commitment.clone(),
+            value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
             proof: Arc::new(()),
@@ -309,11 +309,11 @@ pub struct Output<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
 }
 tag_enforcement_test!(Output<(), InMemoryDB>);
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Output<P, D, B> {
-    pub fn erase_proof(&self) -> Output<(), D, B> {
+impl<P: Storable<D>, D: DB> Output<P, D> {
+    pub fn erase_proof(&self) -> Output<(), D> {
         Output {
             coin_com: self.coin_com,
-            value_commitment: self.value_commitment.clone(),
+            value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
             proof: Arc::new(()),
@@ -390,13 +390,13 @@ pub struct Transient<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
 }
 tag_enforcement_test!(Transient<(), InMemoryDB>);
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Transient<P, D, B> {
-    pub fn erase_proof(&self) -> Transient<(), D, B> {
+impl<P: Storable<D>, D: DB> Transient<P, D> {
+    pub fn erase_proof(&self) -> Transient<(), D> {
         Transient {
             nullifier: self.nullifier,
             coin_com: self.coin_com,
-            value_commitment_input: self.value_commitment_input.clone(),
-            value_commitment_output: self.value_commitment_output.clone(),
+            value_commitment_input: self.value_commitment_input,
+            value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
             proof_input: Arc::new(()),
@@ -583,7 +583,7 @@ impl<D: DB> Offer<ProofPreimage, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Offer<P, D, B> {
+impl<P: Storable<D>, D: DB> Offer<P, D> {
     /// The parts of this offer that applying it reads, and nothing else.
     ///
     /// The counterpart of [`crate::ledger::State::try_apply_effects`]: this derives what
@@ -620,7 +620,7 @@ impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Offer<P, D, B> {
         }
     }
 
-    pub fn erase_proofs(&self) -> Offer<(), D, B> {
+    pub fn erase_proofs(&self) -> Offer<(), D> {
         Offer {
             inputs: self.inputs.iter_deref().map(Input::erase_proof).collect(),
             outputs: self.outputs.iter_deref().map(Output::erase_proof).collect(),
@@ -675,7 +675,7 @@ pub fn normalize_deltas<T: Ord, I: Iterator<Item = (T, i128)>>(deltas: I) -> Vec
     new_deltas
 }
 
-impl<P: Clone + Ord + Storable<D>, D: DB, B: Clone + Ord + Storable<D>> Offer<P, D, B> {
+impl<P: Clone + Ord + Storable<D>, D: DB> Offer<P, D> {
     pub fn normalize(&mut self) {
         self.inputs = self.inputs.iter_deref().sorted().cloned().collect();
         self.outputs = self.outputs.iter_deref().sorted().cloned().collect();
