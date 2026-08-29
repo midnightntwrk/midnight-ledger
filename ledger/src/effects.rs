@@ -24,14 +24,15 @@
 //! is sound only where something attests the producing computation. It must not become the
 //! default path for a consumer with no such stage.
 //!
-//! [`Offer::effects`]: midnight_zswap::structure::Offer::effects
-//! [`State::try_apply_effects`]: midnight_zswap::ledger::State::try_apply_effects
+//! [`Offer::effects`]: zswap::structure::Offer::effects
+//! [`State::try_apply_effects`]: zswap::ledger::State::try_apply_effects
 
 use crate::structure::{IntentHash, UtxoOutput, UtxoSpend};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Commitment, Nullifier};
 use coin_structure::contract::ContractAddress;
-use serialize::{Deserializable, Serializable};
+use serialize::{Deserializable, Serializable, Tagged};
+use transient_crypto::merkle_tree::MerkleTreeDigest;
 
 /// Everything applying one transaction does.
 ///
@@ -108,7 +109,7 @@ pub struct IntentEffects {
 /// separately. A single root per delta would silently accept a spend proven against a root
 /// the state never had.
 ///
-/// [`ZswapEffects`]: midnight_zswap::structure::ZswapEffects
+/// [`ZswapEffects`]: zswap::structure::ZswapEffects
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ZswapDelta {
     /// Precondition: each root `∈ past_roots`, each nullifier absent. Mutation: inserted.
@@ -123,7 +124,7 @@ pub struct ZswapDelta {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SpendDelta {
     /// Precondition: `∈ past_roots`. The root *this* input was proven against.
-    pub merkle_tree_root: [u8; 32],
+    pub merkle_tree_root: MerkleTreeDigest,
     /// Precondition: absent from the nullifier set. Mutation: inserted.
     pub nullifier: Nullifier,
     /// The contract this spend belongs to, if any.
@@ -204,6 +205,56 @@ pub struct ContractEffect {
     pub prior_state: [u8; 32],
     /// Mutation: the contract's state becomes this.
     pub new_state: Vec<u8>,
+}
+
+// ── producers ───────────────────────────────────────────────────────────────────────────
+
+impl ZswapDelta {
+    /// Project a shielded offer onto what applying it needs.
+    ///
+    /// ⌖ Deliberately routed through [`Offer::effects`] rather than reading the offer's own
+    /// fields. That method is the ledger's answer to "what does applying an offer need", and
+    /// duplicating the projection here is how the two would drift — the first draft of this
+    /// type dropped `contract_address` and collapsed the per-spend merkle root to one per
+    /// offer, both of which mirroring would have prevented.
+    pub fn from_offer<P, D, C>(offer: &zswap::Offer<P, D, C>) -> Self
+    where
+        D: storage::db::DB,
+        P: storage::storable::Storable<D>,
+        C: storage::storable::Storable<D>
+            + Tagged
+            + transient_crypto::commitment::CommitmentRepr<D>,
+    {
+        let e = offer.effects();
+        ZswapDelta {
+            spends: e
+                .spends
+                .iter_deref()
+                .map(|s| SpendDelta {
+                    merkle_tree_root: s.merkle_tree_root,
+                    nullifier: s.nullifier,
+                    contract_address: s.contract_address.as_ref().map(|a| *a.clone()),
+                })
+                .collect(),
+            creates: e
+                .creates
+                .iter_deref()
+                .map(|c| CreateDelta {
+                    coin_com: c.coin_com,
+                    contract_address: c.contract_address.as_ref().map(|a| *a.clone()),
+                })
+                .collect(),
+            transients: e
+                .transients
+                .iter_deref()
+                .map(|t| TransientDelta {
+                    nullifier: t.nullifier,
+                    coin_com: t.coin_com,
+                    contract_address: t.contract_address.as_ref().map(|a| *a.clone()),
+                })
+                .collect(),
+        }
+    }
 }
 
 // ── the flat codec ──────────────────────────────────────────────────────────────────────
@@ -333,6 +384,7 @@ macro_rules! flat_via_serializable {
 }
 
 flat_via_serializable!(
+    MerkleTreeDigest,
     UtxoSpend,
     UtxoOutput,
     Nullifier,
@@ -362,7 +414,7 @@ impl Flat for SpendDelta {
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(SpendDelta {
-            merkle_tree_root: <[u8; 32]>::get(inp)?,
+            merkle_tree_root: MerkleTreeDigest::get(inp)?,
             nullifier: Nullifier::get(inp)?,
             contract_address: Option::get(inp)?,
         })
@@ -640,7 +692,7 @@ mod tests {
             guaranteed: GuaranteedEffects {
                 zswap: ZswapDelta {
                     spends: vec![SpendDelta {
-                        merkle_tree_root: [7; 32],
+                        merkle_tree_root: MerkleTreeDigest::default(),
                         nullifier: Nullifier(base_crypto::hash::HashOutput([1; 32])),
                         contract_address: None,
                     }],
@@ -690,6 +742,133 @@ mod tests {
             "a one-segment record should be well under a kilobyte, was {}",
             buf.len()
         );
+    }
+
+    /// **The gate: the projection must lose nothing `ZswapEffects` carries.**
+    ///
+    /// ⌖ Written because two hand-derived shapes were wrong in ways neither the type system
+    /// nor five passing round-trip tests noticed: the per-spend merkle root was collapsed to
+    /// one per offer, and `contract_address` was dropped from every entry. Both are
+    /// soundness-relevant — the first would accept a spend proven against a root the state
+    /// never held. Field-by-field correspondence against the ledger's own projection is the
+    /// only thing that catches that class.
+    #[test]
+    fn the_projection_loses_nothing_the_ledgers_own_effects_carry() {
+        use coin_structure::coin::{Info as CoinInfo, PublicKey, ShieldedTokenType};
+        use storage::db::InMemoryDB;
+        use zswap::{Delta, Offer, Output};
+
+        use coin_structure::contract::ContractAddress;
+        use std::sync::Arc;
+        use storage::arena::Sp;
+        use zswap::Input;
+
+        let mut rng = rand::thread_rng();
+        let (mut outputs, mut deltas) = (Vec::new(), Vec::new());
+        for _ in 0..4 {
+            let (type_, value): (ShieldedTokenType, u128) =
+                (rand::Rng::r#gen(&mut rng), rand::Rng::r#gen(&mut rng));
+            let info = CoinInfo {
+                nonce: rand::Rng::r#gen(&mut rng),
+                type_,
+                value,
+            };
+            let cpk = PublicKey(rand::Rng::r#gen(&mut rng));
+            outputs.push(
+                Output::new(&mut rng, &info, None, &cpk, None)
+                    .expect("output")
+                    .erase_proof(),
+            );
+            deltas.push(Delta {
+                token_type: type_,
+                value: value as i128,
+            });
+        }
+
+        // ⚠︎ Inputs are what make this test mean anything. Built by hand because the fields
+        // are public and the constructors want a witnessed tree: each carries a **distinct**
+        // merkle root, so collapsing them to one is visible, and a **present**
+        // `contract_address`, so dropping it is visible. With outputs alone — which is all
+        // the fixture had at first, and all zswap's own equivalence test has — both loops
+        // below iterate zero times and the test passes against a deliberately broken
+        // projection. Verified: it did.
+        let inputs: Vec<Input<(), InMemoryDB>> = (0u8..3)
+            .map(|i| Input {
+                nullifier: Nullifier(base_crypto::hash::HashOutput([i + 1; 32])),
+                value_commitment: Default::default(),
+                contract_address: Some(Sp::new(ContractAddress(base_crypto::hash::HashOutput(
+                    [i + 100; 32],
+                )))),
+                merkle_tree_root: MerkleTreeDigest::from(transient_crypto::curve::Fr::from(
+                    u64::from(i) + 1,
+                )),
+                proof: Arc::new(()),
+            })
+            .collect();
+
+        let offer: Offer<(), InMemoryDB> = Offer {
+            inputs: inputs.into(),
+            outputs: outputs.into(),
+            transient: vec![].into(),
+            deltas: deltas.into(),
+        };
+
+        let reference = offer.effects();
+        let ours = ZswapDelta::from_offer(&offer);
+
+        // The fixture must actually exercise what the loops below check.
+        assert!(!ours.spends.is_empty(), "fixture has no spends to compare");
+        assert!(
+            !ours.creates.is_empty(),
+            "fixture has no creates to compare"
+        );
+        assert!(
+            ours.spends.iter().any(|s| s.contract_address.is_some()),
+            "fixture has no contract address, so dropping it would go unnoticed"
+        );
+        assert!(
+            ours.spends
+                .iter()
+                .map(|s| s.merkle_tree_root)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1,
+            "fixture has one distinct root, so collapsing per-spend roots would go unnoticed"
+        );
+
+        assert_eq!(ours.spends.len(), reference.spends.len(), "spend count");
+        assert_eq!(ours.creates.len(), reference.creates.len(), "create count");
+        assert_eq!(
+            ours.transients.len(),
+            reference.transients.len(),
+            "transient count"
+        );
+
+        for (a, b) in ours.spends.iter().zip(reference.spends.iter_deref()) {
+            assert_eq!(a.nullifier, b.nullifier, "nullifier");
+            // ⚠︎ per spend, not per offer — the bug this line exists for
+            assert_eq!(a.merkle_tree_root, b.merkle_tree_root, "merkle root");
+            assert_eq!(
+                a.contract_address,
+                b.contract_address.as_ref().map(|x| *x.clone()),
+                "contract address"
+            );
+        }
+        for (a, b) in ours.creates.iter().zip(reference.creates.iter_deref()) {
+            assert_eq!(a.coin_com, b.coin_com, "commitment");
+            assert_eq!(
+                a.contract_address,
+                b.contract_address.as_ref().map(|x| *x.clone()),
+                "contract address"
+            );
+        }
+
+        // And it must survive the wire unchanged.
+        let mut buf = Vec::new();
+        ours.put(&mut buf);
+        let mut inp = &buf[..];
+        assert_eq!(ZswapDelta::get(&mut inp).as_ref(), Some(&ours));
+        assert!(inp.is_empty());
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
