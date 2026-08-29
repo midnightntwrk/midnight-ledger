@@ -1389,6 +1389,28 @@ mod tests {
             ContractsPresent::None,
             "no actions in the fixture"
         );
+
+        // ⚠︎ And the flag must actually flip. Without an intent that *has* an action, a
+        // producer that always answered `None` passes — verified by mutation, it did. That
+        // flag routes a contract transaction to the full path, so answering it wrongly means
+        // silently applying incomplete effects, which is the worst failure this module has.
+        let with_action = Intent::<(), (), Pedersen, InMemoryDB> {
+            actions: vec![crate::structure::ContractAction::Maintain(
+                crate::structure::MaintenanceUpdate {
+                    address: coin_structure::contract::ContractAddress(HashOutput([5; 32])),
+                    updates: vec![].into(),
+                    counter: 0,
+                    signatures: vec![].into(),
+                },
+            )]
+            .into(),
+            ..intent.clone()
+        };
+        assert_eq!(
+            IntentEffects::from_intent(&with_action, SEG).contracts,
+            ContractsPresent::UseFullPath,
+            "an intent with actions must route to the full path"
+        );
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
