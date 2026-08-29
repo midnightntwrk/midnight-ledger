@@ -213,32 +213,43 @@ pub struct DustRegistrationEffect {
     pub allow_fee_payment: u128,
 }
 
-/// Whether a transaction's contract actions can be applied from effects at all.
+/// Whether a transaction's contract actions can be applied from these effects.
 ///
-/// ✗ **Contract actions do not fit this transport, and pretending otherwise would be worse
-/// than admitting it.** Every variant of `ContractAction` ends by setting the contract's
-/// state at an address — `Call` to the transcript's result, `Deploy` to an initial state,
-/// `Maintain` to the state after its update ops. That state is itself a `Storable` graph, so
-/// carrying it as a flat blob reintroduces exactly the reconstruction cost this module
-/// exists to remove, only for a larger payload.
+/// ⌖ **Do not carry contract state — carry the transcript.** `apply_actions` computes the new
+/// state by *running* the transcript against the current one
+/// (`res.update_index(addr, results.context.state, ..)`), so an applier needs the ops, not the
+/// result. An earlier version of this type carried a `new_state: Vec<u8>` and concluded
+/// contracts were unfit for a flat transport; that was wrong, and wrong because it assumed
+/// the state had to cross.
 ///
-/// The three also have genuinely different preconditions — `Call` needs the contract present
-/// and its declared effects to match a re-run, `Deploy` needs the address *absent*, `Maintain`
-/// needs a matching maintenance counter — so a single "prior state hash" precondition, which
-/// this type carried at first, is wrong for two of the three.
+/// Everything a `Call` needs flattens the same way the rest of this module does:
 ///
-/// ⌖ So a transaction carrying contract actions declares itself unfit for the effects path
-/// and the caller applies it the ordinary way. Most transactions have none, and those pay
-/// nothing; the ones that do pay exactly what they pay today. That is a scoping decision, not
-/// a gap to be filled later without thought: making contracts fit needs a state *delta*
-/// representation, or the trust argument for skipping `run_transcript` entirely, and both are
-/// larger questions than this transport.
+/// ```text
+/// Transcript.gas        RunningCost, plain
+/// Transcript.effects    HashSet/HashMap over flat leaves — Nullifier, TokenType, u128
+/// Transcript.program    Array<Op, D> → Vec<Op>; ~28 nullary or small-immediate variants
+/// Transcript.version    a small enum
+/// ```
+///
+/// So the three variants split by *frequency*, not by whether they are representable:
+///
+/// - **`Call`** — the common case. Carry the transcript flat; the ledger runs it and derives
+///   the state. No state blob.
+/// - **`Deploy`** — carries an `initial_state`, which genuinely is a state blob, but it is
+///   one-off per contract and a fresh contract's state is small.
+/// - **`Maintain`** — rare, and a governance operation: it rotates the contract's
+///   verification machinery for a ᴢᴋ upgrade rather than touching its data. The full path is
+///   the right answer for it permanently, not a stopgap.
+///
+/// ⚠︎ Until the `Op` codec exists, all three take the full path. That is a *staging*
+/// decision now rather than a scoping one — the remaining work is a tag-and-payload codec for
+/// ~28 mostly-nullary variants, not a design question.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContractsPresent {
     /// No contract actions; the effects above are the whole transaction.
     None,
-    /// Contract actions are present. These effects are incomplete — apply the transaction
-    /// through `LedgerState::apply` instead.
+    /// Contract actions are present and not yet represented here. These effects are
+    /// incomplete — apply the transaction through `LedgerState::apply` instead.
     UseFullPath,
 }
 
