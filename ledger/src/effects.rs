@@ -465,10 +465,23 @@ impl IntentEffects {
         D: storage::db::DB,
         B: storage::storable::Storable<D> + serialize::Serializable,
     {
-        let creating_hash = intent.intent_hash(segment);
+        // ⌖ `intent_hash(0)`, not `intent_hash(segment)` — and for *both* hashes here.
+        //
+        // Replay is segment-independent so it cannot be relocated. The creating hash is
+        // `intent_hash(pass)`, and this projection is the **guaranteed pass**, whose pass is
+        // 0 whatever segment the intent physically sits in: `semantics.rs:990` applies every
+        // intent's guaranteed offer with `apply_offer(offer, &erased, segment, ..)` where
+        // `segment == 0`, and marks the physical segment `#[allow(unused_variables)]`.
+        //
+        // ⚠︎ So in the guaranteed pass the two hashes coincide, and they diverge only in a
+        // fallible segment (see `effects()`, which passes `i.intent_hash(segment)` there).
+        // A test built only from segment-0 offers therefore cannot tell the two functions
+        // apart — which is exactly how this shipped wrong: every family-level gate passed
+        // while the whole-transaction comparison put the created utxo under a hash nothing
+        // else in the system agrees with.
+        let creating_hash = intent.intent_hash(0);
         IntentEffects {
             segment,
-            // ⌖ `intent_hash(0)`, not `intent_hash(segment)`.
             intent_hash: intent.intent_hash(0),
             ttl: intent.ttl,
             unshielded: intent
@@ -1676,9 +1689,23 @@ mod tests {
         assert_eq!(e.segment, SEG);
         assert_eq!(e.ttl, Timestamp::from_secs(1234));
         assert_eq!(e.unshielded.creates.len(), 1, "fixture must create a utxo");
+        // ⚠︎ **This assertion used to read `by_segment`, and it was wrong.**
+        //
+        // It encoded the same misreading as the code it was checking, so it passed. The
+        // creating hash is `intent_hash(pass)`, and `from_intent` projects the *guaranteed
+        // pass*, whose pass is 0 whatever segment the intent sits in — `semantics.rs:990`
+        // applies every intent's guaranteed offer with `segment == 0`. The whole-transaction
+        // comparison in `tests/effects_equivalence.rs` is what caught it: it put the created
+        // utxo under a hash the full path never produces, and nothing at this level could
+        // see that, because both sides of a family-level gate were derived from the same
+        // wrong belief.
         assert_eq!(
+            e.unshielded.creates[0].intent_hash, by_zero,
+            "the guaranteed pass creates under intent_hash(0) — see semantics.rs:990"
+        );
+        assert_ne!(
             e.unshielded.creates[0].intent_hash, by_segment,
-            "created utxos use the segment-dependent hash"
+            "and specifically not under the physical segment's hash"
         );
         assert_eq!(
             e.contracts,
