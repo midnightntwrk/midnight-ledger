@@ -31,6 +31,7 @@ use crate::structure::{IntentHash, UtxoOutput, UtxoSpend};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Commitment, Nullifier};
 use coin_structure::contract::ContractAddress;
+use serialize::{Deserializable, Serializable};
 
 /// Everything applying one transaction does.
 ///
@@ -259,6 +260,148 @@ impl Flat for Timestamp {
     }
 }
 
+/// ⌖ Leaves delegate to `Serializable`, which is **not** `Storable`: it is plain byte work
+/// on types that carry no `Sp` and are not generic over `DB`, so it costs nothing like the
+/// graph reconstruction this module exists to avoid. Delegating also keeps the wire form
+/// identical to the ledger's own, so the two cannot drift.
+macro_rules! flat_via_serializable {
+    ($($t:ty),* $(,)?) => { $(
+        impl Flat for $t {
+            fn put(&self, out: &mut Vec<u8>) {
+                Serializable::serialize(self, out).expect("writing to a Vec cannot fail");
+            }
+            fn get(inp: &mut &[u8]) -> Option<Self> {
+                Deserializable::deserialize(inp, 0).ok()
+            }
+        }
+    )* };
+}
+
+flat_via_serializable!(
+    UtxoSpend,
+    UtxoOutput,
+    Nullifier,
+    Commitment,
+    IntentHash,
+    ContractAddress,
+);
+
+impl Flat for UnshieldedDelta {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.spends.put(out);
+        self.outputs.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(UnshieldedDelta {
+            spends: Vec::get(inp)?,
+            outputs: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for ZswapDelta {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.merkle_root.put(out);
+        self.nullifiers.put(out);
+        self.commitments.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(ZswapDelta {
+            merkle_root: Option::get(inp)?,
+            nullifiers: Vec::get(inp)?,
+            commitments: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for ContractEffect {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.address.put(out);
+        self.prior_state.put(out);
+        self.new_state.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(ContractEffect {
+            address: ContractAddress::get(inp)?,
+            prior_state: <[u8; 32]>::get(inp)?,
+            new_state: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for u8 {
+    fn put(&self, out: &mut Vec<u8>) {
+        out.push(*self);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(take(inp, 1)?[0])
+    }
+}
+
+impl Flat for IntentEffects {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.intent_hash.put(out);
+        self.ttl.put(out);
+        self.guaranteed_unshielded.put(out);
+        self.fallible_unshielded.put(out);
+        self.dust.put(out);
+        self.contracts.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(IntentEffects {
+            intent_hash: IntentHash::get(inp)?,
+            ttl: Timestamp::get(inp)?,
+            guaranteed_unshielded: UnshieldedDelta::get(inp)?,
+            fallible_unshielded: UnshieldedDelta::get(inp)?,
+            dust: DustDelta::get(inp)?,
+            contracts: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for SegmentEffects {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.segment.put(out);
+        self.guaranteed.put(out);
+        self.fallible.put(out);
+        self.intents.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(SegmentEffects {
+            segment: u16::get(inp)?,
+            guaranteed: ZswapDelta::get(inp)?,
+            fallible: ZswapDelta::get(inp)?,
+            intents: Vec::get(inp)?,
+        })
+    }
+}
+
+impl Flat for ReplayEffect {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.tx_hash.put(out);
+        self.ttl.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(ReplayEffect {
+            tx_hash: IntentHash::get(inp)?,
+            ttl: Timestamp::get(inp)?,
+        })
+    }
+}
+
+impl Flat for TransactionEffects {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.replay.put(out);
+        self.segments.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(TransactionEffects {
+            replay: ReplayEffect::get(inp)?,
+            segments: Vec::get(inp)?,
+        })
+    }
+}
+
 impl Flat for DustSpendEffect {
     fn put(&self, out: &mut Vec<u8>) {
         self.v_fee.put(out);
@@ -365,6 +508,60 @@ mod tests {
                 "a {cut}-octet prefix must not decode"
             );
         }
+    }
+
+    /// A whole record, of the shape a real transaction produces: one segment, a shielded
+    /// spend and two creates, an unshielded spend and output, and a dust spend.
+    ///
+    /// ⌖ The size is the point as much as the round trip. The transport it replaces is 1,422
+    /// octets and costs 4,584,171 gas to decode; `𝖶_R`, the report's blob budget, is 49,152.
+    /// If this were to come out at tens of kilobytes the design would be in trouble.
+    #[test]
+    fn a_whole_record_round_trips_and_stays_small() {
+        let fx = TransactionEffects {
+            replay: ReplayEffect {
+                tx_hash: IntentHash(base_crypto::hash::HashOutput([9; 32])),
+                ttl: Timestamp::from_secs(1000),
+            },
+            segments: vec![SegmentEffects {
+                segment: 0,
+                guaranteed: ZswapDelta {
+                    merkle_root: Some([7; 32]),
+                    nullifiers: vec![Nullifier(base_crypto::hash::HashOutput([1; 32]))],
+                    commitments: vec![
+                        Commitment(base_crypto::hash::HashOutput([2; 32])),
+                        Commitment(base_crypto::hash::HashOutput([3; 32])),
+                    ],
+                },
+                fallible: ZswapDelta::default(),
+                intents: vec![IntentEffects {
+                    intent_hash: IntentHash(base_crypto::hash::HashOutput([4; 32])),
+                    ttl: Timestamp::from_secs(2000),
+                    guaranteed_unshielded: UnshieldedDelta::default(),
+                    fallible_unshielded: UnshieldedDelta::default(),
+                    dust: DustDelta {
+                        ctime: Timestamp::from_secs(1500),
+                        spends: vec![DustSpendEffect {
+                            v_fee: 42,
+                            old_nullifier: [5; 32],
+                            new_commitment: [6; 32],
+                        }],
+                        registrations: vec![],
+                    },
+                    contracts: vec![],
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        fx.put(&mut buf);
+        let mut inp = &buf[..];
+        assert_eq!(TransactionEffects::get(&mut inp).as_ref(), Some(&fx));
+        assert!(inp.is_empty(), "decoded exactly what was encoded");
+        assert!(
+            buf.len() < 1024,
+            "a one-segment record should be well under a kilobyte, was {}",
+            buf.len()
+        );
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
