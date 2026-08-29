@@ -762,10 +762,7 @@ impl<D: DB> Arena<D> {
             .lock_backend()
             .borrow_mut()
             .get(key)
-            .ok_or(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
-            ))?
+            .ok_or_else(|| missing_key(key))?
             .children.clone())
     }
 
@@ -989,6 +986,29 @@ impl<D: DB> Arena<D> {
     }
 }
 
+/// The missing-key error, built once for the whole program.
+///
+/// Two things are deliberate here. `&dyn Debug` rather than a type parameter, so this
+/// ~120-byte message and the `format!` machinery behind it are not monomorphised into every
+/// instantiation of `BackendLoader::get` -- of which a ledger guest has several hundred, one
+/// per `Storable` type. And `#[cold]`/`#[inline(never)]`, so the error path stays out of the
+/// hot one entirely.
+///
+/// It is called from `ok_or_else`, never `ok_or`: the latter takes its argument by value, so
+/// the message was formatted -- debug-printing the hash and allocating the string -- on every
+/// *successful* node load, which is the hottest path the arena has.
+#[cold]
+#[inline(never)]
+fn missing_key(key: &dyn std::fmt::Debug) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "BackendLoader::get(): key {key:?} not in storage arena. \
+             Are you sure you persisted this key or one of its ancestors?"
+        ),
+    )
+}
+
 /// A `Loader` that loads by deserializing binary data from the back-end, with an
 /// optional depth bound that allows for lazy loading of nested `Sp`s.
 ///
@@ -1080,10 +1100,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                     .lock_backend()
                     .borrow_mut()
                     .get(key)
-                    .ok_or(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
-                    ))?
+                    .ok_or_else(|| missing_key(key))?
                     .clone();
                 (Arc::new(obj.data), Arc::new(obj.children))
             }
@@ -1212,10 +1229,9 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         }
 
         // Otherwise, deserialize Sp from the IRs.
-        let ir = self.all.get(key).ok_or(io::Error::new(
-            io::ErrorKind::NotFound,
-            "IR not found in `all` map",
-        ))?;
+        let ir = self.all.get(key).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "IR not found in `all` map")
+        })?;
         if self.recursion_depth > serialize::RECURSION_LIMIT {
             return Err(std::io::Error::other("Reached recursion limit".to_string()));
         }
