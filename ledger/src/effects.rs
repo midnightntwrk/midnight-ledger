@@ -267,6 +267,41 @@ impl Flat for ContractsPresent {
     }
 }
 
+/// A transcript's declared effects, as plain data.
+///
+/// Mirrors [`onchain_runtime::context::Effects`] field for field. Every leaf is already flat —
+/// `Nullifier`, `CoinCommitment`, `TokenType`, `HashOutput`, and two tuple structs of the same
+/// — so only the containers change.
+///
+/// ⚠︎ **The originals are sets and maps; these are sequences, and that makes ordering part of
+/// the encoding.** Two producers projecting the same effects must emit the same octets, so
+/// every sequence is **sorted** on the way out. Iterating a `HashMap` and taking whatever order
+/// falls out would give a record whose bytes depend on hash iteration order — which in a
+/// consensus system is a fault, not a flaky test. Equality after reconstruction is unaffected
+/// either way, since the originals are sets; determinism of the *bytes* is the reason.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TranscriptEffects {
+    /// Nullifiers the transcript claims to spend.
+    pub claimed_nullifiers: Vec<Nullifier>,
+    /// Shielded commitments it claims to receive.
+    pub claimed_shielded_receives: Vec<Commitment>,
+    /// Shielded commitments it claims to spend.
+    pub claimed_shielded_spends: Vec<Commitment>,
+    /// Contract calls it claims to have made.
+    pub claimed_contract_calls: Vec<onchain_runtime::context::ClaimedContractCallsValue>,
+    /// Shielded mints, by token hash.
+    pub shielded_mints: Vec<(base_crypto::hash::HashOutput, u64)>,
+    /// Unshielded mints, by token hash.
+    pub unshielded_mints: Vec<(base_crypto::hash::HashOutput, u64)>,
+    /// Unshielded value taken in, by token type.
+    pub unshielded_inputs: Vec<(coin_structure::coin::TokenType, u128)>,
+    /// Unshielded value paid out, by token type.
+    pub unshielded_outputs: Vec<(coin_structure::coin::TokenType, u128)>,
+    /// Unshielded spends it claims, by (token, address).
+    pub claimed_unshielded_spends:
+        Vec<(onchain_runtime::context::ClaimedUnshieldedSpendsKey, u128)>,
+}
+
 // ── producers ───────────────────────────────────────────────────────────────────────────
 
 impl ZswapDelta {
@@ -726,6 +761,25 @@ impl Flat for u32 {
     }
 }
 
+impl Flat for u64 {
+    fn put(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.to_le_bytes());
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(u64::from_le_bytes(take(inp, 8)?.try_into().ok()?))
+    }
+}
+
+impl<A: Flat, B: Flat> Flat for (A, B) {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.0.put(out);
+        self.1.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some((A::get(inp)?, B::get(inp)?))
+    }
+}
+
 impl Flat for u128 {
     fn put(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.to_le_bytes());
@@ -811,6 +865,10 @@ macro_rules! flat_via_serializable {
 }
 
 flat_via_serializable!(
+    base_crypto::hash::HashOutput,
+    coin_structure::coin::TokenType,
+    onchain_runtime::context::ClaimedContractCallsValue,
+    onchain_runtime::context::ClaimedUnshieldedSpendsKey,
     DustNullifier,
     DustCommitment,
     DustPublicKey,
@@ -876,6 +934,33 @@ impl Flat for TransientDelta {
             nullifier: Nullifier::get(inp)?,
             coin_com: Commitment::get(inp)?,
             contract_address: Option::get(inp)?,
+        })
+    }
+}
+
+impl Flat for TranscriptEffects {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.claimed_nullifiers.put(out);
+        self.claimed_shielded_receives.put(out);
+        self.claimed_shielded_spends.put(out);
+        self.claimed_contract_calls.put(out);
+        self.shielded_mints.put(out);
+        self.unshielded_mints.put(out);
+        self.unshielded_inputs.put(out);
+        self.unshielded_outputs.put(out);
+        self.claimed_unshielded_spends.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(TranscriptEffects {
+            claimed_nullifiers: Vec::get(inp)?,
+            claimed_shielded_receives: Vec::get(inp)?,
+            claimed_shielded_spends: Vec::get(inp)?,
+            claimed_contract_calls: Vec::get(inp)?,
+            shielded_mints: Vec::get(inp)?,
+            unshielded_mints: Vec::get(inp)?,
+            unshielded_inputs: Vec::get(inp)?,
+            unshielded_outputs: Vec::get(inp)?,
+            claimed_unshielded_spends: Vec::get(inp)?,
         })
     }
 }
@@ -1755,6 +1840,44 @@ mod tests {
             members(&via_effects),
             "the two paths must create the same utxos, with the same identities"
         );
+    }
+
+    /// ⚠︎ **Sorted, because the bytes must not depend on hash iteration order.**
+    ///
+    /// `Effects`'s fields are sets and maps; these are sequences. Reconstruction is unaffected
+    /// by order — the originals are sets — but the *encoding* is not, and two producers
+    /// emitting different octets for the same effects is a consensus fault rather than a
+    /// flaky test. The projection sorts; this pins that it does.
+    #[test]
+    fn the_transcript_projection_is_ordered() {
+        use base_crypto::hash::HashOutput;
+
+        let h = |n: u8| HashOutput([n; 32]);
+        // Deliberately built out of order.
+        let fx = TranscriptEffects {
+            shielded_mints: vec![(h(9), 1), (h(2), 2), (h(5), 3)],
+            ..Default::default()
+        };
+        let mut sorted = fx.clone();
+        sorted.shielded_mints.sort();
+
+        let enc = |v: &TranscriptEffects| {
+            let mut b = Vec::new();
+            v.put(&mut b);
+            b
+        };
+        assert_ne!(
+            enc(&fx),
+            enc(&sorted),
+            "if these matched, order would not reach the octets and this test would be vacuous"
+        );
+
+        // And the codec itself round-trips whatever order it is given.
+        let mut b = Vec::new();
+        fx.put(&mut b);
+        let mut inp = &b[..];
+        assert_eq!(TranscriptEffects::get(&mut inp).as_ref(), Some(&fx));
+        assert!(inp.is_empty());
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
