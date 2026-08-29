@@ -627,21 +627,46 @@ impl<D: DB> Arena<D> {
         children: std::vec::Vec<ArenaKey<D::Hasher>>,
         child_repr: ArenaKey<D::Hasher>,
     ) -> Sp<T, D> {
-        self.track_locked(metadata, key.clone(), data, children, &child_repr);
-        // Try to reuse any existing cached `Arc` for `value`, creating and
-        // caching a new `Arc` if necessary.
-        let arc = {
-            let guard = &self.lock_sp_cache();
-            match self.read_sp_cache_locked(guard, &key) {
-                Some(arc) => arc,
-                None => {
-                    let arc = Arc::new(value);
-                    self.write_sp_cache_locked(guard, key.clone(), arc.clone());
-                    arc
-                }
+        let arc = self.new_sp_arc_locked(
+            metadata,
+            Arc::new(value),
+            TypeId::of::<T>(),
+            key.clone(),
+            data,
+            children,
+            &child_repr,
+        );
+        Sp::eager_erased(self.clone(), key, arc, child_repr)
+    }
+
+    /// Track the node and settle on the `Arc` that will back it, reusing a cached one when
+    /// there is one.
+    ///
+    /// ⌖ The body of [`Self::new_sp_locked`] with the stored type reduced to a `TypeId`.
+    /// Only `Arc::new(value)` and the `Sp<T, D>` that comes back genuinely need `T`; the
+    /// tracking and the cache round-trip do not, and as a method on `Arena<D>` they exist
+    /// once per back end rather than once per `Storable`.
+    #[allow(clippy::too_many_arguments)]
+    fn new_sp_arc_locked(
+        &self,
+        metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
+        arc: Arc<dyn Any + Send + Sync>,
+        type_id: TypeId,
+        key: ArenaHash<D::Hasher>,
+        data: std::vec::Vec<u8>,
+        children: std::vec::Vec<ArenaKey<D::Hasher>>,
+        child_repr: &ArenaKey<D::Hasher>,
+    ) -> Arc<dyn Any + Send + Sync> {
+        self.track_locked(metadata, key.clone(), data, children, child_repr);
+        // Try to reuse any existing cached `Arc`, caching the new one if there is none.
+        let guard = &self.lock_sp_cache();
+        match self.read_sp_cache_erased(guard, &key, type_id) {
+            Some(cached) => cached,
+            None => {
+                self.write_sp_cache_erased(guard, key, type_id, arc.clone());
+                arc
             }
-        };
-        Sp::eager(self.clone(), key, arc, child_repr)
+        }
     }
 
     fn new_sp<T: Storable<D>>(
