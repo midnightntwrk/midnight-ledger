@@ -343,7 +343,7 @@ pub type MaybeEvents<D> = (LedgerState<D>, Vec<Event<D>>);
 
 impl<D: DB> LedgerState<D> {
     #[allow(unused_variables)]
-    fn apply_zswap<P: Storable<D> + Deserializable, C: Clone + Storable<D>>(
+    fn apply_zswap<P: Storable<D> + Deserializable, C: Clone + Storable<D> + Tagged>(
         &self,
         offer: &ZswapOffer<P, D, C>,
         whitelist: Option<Map<ContractAddress, ()>>,
@@ -1754,7 +1754,7 @@ impl<D: DB> ReplayProtectionState<D> {
         S: SignatureKind<D>,
         P: ProofKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Storable<D> + Serializable,
+        C: Storable<D> + Serializable + Tagged,
     >(
         &self,
         stx: &StandardTransaction<S, P, B, D, C>,

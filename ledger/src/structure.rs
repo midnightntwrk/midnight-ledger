@@ -426,7 +426,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize;
@@ -524,7 +524,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -574,7 +574,7 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -618,7 +618,7 @@ impl<D: DB> ProofKind<D> for () {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -1323,6 +1323,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
+#[phantom(C)]
 #[tag = "transaction[v9]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
@@ -1331,7 +1332,7 @@ pub enum Transaction<
     P: ProofKind<D>,
     B: Storable<D>,
     D: DB,
-    C: Storable<D> = Pedersen,
+    C: Storable<D> + Tagged = Pedersen,
 > {
     Standard(StandardTransaction<S, P, B, D, C>),
     ClaimRewards(ClaimRewardsTransaction<S, D>),
@@ -1339,12 +1340,16 @@ pub enum Transaction<
 tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 
 #[derive_where(Clone; B, C)]
-pub struct VerifiedTransaction<D: DB, B: Storable<D> = Pedersen, C: Storable<D> = Pedersen> {
+pub struct VerifiedTransaction<
+    D: DB,
+    B: Storable<D> = Pedersen,
+    C: Storable<D> + Tagged = Pedersen,
+> {
     pub(crate) inner: Transaction<(), (), B, D, C>,
     pub(crate) hash: TransactionHash,
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D>> VerifiedTransaction<D, B, C> {
+impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged> VerifiedTransaction<D, B, C> {
     /// The transaction's hash, fixed when it was checked.
     pub fn hash(&self) -> TransactionHash {
         self.hash
@@ -1366,7 +1371,7 @@ impl<D: DB, B: Storable<D>, C: Storable<D>> VerifiedTransaction<D, B, C> {
     }
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D>> Deref for VerifiedTransaction<D, B, C> {
+impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged> Deref for VerifiedTransaction<D, B, C> {
     type Target = Transaction<(), (), B, D, C>;
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -1389,7 +1394,7 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
 > Transaction<S, P, B, D, C>
 {
     pub fn erase_proofs(&self) -> Transaction<S, (), Pedersen, D, C> {
@@ -1592,7 +1597,7 @@ impl<
     }
 }
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB, C: Storable<D>>
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB, C: Storable<D> + Tagged>
     Transaction<S, P, B, D, C>
 where
     Transaction<S, P, B, D, C>: Serializable,
@@ -1630,13 +1635,20 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B, C)]
+// ⌖ **`C` is deliberately absent from the tag.** The derive appends every generic's tag to the
+// type's own, so a fourth parameter would turn `transaction[v9]((),(),pedersen[v1])` into
+// `…,pedersen[v1])` — a *different tag for identical octets*. `C` selects how a commitment is
+// held in memory, not how it is written: both choices serialize to the same 32 octets, which is
+// asserted on `PedersenVerified`. Letting it reach the tag would make the same bytes undecodable
+// by a peer that chose the other representation.
+#[phantom(C)]
 #[tag = "standard-transaction[v9]"]
 pub struct StandardTransaction<
     S: SignatureKind<D>,
     P: ProofKind<D>,
     B: Storable<D>,
     D: DB,
-    C: Storable<D> = Pedersen,
+    C: Storable<D> + Tagged = Pedersen,
 > {
     pub network_id: String,
     pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
@@ -1651,7 +1663,7 @@ impl<
     P: ProofKind<D> + Serializable + Deserializable,
     B: Storable<D>,
     D: DB,
-    C: Storable<D>,
+    C: Storable<D> + Tagged,
 > StandardTransaction<S, P, B, D, C>
 {
     pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
@@ -1887,7 +1899,7 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified>,
+    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
 > Transaction<S, P, B, D, C>
 where
     Transaction<S, P, B, D, C>: Serializable,
