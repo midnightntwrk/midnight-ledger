@@ -1210,10 +1210,10 @@ impl<D: DB> DustState<D> {
             .fold(0u128, |a, b| a.saturating_add(b))
     }
 
-    pub(crate) fn apply_offer<S: SignatureKind<D>>(
+    pub(crate) fn apply_offer<S: SignatureKind<D>, B: Storable<D> + Serializable>(
         &self,
         offer: &UnshieldedOffer<S, D>,
-        parent: &ErasedIntent<D>,
+        parent: &ErasedIntent<D, B>,
         segment: u16,
         context: &TransactionContext<D>,
         mut event_push: impl FnMut(EventDetails<D>),

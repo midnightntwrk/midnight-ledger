@@ -47,7 +47,6 @@ use storage::arena::Sp;
 use storage::db::DB;
 use storage::storage::HashSet;
 use storage::storage::Map;
-use transient_crypto::commitment::Pedersen;
 use transient_crypto::commitment::{PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::merkle_tree::InvalidUpdate;
 use zswap::Offer as ZswapOffer;
@@ -924,13 +923,13 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self, tx, context))]
-    fn apply_section<
-        S: SignatureKind<D>,
-        P: ProofKind<D>,
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
-    >(
+    // ⌖ Specialised to an already-erased transaction, which is the only thing that reaches it:
+    // `apply` is the sole caller and passes `tx.inner`, whose proof and signature parameters are
+    // `()` by construction. Erasing again was a no-op that nonetheless *downgraded* the binding
+    // -- forcing a curve point to be reconstructed per intent for a value this path only hashes.
+    fn apply_section<B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged>(
         &self,
-        tx: &StandardTransaction<S, P, B, D>,
+        tx: &StandardTransaction<(), (), B, D>,
         transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
@@ -969,7 +968,8 @@ impl<D: DB> LedgerState<D> {
 
             #[allow(unused_variables)]
             for (phys_seg, intent) in tx.intents.sorted_iter() {
-                let erased = intent.erase_proofs().erase_signatures();
+                // Already erased: the parameters are `()`, so this is a clone, not a conversion.
+                let erased: Intent<(), (), B, D> = (*intent).clone();
                 if let Some(offer) = &intent.guaranteed_unshielded_offer {
                     state.utxo = Sp::new(state.utxo.apply_offer(offer, &erased, segment, context)?);
                     {
@@ -1201,9 +1201,12 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
-    pub fn apply(
+    /// ⌖ Generic in the binding, defaulted to [`Pedersen`] so existing callers are unchanged.
+    /// It varies so an already-verified transaction can carry commitments in the form they
+    /// arrived in rather than as reconstructed curve points -- applying only ever hashes them.
+    pub fn apply<B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged + Debug>(
         &self,
-        tx: &VerifiedTransaction<D>,
+        tx: &VerifiedTransaction<D, B>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
         let res = match &tx.inner {
@@ -1266,12 +1269,12 @@ impl<D: DB> LedgerState<D> {
         res
     }
 
-    fn apply_actions<P: ProofKind<D>>(
+    fn apply_actions<P: ProofKind<D>, B: Storable<D> + Serializable>(
         &self,
         calls: &[ContractAction<P, D>],
         guaranteed: bool,
         context: &TransactionContext<D>,
-        parent_intent: Intent<(), (), Pedersen, D>,
+        parent_intent: Intent<(), (), B, D>,
         com_indices: &Map<Commitment, u64>,
         event_source: EventSource,
     ) -> Result<MaybeEvents<D>, TransactionInvalid<D>> {
@@ -1643,10 +1646,10 @@ fn claim_unshielded<D: DB>(
 }
 
 impl<D: DB> UtxoState<D> {
-    pub fn apply_offer<S: SignatureKind<D>>(
+    pub fn apply_offer<S: SignatureKind<D>, B: Storable<D> + Serializable>(
         &self,
         offer: &UnshieldedOffer<S, D>,
-        parent: &ErasedIntent<D>,
+        parent: &ErasedIntent<D, B>,
         segment_id: u16,
         context: &TransactionContext<D>,
     ) -> Result<Self, TransactionInvalid<D>> {

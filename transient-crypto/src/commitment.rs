@@ -106,12 +106,26 @@ impl From<Pedersen> for PedersenVerified {
     }
 }
 
-impl TryFrom<PedersenVerified> for Pedersen {
-    type Error = std::io::Error;
-
+impl PedersenVerified {
     /// Materialise the point — the square root, paid here and only if asked.
-    fn try_from(v: PedersenVerified) -> Result<Self, Self::Error> {
-        Deserializable::deserialize(&mut &v.0[..], 0)
+    ///
+    /// Fallible, because the octets were never validated: this is the moment the deferred check
+    /// actually happens.
+    pub fn to_pedersen(self) -> std::io::Result<Pedersen> {
+        Deserializable::deserialize(&mut &self.0[..], 0)
+    }
+}
+
+impl From<PedersenVerified> for Pedersen {
+    /// ⚠︎ Panics on octets that are not a point.
+    ///
+    /// Infallible only because `PedersenDowngradeable` requires `Into<Pedersen>`. It is sound
+    /// under this type's contract — the octets came from a transaction a verifier accepted, and
+    /// a verifier cannot accept a commitment that is not a point. Where that assurance is
+    /// missing, use [`PedersenVerified::to_pedersen`] and handle the error.
+    fn from(v: PedersenVerified) -> Self {
+        v.to_pedersen()
+            .expect("a verifier accepted these octets as a commitment")
     }
 }
 
@@ -318,7 +332,7 @@ mod pedersen_verified_tests {
                 Deserializable::deserialize(&mut &a[..], 0).expect("verified decode");
             assert_eq!(w, v);
             // ...and materialising the point, if anyone asks, gives back what went in.
-            let q = Pedersen::try_from(w).expect("a verifier accepted this");
+            let q = w.to_pedersen().expect("a verifier accepted this");
             assert_eq!(q, p, "the round trip must be exact, not merely close");
         }
     }
@@ -332,7 +346,7 @@ mod pedersen_verified_tests {
         let v: PedersenVerified =
             Deserializable::deserialize(&mut &junk[..], 0).expect("no validation on decode");
         assert!(
-            Pedersen::try_from(v).is_err(),
+            v.to_pedersen().is_err(),
             "materialising it must fail — the check is deferred, not deleted"
         );
     }

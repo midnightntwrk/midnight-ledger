@@ -67,7 +67,7 @@ use storage::merkle_patricia_trie::Annotation;
 use storage::storable::Loader;
 use storage::storage::Map;
 use storage::storage::{HashMap, HashSet, TimeFilterMap};
-use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
+use transient_crypto::commitment::{Pedersen, PedersenRandomness, PedersenVerified, PureGeneratorPedersen};
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
@@ -207,6 +207,22 @@ impl<D: DB> PedersenUpgradeable<D> for PedersenRandomness {
         challenge_pre: &[u8],
     ) -> PureGeneratorPedersen {
         PureGeneratorPedersen::new_from(rng, self, challenge_pre)
+    }
+}
+
+impl<D: DB> PedersenDowngradeable<D> for PedersenVerified {
+    /// ⚠︎ **This is where the square root moved to.** For every other binding type `downgrade`
+    /// is a copy or a cheap conversion; here it decompresses a point, which is ~9.2 M gas on a
+    /// metered interpreter. That is the whole reason this type exists — so the apply path, which
+    /// only ever hashes the binding, does not pay it — and so a call *here* means something is
+    /// genuinely asking for a point.
+    fn downgrade(&self) -> Pedersen {
+        (*self).into()
+    }
+
+    /// The verifier discharged this. See the type's documentation for the obligation.
+    fn valid(&self, _challenge_pre: &[u8]) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
     }
 }
 
@@ -823,7 +839,7 @@ impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
 pub struct IntentHash(pub HashOutput);
 tag_enforcement_test!(IntentHash);
 
-impl<D: DB> ErasedIntent<D> {
+impl<D: DB, B: Storable<D> + Serializable> ErasedIntent<D, B> {
     pub fn intent_hash(&self, segment_id: u16) -> IntentHash {
         IntentHash(persistent_hash(&self.data_to_sign(segment_id)))
     }
@@ -835,7 +851,14 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
     }
 }
 
-pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
+/// An intent with its proofs and signatures erased.
+///
+/// ⌖ The binding is a parameter, defaulted to [`Pedersen`] so every existing use is unchanged.
+/// It varies so that an *already verified* transaction can carry its commitments in the wire
+/// form they arrived in — see [`PedersenVerified`] — instead of rebuilding a curve point per
+/// commitment for a value the apply path only ever hashes. The hash preimage below serializes
+/// the binding, and `PedersenVerified` serializes byte-identically, so no intent hash moves.
+pub type ErasedIntent<D, B = Pedersen> = Intent<(), (), B, D>;
 
 #[derive(Storable)]
 #[tag = "intent[v6]"]
@@ -880,7 +903,10 @@ impl<S: SignatureKind<D> + Debug, P: ProofKind<D>, B: Storable<D>, D: DB> fmt::D
     }
 }
 
-fn to_hash_data<D: DB>(intent: Intent<(), (), Pedersen, D>, mut data: Vec<u8>) -> Vec<u8> {
+fn to_hash_data<D: DB, B: Storable<D> + Serializable>(
+    intent: Intent<(), (), B, D>,
+    mut data: Vec<u8>,
+) -> Vec<u8> {
     Serializable::serialize(&intent.guaranteed_unshielded_offer, &mut data)
         .expect("In-memory serialization should succeed");
     Serializable::serialize(&intent.fallible_unshielded_offer, &mut data)
@@ -979,13 +1005,13 @@ impl<
     }
 }
 
-impl<D: DB> Intent<(), (), Pedersen, D> {
+impl<D: DB, B: Storable<D> + Serializable> Intent<(), (), B, D> {
     pub fn data_to_sign(&self, segment_id: u16) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend(b"midnight:hash-intent:");
         Serializable::serialize(&segment_id, &mut data)
             .expect("In-memory serialization should succeed");
-        to_hash_data::<D>(self.clone(), data)
+        to_hash_data::<D, B>(self.clone(), data)
     }
 }
 
@@ -1287,13 +1313,13 @@ pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB
 }
 tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 
-#[derive_where(Debug, Clone)]
-pub struct VerifiedTransaction<D: DB> {
-    pub(crate) inner: Transaction<(), (), Pedersen, D>,
+#[derive_where(Debug, Clone; B)]
+pub struct VerifiedTransaction<D: DB, B: Storable<D> = Pedersen> {
+    pub(crate) inner: Transaction<(), (), B, D>,
     pub(crate) hash: TransactionHash,
 }
 
-impl<D: DB> VerifiedTransaction<D> {
+impl<D: DB, B: Storable<D>> VerifiedTransaction<D, B> {
     /// The transaction's hash, fixed when it was checked.
     pub fn hash(&self) -> TransactionHash {
         self.hash
@@ -1310,13 +1336,13 @@ impl<D: DB> VerifiedTransaction<D> {
     ///
     /// The caller asserts the check happened. Constructing this from an unchecked transaction
     /// applies it unchecked.
-    pub fn from_verified(inner: Transaction<(), (), Pedersen, D>, hash: TransactionHash) -> Self {
+    pub fn from_verified(inner: Transaction<(), (), B, D>, hash: TransactionHash) -> Self {
         Self { inner, hash }
     }
 }
 
-impl<D: DB> Deref for VerifiedTransaction<D> {
-    type Target = Transaction<(), (), Pedersen, D>;
+impl<D: DB, B: Storable<D>> Deref for VerifiedTransaction<D, B> {
+    type Target = Transaction<(), (), B, D>;
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
@@ -2430,10 +2456,10 @@ impl<P: ProofKind<D>, D: DB> Debug for ContractCall<P, D> {
 }
 
 impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
-    pub fn context(
+    pub fn context<B: Storable<D> + Serializable>(
         self,
         block: &BlockContext,
-        intent: &Intent<(), (), Pedersen, D>,
+        intent: &Intent<(), (), B, D>,
         state: ContractState<D>,
         com_indices: &Map<Commitment, u64>,
     ) -> CallContext<D> {
