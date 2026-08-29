@@ -505,6 +505,30 @@ where
     }
 }
 
+impl<D, B, C> crate::structure::VerifiedTransaction<D, B, C>
+where
+    D: storage::db::DB,
+    B: storage::storable::Storable<D> + serialize::Serializable,
+    C: storage::storable::Storable<D> + Tagged + transient_crypto::commitment::CommitmentRepr<D>,
+{
+    /// What applying this transaction does.
+    ///
+    /// ⌖ Deliberately on `VerifiedTransaction` rather than on `Transaction`. Applying effects
+    /// assumes the transaction they came from has been checked — proofs, signatures, balance
+    /// — and this type is the ledger's evidence of exactly that. Putting the projection here
+    /// makes the trust contract a type rather than a doc comment: you cannot produce effects
+    /// from something you have not verified.
+    ///
+    /// `None` for a transaction with no effects to project — a rewards claim, say — so a
+    /// caller cannot mistake "nothing to do" for "an empty transaction applied".
+    pub fn effects(&self) -> Option<TransactionEffects> {
+        match &self.inner {
+            crate::structure::Transaction::Standard(stx) => Some(stx.effects()),
+            _ => None,
+        }
+    }
+}
+
 // ── appliers ────────────────────────────────────────────────────────────────────────────
 
 impl<D: storage::db::DB> crate::structure::LedgerState<D> {
