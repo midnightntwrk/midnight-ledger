@@ -32,8 +32,8 @@ use storage::{
     arena::{ArenaHash, ArenaKey},
     storable::Loader,
 };
-use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 use transient_crypto::commitment::CommitmentRepr;
+use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Debug, Eq)]
@@ -199,7 +199,10 @@ impl<D: DB> State<D> {
     }
 
     #[instrument(skip(self, offer, whitelist))]
-    pub fn try_apply<P: Storable<D> + Deserializable, B: Clone + Storable<D> + CommitmentRepr<D>>(
+    pub fn try_apply<
+        P: Storable<D> + Deserializable,
+        B: Clone + Storable<D> + CommitmentRepr<D>,
+    >(
         &self,
         offer: &Offer<P, D, B>,
         whitelist: Option<Map<ContractAddress, ()>>,
@@ -281,6 +284,48 @@ impl<D: DB> State<D> {
                     t.contract_address.clone(),
                     &whitelist,
                 )?;
+                Ok((state, indicies.insert(com, index)))
+            },
+        )?;
+        Ok((new_st, com_indicies))
+    }
+
+    /// [`Self::try_apply_effects`] driven by plain data rather than by a [`ZswapEffects`].
+    ///
+    /// ⌖ Same primitives, same order, same checks — only the container differs.
+    /// `ZswapEffects` is `Storable`, so a consumer that receives effects over a wire must
+    /// rebuild an arena-backed graph before it can apply them, and for the motivating consumer
+    /// that reconstruction costs three orders of magnitude more than reading the octets. The
+    /// per-item primitives already take plain arguments; this exposes that.
+    ///
+    /// Callers holding a `ZswapEffects` should keep using [`Self::try_apply_effects`] — this
+    /// exists for callers that never had one.
+    pub fn try_apply_flat(
+        &self,
+        spends: &[(MerkleTreeDigest, Nullifier, Option<ContractAddress>)],
+        creates: &[(Commitment, Option<ContractAddress>)],
+        transients: &[(Nullifier, Commitment, Option<ContractAddress>)],
+        whitelist: Option<Map<ContractAddress, ()>>,
+    ) -> Result<(Self, Map<Commitment, u64>), TransactionInvalid> {
+        let mut com_indicies = Map::new();
+        let mut new_st = spends
+            .iter()
+            .try_fold(self.clone(), |state, (root, nul, addr)| {
+                state.apply_spend(*root, *nul, addr.map(Sp::new), &whitelist)
+            })?;
+        (new_st, com_indicies) =
+            creates
+                .iter()
+                .try_fold((new_st, com_indicies), |(state, indicies), (com, addr)| {
+                    let (state, com, index) =
+                        state.apply_create(*com, addr.map(Sp::new), &whitelist)?;
+                    Ok((state, indicies.insert(com, index)))
+                })?;
+        (new_st, com_indicies) = transients.iter().try_fold(
+            (new_st, com_indicies),
+            |(state, indicies), (nul, com, addr)| {
+                let (state, com, index) =
+                    state.apply_transient_effect(*nul, *com, addr.map(Sp::new), &whitelist)?;
                 Ok((state, indicies.insert(com, index)))
             },
         )?;
@@ -485,5 +530,120 @@ mod tests {
                 .unwrap(),
         );
         Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
+    }
+
+    /// `try_apply_flat` must be indistinguishable from `try_apply_effects` given the same
+    /// effects — same resulting state, same commitment indices.
+    ///
+    /// ⌖ The effects are built directly rather than via `Offer::effects`, because a fixture
+    /// made of `Output::new` carries no contract address and no transients, which leaves the
+    /// address plumbing and two of the three folds unexercised. Verified: with such a fixture,
+    /// dropping the contract address from `apply_create` and reversing the transient fold both
+    /// pass. The coverage assertions below are what stop that recurring.
+    ///
+    /// ⚠︎ Spends remain uncovered — `apply_spend` needs the root in `past_roots`, which needs
+    /// a witnessed tree this test does not build.
+    #[test]
+    fn flat_application_is_indistinguishable_from_effects_application() {
+        use crate::structure::{CreateEffect, TransientEffect, ZswapEffects};
+        use coin_structure::coin::{Commitment, Nullifier};
+        use coin_structure::contract::ContractAddress;
+        use storage::arena::Sp;
+
+        let addr = |n: u8| ContractAddress(base_crypto::hash::HashOutput([n; 32]));
+        let com = |n: u8| Commitment(base_crypto::hash::HashOutput([n; 32]));
+        let nul = |n: u8| Nullifier(base_crypto::hash::HashOutput([n; 32]));
+
+        let creates = vec![
+            CreateEffect::<InMemoryDB> {
+                coin_com: com(1),
+                contract_address: Some(Sp::new(addr(10))),
+            },
+            CreateEffect {
+                coin_com: com(2),
+                contract_address: None,
+            },
+        ];
+        let transients = vec![
+            TransientEffect::<InMemoryDB> {
+                nullifier: nul(3),
+                coin_com: com(4),
+                contract_address: Some(Sp::new(addr(11))),
+            },
+            TransientEffect {
+                nullifier: nul(5),
+                coin_com: com(6),
+                contract_address: None,
+            },
+        ];
+        let effects = ZswapEffects::<InMemoryDB> {
+            spends: vec![].into(),
+            creates: creates.clone().into(),
+            transients: transients.clone().into(),
+        };
+
+        let flat_creates: Vec<_> = creates
+            .iter()
+            .map(|c| (c.coin_com, c.contract_address.as_ref().map(|a| *a.clone())))
+            .collect();
+        let flat_transients: Vec<_> = transients
+            .iter()
+            .map(|t| {
+                (
+                    t.nullifier,
+                    t.coin_com,
+                    t.contract_address.as_ref().map(|a| *a.clone()),
+                )
+            })
+            .collect();
+
+        // The fixture must exercise what the folds and the address plumbing do.
+        assert!(
+            flat_creates.iter().any(|(_, a)| a.is_some()),
+            "no contract address on any create — dropping it would go unnoticed"
+        );
+        // ⚠︎ More than one, and more than one create: a single-element sequence cannot
+        // detect a reordering, so a one-transient fixture passes against a reversed fold.
+        // Verified — it did.
+        assert!(
+            flat_transients.len() > 1,
+            "fewer than two transients — a reordering would go unnoticed"
+        );
+        assert!(
+            flat_creates.len() > 1,
+            "fewer than two creates — a reordering would go unnoticed"
+        );
+
+        let base = State::<InMemoryDB>::new();
+        let (via_effects, idx_effects) = base.try_apply_effects(&effects, None).unwrap();
+        let (via_flat, idx_flat) = base
+            .try_apply_flat(&[], &flat_creates, &flat_transients, None)
+            .unwrap();
+
+        assert_eq!(idx_effects, idx_flat, "commitment indices must agree");
+        assert_eq!(
+            via_effects.coin_coms.root(),
+            via_flat.coin_coms.root(),
+            "the commitment tree root must agree"
+        );
+        assert_eq!(
+            via_effects.first_free, via_flat.first_free,
+            "the next free index must agree"
+        );
+
+        // ⚠︎ The contract address lives in the tree's *auxiliary* data, which the root, the
+        // indices and `first_free` are all blind to. Without this, dropping the address
+        // entirely from `apply_create` passes every other assertion here — verified.
+        let aux = |st: &State<InMemoryDB>| {
+            st.coin_coms
+                .iter_aux()
+                .map(|(i, (_h, a))| (i, a.map(|x| *x.clone())))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            aux(&via_effects),
+            aux(&via_flat),
+            "the per-commitment contract addresses must agree"
+        );
     }
 }

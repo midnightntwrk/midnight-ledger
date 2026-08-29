@@ -35,8 +35,8 @@ use storage::db::DB;
 use storage::db::InMemoryDB;
 use storage::storable::Loader;
 use storage::storage::Array;
-use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 use transient_crypto::commitment::CommitmentRepr;
+use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 use transient_crypto::curve::{EmbeddedGroupAffine, Fr, InfinityCheck, VerifiedPoint};
 use transient_crypto::encryption;
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
@@ -118,7 +118,21 @@ impl CoinCiphertext<VerifiedPoint> {
     }
 }
 
-impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck + Into<VerifiedPoint>> CoinCiphertext<E> {
+impl<
+    E: Clone
+        + Ord
+        + std::hash::Hash
+        + Debug
+        + Serialize
+        + Serializable
+        + Deserializable
+        + Send
+        + Sync
+        + 'static
+        + InfinityCheck
+        + Into<VerifiedPoint>,
+> CoinCiphertext<E>
+{
     /// The ciphertext with its ephemeral key in wire form.
     ///
     /// ⌖ What an applier hands to an event. It carries the ciphertext and never opens it --
@@ -133,7 +147,20 @@ impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deser
     }
 }
 
-impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Tagged for CoinCiphertext<E> {
+impl<
+    E: Clone
+        + Ord
+        + std::hash::Hash
+        + Debug
+        + Serialize
+        + Serializable
+        + Deserializable
+        + Send
+        + Sync
+        + 'static
+        + InfinityCheck,
+> Tagged for CoinCiphertext<E>
+{
     fn tag() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("zswap-coin-ciphertext[v1]")
     }
@@ -143,7 +170,20 @@ impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deser
 }
 tag_enforcement_test!(CoinCiphertext);
 
-impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Serializable for CoinCiphertext<E> {
+impl<
+    E: Clone
+        + Ord
+        + std::hash::Hash
+        + Debug
+        + Serialize
+        + Serializable
+        + Deserializable
+        + Send
+        + Sync
+        + 'static
+        + InfinityCheck,
+> Serializable for CoinCiphertext<E>
+{
     fn serialize(&self, writer: &mut impl std::io::Write) -> Result<(), std::io::Error> {
         <E as Serializable>::serialize(&self.c, writer)?;
         // Because this is unversioned we need not send COIN_CIPHERTEXT_LEN
@@ -163,7 +203,20 @@ impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deser
     }
 }
 
-impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Deserializable for CoinCiphertext<E> {
+impl<
+    E: Clone
+        + Ord
+        + std::hash::Hash
+        + Debug
+        + Serialize
+        + Serializable
+        + Deserializable
+        + Send
+        + Sync
+        + 'static
+        + InfinityCheck,
+> Deserializable for CoinCiphertext<E>
+{
     fn deserialize(
         reader: &mut impl std::io::Read,
         recursive_depth: u32,
@@ -479,7 +532,9 @@ impl<P: Clone + Storable<D>, D: DB, B: Clone + Storable<D> + CommitmentRepr<D>> 
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Storable<D> + Debug + CommitmentRepr<D>> Debug for Transient<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug + CommitmentRepr<D>> Debug
+    for Transient<P, D, B>
+{
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match self.contract_address.clone() {
             Some(addr) => {
@@ -713,7 +768,9 @@ pub fn normalize_deltas<T: Ord, I: Iterator<Item = (T, i128)>>(deltas: I) -> Vec
     new_deltas
 }
 
-impl<P: Clone + Ord + Storable<D>, D: DB, B: Clone + Ord + Storable<D> + CommitmentRepr<D>> Offer<P, D, B> {
+impl<P: Clone + Ord + Storable<D>, D: DB, B: Clone + Ord + Storable<D> + CommitmentRepr<D>>
+    Offer<P, D, B>
+{
     pub fn normalize(&mut self) {
         self.inputs = self.inputs.iter_deref().sorted().cloned().collect();
         self.outputs = self.outputs.iter_deref().sorted().cloned().collect();
