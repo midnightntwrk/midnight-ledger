@@ -208,12 +208,12 @@ impl<P> AuthorizedClaim<P> {
 }
 
 #[derive(Storable, Serialize)]
-#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P, B)]
 #[tag = "zswap-input[v2]"]
 #[storable(db = D)]
-pub struct Input<P: Storable<D>, D: DB> {
+pub struct Input<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
     pub nullifier: Nullifier,
-    pub value_commitment: Pedersen,
+    pub value_commitment: B,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub merkle_tree_root: MerkleTreeDigest,
     pub proof: Arc<P>,
@@ -270,7 +270,7 @@ impl<D: DB> Input<ProofPreimage, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB> Debug for Input<P, D> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Input<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match &self.contract_address {
             Some(addr) => write!(
@@ -297,12 +297,12 @@ impl<D: DB> Input<ProofPreimage, D> {
 }
 
 #[derive(Storable, Serialize)]
-#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P, B)]
 #[tag = "zswap-output[v2]"]
 #[storable(db = D)]
-pub struct Output<P: Storable<D>, D: DB> {
+pub struct Output<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
     pub coin_com: Commitment,
-    pub value_commitment: Pedersen,
+    pub value_commitment: B,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
     pub proof: Arc<P>,
@@ -361,7 +361,7 @@ impl<D: DB> Output<ProofPreimage, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Output<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match &self.contract_address {
             Some(addr) => write!(
@@ -375,14 +375,14 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 }
 
 #[derive(Storable, Serialize)]
-#[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
+#[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P, B)]
 #[tag = "zswap-transient[v2]"]
 #[storable(db = D)]
-pub struct Transient<P: Storable<D>, D: DB> {
+pub struct Transient<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
     pub nullifier: Nullifier,
     pub coin_com: Commitment,
-    pub value_commitment_input: Pedersen,
-    pub value_commitment_output: Pedersen,
+    pub value_commitment_input: B,
+    pub value_commitment_output: B,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
     pub proof_input: Arc<P>,
@@ -414,11 +414,11 @@ impl<D: DB> Transient<ProofPreimage, D> {
     }
 }
 
-impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
-    pub fn as_input(&self) -> Input<P, D> {
+impl<P: Clone + Storable<D>, D: DB, B: Clone + Storable<D>> Transient<P, D, B> {
+    pub fn as_input(&self) -> Input<P, D, B> {
         Input {
             nullifier: self.nullifier,
-            value_commitment: self.value_commitment_input,
+            value_commitment: self.value_commitment_input.clone(),
             contract_address: self.contract_address.clone(),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
                 .try_update_hash(0, self.coin_com.0, ())
@@ -430,10 +430,10 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
         }
     }
 
-    pub fn as_output(&self) -> Output<P, D> {
+    pub fn as_output(&self) -> Output<P, D, B> {
         Output {
             coin_com: self.coin_com,
-            value_commitment: self.value_commitment_output,
+            value_commitment: self.value_commitment_output.clone(),
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
             proof: self.proof_output.clone(),
@@ -441,7 +441,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB> Debug for Transient<P, D> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Transient<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match self.contract_address.clone() {
             Some(addr) => {
@@ -548,7 +548,7 @@ pub struct ZswapEffects<D: DB> {
 tag_enforcement_test!(ZswapEffects<InMemoryDB>);
 
 #[derive(Storable)]
-#[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
+#[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P, B)]
 #[tag = "zswap-offer[v5]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
@@ -557,14 +557,14 @@ tag_enforcement_test!(ZswapEffects<InMemoryDB>);
 /// All vectors must be sorted to be valid, and `deltas` must be key-unique
 /// (i.e. not contain tuples sharing their first element `(a, b)` and `(a, c)`).
 /// This is to have a canonical representation while operating on sets and maps.
-pub struct Offer<P: Storable<D>, D: DB> {
+pub struct Offer<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
     /// A set of Inputs
-    pub inputs: Array<Input<P, D>, D>,
+    pub inputs: Array<Input<P, D, B>, D>,
     /// A set of Outputs
-    pub outputs: Array<Output<P, D>, D>,
+    pub outputs: Array<Output<P, D, B>, D>,
     /// A set of "transient" Zswap coins: Coins that are created and spent in
     /// the same transaction
-    pub transient: Array<Transient<P, D>, D>,
+    pub transient: Array<Transient<P, D, B>, D>,
     /// A map from types (coin colors) to the offer value in this type.
     /// A positive value means more coins have been spent, a negative value
     /// means more coins were created.
@@ -634,7 +634,7 @@ impl<P: Storable<D>, D: DB> Offer<P, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB> Debug for Offer<P, D> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Offer<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter
             .debug_map()

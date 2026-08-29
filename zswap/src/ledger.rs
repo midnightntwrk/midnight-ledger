@@ -149,9 +149,9 @@ impl<D: DB> State<D> {
         self.apply_create(coin_com, contract_address, whitelist)
     }
 
-    fn apply_input<P: Storable<D>>(
+    fn apply_input<P: Storable<D>, B: Clone + Storable<D>>(
         self,
-        inp: Input<P, D>,
+        inp: Input<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<Self, TransactionInvalid> {
         self.apply_spend(
@@ -162,17 +162,17 @@ impl<D: DB> State<D> {
         )
     }
 
-    fn apply_output<P: Storable<D>>(
+    fn apply_output<P: Storable<D>, B: Clone + Storable<D>>(
         self,
-        out: Output<P, D>,
+        out: Output<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
         self.apply_create(out.coin_com, out.contract_address, whitelist)
     }
 
-    fn apply_transient<P: Storable<D>>(
+    fn apply_transient<P: Storable<D>, B: Clone + Storable<D>>(
         self,
-        trans: Transient<P, D>,
+        trans: Transient<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
     ) -> Result<(Self, Commitment, u64), TransactionInvalid> {
         self.apply_transient_effect(
@@ -198,9 +198,9 @@ impl<D: DB> State<D> {
     }
 
     #[instrument(skip(self, offer, whitelist))]
-    pub fn try_apply<P: Storable<D> + Deserializable>(
+    pub fn try_apply<P: Storable<D> + Deserializable, B: Clone + Storable<D>>(
         &self,
-        offer: &Offer<P, D>,
+        offer: &Offer<P, D, B>,
         whitelist: Option<Map<ContractAddress, ()>>,
     ) -> Result<(Self, Map<Commitment, u64>), TransactionInvalid> {
         let mut com_indicies = Map::new();
