@@ -22,6 +22,7 @@ extern crate tracing;
 pub mod annotation;
 pub mod construct;
 pub mod dust;
+pub mod effects;
 pub mod error;
 pub mod events;
 #[path = "tracing.rs"]

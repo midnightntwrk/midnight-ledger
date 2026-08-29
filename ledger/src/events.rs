@@ -30,9 +30,9 @@ use storage::{
     db::DB,
     storable::Loader,
 };
+use transient_crypto::curve::VerifiedPoint;
 use transient_crypto::merkle_tree::TreeInsertionPath;
 use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};
-use transient_crypto::curve::VerifiedPoint;
 
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]

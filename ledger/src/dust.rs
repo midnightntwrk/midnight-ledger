@@ -17,22 +17,21 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, ProofKind, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
-    UtxoState,
+    ErasedIntent, IntentHash, ProofKind, ProofPreimageMarker, SPECKS_PER_DUST, STARS_PER_NIGHT,
+    SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
+#[cfg(feature = "proving")]
+use base_crypto::data_provider::MidnightDataProvider;
+#[cfg(feature = "proof-verifying")]
+use base_crypto::fab::AlignedValue;
+use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment, Value};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
     signatures::VerifyingKey,
     time::{Duration, Timestamp},
 };
-#[cfg(feature = "proving")]
-use base_crypto::data_provider::MidnightDataProvider;
-use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment, Value};
-#[cfg(feature = "proof-verifying")]
-use base_crypto::fab::AlignedValue;
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
 #[cfg(feature = "proving")]
@@ -73,6 +72,8 @@ use transient_crypto::proofs::{ProvingKeyMaterial, Resolver};
 // Prover-only, but referenced by the gated methods below, so gated the same way.
 #[cfg(feature = "proving")]
 use crate::structure::ProofMarker;
+#[cfg(feature = "proof-verifying")]
+use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 #[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProvingError, ProvingProvider};
 use transient_crypto::{
@@ -82,8 +83,6 @@ use transient_crypto::{
     merkle_tree::{MerkleTree, MerkleTreeDigest},
     repr::FieldRepr,
 };
-#[cfg(feature = "proof-verifying")]
-use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 #[cfg(feature = "proof-verifying")]
 use zswap::verify::with_outputs;
