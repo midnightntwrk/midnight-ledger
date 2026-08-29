@@ -486,6 +486,30 @@ impl EmbeddedGroupAffine {
         embedded::AffineExtended::from_xy(x.0, y.0).map(|p| EmbeddedGroupAffine(p.into_subgroup()))
     }
 
+    /// Builds a point from coordinates without checking either the curve equation or the
+    /// subgroup.
+    ///
+    /// ⌖ **Why this exists.** Both safe routes to a point cost a scalar-multiplication's worth of
+    /// field arithmetic, measured at ~9.2 M gas on a metered interpreter: [`Self::new`] clears
+    /// the cofactor, and deserializing a compressed encoding recovers `y` by modular square
+    /// root. For a point that a verifier has *already* accepted, both are re-establishing a fact
+    /// that is already established -- and an applier that only hashes commitments pays it for
+    /// nothing.
+    ///
+    /// # Safety
+    ///
+    /// This is not memory-unsafe in Rust's sense; it is marked `unsafe` because the obligation is
+    /// as serious and there is no other way to make it un-callable by accident. The caller must
+    /// guarantee that `(x, y)` came from a point that was on the curve and in the prime-order
+    /// subgroup -- in practice, that it was read back from a value some verifier accepted.
+    ///
+    /// Violating that yields a value that is not a group element. Arithmetic on it is meaningless
+    /// rather than merely wrong: sums will not balance, and a commitment scheme whose sums do not
+    /// balance is not binding.
+    pub unsafe fn from_raw_unchecked(x: Fr, y: Fr) -> Self {
+        EmbeddedGroupAffine(embedded::Affine::from_raw_unchecked(x.0, y.0))
+    }
+
     /// Retrieves the curve point's affine `x` coordinate.
     /// Or `None` if this is the identity
     pub fn x(&self) -> Option<Fr> {
@@ -682,6 +706,29 @@ mod tests {
             elem,
             <EmbeddedGroupAffine as Deserializable>::deserialize(&mut writer.as_slice(), 0)
                 .unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod from_raw_unchecked_tests {
+    use super::*;
+
+    /// The constructor must agree with the checked routes on a point that *is* valid — otherwise
+    /// it is not a cheaper way to the same answer, it is a different answer.
+    #[test]
+    fn it_agrees_with_the_checked_route_on_a_valid_point() {
+        let g = EmbeddedGroupAffine::generator();
+        let (x, y) = (g.x().expect("not identity"), g.y().expect("not identity"));
+
+        // SAFETY: `g` is the curve's own generator, so it is on the curve and in the
+        // prime-order subgroup; its coordinates round-trip by definition.
+        let raw = unsafe { EmbeddedGroupAffine::from_raw_unchecked(x, y) };
+        assert_eq!(raw, g, "the cheap route must reach the same point");
+        assert_eq!(
+            EmbeddedGroupAffine::new(x, y).expect("on the curve"),
+            g,
+            "and so must the checked one, or the comparison proves nothing"
         );
     }
 }
