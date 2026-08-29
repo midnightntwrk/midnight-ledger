@@ -1646,6 +1646,93 @@ mod tests {
         );
     }
 
+    /// **The equivalence gate for the unshielded family.**
+    ///
+    /// The same offer applied two ways — through `UtxoState::apply_offer`, which derives each
+    /// created utxo from the intent hash and the output index, and through
+    /// `UnshieldedDelta::from_offer` + `apply_unshielded_delta`, where the derivation happened
+    /// in the producer. The resulting states must be indistinguishable.
+    ///
+    /// ⌖ This is the only test here that compares the *two paths* rather than checking one
+    /// against a written-out expectation. An expectation can be wrong in the same way the code
+    /// is; the ledger's own applier cannot.
+    #[test]
+    fn the_effects_path_and_apply_offer_reach_the_same_state() {
+        use crate::semantics::TransactionContext;
+        use crate::structure::{Intent, UnshieldedOffer, UtxoOutput, UtxoState};
+        use base_crypto::hash::HashOutput;
+        use coin_structure::coin::{UnshieldedTokenType, UserAddress};
+        use onchain_runtime::context::BlockContext;
+        use storage::db::InMemoryDB;
+        use transient_crypto::commitment::Pedersen;
+
+        let ty = UnshieldedTokenType(HashOutput([8; 32]));
+        let spender = VerifyingKey::default();
+        let owner = UserAddress::from(spender.clone());
+        let tblock = Timestamp::from_secs(900);
+
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![].into(),
+            outputs: vec![
+                UtxoOutput {
+                    value: 11,
+                    owner,
+                    type_: ty,
+                },
+                UtxoOutput {
+                    value: 22,
+                    owner,
+                    type_: ty,
+                },
+            ]
+            .into(),
+            signatures: vec![].into(),
+        };
+        let intent: Intent<(), (), Pedersen, InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: Some(storage::arena::Sp::new(offer.clone())),
+            fallible_unshielded_offer: None,
+            actions: vec![].into(),
+            dust_actions: None,
+            ttl: tblock,
+            binding_commitment: Pedersen::default(),
+        };
+
+        const SEG: u16 = 2;
+        let ctx = TransactionContext::<InMemoryDB> {
+            ref_state: crate::structure::LedgerState::new("test"),
+            block_context: BlockContext {
+                tblock,
+                tblock_err: 0,
+                parent_block_hash: HashOutput([0; 32]),
+                last_block_time: tblock,
+            },
+            whitelist: None,
+        };
+
+        let base = UtxoState::<InMemoryDB>::default();
+        let via_apply = base
+            .apply_offer(&offer, &intent, SEG, &ctx)
+            .expect("no inputs, so nothing to be missing");
+
+        let delta = UnshieldedDelta::from_offer(&offer, intent.intent_hash(SEG));
+        let via_effects = base
+            .apply_unshielded_delta(&delta, tblock)
+            .expect("same offer, so the same outcome");
+
+        // Compare the utxo sets themselves, not a summary of them.
+        let members = |st: &UtxoState<InMemoryDB>| {
+            let mut v: Vec<Utxo> = st.utxos.keys().collect();
+            v.sort();
+            v
+        };
+        assert!(!members(&via_apply).is_empty(), "fixture created no utxos");
+        assert_eq!(
+            members(&via_apply),
+            members(&via_effects),
+            "the two paths must create the same utxos, with the same identities"
+        );
+    }
+
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
     /// only as the input supplies elements, so a four-octet header cannot ask for a gigabyte.
     #[test]
