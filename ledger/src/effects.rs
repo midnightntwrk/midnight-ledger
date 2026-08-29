@@ -268,6 +268,45 @@ impl ZswapDelta {
     }
 }
 
+impl UnshieldedDelta {
+    /// Project an unshielded offer onto what applying it needs.
+    ///
+    /// ⚠︎ `intent_hash` is a parameter rather than derived here, and that is deliberate. The
+    /// creating hash is `parent.intent_hash(segment_id)`, while replay protection uses
+    /// `intent_hash(0)` — segment-independent, so a replay cannot be relocated to another
+    /// segment. Deriving it inside this function would put the choice somewhere the caller
+    /// cannot see it, and picking the wrong one yields utxos under identities nothing else in
+    /// the system agrees with.
+    ///
+    /// The `output_no` is the offer's own enumeration order, exactly as `apply_offer` assigns
+    /// it. Signatures are dropped: whoever produced these effects has already checked them.
+    pub fn from_offer<S, D>(
+        offer: &crate::structure::UnshieldedOffer<S, D>,
+        intent_hash: IntentHash,
+    ) -> Self
+    where
+        D: storage::db::DB,
+        S: crate::structure::SignatureKind<D>,
+    {
+        UnshieldedDelta {
+            spends: offer.inputs.iter_deref().cloned().collect(),
+            creates: offer
+                .outputs
+                .iter_deref()
+                .enumerate()
+                .map(|(output_no, o)| Utxo {
+                    value: o.value,
+                    owner: o.owner,
+                    type_: o.type_,
+                    intent_hash,
+                    // Cast safe, as `apply_offer` assumes fewer than 4B outputs.
+                    output_no: output_no as u32,
+                })
+                .collect(),
+        }
+    }
+}
+
 // ── the flat codec ──────────────────────────────────────────────────────────────────────
 //
 // Fixed-width fields and length-prefixed sequences, little-endian, no tags and no
@@ -879,6 +918,79 @@ mod tests {
         ours.put(&mut buf);
         let mut inp = &buf[..];
         assert_eq!(ZswapDelta::get(&mut inp).as_ref(), Some(&ours));
+        assert!(inp.is_empty());
+    }
+
+    /// **The unshielded gate.** `apply_offer` derives each created utxo from the intent hash
+    /// plus the output's *enumeration index*; the expectation below is written out by hand
+    /// rather than re-derived, so a producer that enumerated differently, dropped a field, or
+    /// used the wrong hash cannot agree with it by construction.
+    #[test]
+    fn the_unshielded_projection_matches_what_apply_offer_derives() {
+        use crate::structure::{UnshieldedOffer, UtxoOutput};
+        use base_crypto::hash::HashOutput;
+        use coin_structure::coin::UnshieldedTokenType;
+        use storage::db::InMemoryDB;
+
+        let ty = UnshieldedTokenType(HashOutput([8; 32]));
+        let owner = coin_structure::coin::UserAddress(HashOutput([9; 32]));
+        // A sentinel distinct from anything the producer could derive on its own, so using
+        // some *other* intent hash would be visible.
+        let ih = IntentHash(HashOutput([0xAB; 32]));
+
+        let spend = UtxoSpend {
+            value: 5,
+            owner: Default::default(),
+            type_: ty,
+            intent_hash: IntentHash(HashOutput([1; 32])),
+            output_no: 3,
+        };
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![spend.clone()].into(),
+            outputs: vec![
+                UtxoOutput {
+                    value: 11,
+                    owner,
+                    type_: ty,
+                },
+                UtxoOutput {
+                    value: 22,
+                    owner,
+                    type_: ty,
+                },
+            ]
+            .into(),
+            signatures: vec![].into(),
+        };
+
+        let d = UnshieldedDelta::from_offer(&offer, ih);
+
+        assert_eq!(d.spends, vec![spend], "spends pass through untouched");
+        assert_eq!(
+            d.creates,
+            vec![
+                Utxo {
+                    value: 11,
+                    owner,
+                    type_: ty,
+                    intent_hash: ih,
+                    output_no: 0,
+                },
+                Utxo {
+                    value: 22,
+                    owner,
+                    type_: ty,
+                    intent_hash: ih,
+                    output_no: 1,
+                },
+            ],
+            "creates carry the given intent hash and the offer's enumeration order"
+        );
+
+        let mut buf = Vec::new();
+        d.put(&mut buf);
+        let mut inp = &buf[..];
+        assert_eq!(UnshieldedDelta::get(&mut inp).as_ref(), Some(&d));
         assert!(inp.is_empty());
     }
 
