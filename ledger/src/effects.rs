@@ -225,7 +225,7 @@ pub struct DustRegistrationEffect {
 /// ```text
 /// Transcript.gas        RunningCost, plain
 /// Transcript.effects    HashSet/HashMap over flat leaves — Nullifier, TokenType, u128
-/// Transcript.program    Array<Op, D> → Vec<Op>; ~28 nullary or small-immediate variants
+/// Transcript.program    Array<Op, D> → Vec<Op>; 28 variants, but see the ⚠︎ below
 /// Transcript.version    a small enum
 /// ```
 ///
@@ -239,9 +239,27 @@ pub struct DustRegistrationEffect {
 ///   verification machinery for a ᴢᴋ upgrade rather than touching its data. The full path is
 ///   the right answer for it permanently, not a stopgap.
 ///
-/// ⚠︎ Until the `Op` codec exists, all three take the full path. That is a *staging*
-/// decision now rather than a scoping one — the remaining work is a tag-and-payload codec for
-/// ~28 mostly-nullary variants, not a design question.
+/// ⚠︎ **Corrected.** An earlier revision of this comment called the remaining work a
+/// tag-and-payload codec for ~28 mostly-nullary variants and "not a design question". Reading
+/// the apply path falsifies both halves:
+///
+/// - `semantics.rs:1328` applies a `Call` by *running* the transcript
+///   (`QueryContext::run_transcript` → `query`) against the contract's state. The new state is
+///   the run's **output**; it appears nowhere in the declared effects. So for contracts the
+///   declared effects can never be sufficient the way `UnshieldedDelta` is — there, the effect
+///   *is* the delta and applying it is a set insertion. `transcript.effects` is only checked
+///   against the run (`EffectsMismatch`); it does not stand in for it.
+/// - Two of the 28 variants are not small. `Push { value: StateValue<D> }` carries the whole
+///   recursive arena value — `Cell(Sp<AlignedValue>)`, `Map(HashMap<…>)`,
+///   `Array(Array<StateValue>)`, `BoundedMerkleTree` (`onchain-state/src/state.rs:79`) — and
+///   `Popeq { result: M::ReadResult }` is an `AlignedValue`. The rest really are nullary or a
+///   `u8`/`u32` immediate.
+///
+/// The consequence is a smaller claim, not a dead one. On the contract path the applier still
+/// skips proof verification, signature checks and well-formedness, but it **must** run the VM,
+/// and the VM needs real `StateValue`s — so a flat codec can replace the transcript's
+/// *encoding*, never its work. That is a different and much weaker win than the one the
+/// zswap/unshielded/dust families deliver, and it is worth measuring before it is built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContractsPresent {
     /// No contract actions; the effects above are the whole transaction.
