@@ -1223,6 +1223,49 @@ pub(crate) struct IrLoader<'a, D: DB> {
     key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
 }
 
+impl<'a, D: DB> IrLoader<'a, D> {
+    /// The intermediate representation for `key`, with the recursion bound checked.
+    ///
+    /// ⌖ Outlined from `Loader::get` for the same reason as [`BackendLoader::repr`]: `get` is
+    /// generic over the stored type, so anything left inside it is duplicated once per
+    /// `Storable`. None of this depends on that type.
+    fn ir_for(
+        &self,
+        key: &ArenaHash<D::Hasher>,
+    ) -> Result<&'a IntermediateRepr<D>, std::io::Error> {
+        if self.recursion_depth > serialize::RECURSION_LIMIT {
+            return Err(std::io::Error::other("Reached recursion limit"));
+        }
+        self.all
+            .get(key)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "IR not found in `all` map"))
+    }
+
+    /// Resolve an ɪʀ's child hashes to the keys `from_binary_repr` expects.
+    fn child_keys(&self, ir: &IntermediateRepr<D>) -> Vec<ArenaKey<D::Hasher>> {
+        ir.children
+            .iter()
+            .map(|k| {
+                self.key_to_child_repr
+                    .get(k)
+                    .expect("should be able to convert child ArenaHash to ArenaKey")
+                    .clone()
+            })
+            .collect()
+    }
+
+    /// The loader for one level down.
+    fn child_loader(&self) -> IrLoader<'a, D> {
+        IrLoader {
+            arena: self.arena,
+            all: self.all,
+            recursion_depth: self.recursion_depth + 1,
+            visited: self.visited.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 impl<'a, D: DB> IrLoader<'a, D> {
     pub(crate) fn new(
@@ -1284,29 +1327,15 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             }
         }
 
-        // Otherwise, deserialize Sp from the IRs.
-        let ir = self
-            .all
-            .get(key)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "IR not found in `all` map"))?;
-        if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
-        let loader = IrLoader {
-            arena: self.arena,
-            all: self.all,
-            recursion_depth: self.recursion_depth + 1,
-            visited: self.visited.clone(),
-            key_to_child_repr: self.key_to_child_repr.clone(),
-        };
+        // Otherwise, deserialize Sp from the IRs. Everything up to `from_binary_repr` is
+        // independent of `T` and lives on `IrLoader<D>`, so it exists once per back end
+        // rather than once per stored type.
+        let ir = self.ir_for(key)?;
+        let loader = self.child_loader();
+        let children = self.child_keys(ir);
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
-            &mut ir.children.clone().into_iter().map(|k| {
-                self.key_to_child_repr
-                    .get(&k)
-                    .expect("should be able to convert child ArenaHash to ArenaKey")
-                    .clone()
-            }),
+            &mut children.into_iter(),
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
