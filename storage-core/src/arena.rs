@@ -675,14 +675,26 @@ impl<D: DB> Arena<D> {
         sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
         key: &ArenaHash<D::Hasher>,
     ) -> Option<Arc<T>> {
-        let type_id = TypeId::of::<T>();
-        let cache_key = (key.clone(), type_id);
-        let sp_cache = RefCell::borrow(sp_cache);
-        sp_cache
-            .get(&cache_key)
+        // The `downcast` is safe because we only insert `Arc`s of type `T`.
+        self.read_sp_cache_erased(sp_cache, key, TypeId::of::<T>())
+            .map(|arc| arc.downcast::<T>().expect("the cache is keyed by TypeId"))
+    }
+
+    /// The body of [`Self::read_sp_cache_locked`], without recovering the concrete type.
+    ///
+    /// ⌖ Since `Sp` stores its payload erased, most callers immediately put the `Arc<T>` back
+    /// into an `Arc<dyn Any + Send + Sync>` -- the downcast and re-upcast cancel. Reading the
+    /// erased handle directly skips both, and the lookup itself exists once rather than once
+    /// per stored type.
+    fn read_sp_cache_erased(
+        &self,
+        sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
+        key: &ArenaHash<D::Hasher>,
+        type_id: TypeId,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        RefCell::borrow(sp_cache)
+            .get(&(key.clone(), type_id))
             .and_then(|weak| weak.upgrade())
-            // The `downcast` is safe because we only insert `Arc`s of type `T`.
-            .map(|arc| arc.clone().downcast::<T>().unwrap())
     }
 
     /// Invariant: any `key` written to this cache must already be present in
@@ -1137,11 +1149,13 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             // Avoid race: keep the metadata locked until we call `Sp::eager` below, so that
             // no one can sneak in and remove `key` from the metadata in the mean time.
             let metadata_lock = self.arena.lock_metadata();
-            let maybe_arc = self
-                .arena
-                .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
+            let maybe_arc = self.arena.read_sp_cache_erased(
+                &self.arena.lock_sp_cache(),
+                key,
+                TypeId::of::<T>(),
+            );
             if let Some(arc) = maybe_arc {
-                return Ok(Sp::eager(
+                return Ok(Sp::eager_erased(
                     self.arena.clone(),
                     key.clone(),
                     arc,
@@ -1456,8 +1470,19 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     where
         T: Sized + Any + Send + Sync,
     {
+        Sp::eager_erased(arena, root, arc as Arc<dyn Any + Send + Sync>, child_repr)
+    }
+
+    /// [`Self::eager`] for a payload that is already erased — which, since the sp-cache
+    /// stores it that way, is what every internal caller actually has.
+    fn eager_erased(
+        arena: Arena<D>,
+        root: ArenaHash<D::Hasher>,
+        arc: Arc<dyn Any + Send + Sync>,
+        child_repr: ArenaKey<D::Hasher>,
+    ) -> Self {
         let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
-        let _ = sp.data.set(arc as Arc<dyn Any + Send + Sync>);
+        let _ = sp.data.set(arc);
         sp
     }
 
@@ -1803,9 +1828,9 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             // acquires sp_cache).
             let _metadata_lock = self.arena.lock_metadata();
             let cache_lock = self.arena.lock_sp_cache();
-            let maybe_arc = self
-                .arena
-                .read_sp_cache_locked::<T>(&cache_lock, &self.root);
+            let maybe_arc =
+                self.arena
+                    .read_sp_cache_erased(&cache_lock, &self.root, TypeId::of::<T>());
             let arc: Arc<dyn Any + Send + Sync> = match maybe_arc {
                 Some(arc) => arc, // upcast from Arc<T>
                 None => {
