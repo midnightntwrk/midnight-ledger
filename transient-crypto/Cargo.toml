@@ -18,6 +18,8 @@ data-provider = ["base-crypto/data-provider"]
 cli = ["base-crypto/cli"]
 # ⚠︎ See the doc on the octet representation of `Pedersen`. For appliers only.
 unsafe-commitments-as-octets = []
+# Count point materialisations -- see `curve::POINTS`. Off by default.
+point-counter = []
 proptest = [
   "dep:proptest",
   "dep:proptest-derive",

@@ -454,8 +454,19 @@ impl Serializable for EmbeddedGroupAffine {
     }
 }
 
+/// Counts every point materialised from octets or coordinates.
+///
+/// ⌖ Behind `point-counter`, off by default. Both routes to a point cost a scalar
+/// multiplication's worth of field arithmetic -- ~9.2 M gas on a metered interpreter -- and when
+/// a transaction's cost is dominated by them, "how many and from where" is the only question
+/// that matters. Division by a per-point price answers it badly; this answers it.
+#[cfg(feature = "point-counter")]
+pub static POINTS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 impl Deserializable for EmbeddedGroupAffine {
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
+        #[cfg(feature = "point-counter")]
+        POINTS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let mut data = <<embedded::AffineExtended as GroupEncoding>::Repr>::default();
         reader.read_exact(data.as_mut())?;
         <Option<_>>::from(embedded::Affine::from_bytes(&data).map(EmbeddedGroupAffine)).ok_or_else(
@@ -483,6 +494,8 @@ impl EmbeddedGroupAffine {
     /// Creates a new elliptic curve element from it's affine coordinates. It *is*
     /// checked for validity.
     pub fn new(x: Fr, y: Fr) -> Option<Self> {
+        #[cfg(feature = "point-counter")]
+        POINTS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         embedded::AffineExtended::from_xy(x.0, y.0).map(|p| EmbeddedGroupAffine(p.into_subgroup()))
     }
 

@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Provides the transaction format and semantics for Midnight."
 
 [features]
+point-counter = ["transient-crypto/point-counter"]
 default = ["proof-verifying", "proving"]
 # The prover. On by default, so nothing changes for an existing consumer; off, a
 # verify-only build does not compile it. Verifying and proving are different jobs with very

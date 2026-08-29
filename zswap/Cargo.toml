@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Implementation of the Zswap shielded token atomic swap mechanism."
 
 [features]
+point-counter = ["transient-crypto/point-counter"]
 default = ["proof-verifying", "proving"]
 proof-verifying = []
 # The prover -- see the note in ../ledger/Cargo.toml. On by default.
