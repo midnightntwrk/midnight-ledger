@@ -78,6 +78,43 @@ pub static HASHES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64
 #[cfg(feature = "hash-counter")]
 pub static HASH_BYTES: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 
+/// Suspects, counted rather than inferred.
+///
+/// ⌖ Both phases of an accumulate run have the same *opcode* shape, and a program-counter
+/// histogram put 72% of one phase in 448 octets that read as reference-count management. That is
+/// a reading of unlabelled disassembly, and readings have been wrong here before -- hashing
+/// looked like 6,300 calls when it was 659, and one curve point looked like three. So each
+/// suspect gets a counter and the histogram gets checked against numbers.
+///
+/// Behind `hash-counter`, which is already plumbed through the crates that matter.
+#[cfg(feature = "hash-counter")]
+pub mod counters {
+    use core::sync::atomic::AtomicU64;
+
+    /// `Sp::clone` — a reference taken.
+    pub static SP_CLONE: AtomicU64 = AtomicU64::new(0);
+    /// `Sp::drop` — a reference released.
+    pub static SP_DROP: AtomicU64 = AtomicU64::new(0);
+    /// `Arena::alloc` — a value moved into the arena.
+    pub static ALLOC: AtomicU64 = AtomicU64::new(0);
+    /// `Arena::get_lazy` — a root resolved without materialising its children.
+    pub static GET_LAZY: AtomicU64 = AtomicU64::new(0);
+    /// `Sp::unload` — a loaded value dropped back to its key.
+    pub static UNLOAD: AtomicU64 = AtomicU64::new(0);
+
+    /// Read them all, in the order above.
+    pub fn snapshot() -> [u64; 5] {
+        use core::sync::atomic::Ordering::Relaxed;
+        [
+            SP_CLONE.load(Relaxed),
+            SP_DROP.load(Relaxed),
+            ALLOC.load(Relaxed),
+            GET_LAZY.load(Relaxed),
+            UNLOAD.load(Relaxed),
+        ]
+    }
+}
+
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
     child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
@@ -545,6 +582,8 @@ impl<D: DB> Arena<D> {
     /// Insert `value` into the arena, and cache its data in the back-end until
     /// all `Sp`s for this data are dropped.
     pub fn alloc<T: Storable<D>>(&self, value: T) -> Sp<T, D> {
+        #[cfg(feature = "hash-counter")]
+        counters::ALLOC.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let children = value.children();
         assert!(
             children.len() <= 16,
@@ -740,6 +779,8 @@ impl<D: DB> Arena<D> {
         &self,
         key: &TypedArenaKey<T, D::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
+        #[cfg(feature = "hash-counter")]
+        counters::GET_LAZY.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         self.get_lazy_unversioned(&key.key)
     }
 
@@ -1436,6 +1477,8 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
+        #[cfg(feature = "hash-counter")]
+        counters::SP_CLONE.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
@@ -1607,6 +1650,8 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// Warning: If this *is* the last reference to the Sp, and the Sp is *not* persisted,
     /// dereferencing it after unload may fail, because nothing is keeping the data alive.
     pub fn unload(&mut self) {
+        #[cfg(feature = "hash-counter")]
+        counters::UNLOAD.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         // Return our data to the uninitialized state, dropping the `Arc` in
         // `data`, if any. This must happen before `gc_weak_pointer`, so that
         // the strong count of the Arc is decremented before we check if the
@@ -1807,6 +1852,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
+        #[cfg(feature = "hash-counter")]
+        counters::SP_DROP.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         self.unload();
         // Decrement the ref count only when the Sp is truly destroyed.
         // This must happen after unload(), which is responsible for cleaning
