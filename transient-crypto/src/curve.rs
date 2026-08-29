@@ -490,6 +490,91 @@ impl Tagged for EmbeddedGroupAffine {
 }
 tag_enforcement_test!(EmbeddedGroupAffine);
 
+/// Whether a decoded point is the identity, asked of whichever representation is in use.
+///
+/// ⌖ ᴢꜱᴡᴀᴘ rejects a ciphertext whose ephemeral key is the point at infinity, at decode. That
+/// check belongs to whoever decodes a *point*; a representation holding octets has not decoded
+/// one and cannot answer, so it says `false` and the check is discharged by the verifier that
+/// did decode it. Same obligation as the rest of the verified path, stated where it is skipped
+/// rather than left implicit.
+pub trait InfinityCheck {
+    /// True when this decodes to the identity — the value ᴢꜱᴡᴀᴘ refuses in a ciphertext.
+    fn is_infinity_encoding(&self) -> bool;
+}
+
+impl InfinityCheck for EmbeddedGroupAffine {
+    fn is_infinity_encoding(&self) -> bool {
+        self.is_infinity()
+    }
+}
+
+impl InfinityCheck for VerifiedPoint {
+    /// A verifier rejected this already; nothing here decoded a point to ask.
+    fn is_infinity_encoding(&self) -> bool {
+        false
+    }
+}
+
+/// A curve point kept in the octets it arrived as.
+///
+/// ⌖ Same argument as [`crate::commitment::PedersenVerified`], for a different field. The wire
+/// form is compressed, so materialising a point costs a modular square root -- ~9.2 M gas on a
+/// metered interpreter. An applier carries an output's ciphertext into an event and never opens
+/// it: decrypting needs a secret key, and no key is in scope on that path. The wallet that
+/// *does* decrypt materialises the point then, which is a cost it was always going to pay.
+///
+/// ⚠︎ Not validated on decode. Sound where the value came from something a verifier accepted.
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Storable)]
+#[storable(base)]
+#[tag = "embedded-group-affine[v1]"]
+#[serde(transparent)]
+pub struct VerifiedPoint(pub [u8; 32]);
+
+impl Tagged for VerifiedPoint {
+    /// Deliberately the tag of [`EmbeddedGroupAffine`]: one type on the wire, two
+    /// representations of it. A distinct tag would make the same octets undecodable.
+    fn tag() -> std::borrow::Cow<'static, str> {
+        <EmbeddedGroupAffine as Tagged>::tag()
+    }
+
+    fn tag_unique_factor() -> String {
+        <EmbeddedGroupAffine as Tagged>::tag_unique_factor()
+    }
+}
+
+impl Serializable for VerifiedPoint {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(&self.0)
+    }
+
+    fn serialized_size(&self) -> usize {
+        32
+    }
+}
+
+impl Deserializable for VerifiedPoint {
+    fn deserialize(reader: &mut impl std::io::Read, _recursion_depth: u32) -> std::io::Result<Self> {
+        let mut b = [0u8; 32];
+        reader.read_exact(&mut b)?;
+        Ok(VerifiedPoint(b))
+    }
+}
+
+impl VerifiedPoint {
+    /// Materialise the point — the square root, paid here and only when something needs one.
+    pub fn to_point(self) -> std::io::Result<EmbeddedGroupAffine> {
+        Deserializable::deserialize(&mut &self.0[..], 0)
+    }
+}
+
+impl From<EmbeddedGroupAffine> for VerifiedPoint {
+    fn from(p: EmbeddedGroupAffine) -> Self {
+        let mut b = Vec::with_capacity(32);
+        Serializable::serialize(&p, &mut b).expect("a point serializes to 32 octets");
+        VerifiedPoint(b.try_into().expect("32 octets"))
+    }
+}
+
 impl EmbeddedGroupAffine {
     /// Creates a new elliptic curve element from it's affine coordinates. It *is*
     /// checked for validity.

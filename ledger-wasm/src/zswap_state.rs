@@ -284,7 +284,9 @@ impl ZswapLocalState {
                 commitment: o.coin_com,
                 preimage_evidence: match o.ciphertext {
                     Some(ciph) => {
-                        ledger::events::ZswapPreimageEvidence::Ciphertext(Box::new((*ciph).clone()))
+                        ledger::events::ZswapPreimageEvidence::Ciphertext(Box::new(
+                            (*ciph).clone().to_verified(),
+                        ))
                     }
                     None => ledger::events::ZswapPreimageEvidence::None,
                 },

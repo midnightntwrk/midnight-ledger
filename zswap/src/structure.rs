@@ -36,7 +36,8 @@ use storage::db::InMemoryDB;
 use storage::storable::Loader;
 use storage::storage::Array;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
+use transient_crypto::commitment::CommitmentRepr;
+use transient_crypto::curve::{EmbeddedGroupAffine, Fr, InfinityCheck, VerifiedPoint};
 use transient_crypto::encryption;
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 use transient_crypto::proofs::ProofPreimage;
@@ -90,12 +91,49 @@ pub const ZSWAP_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
 pub(crate) const COIN_CIPHERTEXT_LEN: usize = 6;
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Storable)]
 #[storable(base)]
-pub struct CoinCiphertext {
-    pub c: EmbeddedGroupAffine,
+pub struct CoinCiphertext<
+    E: Clone
+        + Ord
+        + std::hash::Hash
+        + Debug
+        + Serialize
+        + Serializable
+        + Deserializable
+        + Send
+        + Sync
+        + InfinityCheck
+        + 'static = EmbeddedGroupAffine,
+> {
+    pub c: E,
     pub ciph: [Fr; COIN_CIPHERTEXT_LEN],
 }
 
-impl Tagged for CoinCiphertext {
+impl CoinCiphertext<VerifiedPoint> {
+    /// Materialise the ephemeral key — the square root, paid by whoever actually decrypts.
+    pub fn to_point_form(&self) -> std::io::Result<CoinCiphertext<EmbeddedGroupAffine>> {
+        Ok(CoinCiphertext {
+            c: self.c.to_point()?,
+            ciph: self.ciph,
+        })
+    }
+}
+
+impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck + Into<VerifiedPoint>> CoinCiphertext<E> {
+    /// The ciphertext with its ephemeral key in wire form.
+    ///
+    /// ⌖ What an applier hands to an event. It carries the ciphertext and never opens it --
+    /// decrypting needs a secret key and none is in scope on that path -- so the point stays
+    /// octets until a wallet with keys materialises it, which is a cost that side was always
+    /// going to pay.
+    pub fn to_verified(self) -> CoinCiphertext<VerifiedPoint> {
+        CoinCiphertext {
+            c: self.c.into(),
+            ciph: self.ciph,
+        }
+    }
+}
+
+impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Tagged for CoinCiphertext<E> {
     fn tag() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("zswap-coin-ciphertext[v1]")
     }
@@ -105,9 +143,9 @@ impl Tagged for CoinCiphertext {
 }
 tag_enforcement_test!(CoinCiphertext);
 
-impl Serializable for CoinCiphertext {
+impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Serializable for CoinCiphertext<E> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> Result<(), std::io::Error> {
-        <EmbeddedGroupAffine as Serializable>::serialize(&self.c, writer)?;
+        <E as Serializable>::serialize(&self.c, writer)?;
         // Because this is unversioned we need not send COIN_CIPHERTEXT_LEN
         for elem in self.ciph {
             <Fr as Serializable>::serialize(&elem, writer)?;
@@ -116,7 +154,7 @@ impl Serializable for CoinCiphertext {
     }
 
     fn serialized_size(&self) -> usize {
-        EmbeddedGroupAffine::serialized_size(&self.c)
+        E::serialized_size(&self.c)
             + self
                 .ciph
                 .iter()
@@ -125,15 +163,15 @@ impl Serializable for CoinCiphertext {
     }
 }
 
-impl Deserializable for CoinCiphertext {
+impl<E: Clone + Ord + std::hash::Hash + Debug + Serialize + Serializable + Deserializable + Send + Sync + 'static + InfinityCheck> Deserializable for CoinCiphertext<E> {
     fn deserialize(
         reader: &mut impl std::io::Read,
         recursive_depth: u32,
     ) -> Result<Self, std::io::Error> {
-        let c = EmbeddedGroupAffine::deserialize(reader, recursive_depth)?;
+        let c = E::deserialize(reader, recursive_depth)?;
         // See note in `transient_crypto::encryption::SecretKey::decrypt` for why the point at
         // infinity is excluded.
-        if c.is_infinity() {
+        if c.is_infinity_encoding() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "ciphertext challenge may not be the point at infinity",
@@ -300,16 +338,16 @@ impl<D: DB> Input<ProofPreimage, D> {
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P, B)]
 #[tag = "zswap-output[v2]"]
 #[storable(db = D)]
-pub struct Output<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
+pub struct Output<P: Storable<D>, D: DB, B: Storable<D> + CommitmentRepr<D> = Pedersen> {
     pub coin_com: Commitment,
     pub value_commitment: B,
     pub contract_address: Option<Sp<ContractAddress, D>>,
-    pub ciphertext: Option<Sp<CoinCiphertext, D>>,
+    pub ciphertext: Option<Sp<CoinCiphertext<<B as CommitmentRepr<D>>::Point>, D>>,
     pub proof: Arc<P>,
 }
 tag_enforcement_test!(Output<(), InMemoryDB>);
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Output<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Clone + Storable<D> + CommitmentRepr<D>> Output<P, D, B> {
     pub fn erase_proof(&self) -> Output<(), D, B> {
         Output {
             coin_com: self.coin_com,
@@ -361,7 +399,7 @@ impl<D: DB> Output<ProofPreimage, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Output<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug + CommitmentRepr<D>> Debug for Output<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match &self.contract_address {
             Some(addr) => write!(
@@ -378,19 +416,19 @@ impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Output<P, D, B> {
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P, B)]
 #[tag = "zswap-transient[v2]"]
 #[storable(db = D)]
-pub struct Transient<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
+pub struct Transient<P: Storable<D>, D: DB, B: Storable<D> + CommitmentRepr<D> = Pedersen> {
     pub nullifier: Nullifier,
     pub coin_com: Commitment,
     pub value_commitment_input: B,
     pub value_commitment_output: B,
     pub contract_address: Option<Sp<ContractAddress, D>>,
-    pub ciphertext: Option<Sp<CoinCiphertext, D>>,
+    pub ciphertext: Option<Sp<CoinCiphertext<<B as CommitmentRepr<D>>::Point>, D>>,
     pub proof_input: Arc<P>,
     pub proof_output: Arc<P>,
 }
 tag_enforcement_test!(Transient<(), InMemoryDB>);
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Transient<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Clone + Storable<D> + CommitmentRepr<D>> Transient<P, D, B> {
     pub fn erase_proof(&self) -> Transient<(), D, B> {
         Transient {
             nullifier: self.nullifier,
@@ -414,7 +452,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
     }
 }
 
-impl<P: Clone + Storable<D>, D: DB, B: Clone + Storable<D>> Transient<P, D, B> {
+impl<P: Clone + Storable<D>, D: DB, B: Clone + Storable<D> + CommitmentRepr<D>> Transient<P, D, B> {
     pub fn as_input(&self) -> Input<P, D, B> {
         Input {
             nullifier: self.nullifier,
@@ -441,7 +479,7 @@ impl<P: Clone + Storable<D>, D: DB, B: Clone + Storable<D>> Transient<P, D, B> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Transient<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug + CommitmentRepr<D>> Debug for Transient<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         match self.contract_address.clone() {
             Some(addr) => {
@@ -557,7 +595,7 @@ tag_enforcement_test!(ZswapEffects<InMemoryDB>);
 /// All vectors must be sorted to be valid, and `deltas` must be key-unique
 /// (i.e. not contain tuples sharing their first element `(a, b)` and `(a, c)`).
 /// This is to have a canonical representation while operating on sets and maps.
-pub struct Offer<P: Storable<D>, D: DB, B: Storable<D> = Pedersen> {
+pub struct Offer<P: Storable<D>, D: DB, B: Storable<D> + CommitmentRepr<D> = Pedersen> {
     /// A set of Inputs
     pub inputs: Array<Input<P, D, B>, D>,
     /// A set of Outputs
@@ -583,7 +621,7 @@ impl<D: DB> Offer<ProofPreimage, D> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Offer<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Clone + Storable<D> + CommitmentRepr<D>> Offer<P, D, B> {
     /// The parts of this offer that applying it reads, and nothing else.
     ///
     /// The counterpart of [`crate::ledger::State::try_apply_effects`]: this derives what
@@ -634,7 +672,7 @@ impl<P: Storable<D>, D: DB, B: Clone + Storable<D>> Offer<P, D, B> {
     }
 }
 
-impl<P: Storable<D>, D: DB, B: Storable<D> + Debug> Debug for Offer<P, D, B> {
+impl<P: Storable<D>, D: DB, B: Storable<D> + Debug + CommitmentRepr<D>> Debug for Offer<P, D, B> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         formatter
             .debug_map()
@@ -675,7 +713,7 @@ pub fn normalize_deltas<T: Ord, I: Iterator<Item = (T, i128)>>(deltas: I) -> Vec
     new_deltas
 }
 
-impl<P: Clone + Ord + Storable<D>, D: DB, B: Clone + Ord + Storable<D>> Offer<P, D, B> {
+impl<P: Clone + Ord + Storable<D>, D: DB, B: Clone + Ord + Storable<D> + CommitmentRepr<D>> Offer<P, D, B> {
     pub fn normalize(&mut self) {
         self.inputs = self.inputs.iter_deref().sorted().cloned().collect();
         self.outputs = self.outputs.iter_deref().sorted().cloned().collect();

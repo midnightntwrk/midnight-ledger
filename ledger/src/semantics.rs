@@ -53,6 +53,7 @@ use transient_crypto::merkle_tree::InvalidUpdate;
 use zswap::Offer as ZswapOffer;
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
+use transient_crypto::commitment::CommitmentRepr;
 
 pub(crate) fn whitelist_matches(
     whitelist: &Option<Map<ContractAddress, ()>>,
@@ -343,7 +344,7 @@ pub type MaybeEvents<D> = (LedgerState<D>, Vec<Event<D>>);
 
 impl<D: DB> LedgerState<D> {
     #[allow(unused_variables)]
-    fn apply_zswap<P: Storable<D> + Deserializable, C: Clone + Storable<D> + Tagged>(
+    fn apply_zswap<P: Storable<D> + Deserializable, C: Clone + Storable<D> + Tagged + CommitmentRepr<D>>(
         &self,
         offer: &ZswapOffer<P, D, C>,
         whitelist: Option<Map<ContractAddress, ()>>,
@@ -390,7 +391,11 @@ impl<D: DB> LedgerState<D> {
                 content: EventDetails::ZswapOutput {
                     commitment: output.coin_com,
                     preimage_evidence: match &output.ciphertext {
-                        Some(ciph) => ZswapPreimageEvidence::Ciphertext(Box::new((**ciph).clone())),
+                        Some(ciph) => {
+                            ZswapPreimageEvidence::Ciphertext(Box::new(
+                                (**ciph).clone().to_verified(),
+                            ))
+                        }
                         None => ZswapPreimageEvidence::None,
                     },
                     contract: output.contract_address.clone(),
@@ -930,7 +935,7 @@ impl<D: DB> LedgerState<D> {
     // -- forcing a curve point to be reconstructed per intent for a value this path only hashes.
     fn apply_section<
         B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
-        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified> + CommitmentRepr<D>,
     >(
         &self,
         tx: &StandardTransaction<(), (), B, D, C>,
@@ -1210,7 +1215,7 @@ impl<D: DB> LedgerState<D> {
     /// arrived in rather than as reconstructed curve points -- applying only ever hashes them.
     pub fn apply<
         B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
-        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified>,
+        C: Clone + Ord + Storable<D> + Serializable + Tagged + Into<PedersenVerified> + CommitmentRepr<D>,
     >(
         &self,
         tx: &VerifiedTransaction<D, B, C>,
@@ -1754,7 +1759,7 @@ impl<D: DB> ReplayProtectionState<D> {
         S: SignatureKind<D>,
         P: ProofKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Storable<D> + Serializable + Tagged,
+        C: Storable<D> + Serializable + Tagged + CommitmentRepr<D>,
     >(
         &self,
         stx: &StandardTransaction<S, P, B, D, C>,

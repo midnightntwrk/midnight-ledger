@@ -77,6 +77,7 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 use zswap::ZSWAP_TREE_HEIGHT;
 use zswap::error::MalformedOffer;
 use zswap::{Input, Offer as ZswapOffer, Output, Transient};
+use transient_crypto::commitment::CommitmentRepr;
 
 /// A trait for things that can fit into `Signature` shaped holes
 pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
@@ -426,7 +427,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize;
@@ -524,7 +525,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -574,7 +575,7 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -618,7 +619,7 @@ impl<D: DB> ProofKind<D> for () {
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
-        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+        C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
     >(
         tx: &Transaction<S, Self, B, D, C>,
     ) -> usize {
@@ -1332,7 +1333,7 @@ pub enum Transaction<
     P: ProofKind<D>,
     B: Storable<D>,
     D: DB,
-    C: Storable<D> + Tagged = Pedersen,
+    C: Storable<D> + Tagged + CommitmentRepr<D> = Pedersen,
 > {
     Standard(StandardTransaction<S, P, B, D, C>),
     ClaimRewards(ClaimRewardsTransaction<S, D>),
@@ -1343,13 +1344,13 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<
     D: DB,
     B: Storable<D> = Pedersen,
-    C: Storable<D> + Tagged = Pedersen,
+    C: Storable<D> + Tagged + CommitmentRepr<D> = Pedersen,
 > {
     pub(crate) inner: Transaction<(), (), B, D, C>,
     pub(crate) hash: TransactionHash,
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged> VerifiedTransaction<D, B, C> {
+impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged + CommitmentRepr<D>> VerifiedTransaction<D, B, C> {
     /// The transaction's hash, fixed when it was checked.
     pub fn hash(&self) -> TransactionHash {
         self.hash
@@ -1371,7 +1372,7 @@ impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged> VerifiedTransaction<D, B, C
     }
 }
 
-impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged> Deref for VerifiedTransaction<D, B, C> {
+impl<D: DB, B: Storable<D>, C: Storable<D> + Tagged + CommitmentRepr<D>> Deref for VerifiedTransaction<D, B, C> {
     type Target = Transaction<(), (), B, D, C>;
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -1394,7 +1395,7 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
 > Transaction<S, P, B, D, C>
 {
     pub fn erase_proofs(&self) -> Transaction<S, (), Pedersen, D, C> {
@@ -1597,7 +1598,7 @@ impl<
     }
 }
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB, C: Storable<D> + Tagged>
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB, C: Storable<D> + Tagged + CommitmentRepr<D>>
     Transaction<S, P, B, D, C>
 where
     Transaction<S, P, B, D, C>: Serializable,
@@ -1648,7 +1649,7 @@ pub struct StandardTransaction<
     P: ProofKind<D>,
     B: Storable<D>,
     D: DB,
-    C: Storable<D> + Tagged = Pedersen,
+    C: Storable<D> + Tagged + CommitmentRepr<D> = Pedersen,
 > {
     pub network_id: String,
     pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
@@ -1663,7 +1664,7 @@ impl<
     P: ProofKind<D> + Serializable + Deserializable,
     B: Storable<D>,
     D: DB,
-    C: Storable<D> + Tagged,
+    C: Storable<D> + Tagged + CommitmentRepr<D>,
 > StandardTransaction<S, P, B, D, C>
 {
     pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
@@ -1899,7 +1900,7 @@ impl<
     P: ProofKind<D>,
     B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     D: DB,
-    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged,
+    C: Clone + Ord + Storable<D> + Serializable + Into<PedersenVerified> + Tagged + CommitmentRepr<D>,
 > Transaction<S, P, B, D, C>
 where
     Transaction<S, P, B, D, C>: Serializable,

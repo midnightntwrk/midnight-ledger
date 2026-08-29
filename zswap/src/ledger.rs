@@ -33,6 +33,7 @@ use storage::{
     storable::Loader,
 };
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
+use transient_crypto::commitment::CommitmentRepr;
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Debug, Eq)]
@@ -149,7 +150,7 @@ impl<D: DB> State<D> {
         self.apply_create(coin_com, contract_address, whitelist)
     }
 
-    fn apply_input<P: Storable<D>, B: Clone + Storable<D>>(
+    fn apply_input<P: Storable<D>, B: Clone + Storable<D> + CommitmentRepr<D>>(
         self,
         inp: Input<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
@@ -162,7 +163,7 @@ impl<D: DB> State<D> {
         )
     }
 
-    fn apply_output<P: Storable<D>, B: Clone + Storable<D>>(
+    fn apply_output<P: Storable<D>, B: Clone + Storable<D> + CommitmentRepr<D>>(
         self,
         out: Output<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
@@ -170,7 +171,7 @@ impl<D: DB> State<D> {
         self.apply_create(out.coin_com, out.contract_address, whitelist)
     }
 
-    fn apply_transient<P: Storable<D>, B: Clone + Storable<D>>(
+    fn apply_transient<P: Storable<D>, B: Clone + Storable<D> + CommitmentRepr<D>>(
         self,
         trans: Transient<P, D, B>,
         whitelist: &Option<Map<ContractAddress, ()>>,
@@ -198,7 +199,7 @@ impl<D: DB> State<D> {
     }
 
     #[instrument(skip(self, offer, whitelist))]
-    pub fn try_apply<P: Storable<D> + Deserializable, B: Clone + Storable<D>>(
+    pub fn try_apply<P: Storable<D> + Deserializable, B: Clone + Storable<D> + CommitmentRepr<D>>(
         &self,
         offer: &Offer<P, D, B>,
         whitelist: Option<Map<ContractAddress, ()>>,

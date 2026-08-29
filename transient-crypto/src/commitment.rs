@@ -230,6 +230,39 @@ impl From<PedersenVerified> for Pedersen {
     }
 }
 
+/// Which representation the curve values *beside* a commitment take.
+///
+/// ⌖ One parameter, two decisions. A transaction's outputs carry both a commitment and a
+/// ciphertext whose ephemeral key is a curve point, and the same question applies to each: does
+/// this side need a point, or only the octets? A verifier needs points; an applier carries both
+/// and opens neither. Tying them to one parameter keeps that a single choice rather than two
+/// that could disagree.
+pub trait CommitmentRepr<D: DB> {
+    /// How a curve point travels alongside this commitment form.
+    type Point: Clone
+        + Ord
+        + std::hash::Hash
+        + std::fmt::Debug
+        + serde::Serialize
+        + Storable<D>
+        + Serializable
+        + Deserializable
+        + Tagged
+        + crate::curve::InfinityCheck
+        + Into<crate::curve::VerifiedPoint>
+        + Send
+        + Sync
+        + 'static;
+}
+
+impl<D: DB> CommitmentRepr<D> for Pedersen {
+    type Point = crate::curve::EmbeddedGroupAffine;
+}
+
+impl<D: DB> CommitmentRepr<D> for PedersenVerified {
+    type Point = crate::curve::VerifiedPoint;
+}
+
 /// The randomness used in the Pedersen commitments is the embedded curves prime
 /// field.
 pub type PedersenRandomness = EmbeddedFr;

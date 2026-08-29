@@ -32,6 +32,7 @@ use storage::{
 };
 use transient_crypto::merkle_tree::TreeInsertionPath;
 use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};
+use transient_crypto::curve::VerifiedPoint;
 
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
@@ -57,7 +58,10 @@ tag_enforcement_test!(EventSource);
 #[storable(base)]
 #[tag = "zswap-preimage-evidence[v2]"]
 pub enum ZswapPreimageEvidence {
-    Ciphertext(Box<CoinCiphertext>),
+    /// ⌖ The ephemeral key stays in wire form. An applier is a courier for this: it records the
+    /// ciphertext in an event and never opens it. Whoever holds the keys materialises the point
+    /// when it decrypts, which is a cost that side pays regardless.
+    Ciphertext(Box<CoinCiphertext<VerifiedPoint>>),
     PublicPreimage {
         coin: CoinInfo,
         recipient: Recipient,
@@ -69,7 +73,11 @@ tag_enforcement_test!(ZswapPreimageEvidence);
 impl ZswapPreimageEvidence {
     pub fn try_with_keys(&self, secret_keys: &ZswapSecretKeys) -> Option<CoinInfo> {
         match self {
-            ZswapPreimageEvidence::Ciphertext(ciph) => secret_keys.try_decrypt(ciph),
+            // ⌖ The point is materialised here and nowhere earlier: this is the one place that
+            // holds keys and actually opens the ciphertext.
+            ZswapPreimageEvidence::Ciphertext(ciph) => {
+                secret_keys.try_decrypt(&ciph.to_point_form().ok()?)
+            }
             ZswapPreimageEvidence::PublicPreimage {
                 coin,
                 recipient: Recipient::User(pk),
