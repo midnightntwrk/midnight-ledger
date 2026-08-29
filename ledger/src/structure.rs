@@ -152,6 +152,16 @@ pub trait PedersenDowngradeable<D: DB>:
 {
     fn downgrade(&self) -> Pedersen;
 
+    /// The commitment in its wire form.
+    ///
+    /// ⌖ Identifiers only ever compare and serialize commitments, so they do not need a curve
+    /// point — and materialising one costs a modular square root. The default route goes through
+    /// [`Self::downgrade`], which is what every binding that *is* a point already pays;
+    /// [`PedersenVerified`] overrides it with the octets it is already holding.
+    fn to_verified(&self) -> PedersenVerified {
+        self.downgrade().into()
+    }
+
     #[allow(clippy::result_large_err)]
     fn valid(&self, _challenge_pre: &[u8]) -> Result<(), MalformedTransaction<D>>;
 }
@@ -218,6 +228,11 @@ impl<D: DB> PedersenDowngradeable<D> for PedersenVerified {
     /// genuinely asking for a point.
     fn downgrade(&self) -> Pedersen {
         (*self).into()
+    }
+
+    /// Already the wire form: no square root, no copy of a point that was never built.
+    fn to_verified(&self) -> PedersenVerified {
+        *self
     }
 
     /// The verifier discharged this. See the type's documentation for the obligation.
@@ -1497,13 +1512,13 @@ impl<
         match self {
             Transaction::Standard(stx) => res.extend(
                 stx.inputs()
-                    .map(|i| i.value_commitment)
-                    .chain(stx.outputs().map(|o| o.value_commitment))
-                    .chain(stx.transients().map(|io| io.value_commitment_input))
-                    .chain(stx.transients().map(|io| io.value_commitment_output))
+                    .map(|i| i.value_commitment.into())
+                    .chain(stx.outputs().map(|o| o.value_commitment.into()))
+                    .chain(stx.transients().map(|io| io.value_commitment_input.into()))
+                    .chain(stx.transients().map(|io| io.value_commitment_output.into()))
                     .chain(
                         stx.intents()
-                            .map(|(_, intent)| intent.binding_commitment.downgrade()),
+                            .map(|(_, intent)| intent.binding_commitment.to_verified()),
                     )
                     .map(TransactionIdentifier::Merged),
             ),
@@ -2855,7 +2870,7 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serializable)]
 #[tag = "transcation-id[v1]"]
 pub enum TransactionIdentifier {
-    Merged(Pedersen),
+    Merged(PedersenVerified),
     Unique(HashOutput),
 }
 tag_enforcement_test!(TransactionIdentifier);
