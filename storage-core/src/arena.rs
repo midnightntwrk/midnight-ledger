@@ -2215,19 +2215,59 @@ pub struct TopoSortedNode {
 /// ⚠︎ Not self-contained, and deliberately so. Deserializing one into an arena is not
 /// meaningful on its own; it is written into a content-addressed store whose existing nodes
 /// resolve the references.
-#[derive(Clone, PartialEq, Eq, Debug, Serializable)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct HashSortedNodes<H: WellBehavedHasher> {
     /// Children before parents, so writing in order never leaves a dangling reference.
     pub nodes: Vec<HashSortedNode<H>>,
 }
 
 /// One node of a [`HashSortedNodes`].
-#[derive(Clone, PartialEq, Eq, Debug, Serializable)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct HashSortedNode<H: WellBehavedHasher> {
     /// The hashes of this node's children, in order.
     pub child_hashes: Vec<ArenaHash<H>>,
     /// The node's own bytes.
     pub data: Vec<u8>,
+}
+
+// ⌖ Written out rather than derived. The derive puts a `Serializable` bound on `H` itself,
+// but `H` is only ever a hasher — nothing of it is encoded. What is encoded is
+// `ArenaHash<H>`, which carries its own impl, so the bound belongs there and not on the
+// hasher.
+impl<H: WellBehavedHasher> Serializable for HashSortedNode<H> {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.child_hashes.serialize(writer)?;
+        self.data.serialize(writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.child_hashes.serialized_size() + self.data.serialized_size()
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for HashSortedNode<H> {
+    fn deserialize(reader: &mut impl std::io::Read, d: u32) -> std::io::Result<Self> {
+        Ok(HashSortedNode {
+            child_hashes: Deserializable::deserialize(reader, d)?,
+            data: Deserializable::deserialize(reader, d)?,
+        })
+    }
+}
+
+impl<H: WellBehavedHasher> Serializable for HashSortedNodes<H> {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.nodes.serialize(writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.nodes.serialized_size()
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for HashSortedNodes<H> {
+    fn deserialize(reader: &mut impl std::io::Read, d: u32) -> std::io::Result<Self> {
+        Ok(HashSortedNodes {
+            nodes: Deserializable::deserialize(reader, d)?,
+        })
+    }
 }
 
 impl<H: WellBehavedHasher> HashSortedNodes<H> {
