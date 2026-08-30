@@ -866,14 +866,29 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
         };
         for e in effects {
             let mut inp = &e.post_state[..];
-            let data: onchain_runtime::state::ChargedState<D> =
-                serialize::tagged_deserialize(&mut inp)
+            let delta: storage::arena::HashSortedNodes<<D as storage::db::DB>::Hasher> =
+                serialize::Deserializable::deserialize(&mut inp, 0)
                     .map_err(|_| crate::error::TransactionInvalid::EffectsIncompleteContracts)?;
             // ⚠︎ Trailing octets mean the blob is not what it claims; refuse rather than
             // install a prefix.
             if !inp.is_empty() {
                 return Err(crate::error::TransactionInvalid::EffectsIncompleteContracts);
             }
+            // ⌖ Every address is recomputed, so nothing the producer said is trusted; the
+            // root is the last one because children precede parents.
+            let arena = &storage::storage::default_storage::<D>().arena;
+            let root = arena
+                .accept_hash_node_list(&delta)
+                .pop()
+                .ok_or(crate::error::TransactionInvalid::EffectsIncompleteContracts)?;
+            let tkey: storage::arena::TypedArenaKey<
+                onchain_runtime::state::ChargedState<D>,
+                <D as storage::db::DB>::Hasher,
+            > = storage::arena::ArenaKey::Ref(root).into();
+            let data = arena
+                .get_lazy(&tkey)
+                .map_err(|_| crate::error::TransactionInvalid::EffectsIncompleteContracts)?;
+            let data: onchain_runtime::state::ChargedState<D> = (*data).clone();
             let mut balance = storage::storage::HashMap::new();
             for (t, v) in &e.balance {
                 balance = balance.insert(*t, *v);

@@ -204,14 +204,23 @@ async fn a_contract_call_replays_from_its_carried_post_state() {
         .apply_effects(&fx, &context)
         .expect("effects that carry the post-state must apply");
 
-    assert_eq!(
-        format!("{:?}", full.contract),
-        format!("{:?}", via_effects.contract),
-        "the carried post-state produced a different contract map"
-    );
+    // ⚠︎ **`state_hash`, not `Debug`.** An earlier version of this test compared the two
+    // contract maps as debug strings and failed with `<Lazy Sp>` against `<[01]: b8>` — the
+    // carried graph is reconstituted lazily and its children are simply not dereferenced yet.
+    // That is not a difference in the state, and a comparison that cannot tell laziness from
+    // divergence reports the wrong thing twice: it fails when nothing is wrong, and it would
+    // have passed if both sides were equally lazy and equally wrong.
     assert_eq!(
         full.state_hash(),
         via_effects.state_hash(),
-        "the effects path reached a different ledger than the full path"
+        "the effects path reached a different ledger than the full path\n  full: {:?}\n  fx:   {:?}",
+        full.contract,
+        via_effects.contract
+    );
+    // And the carried contract really does hold the post-state, forced this time.
+    assert_eq!(
+        via_effects.index(addr).unwrap().data.get_ref(),
+        &stval!([(1u64), (true), (1u64)]),
+        "the carried contract does not hold what the call produced"
     );
 }

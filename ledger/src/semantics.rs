@@ -1434,10 +1434,22 @@ impl<D: DB> LedgerState<D> {
                             // where a contract's post-state enters the ledger, so a
                             // recorder placed here observes exactly what apply installed.
                             {
+                                // ⌖ **The delta: the nodes this call created.**
+                                //
+                                // Not "the whole post-state", which scales with what the
+                                // contract *holds* — priced rather than capped, so unbounded.
+                                // The nodes the database does not yet have are the ones this
+                                // call made, which scales with what it *changed*, and the
+                                // ledger already meters that as `bytes_written`.
+                                //
+                                // ⚠︎ Asking the database, not walking the pre-state. Walking
+                                // it means materialising it, which a lazy `DB` makes
+                                // impossible rather than merely slow — an earlier attempt
+                                // failed exactly there.
+                                let post = storage::arena::Sp::new(results.context.state.clone());
+                                let delta = post.serialize_to_hash_node_list_unpersisted();
                                 let mut blob = Vec::new();
-                                if serialize::tagged_serialize(&results.context.state, &mut blob)
-                                    .is_ok()
-                                {
+                                if serialize::Serializable::serialize(&delta, &mut blob).is_ok() {
                                     rec.push(crate::effects::ContractEffect {
                                         // ⌖ The *pass*'s segment, which `event_source`
                                         // already carries as `logical_segment` — the same

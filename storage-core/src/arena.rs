@@ -2035,6 +2035,78 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         HashSortedNodes { nodes: out }
     }
 
+    /// The delta a recipient actually needs: the nodes this graph has that the **database**
+    /// does not.
+    ///
+    /// ⌖ **The predicate is "already persisted", and it needs no pre-state.** An earlier
+    /// attempt computed the excluded set by walking the previous version of the graph, which
+    /// meant materialising it — precisely what a lazy `DB` exists to avoid, and it failed
+    /// outright rather than merely costing: a lazily-loaded node is not in the arena, so the
+    /// walk could not read it.
+    ///
+    /// A node that existed before this change is in the database; one this change created is
+    /// not yet. That is the same distinction, obtained by asking rather than by walking, and
+    /// it holds for both recipients that matter: a service whose ᴅᴀɢ persists in
+    /// content-addressed storage between invocations, and a verifier holding a witness of the
+    /// nodes it was given.
+    ///
+    /// ⚠︎ So the excluded set is *whatever the database already has*, which makes this correct
+    /// exactly when the recipient's store is a superset of the producer's database. That is
+    /// the arrangement here — the producer read the old graph out of the recipient's store —
+    /// but it is an assumption, not a guarantee, and a recipient given a delta against some
+    /// other database will find references it cannot resolve.
+    pub fn serialize_to_hash_node_list_unpersisted(&self) -> HashSortedNodes<D::Hasher> {
+        let arena = self.arena.clone();
+        let root = self.child_repr.clone();
+        let mut seen: std::collections::HashSet<ArenaHash<D::Hasher>> = Default::default();
+        let mut out: Vec<HashSortedNode<D::Hasher>> = Vec::new();
+        let mut stack = vec![(root, false)];
+        while let Some((key, expanded)) = stack.pop() {
+            let h = key.hash().clone();
+            if seen.contains(&h) {
+                continue;
+            }
+            // Already in the database ⇒ the recipient has it ⇒ do not send it, and do not
+            // descend, because everything beneath it is older still.
+            if let ArenaKey::Ref(ref k) = key {
+                if arena.with_backend(|b| b.database.get_node(k).is_some()) {
+                    seen.insert(h);
+                    continue;
+                }
+            }
+            let node = match key {
+                ArenaKey::Ref(ref k) => match arena.lock_backend().borrow_mut().get(k) {
+                    Some(o) => o.clone(),
+                    // Neither in the database nor in the arena: nothing can be said about it,
+                    // and pretending otherwise would emit a graph with a hole in it.
+                    None => {
+                        seen.insert(h);
+                        continue;
+                    }
+                },
+                ArenaKey::Direct(ref d) => OnDiskObject {
+                    data: d.data.as_ref().clone(),
+                    #[cfg(not(feature = "layout-v2"))]
+                    ref_count: 0,
+                    children: d.children.as_ref().clone(),
+                },
+            };
+            if expanded {
+                seen.insert(h);
+                out.push(HashSortedNode {
+                    child_hashes: node.children.iter().map(|c| c.hash().clone()).collect(),
+                    data: node.data.clone(),
+                });
+            } else {
+                stack.push((key, true));
+                for c in node.children.iter() {
+                    stack.push((c.clone(), false));
+                }
+            }
+        }
+        HashSortedNodes { nodes: out }
+    }
+
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
     /// This will force and load all nodes in this sub-graph.
@@ -3450,5 +3522,66 @@ mod tests {
             .expect("the delta plus what was already held is a complete graph");
         assert_eq!(*back.a, 1u32, "the subtree the delta omitted");
         assert_eq!(*back.b, 2u32, "the subtree the delta carried");
+    }
+
+    /// **The delta a recipient needs, without ever walking the old graph.**
+    ///
+    /// `serialize_to_hash_node_list_excluding` needs to be told what to prune, and computing
+    /// that by walking the previous version means materialising it — which a lazy `DB` makes
+    /// impossible, not merely slow. Asking the database instead needs no pre-state at all.
+    #[test]
+    fn an_unpersisted_delta_carries_only_what_the_database_lacks() {
+        #[derive(Storable, Clone, PartialEq, Eq, Debug)]
+        struct Pair {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = &new_arena();
+
+        // An "old" node, persisted and flushed — the recipient has this.
+        let old: Sp<u32, DefaultDB> = arena.alloc(1u32).into_tracked();
+        arena.with_backend(|b| {
+            b.persist(old.child_repr.hash());
+            b.flush_all_changes_to_db();
+        });
+
+        // A change: a new leaf and a new parent, over the old node.
+        let fresh: Sp<u32, DefaultDB> = arena.alloc(2u32).into_tracked();
+        let root = arena
+            .alloc(Pair {
+                a: old.clone(),
+                b: fresh.clone(),
+            })
+            .into_tracked();
+
+        let delta = root.serialize_to_hash_node_list_unpersisted();
+        let whole = root.serialize_to_node_list();
+        assert!(
+            delta.nodes.len() < whole.nodes.len(),
+            "nothing was pruned, so the database was not consulted"
+        );
+
+        let hashes = delta.verify();
+        assert!(
+            !hashes.contains(old.child_repr.hash()),
+            "the persisted node was sent anyway — the recipient already had it"
+        );
+        assert_eq!(
+            hashes.last(),
+            Some(root.child_repr.hash()),
+            "the last recomputed address must be the root"
+        );
+
+        // ⌖ And the parent still names the pruned child, so the graph the recipient
+        // reassembles is the producer's graph and not a truncated one.
+        let root_node = delta.nodes.last().expect("children precede parents");
+        assert!(
+            root_node.child_hashes.contains(old.child_repr.hash()),
+            "a delta that drops the reference as well as the node is not a delta, it is a \
+             different graph"
+        );
     }
 }
