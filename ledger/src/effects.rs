@@ -239,27 +239,46 @@ pub struct DustRegistrationEffect {
 ///   verification machinery for a ᴢᴋ upgrade rather than touching its data. The full path is
 ///   the right answer for it permanently, not a stopgap.
 ///
-/// ⚠︎ **Corrected.** An earlier revision of this comment called the remaining work a
-/// tag-and-payload codec for ~28 mostly-nullary variants and "not a design question". Reading
-/// the apply path falsifies both halves:
+/// ⚠︎ **Corrected twice; this is the third reading and the first one that holds.**
 ///
-/// - `semantics.rs:1328` applies a `Call` by *running* the transcript
-///   (`QueryContext::run_transcript` → `query`) against the contract's state. The new state is
-///   the run's **output**; it appears nowhere in the declared effects. So for contracts the
-///   declared effects can never be sufficient the way `UnshieldedDelta` is — there, the effect
-///   *is* the delta and applying it is a set insertion. `transcript.effects` is only checked
-///   against the run (`EffectsMismatch`); it does not stand in for it.
-/// - Two of the 28 variants are not small. `Push { value: StateValue<D> }` carries the whole
-///   recursive arena value — `Cell(Sp<AlignedValue>)`, `Map(HashMap<…>)`,
-///   `Array(Array<StateValue>)`, `BoundedMerkleTree` (`onchain-state/src/state.rs:79`) — and
-///   `Popeq { result: M::ReadResult }` is an `AlignedValue`. The rest really are nullary or a
-///   `u8`/`u32` immediate.
+/// 1. The original said the remaining work was "a tag-and-payload codec for ~28 mostly-nullary
+///    variants, not a design question". Wrong: two of the variants are not small
+///    (`Push { value: StateValue<D> }` carries the whole recursive arena value, `Popeq` an
+///    `AlignedValue`), and it *is* a design question.
+/// 2. The replacement said contracts "must run the ᴠᴍ, so a flat codec replaces the
+///    transcript's encoding and never its work". Also wrong, and more usefully so.
 ///
-/// The consequence is a smaller claim, not a dead one. On the contract path the applier still
-/// skips proof verification, signature checks and well-formedness, but it **must** run the VM,
-/// and the VM needs real `StateValue`s — so a flat codec can replace the transcript's
-/// *encoding*, never its work. That is a different and much weaker win than the one the
-/// zswap/unshielded/dust families deliver, and it is worth measuring before it is built.
+/// Read `semantics.rs:1328..1378` as four steps:
+///
+/// ```text
+/// ①  results = qcontext.run_transcript(transcript, …)          run the program
+/// ②  if results.context.effects != transcript.effects → Err    declared vs actual
+/// ③  new_balance from transcript.effects.unshielded_inputs     already in the effects
+/// ④  res.update_index(addr, results.context.state, balance)    install
+/// ```
+///
+/// ④ is a **plain write** (`structure.rs:3196`) — take the address, the state, the balance,
+/// put them in the map. The reason ① cannot be skipped is only that ④ needs
+/// `results.context.state`, and that is *not* in `transcript.effects`, which carries the
+/// transcript's **declarations** (`claimed_nullifiers`, `unshielded_inputs`, …) for ② to
+/// check against.
+///
+/// ◈ **But a transport is not limited to the transaction's declared effects.** Refine already
+/// runs the transcript — it must, to verify — so refine *holds* `results.context.state` when
+/// it finishes. Shipping that makes the accumulate side ④ alone: a write, not a run, which is
+/// exactly the shape [`UnshieldedDelta`] has and the shape contracts were said not to have.
+///
+/// So the question is size, not possibility. A whole post-state per call is proportional to
+/// the contract's *state*; but the arena is content-addressed, so only the changed nodes
+/// differ from what the chain already holds, and the delta is proportional to its *churn*.
+/// That is the witness mechanism run in reverse.
+///
+/// ⚠︎ Skipping ① also skips the `EffectsMismatch` check. Sound only under this module's
+/// standing premise — refine verified, accumulate trusts it — but worth stating outright,
+/// because here it is the difference between the chain *re-deriving* a contract's state and
+/// the chain being *told* it.
+///
+/// ⏸︎ Still `UseFullPath` today: the post-state channel is designed, not built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContractsPresent {
     /// No contract actions; the effects above are the whole transaction.
