@@ -739,14 +739,44 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
                 ContractsPresent::Carried(v)
             }
         };
+        // ⌖ **Which segments the recording is allowed to speak for.**
+        //
+        // A segment whose intent holds only `Call`s is fully covered: every call recorded a
+        // post-state. One holding a `Deploy` or `Maintain` is not, because neither has a
+        // post-state to record, and that segment keeps its refusal so the whole transaction
+        // takes the full path rather than half of it.
+        let mut covered: std::collections::BTreeSet<u16> = Default::default();
+        if let crate::structure::Transaction::Standard(stx) = &tx.inner {
+            for (seg, intent) in stx.intents.sorted_iter() {
+                if intent
+                    .actions
+                    .iter()
+                    .all(|a| matches!(&*a, crate::structure::ContractAction::Call(_)))
+                {
+                    covered.insert(*seg);
+                }
+            }
+        }
+
+        // The guaranteed pass applies every intent's guaranteed actions at segment 0.
         fx.guaranteed.contracts = take(&rec, 0);
+
+        // ⚠︎ `VerifiedTransaction::effects` is a pure projection and cannot know whether a
+        // post-state was captured, so it sets `UseFullPath` for *any* action. That
+        // conservatism stays: an effects record built without a recorder must keep refusing,
+        // or a contract call would be silently skipped while the rest of the transaction
+        // applied. Only this method — which has just run the calls — may lower it.
+        for i in fx.guaranteed.intents.iter_mut() {
+            if covered.contains(&i.segment) {
+                i.contracts = ContractsPresent::None;
+            }
+        }
         for seg in fx.fallible.iter_mut() {
-            // Only replace a refusal that the recording actually covers; a `Deploy` leaves
-            // `UseFullPath` standing and the whole transaction stays on the full path.
-            if seg.contracts != ContractsPresent::UseFullPath {
+            if covered.contains(&seg.segment) {
                 seg.contracts = take(&rec, seg.segment);
             }
         }
+
         (next, result, fx)
     }
 
@@ -787,6 +817,12 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
             );
         }
         state = state.apply_zswap_delta(&fx.guaranteed.zswap)?;
+        // ⚠︎ **The guaranteed pass's contracts are segment-level, not per intent.** They were
+        // recorded under segment 0 because that is the pass that installed them, so they are
+        // applied here rather than inside the per-intent loop below. Omitting this left every
+        // contract at its *pre*-state while the rest of the transaction applied — which read
+        // as the codec losing values, and was not.
+        state = state.apply_contract_effects(&fx.guaranteed.contracts)?;
         for intent in &fx.guaranteed.intents {
             state.utxo = storage::arena::Sp::new(
                 state
@@ -794,7 +830,6 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
                     .apply_unshielded_delta(&intent.unshielded, tblock)?,
             );
             state = state.apply_dust_spends(&intent.dust, tblock, context)?;
-            state = state.apply_contract_effects(&intent.contracts)?;
         }
 
         // ── each fallible segment ───────────────────────────────────────────────────────
@@ -2116,6 +2151,76 @@ mod tests {
         let mut inp = &b[..];
         assert_eq!(TranscriptEffects::get(&mut inp).as_ref(), Some(&fx));
         assert!(inp.is_empty());
+    }
+
+    /// **Does a contract's post-state survive the octets it travels as?**
+    ///
+    /// `ContractEffect` carries `ChargedState<D>` as `tagged_serialize`d bytes, so everything
+    /// downstream rests on that round trip being lossless. Checked directly, because a
+    /// difference here would surface much later as a contract quietly holding the wrong
+    /// thing, and the first sighting of it was a whole-transaction hash mismatch — an
+    /// expensive way to learn a codec fact.
+    #[test]
+    fn a_charged_state_survives_its_own_round_trip() {
+        use onchain_runtime::state::{ChargedState, StateValue};
+        use storage::db::InMemoryDB;
+
+        // ⌖ The shape a real contract has: an `Array` of cells, not one cell. The counter
+        // fixture's post-state is `Array(3)`, and a single `Cell` exercises a different path
+        // through the codec.
+        let cells: Vec<StateValue<InMemoryDB>> = vec![1u64.into(), 0u64.into(), 1u64.into()];
+        let before = ChargedState::new(StateValue::Array(cells.into_iter().collect()));
+
+        let mut blob = Vec::new();
+        serialize::tagged_serialize(&before, &mut blob).expect("serialising");
+        let mut inp = &blob[..];
+        let after: ChargedState<InMemoryDB> =
+            serialize::tagged_deserialize(&mut inp).expect("deserialising");
+        assert!(inp.is_empty(), "trailing octets");
+
+        assert_eq!(
+            format!("{:?}", before),
+            format!("{:?}", after),
+            "the state prints differently after a round trip"
+        );
+        assert!(
+            before == after,
+            "a ChargedState is not equal to itself after a round trip — which is what the \
+             contract transport carries, so nothing downstream can be right"
+        );
+
+        // ⌖ **The case that actually matters: a state whose `Sp`s are lazy.**
+        //
+        // The one above was built in this frame, so every `Sp` holds its value. A post-state
+        // coming out of the ᴠᴍ has been through the arena, and a lazy `Sp` prints as
+        // `<Lazy Sp>` and may serialise as a *reference* rather than a value — which is the
+        // `Storable` versus `Serializable` distinction that has now cost time twice.
+        let sp = storage::arena::Sp::new(before.clone());
+        let (hash, key) = (sp.root.clone(), sp.child_repr.clone());
+        storage::storage::default_storage::<InMemoryDB>()
+            .arena
+            .with_backend(|b| {
+                b.persist(&hash);
+                b.flush_all_changes_to_db();
+            });
+        drop(sp);
+        let tkey: storage::arena::TypedArenaKey<ChargedState<InMemoryDB>, _> = key.into();
+        let lazy = storage::storage::default_storage::<InMemoryDB>()
+            .arena
+            .get_lazy(&tkey)
+            .expect("the root is in the db");
+
+        let mut blob = Vec::new();
+        serialize::tagged_serialize(&*lazy, &mut blob).expect("serialising a lazy state");
+        let mut inp = &blob[..];
+        let after: ChargedState<InMemoryDB> =
+            serialize::tagged_deserialize(&mut inp).expect("deserialising");
+        assert_eq!(
+            format!("{:?}", before),
+            format!("{:?}", after),
+            "a lazily-loaded ChargedState loses its values through the codec — the contract \
+             transport cannot carry it as octets"
+        );
     }
 
     /// ⚠︎ A huge declared count must not allocate before the octets exist. The decoder grows
