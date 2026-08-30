@@ -1935,6 +1935,70 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             .expect("unbounded serialization must succeed")
     }
 
+    /// Serialize a sub-graph as nodes whose children are **hashes**, omitting anything the
+    /// recipient already has.
+    ///
+    /// ⌖ [`TopoSortedNodes`] addresses children by index into its own list, so a node list is
+    /// self-contained by construction and cannot express *"this child is hash `H`, which you
+    /// already hold."* That makes it unable to carry a delta. This is the same walk with
+    /// hash-addressed children, which can.
+    ///
+    /// The intended recipient is a content-addressed store that already holds the unchanged
+    /// parts of the graph — a service whose ᴅᴀɢ persists between invocations under node
+    /// hashes, even though its memory does not. Unchanged subtrees keep their hashes forever,
+    /// so `known` prunes them and the walk never descends past one.
+    ///
+    /// ⚠︎ **The recipient must not trust the sender's node hashes.** Nothing here is signed
+    /// and a hash is not carried per node: it is *recomputed* from the data and the child
+    /// hashes by [`HashSortedNodes::verify`], which is what makes accepting a delta from an
+    /// untrusted producer safe. A node whose hash does not match its content is not a node.
+    pub fn serialize_to_hash_node_list_excluding(
+        &self,
+        known: &std::collections::HashSet<ArenaHash<D::Hasher>>,
+    ) -> HashSortedNodes<D::Hasher> {
+        let arena = self.arena.clone();
+        let root = self.child_repr.clone();
+        let mut seen: std::collections::HashSet<ArenaHash<D::Hasher>> = Default::default();
+        let mut out: Vec<HashSortedNode<D::Hasher>> = Vec::new();
+        // Depth-first, children before parents, so a consumer writing in order never stores a
+        // node before the children it names — which is what lets a store be topped up
+        // incrementally without ever holding a dangling reference.
+        let mut stack = vec![(root, false)];
+        while let Some((key, expanded)) = stack.pop() {
+            let h = key.hash().clone();
+            if known.contains(&h) || seen.contains(&h) {
+                continue;
+            }
+            let node = match key {
+                ArenaKey::Ref(ref k) => arena
+                    .lock_backend()
+                    .borrow_mut()
+                    .get(k)
+                    .expect("arena should contain the serialization target")
+                    .clone(),
+                ArenaKey::Direct(ref d) => OnDiskObject {
+                    data: d.data.as_ref().clone(),
+                    #[cfg(not(feature = "layout-v2"))]
+                    ref_count: 0,
+                    children: d.children.as_ref().clone(),
+                },
+            };
+            if expanded {
+                seen.insert(h);
+                out.push(HashSortedNode {
+                    child_hashes: node.children.iter().map(|c| c.hash().clone()).collect(),
+                    data: node.data.clone(),
+                });
+            } else {
+                stack.push((key, true));
+                for c in node.children.iter() {
+                    stack.push((c.clone(), false));
+                }
+            }
+        }
+        HashSortedNodes { nodes: out }
+    }
+
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
     /// This will force and load all nodes in this sub-graph.
@@ -2104,6 +2168,54 @@ pub struct TopoSortedNode {
     pub child_indices: Vec<u64>,
     /// The data of this node
     pub data: Vec<u8>,
+}
+
+/// A storage sub-graph whose nodes name their children by **hash** rather than by index.
+///
+/// The delta counterpart to [`TopoSortedNodes`]. Because children are hashes, a list may
+/// reference nodes it does not contain — anything the recipient's store already holds — which
+/// is exactly what [`TopoSortedNodes`] cannot express.
+///
+/// ⚠︎ Not self-contained, and deliberately so. Deserializing one into an arena is not
+/// meaningful on its own; it is written into a content-addressed store whose existing nodes
+/// resolve the references.
+#[derive(Clone, PartialEq, Eq, Debug, Serializable)]
+pub struct HashSortedNodes<H: WellBehavedHasher> {
+    /// Children before parents, so writing in order never leaves a dangling reference.
+    pub nodes: Vec<HashSortedNode<H>>,
+}
+
+/// One node of a [`HashSortedNodes`].
+#[derive(Clone, PartialEq, Eq, Debug, Serializable)]
+pub struct HashSortedNode<H: WellBehavedHasher> {
+    /// The hashes of this node's children, in order.
+    pub child_hashes: Vec<ArenaHash<H>>,
+    /// The node's own bytes.
+    pub data: Vec<u8>,
+}
+
+impl<H: WellBehavedHasher> HashSortedNodes<H> {
+    /// Recompute every node's content address, in order, and return them.
+    ///
+    /// ⌖ **This is the trust boundary.** A delta arrives from a producer the recipient does
+    /// not trust; nothing about it is signed. What makes it safe to accept is that a node's
+    /// identity *is* its content — `hash(data, child_hashes)` — so the recipient derives every
+    /// hash rather than being told it. A tampered node lands under a different address and
+    /// simply is not the node anything references.
+    ///
+    /// Returns the hashes in list order; the last is the root when the list came from
+    /// [`Sp::serialize_to_hash_node_list_excluding`], since that emits children before parents.
+    pub fn verify(&self) -> Vec<ArenaHash<H>> {
+        self.nodes
+            .iter()
+            .map(|n| hash::<H>(&n.data, n.child_hashes.iter()))
+            .collect()
+    }
+
+    /// Total octets of node data, which is what writing this delta costs a recipient.
+    pub fn data_len(&self) -> usize {
+        self.nodes.iter().map(|n| n.data.len()).sum()
+    }
 }
 
 #[derive_where(Clone)]
@@ -3128,6 +3240,78 @@ mod tests {
         assert_eq!(
             root_node.child_indices[0], root_node.child_indices[1],
             "both children deduplicate to the same leaf index"
+        );
+    }
+
+    /// **A delta is a delta: what the recipient already holds is not sent.**
+    ///
+    /// The point of [`HashSortedNodes`]. `TopoSortedNodes` addresses children by index into
+    /// its own list, so it must always carry the whole sub-graph; addressing them by hash lets
+    /// the walk stop at anything the recipient can already resolve.
+    #[test]
+    fn a_hash_node_list_omits_what_the_recipient_has() {
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Pair {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = &new_arena();
+        let a: Sp<u32, DefaultDB> = arena.alloc(1u32);
+        let b: Sp<u32, DefaultDB> = arena.alloc(2u32);
+        let root = arena.alloc(Pair {
+            a: a.clone(),
+            b: b.clone(),
+        });
+
+        // Knowing nothing: the whole graph travels, and it agrees with the index-addressed
+        // walk on how many nodes that is.
+        let all = root.serialize_to_hash_node_list_excluding(&Default::default());
+        assert_eq!(
+            all.nodes.len(),
+            root.serialize_to_node_list().nodes.len(),
+            "with an empty `known` set the two walks must cover the same graph"
+        );
+
+        // Knowing one leaf: it is pruned, and the parent still names it by hash — which is
+        // precisely what the index-addressed format cannot do.
+        let mut known: std::collections::HashSet<ArenaHash<DefaultHasher>> = Default::default();
+        known.insert(a.child_repr.hash().clone());
+        let delta = root.serialize_to_hash_node_list_excluding(&known);
+        assert_eq!(
+            delta.nodes.len(),
+            all.nodes.len() - 1,
+            "the known leaf should not have been sent"
+        );
+        assert!(
+            delta.data_len() < all.data_len(),
+            "a delta that costs the same as the whole graph is not a delta"
+        );
+        let root_node = delta.nodes.last().expect("children precede parents");
+        assert!(
+            root_node.child_hashes.contains(a.child_repr.hash()),
+            "the parent must still reference the pruned child by hash, or the graph is broken"
+        );
+
+        // ── the trust boundary ──────────────────────────────────────────────────────────
+        //
+        // Nothing in a delta is signed, so the recipient recomputes every address. Tampering
+        // with a node's bytes must move it, or a producer could substitute content under a
+        // hash something else already references.
+        let good = delta.verify();
+        assert_eq!(
+            good.last(),
+            Some(root.child_repr.hash()),
+            "the last recomputed hash is the root the recipient asked for"
+        );
+        let mut tampered = delta.clone();
+        tampered.nodes[0].data.push(0xff);
+        assert_ne!(
+            tampered.verify(),
+            good,
+            "a node's identity is its content; changing the content must change the address"
         );
     }
 }
