@@ -579,6 +579,42 @@ impl<D: DB> Arena<D> {
         f(&mut RefCell::borrow_mut(&self.lock_backend()))
     }
 
+    /// Accept a delta: verify every node's content address and insert the ones we lack.
+    ///
+    /// The consumer half of [`Sp::serialize_to_hash_node_list_excluding`]. Returns the
+    /// recomputed hashes in list order; the last is the sub-graph's root.
+    ///
+    /// ⌖ **Verification is not optional and is not a check on the sender.** A node's address
+    /// *is* `hash(data, child_hashes)`, so this derives every address rather than accepting a
+    /// claimed one. Nothing here trusts the producer: a tampered node lands at an address
+    /// nothing references and is inert.
+    ///
+    /// ⚠︎ Nodes already present are skipped rather than re-cached — `StorageBackend::cache`
+    /// asserts a key is not cached twice while live, and a delta may legitimately name a node
+    /// the recipient acquired between being asked and answering.
+    ///
+    /// ⚠︎ This does **not** check that children exist. A delta is meaningful only against a
+    /// store that already holds what it omits; handed one that does not, the graph is
+    /// incomplete and dereferencing it fails later rather than here. The producer decides
+    /// what to omit, by being told what the recipient has.
+    pub fn accept_hash_node_list(
+        &self,
+        nodes: &HashSortedNodes<D::Hasher>,
+    ) -> Vec<ArenaHash<D::Hasher>> {
+        let mut hashes = Vec::with_capacity(nodes.nodes.len());
+        for n in nodes.nodes.iter() {
+            let h = hash::<D::Hasher>(&n.data, n.child_hashes.iter());
+            let have = self.with_backend(|b| b.get(&h).is_some());
+            if !have {
+                let children: Vec<ArenaKey<D::Hasher>> =
+                    n.child_hashes.iter().cloned().map(ArenaKey::Ref).collect();
+                self.with_backend(|b| b.cache(h.clone(), n.data.clone(), children));
+            }
+            hashes.push(h);
+        }
+        hashes
+    }
+
     /// Insert `value` into the arena, and cache its data in the back-end until
     /// all `Sp`s for this data are dropped.
     pub fn alloc<T: Storable<D>>(&self, value: T) -> Sp<T, D> {
@@ -3313,5 +3349,66 @@ mod tests {
             good,
             "a node's identity is its content; changing the content must change the address"
         );
+    }
+
+    /// **The round trip: a delta plus what the recipient already had is the whole value.**
+    ///
+    /// The previous test shows a delta omits known subtrees. This shows the omission is
+    /// *sound* — that a recipient holding the pruned parts reconstructs exactly the value the
+    /// producer had, and gets the same root hash it would have got from the whole graph.
+    #[test]
+    fn a_delta_reconstitutes_against_a_store_that_has_the_rest() {
+        #[derive(Storable, Clone, PartialEq, Eq, Debug)]
+        struct Pair {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let producer = &new_arena();
+        let shared: Sp<u32, DefaultDB> = producer.alloc(1u32).into_tracked();
+        let fresh: Sp<u32, DefaultDB> = producer.alloc(2u32).into_tracked();
+        let root = producer
+            .alloc(Pair {
+                a: shared.clone(),
+                b: fresh.clone(),
+            })
+            .into_tracked();
+
+        // The recipient already holds `shared` — as it would, having been sent it earlier.
+        let recipient = &new_arena();
+        let mut known: std::collections::HashSet<ArenaHash<DefaultHasher>> = Default::default();
+        let shared_on_recipient: Sp<u32, DefaultDB> = recipient.alloc(1u32).into_tracked();
+        recipient.with_backend(|b| b.persist(shared_on_recipient.child_repr.hash()));
+        known.insert(shared_on_recipient.child_repr.hash().clone());
+        assert_eq!(
+            shared.child_repr.hash(),
+            shared_on_recipient.child_repr.hash(),
+            "content addressing: the same value has the same address in either arena, which \
+             is the whole reason a delta can name what it does not carry"
+        );
+
+        let delta = root.serialize_to_hash_node_list_excluding(&known);
+        assert!(
+            delta.nodes.len() < root.serialize_to_node_list().nodes.len(),
+            "nothing was pruned, so this proves nothing about deltas"
+        );
+
+        let got = recipient.accept_hash_node_list(&delta);
+        assert_eq!(
+            got.last(),
+            Some(root.child_repr.hash()),
+            "the recipient derived a different root than the producer had"
+        );
+
+        // And the value itself comes back, which is the claim that matters.
+        // `get_lazy_unversioned` because `Pair` is a test-local type with no `Tagged` impl;
+        // the tag is a versioning concern and not what this test is about.
+        let back: Sp<Pair, DefaultDB> = recipient
+            .get_lazy_unversioned(&ArenaKey::Ref(got.last().unwrap().clone()))
+            .expect("the delta plus what was already held is a complete graph");
+        assert_eq!(*back.a, 1u32, "the subtree the delta omitted");
+        assert_eq!(*back.b, 2u32, "the subtree the delta carried");
     }
 }
