@@ -949,6 +949,7 @@ impl<D: DB> LedgerState<D> {
         transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
+        rec: &mut Vec<crate::effects::ContractEffect>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
         let mut events: Vec<Event<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
@@ -1019,6 +1020,7 @@ impl<D: DB> LedgerState<D> {
                         logical_segment: segment,
                         physical_segment: *phys_seg,
                     },
+                    rec,
                 )?;
                 state = res.0;
                 events.extend(res.1);
@@ -1140,6 +1142,7 @@ impl<D: DB> LedgerState<D> {
                         logical_segment: 0,
                         physical_segment: segment,
                     },
+                    rec,
                 )?;
                 state = res.0;
                 events.extend(res.1);
@@ -1220,6 +1223,35 @@ impl<D: DB> LedgerState<D> {
     /// ⌖ Generic in the binding, defaulted to [`Pedersen`] so existing callers are unchanged.
     /// It varies so an already-verified transaction can carry commitments in the form they
     /// arrived in rather than as reconstructed curve points -- applying only ever hashes them.
+    /// Apply, and keep what each contract call installed.
+    ///
+    /// ⌖ **The producer of a contract effect must be the applier.** Every other family in
+    /// [`crate::effects`] projects from the transaction, because the transaction contains the
+    /// change. A contract's post-state is the *output* of running its transcript, so nothing
+    /// short of running it can produce one — and running it is what this already does.
+    /// Recording here means the effects are, by construction, exactly what apply installed.
+    ///
+    /// [`Self::apply`] is this with the recording discarded, so there is one implementation
+    /// and the two cannot disagree.
+    pub fn apply_recording<
+        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
+        C: Clone
+            + Ord
+            + Storable<D>
+            + Serializable
+            + Tagged
+            + Into<PedersenVerified>
+            + CommitmentRepr<D>,
+    >(
+        &self,
+        tx: &VerifiedTransaction<D, B, C>,
+        context: &TransactionContext<D>,
+        rec: &mut Vec<crate::effects::ContractEffect>,
+    ) -> (Self, TransactionResult<D>) {
+        self.apply_inner(tx, context, rec)
+    }
+
+    /// Apply. Contract effects are computed and dropped; see [`Self::apply_recording`].
     pub fn apply<
         B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
         C: Clone
@@ -1234,6 +1266,24 @@ impl<D: DB> LedgerState<D> {
         tx: &VerifiedTransaction<D, B, C>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
+        self.apply_inner(tx, context, &mut Vec::new())
+    }
+
+    fn apply_inner<
+        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
+        C: Clone
+            + Ord
+            + Storable<D>
+            + Serializable
+            + Tagged
+            + Into<PedersenVerified>
+            + CommitmentRepr<D>,
+    >(
+        &self,
+        tx: &VerifiedTransaction<D, B, C>,
+        context: &TransactionContext<D>,
+        rec: &mut Vec<crate::effects::ContractEffect>,
+    ) -> (Self, TransactionResult<D>) {
         let res = match &tx.inner {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
@@ -1243,7 +1293,7 @@ impl<D: DB> LedgerState<D> {
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, tx.hash, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, segment, context, rec) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
@@ -1294,6 +1344,11 @@ impl<D: DB> LedgerState<D> {
         res
     }
 
+    /// ⌖ `rec` collects what each `Call` installs, so a transport can carry the post-state
+    /// instead of the receiver re-deriving it. It is threaded explicitly rather than kept in
+    /// a global precisely so there is **one** implementation of the apply path: `apply`
+    /// passes a throwaway `Vec`, `apply_recording` keeps it, and neither can drift from the
+    /// other because they are the same code.
     fn apply_actions<P: ProofKind<D>, B: Storable<D> + Serializable>(
         &self,
         calls: &[ContractAction<P, D>],
@@ -1302,6 +1357,7 @@ impl<D: DB> LedgerState<D> {
         parent_intent: Intent<(), (), B, D>,
         com_indices: &Map<Commitment, u64>,
         event_source: EventSource,
+        rec: &mut Vec<crate::effects::ContractEffect>,
     ) -> Result<MaybeEvents<D>, TransactionInvalid<D>> {
         let mut res = self.clone();
         let mut events = vec![];
@@ -1373,6 +1429,28 @@ impl<D: DB> LedgerState<D> {
                                         logged_item: event,
                                     },
                                 });
+                            }
+                            // ⌖ Recorded here and nowhere else: this is the single site
+                            // where a contract's post-state enters the ledger, so a
+                            // recorder placed here observes exactly what apply installed.
+                            {
+                                let mut blob = Vec::new();
+                                if serialize::tagged_serialize(&results.context.state, &mut blob)
+                                    .is_ok()
+                                {
+                                    rec.push(crate::effects::ContractEffect {
+                                        // ⌖ The *pass*'s segment, which `event_source`
+                                        // already carries as `logical_segment` — the same
+                                        // number `apply_effects` replays under.
+                                        segment: event_source.logical_segment,
+                                        address: call.address,
+                                        post_state: blob,
+                                        balance: new_balance
+                                            .iter()
+                                            .map(|kv| (*kv.0, *kv.1))
+                                            .collect(),
+                                    });
+                                }
                             }
                             res =
                                 res.update_index(call.address, results.context.state, new_balance);

@@ -63,6 +63,10 @@ pub struct TransactionEffects {
 pub struct GuaranteedEffects {
     /// The transaction's single guaranteed shielded offer.
     pub zswap: ZswapDelta,
+    /// Contract post-states installed during the guaranteed pass, if the producer recorded
+    /// them. Segment-level rather than per intent, because the pass applies every intent's
+    /// guaranteed actions together at segment 0.
+    pub contracts: ContractsPresent,
     /// Per intent, keyed by its physical segment.
     pub intents: Vec<IntentEffects>,
 }
@@ -279,28 +283,91 @@ pub struct DustRegistrationEffect {
 /// the chain being *told* it.
 ///
 /// ⏸︎ Still `UseFullPath` today: the post-state channel is designed, not built.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ContractsPresent {
     /// No contract actions; the effects above are the whole transaction.
+    #[default]
     None,
     /// Contract actions are present and not yet represented here. These effects are
     /// incomplete — apply the transaction through `LedgerState::apply` instead.
+    ///
+    /// ⌖ Still reachable, and deliberately: a `Deploy` or a `Maintain` is not a `Call` and
+    /// has no post-state to record. Only calls take the carried path.
     UseFullPath,
+    /// The post-states each `Call` installed, recorded by the applier.
+    Carried(Vec<ContractEffect>),
 }
 
 impl Flat for ContractsPresent {
     fn put(&self, out: &mut Vec<u8>) {
-        out.push(match self {
-            ContractsPresent::None => 0,
-            ContractsPresent::UseFullPath => 1,
-        });
+        match self {
+            ContractsPresent::None => out.push(0),
+            ContractsPresent::UseFullPath => out.push(1),
+            ContractsPresent::Carried(v) => {
+                out.push(2);
+                v.put(out);
+            }
+        }
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         match take(inp, 1)?[0] {
             0 => Some(ContractsPresent::None),
             1 => Some(ContractsPresent::UseFullPath),
+            2 => Some(ContractsPresent::Carried(Flat::get(inp)?)),
             _ => None,
         }
+    }
+}
+
+/// What applying one contract call installs.
+///
+/// ⌖ **The post-state, not the transcript.** `semantics.rs`'s last step for a `Call` is
+/// `update_index(addr, results.context.state, balance)` — a plain write
+/// (`structure.rs:3196`). The run above it exists only to *produce* that state. The
+/// transaction cannot carry it, but refine can: it runs the transcript to verify and holds
+/// the result when it finishes. So this is the one effect whose producer must be the
+/// applier rather than a projection of the transaction.
+///
+/// ⚠︎ **The state travels as octets.** `ChargedState<D>` is generic in the database and
+/// [`TransactionEffects`] is deliberately plain data; a `D` here would make the whole
+/// transport generic and defeat the point. `tagged_serialize` on the way out,
+/// `tagged_deserialize` on the way in.
+///
+/// ⚠︎ And this is the *whole* post-state, which scales with the contract's state rather
+/// than its churn. That is the simple thing that works, built first on purpose so the cost
+/// is measured rather than estimated. The cheaper form — shipping only the arena nodes that
+/// changed, which content addressing makes well-defined — is an optimisation on top of a
+/// working channel, not a prerequisite for one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractEffect {
+    /// Which pass installed it: 0 for the guaranteed pass, else the fallible segment.
+    ///
+    /// ⚠︎ Load-bearing for ordering, not book-keeping. The guaranteed pass and each fallible
+    /// segment apply at different points, and `apply_effects` replays that order; an effect
+    /// filed under the wrong one is applied at the wrong time against a different state.
+    pub segment: u16,
+    /// Which contract. Precondition: present in `state.contract`.
+    pub address: coin_structure::contract::ContractAddress,
+    /// `tagged_serialize`d `ChargedState<D>` — what `update_index` installs as `data`.
+    pub post_state: Vec<u8>,
+    /// The balance `update_index` installs alongside it, already netted by the caller.
+    pub balance: Vec<(coin_structure::coin::TokenType, u128)>,
+}
+
+impl Flat for ContractEffect {
+    fn put(&self, out: &mut Vec<u8>) {
+        self.segment.put(out);
+        self.address.put(out);
+        self.post_state.put(out);
+        self.balance.put(out);
+    }
+    fn get(inp: &mut &[u8]) -> Option<Self> {
+        Some(ContractEffect {
+            segment: Flat::get(inp)?,
+            address: Flat::get(inp)?,
+            post_state: Flat::get(inp)?,
+            balance: Flat::get(inp)?,
+        })
     }
 }
 
@@ -547,6 +614,10 @@ where
     /// have.
     pub fn effects(&self) -> TransactionEffects {
         let guaranteed = GuaranteedEffects {
+            // ⌖ `None`, not `UseFullPath`: a projection of the transaction cannot produce a
+            // post-state, so it says nothing here and the per-intent flag carries the
+            // refusal. `apply_recording` is what fills this in.
+            contracts: ContractsPresent::None,
             zswap: self
                 .guaranteed_coins
                 .as_ref()
@@ -617,6 +688,68 @@ where
 // ── appliers ────────────────────────────────────────────────────────────────────────────
 
 impl<D: storage::db::DB> crate::structure::LedgerState<D> {
+    /// Apply, and hand back effects complete enough to replay — contracts included.
+    ///
+    /// ⌖ **This is the only producer that can be complete.** `VerifiedTransaction::effects`
+    /// projects the transaction, and a contract's post-state is not in the transaction: it is
+    /// the output of running the transcript. Running it is exactly what applying does, so the
+    /// complete producer and the applier are the same pass, and the effects it returns are by
+    /// construction what it installed.
+    ///
+    /// The recorded post-states are filed under the segment that installed them and merged
+    /// into the projection: the guaranteed pass takes segment 0, each fallible segment its
+    /// own. ⚠︎ That filing is load-bearing — `apply_effects` replays passes in order, so an
+    /// effect under the wrong segment is applied at the wrong time against a different state.
+    ///
+    /// ⚠︎ A `Deploy` or `Maintain` leaves its intent's flag at `UseFullPath`, because neither
+    /// is a `Call` and neither has a post-state to record. Those transactions still refuse.
+    pub fn apply_with_effects<B, C>(
+        &self,
+        tx: &crate::structure::VerifiedTransaction<D, B, C>,
+        context: &crate::semantics::TransactionContext<D>,
+    ) -> (
+        Self,
+        crate::semantics::TransactionResult<D>,
+        TransactionEffects,
+    )
+    where
+        B: storage::storable::Storable<D>
+            + crate::structure::PedersenDowngradeable<D>
+            + serialize::Serializable
+            + Tagged,
+        C: Clone
+            + Ord
+            + storage::storable::Storable<D>
+            + serialize::Serializable
+            + Tagged
+            + Into<transient_crypto::commitment::PedersenVerified>
+            + transient_crypto::commitment::CommitmentRepr<D>,
+    {
+        let mut rec = Vec::new();
+        let (next, result) = self.apply_recording(tx, context, &mut rec);
+        let mut fx = tx.effects().unwrap_or(TransactionEffects {
+            guaranteed: Default::default(),
+            fallible: Vec::new(),
+        });
+        let take = |rec: &Vec<ContractEffect>, seg: u16| -> ContractsPresent {
+            let v: Vec<_> = rec.iter().filter(|e| e.segment == seg).cloned().collect();
+            if v.is_empty() {
+                ContractsPresent::None
+            } else {
+                ContractsPresent::Carried(v)
+            }
+        };
+        fx.guaranteed.contracts = take(&rec, 0);
+        for seg in fx.fallible.iter_mut() {
+            // Only replace a refusal that the recording actually covers; a `Deploy` leaves
+            // `UseFullPath` standing and the whole transaction stays on the full path.
+            if seg.contracts != ContractsPresent::UseFullPath {
+                seg.contracts = take(&rec, seg.segment);
+            }
+        }
+        (next, result, fx)
+    }
+
     /// Apply a [`TransactionEffects`] without the transaction it came from.
     ///
     /// The order is `apply_section`'s: the guaranteed pass first — replay, the single
@@ -661,14 +794,16 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
                     .apply_unshielded_delta(&intent.unshielded, tblock)?,
             );
             state = state.apply_dust_spends(&intent.dust, tblock, context)?;
+            state = state.apply_contract_effects(&intent.contracts)?;
         }
 
         // ── each fallible segment ───────────────────────────────────────────────────────
         for seg in &fx.fallible {
-            if seg.contracts != ContractsPresent::None {
+            if seg.contracts == ContractsPresent::UseFullPath {
                 return Err(crate::error::TransactionInvalid::EffectsIncomplete);
             }
             state = state.apply_zswap_delta(&seg.zswap)?;
+            state = state.apply_contract_effects(&seg.contracts)?;
             if let Some(u) = &seg.unshielded {
                 state.utxo = storage::arena::Sp::new(state.utxo.apply_unshielded_delta(u, tblock)?);
             }
@@ -677,10 +812,46 @@ impl<D: storage::db::DB> crate::structure::LedgerState<D> {
     }
 
     /// Refuse an intent carrying anything the effects do not represent.
+    /// Install what the applier recorded: `update_index(addr, post_state, balance)`.
+    ///
+    /// ⌖ This is the whole contract path on the receiving side. The transcript is not here
+    /// and is not run — the state it would have produced is carried instead, which is the
+    /// difference between the chain re-deriving a contract's state and being told it.
+    ///
+    /// ⚠︎ That trade is only sound under this module's standing premise: the producer
+    /// verified. It is the same premise every other family here makes, but contracts are
+    /// where it stops being invisible, because a wrong post-state is not a rejected
+    /// transaction — it is a contract that quietly holds the wrong thing.
+    fn apply_contract_effects(
+        mut self,
+        c: &ContractsPresent,
+    ) -> Result<Self, crate::error::TransactionInvalid<D>> {
+        let ContractsPresent::Carried(effects) = c else {
+            return Ok(self);
+        };
+        for e in effects {
+            let mut inp = &e.post_state[..];
+            let data: onchain_runtime::state::ChargedState<D> =
+                serialize::tagged_deserialize(&mut inp)
+                    .map_err(|_| crate::error::TransactionInvalid::EffectsIncompleteContracts)?;
+            // ⚠︎ Trailing octets mean the blob is not what it claims; refuse rather than
+            // install a prefix.
+            if !inp.is_empty() {
+                return Err(crate::error::TransactionInvalid::EffectsIncompleteContracts);
+            }
+            let mut balance = storage::storage::HashMap::new();
+            for (t, v) in &e.balance {
+                balance = balance.insert(*t, *v);
+            }
+            self = self.update_index(e.address, data, balance);
+        }
+        Ok(self)
+    }
+
     fn refuse_if_incomplete(
         intent: &IntentEffects,
     ) -> Result<(), crate::error::TransactionInvalid<D>> {
-        if intent.contracts != ContractsPresent::None {
+        if intent.contracts == ContractsPresent::UseFullPath {
             return Err(crate::error::TransactionInvalid::EffectsIncompleteContracts);
         }
         if !intent.dust.registrations.is_empty() {
@@ -1063,11 +1234,13 @@ impl Flat for IntentEffects {
 impl Flat for GuaranteedEffects {
     fn put(&self, out: &mut Vec<u8>) {
         self.zswap.put(out);
+        self.contracts.put(out);
         self.intents.put(out);
     }
     fn get(inp: &mut &[u8]) -> Option<Self> {
         Some(GuaranteedEffects {
             zswap: ZswapDelta::get(inp)?,
+            contracts: ContractsPresent::get(inp)?,
             intents: Vec::get(inp)?,
         })
     }
@@ -1225,6 +1398,7 @@ mod tests {
         let h = |n| IntentHash(base_crypto::hash::HashOutput([n; 32]));
         let fx = TransactionEffects {
             guaranteed: GuaranteedEffects {
+                contracts: ContractsPresent::None,
                 zswap: ZswapDelta {
                     spends: vec![SpendDelta {
                         merkle_tree_root: MerkleTreeDigest::default(),
