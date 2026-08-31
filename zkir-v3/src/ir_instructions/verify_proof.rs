@@ -35,9 +35,11 @@ use midnight_proofs::{
 };
 use midnight_zk_stdlib::{MidnightVK, ZkStdLib};
 use transient_crypto::curve::outer;
-use transient_crypto::proofs::S;
+use transient_crypto::proofs::InnerSelfEmulation as S;
 
-/// A fixed, arbitrary name used to label the inner verifying key's fixed bases.
+/// Label prefix for the inner verifying key's fixed bases. The specific string
+/// is arbitrary but must match between the off- and in-circuit passes so
+/// `resolve_fixed_bases` can pair each named scalar with its base.
 const VK_NAME: &str = "inner_vk";
 
 /// Public-input encoding of the accumulator a guarded-off `verify_proof`
@@ -50,12 +52,6 @@ pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
     <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(
         &Accumulator::<S>::trivial(&[]),
     )
-}
-
-/// Number of public-input field elements occupied by one fully-collapsed,
-/// single-point-per-side accumulator.
-pub fn accumulator_pi_len() -> usize {
-    trivial_accumulator_pis().len()
 }
 
 /// Off-circuit partial verification of an inner proof into a single-point
@@ -146,6 +142,9 @@ pub fn verify_proof_incircuit(
     let mut acc = verifier.prepare(layouter, &assigned_vk, &committed, instance, proof)?;
     acc.collapse(layouter, bls, bls.scalar_field_chip())?;
     acc.resolve_fixed_bases(&assigned_bases);
+    // Second collapse: `resolve_fixed_bases` moves the inner VK's fixed-base
+    // contributions into the variable-base MSM, so collapse again to fold them
+    // back into a single point per side.
     acc.collapse(layouter, bls, bls.scalar_field_chip())?;
 
     // Guard the accumulator. Scaling by the bit zeroes each side's scalar but

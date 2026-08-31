@@ -32,9 +32,8 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
-use crate::ir_instructions::verify_proof::{
-    accumulator_pi_len, verify_proof_incircuit, verify_proof_offcircuit,
-};
+use crate::ir_instructions::verify_proof::{verify_proof_incircuit, verify_proof_offcircuit};
+use transient_crypto::proofs::accumulator_pi_len;
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};

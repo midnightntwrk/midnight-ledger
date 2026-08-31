@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Ledger 10.0.0
+
+- feat: ZKIR gains `verify_proof` and `inner_proof` instructions, allowing a circuit to verify an inner Midnight Plonk proof under a guard. The resulting accumulator is exposed as public inputs; its pairing check is deferred to the outer verifier and finalized in `VerifierKey::verify` / `batch_verify` using accumulator offsets carried in the `VerifierKey` blob. The inner VK is out-of-band in `IrSource::verify_proof_vks`, keyed by hash from the instruction.
+- breaking: `VerifierKey` wire format bumped to `verifier-key[v7]`, appending accumulator offsets after the plonk VK bytes.
+
 ## Ledger 9.1.0.0-rc.3
 
 - feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.

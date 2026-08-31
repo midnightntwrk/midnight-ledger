@@ -367,27 +367,27 @@ impl<T: Zkir> Deserializable for ProverKey<T> {
 /// Self-emulation used for in-circuit BLS12-381 proof verification, and for
 /// reconstructing/finalizing the accumulators such proofs leave in the public
 /// inputs.
-pub type S = BlstrsEmulation;
+pub type InnerSelfEmulation = BlstrsEmulation;
 
 /// Number of public-input field elements occupied by one fully-collapsed,
-/// single-point-per-side accumulator (as produced by the ZKIR `verify_proof`
-/// instruction).
-fn accumulator_pi_len() -> usize {
-    <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(
-        &Accumulator::<S>::trivial(&[]),
+/// single-point-per-side accumulator: two points and two scalars, encoded as
+/// field elements per the [`Instantiable`] impl of [`AssignedAccumulator`].
+pub fn accumulator_pi_len() -> usize {
+    <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
+        &Accumulator::<InnerSelfEmulation>::trivial(&[]),
     )
     .len()
 }
 
 /// Reconstructs a single-point-per-side accumulator from its public-input
 /// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`). 
-fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<S>> {
+fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<InnerSelfEmulation>> {
     if !fields.len().is_multiple_of(2) || fields.len() < 4 {
         return None;
     }
-    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<S>> {
+    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<InnerSelfEmulation>> {
         let (point_fields, scalar) = side.split_at(side.len() - 1);
-        let base = <<S as SelfEmulation>::AssignedPoint as Instantiable<outer::Scalar>>::from_public_input(
+        let base = <<InnerSelfEmulation as SelfEmulation>::AssignedPoint as Instantiable<outer::Scalar>>::from_public_input(
             point_fields,
         )?;
         Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
@@ -404,7 +404,7 @@ fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<S>> {
 fn extract_accumulators(
     offsets: &[usize],
     pi: &[outer::Scalar],
-) -> Result<Vec<Accumulator<S>>, VerifyingError> {
+) -> Result<Vec<Accumulator<InnerSelfEmulation>>, VerifyingError> {
     let mut accumulators = Vec::new();
     let acc_len = accumulator_pi_len();
     for &offset in offsets {

@@ -940,6 +940,9 @@ pub enum Instruction {
     /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
     /// which VK the circuit was compiled against.
     ///
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `InnerProof` instruction that produces `proof`. 
+    ///
     /// No outputs.
     VerifyProof {
         /// The boolean condition under which the inner proof is verified. A
@@ -967,9 +970,11 @@ pub enum Instruction {
     /// perfectly good witness for `VerifyProof`, whose accumulator is discarded
     /// under the same guard.
     ///
-    /// The `guard` should be the one of the `VerifyProof` that consumes this
-    /// binding: verifying for real against an empty blob yields an accumulator
-    /// that fails the outer verifier's deferred pairing check.
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `VerifyProof` instruction that consumes `output`. A
+    /// guard-off `InnerProof` binds the empty blob, which is only a valid
+    /// witness for a guard-off `VerifyProof` - the reverse pairing produces an
+    /// accumulator that fails the outer verifier's deferred pairing check.
     ///
     /// One output, the inner proof.
     InnerProof {
