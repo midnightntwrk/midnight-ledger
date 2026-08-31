@@ -627,7 +627,7 @@ impl Debug for Symbol {
 }
 
 pub const INPUT_PIS: usize = 68;
-pub const INPUT_PROOF_SIZE: usize = 4_832;
+pub const INPUT_PROOF_SIZE: usize = 3_776;
 pub const OUTPUT_PIS: usize = 77;
-pub const OUTPUT_PROOF_SIZE: usize = 4_832;
+pub const OUTPUT_PROOF_SIZE: usize = 3_776;
 pub const AUTHORIZED_CLAIM_PIS: usize = 13;

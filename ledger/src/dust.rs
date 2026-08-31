@@ -2284,7 +2284,7 @@ mod tests {
         use rand::{Rng, SeedableRng, rngs::StdRng};
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-        use zkir_v2::LocalProvingProvider;
+        use zkir_v3::LocalProvingProvider;
 
         use crate::{
             dust::DUST_SPEND_PROOF_SIZE,

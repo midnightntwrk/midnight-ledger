@@ -667,8 +667,11 @@ pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> Cont
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
-    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
-        .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
+    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR").unwrap_or(
+        "/nix/store/4z7w4iikam79w9pkr4zh8qql692vs99a-midnight-ledger-test-artifacts-1.0.0"
+            .to_string(),
+    );
+    // .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
 
     Resolver::new(
         PUBLIC_PARAMS.clone(),
@@ -870,21 +873,8 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 let real = proven.clone().seal(_rng.split());
                 let real_fees = real.fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
-                    let serialized_size_delta =
-                        mocked.serialized_size().abs_diff(real.serialized_size()) as u128;
-                    let size_based_error_margin =
-                        allowed_error_margin.saturating_mul(serialized_size_delta + 5);
-
                     assert!(real_fees <= mocked_fees);
-                    assert!(
-                        mocked_fees <= real_fees + size_based_error_margin,
-                        "mocked_fees = {}, real_fees = {}, allowed_error_margin = {}, serialized_size_delta = {}, size_based_error_margin = {}",
-                        mocked_fees,
-                        real_fees,
-                        allowed_error_margin,
-                        serialized_size_delta,
-                        size_based_error_margin
-                    );
+                    assert!(mocked_fees <= real_fees + allowed_error_margin);
                 }
             }
             Ok(proven)

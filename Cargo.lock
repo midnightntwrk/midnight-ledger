@@ -3740,7 +3740,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3"
-version = "3.0.0-rc.2"
+version = "3.0.0"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3843,7 +3843,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir-v3",
  "pastey",
  "rand 0.8.7",
  "rayon",
