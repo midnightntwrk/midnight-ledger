@@ -114,7 +114,7 @@ pub const VERIFIER_MAX_DEGREE: u8 = 14;
 
 /// Parameters used for verifying with the `KZG` commitment scheme
 #[derive(Clone)]
-pub struct ParamsVerifier(Arc<ParamsVerifierKZG<Bls12>>);
+pub struct ParamsVerifier(pub(crate) Arc<ParamsVerifierKZG<Bls12>>);
 
 impl ParamsVerifier {
     /// Reads in verifier parameters
@@ -703,11 +703,14 @@ impl VerifierKey {
     /// Mocks the checking of a proof against a statement
     ///
     /// We do this by running a number of CPU burn cycles calculated to be approximately
-    /// equivalent in time-taken to real proof verification
+    /// equivalent in time-taken to real proof verification, including the deferred
+    /// pairing check that [`verify`](Self::verify) performs on each inner-proof
+    /// accumulator exposed by a `verify_proof` instruction.
     #[cfg(feature = "mock-verify")]
     pub fn mock_verify<F: Iterator<Item = Fr>>(&self, statement: F) -> Result<(), VerifyingError> {
         let pi_len = statement.count();
-        crate::mock_verify::mock_verify_for(pi_len)
+        let accumulator_count = self.accumulator_offsets()?.len();
+        crate::mock_verify::mock_verify_for(pi_len, accumulator_count)
     }
 
     /// Checks a sequence of proofs against their corresponding statements and verifier keys
