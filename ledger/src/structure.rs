@@ -412,8 +412,12 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
 }
 
 impl From<Proof> for ProofVersioned {
+    /// Version-tags a bare proof as the latest ZKIR version. This is used for
+    /// the natively verified circuits (currently only Dust spends), which carry
+    /// no version tag of their own and are always proven against the circuits
+    /// shipped with this ledger version.
     fn from(proof: Proof) -> Self {
-        Self::V2(proof)
+        Self::V3(proof)
     }
 }
 

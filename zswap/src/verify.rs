@@ -139,11 +139,7 @@ impl AuthorizedClaim<Proof> {
             op.field_repr(&mut statement);
         }
         SIGN_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
@@ -192,11 +188,7 @@ impl<D: DB> Input<Proof, D> {
             op.field_repr(&mut statement);
         }
         SPEND_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
@@ -264,11 +256,7 @@ impl<D: DB> Output<Proof, D> {
             op.field_repr(&mut statement);
         }
         OUTPUT_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
