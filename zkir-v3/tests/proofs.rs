@@ -1698,6 +1698,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -1763,6 +1764,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -1832,6 +1834,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -1927,6 +1930,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -1987,6 +1991,7 @@ mod proof_tests {
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let result = preimage_fail
@@ -2104,6 +2109,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -2170,6 +2176,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -2239,6 +2246,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -2335,6 +2343,7 @@ mod proof_tests {
             private_transcript,
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = preimage
@@ -2395,6 +2404,7 @@ mod proof_tests {
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
+            proof_witnesses: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let result = preimage_fail

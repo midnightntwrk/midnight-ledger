@@ -381,7 +381,7 @@ pub fn accumulator_pi_len() -> usize {
 
 /// Reconstructs a single-point-per-side accumulator from its public-input
 /// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`). 
-fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<InnerSelfEmulation>> {
+pub fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<InnerSelfEmulation>> {
     if !fields.len().is_multiple_of(2) || fields.len() < 4 {
         return None;
     }
@@ -972,3 +972,82 @@ pub type ProvingError = anyhow::Error;
 /// the public API, although it may be assumed to be [`Debug`]` +
 /// `[`Display`](std::fmt::Display).
 pub type VerifyingError = anyhow::Error;
+
+#[cfg(test)]
+mod accumulator_discharge_tests {
+    use super::*;
+    use group::Group;
+
+    type C = <InnerSelfEmulation as SelfEmulation>::C;
+
+    /// A collapsed accumulator that does *not* satisfy the pairing invariant.
+    fn non_pairing_accumulator() -> Accumulator<InnerSelfEmulation> {
+        let one = outer::Scalar::from(1u64);
+        Accumulator::new(
+            Msm::new(&[C::generator()], &[one], &BTreeMap::new()),
+            Msm::new(&[C::identity()], &[one], &BTreeMap::new()),
+        )
+    }
+
+    fn encode(acc: &Accumulator<InnerSelfEmulation>) -> Vec<outer::Scalar> {
+        <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
+            acc,
+        )
+    }
+
+    #[test]
+    fn a_carried_accumulator_that_does_not_pair_is_rejected() {
+        let trivial = Accumulator::<InnerSelfEmulation>::trivial(&[]);
+        assert!(
+            trivial.check(&PARAMS_VERIFIER.0, &BTreeMap::new()),
+            "the trivial accumulator must pair; a guarded-off instruction exposes it"
+        );
+        assert!(
+            !non_pairing_accumulator().check(&PARAMS_VERIFIER.0, &BTreeMap::new()),
+            "an accumulator whose sides differ must not pair"
+        );
+    }
+
+    #[test]
+    fn every_exposed_accumulator_is_extracted_and_checked() {
+        let acc_len = accumulator_pi_len();
+        let trivial = Accumulator::<InnerSelfEmulation>::trivial(&[]);
+
+        let mut pi = vec![outer::Scalar::from(7u64), outer::Scalar::from(9u64)];
+        pi.extend(encode(&trivial));
+        pi.extend(encode(&non_pairing_accumulator()));
+        let offsets = [2, 2 + acc_len];
+
+        let extracted = extract_accumulators(&offsets, &pi).expect("both must parse");
+        assert_eq!(extracted.len(), 2);
+
+        let verdicts: Vec<bool> = extracted
+            .iter()
+            .map(|acc| acc.check(&PARAMS_VERIFIER.0, &BTreeMap::new()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            vec![true, false],
+            "each accumulator must be checked on its own, not subsumed by the first"
+        );
+    }
+
+    #[test]
+    fn the_collapsed_encoding_round_trips() {
+        for acc in [
+            Accumulator::<InnerSelfEmulation>::trivial(&[]),
+            non_pairing_accumulator(),
+        ] {
+            let fields = encode(&acc);
+            assert_eq!(fields.len(), accumulator_pi_len());
+            let parsed = reconstruct_accumulator(&fields).expect("well-formed encoding must parse");
+            assert_eq!(encode(&parsed), fields);
+        }
+    }
+
+    #[test]
+    fn a_malformed_encoding_is_rejected() {
+        assert!(reconstruct_accumulator(&[]).is_none());
+        assert!(reconstruct_accumulator(&[outer::Scalar::from(1u64); 3]).is_none());
+    }
+}
