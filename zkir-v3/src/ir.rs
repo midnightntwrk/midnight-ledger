@@ -47,8 +47,10 @@ pub struct IrSource {
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
-    /// Full verifying keys for the circuit's `VerifyProof` instructions, in
-    /// instruction order.
+    /// Full verifying keys for the circuit's `VerifyProof` instructions. 
+    /// Each entry is
+    /// [`serialize_vk`](crate::ir_instructions::decidable::serialize_vk)'s
+    /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_proof_vks: Vec<Vec<u8>>,
 }

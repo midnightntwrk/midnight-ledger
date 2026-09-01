@@ -20,8 +20,8 @@
 //! whether the proof is actually verified. Alongside it, `verify_proof` takes:
 //!
 //! - `vk_hash`: hash of the decider-tagged, self-contained `MidnightVK` blob
-//!   (the blob's leading byte is the decider tag, `0x00` = the Standard
-//!   decider). The full VK is resolved out-of-band and carried in the IR's
+//!   (the blob's leading byte is the decider tag, `0x00` = `DeciderKind::None`).
+//!   The full VK is resolved out-of-band and carried in the IR's
 //!   `verify_proof_vks` side-table, keyed by this hash; the canonical text
 //!   stores only the hash.
 //! - `instance`: the inner proof's public inputs, as ordinary `Native`

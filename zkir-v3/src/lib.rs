@@ -20,4 +20,5 @@ pub mod ir_types;
 pub mod ir_vm;
 
 pub use ir::{Identifier, Instruction, IrSource};
+pub use ir_instructions::decidable::{DeciderKind, deserialize_vk, serialize_vk};
 pub use ir_vm::Preprocessed;

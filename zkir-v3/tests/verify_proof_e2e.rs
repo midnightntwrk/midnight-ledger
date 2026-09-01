@@ -11,83 +11,72 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! End-to-end example for the `verify_proof` instruction (Model A: fixed VK,
-//! full binary).
+//! End-to-end tests for the `verify_proof` instruction, one per decider kind.
 //!
-//! Flow:
-//!   1. Build a minimal inner circuit and prove it with a **Poseidon**
-//!      transcript — what the in-circuit verifier expects, NOT ZKIR's default
-//!      Blake2b transcript.
-//!   2. Serialize its `MidnightVK` (Processed) as the VK blob, and take the raw
-//!      proof bytes.
-//!   3. Build an outer ZKIR circuit that binds the proof with `inner_proof` and
-//!      verifies it with `verify_proof`, against that VK and the inner public
-//!      input (as hex in the IR).
-//!   4. keygen the outer circuit (which records the accumulator's public-input
-//!      offset in the verifying key); then prove it and verify, where verifying
-//!      runs the deferred pairing check on the inner proof's accumulator.
-//!   5. Re-prove with the same keys, the guard off and no inner proof at all,
-//!      showing that the accumulator is then the trivial one and the deferred
-//!      check passes regardless.
+//! Both follow the same shape: prove an inner circuit with a Poseidon
+//! transcript, register its verifying key under a decider, then build an
+//! outer ZKIR circuit that witnesses the inner public inputs, binds the proof
+//! with `inner_proof`, and verifies it with `verify_proof`. Verifying the outer
+//! proof runs the pairing check on the accumulator the instruction exposed.
 //!
-//! A second test, `proof_witnesses_track_the_guards`, covers the off-circuit
-//! consumption rule on its own: with two guarded pairs, only the active one
-//! takes a witness from the preimage.
-//!
-//! This test is `#[ignore]`d: the outer circuit does in-circuit BLS12-381 proof
-//! verification, so it is large and needs prover SRS params at a high `k`
-//! (point `MIDNIGHT_PP` at a directory of `bls_midnight_2p<k>` files, or rely on
-//! `~/.cache/midnight/zk-params`), which are not present in CI. Run with:
-//!   `MIDNIGHT_PP=<dir> cargo +1.95.0 test -p midnight-zkir-v3 \
-//!        --test verify_proof_e2e -- --ignored --nocapture`
+//!   * [`Echo`] defers nothing: [`DeciderKind::None`].
+//!   * [`Recursive`] verifies an [`Echo`] proof in-circuit, so it carries the
+//!     accumulator that verification defers: [`DeciderKind::Collapsed`].
 
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
 
 use midnight_circuits::hash::poseidon::PoseidonState;
-use sha2::Digest;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
-use midnight_circuits::types::AssignedNative;
+use midnight_circuits::types::{AssignedBit, AssignedNative};
 use midnight_curves::Fq;
 use midnight_proofs::circuit::{Layouter, Value};
 use midnight_proofs::plonk;
-use midnight_proofs::utils::SerdeFormat;
-use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch, prove, setup_pk, setup_vk};
+use midnight_zk_stdlib::{
+    MidnightVK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
+};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
-
-use std::borrow::Cow;
+use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::verify_proof::trivial_accumulator_pis;
+use midnight_zkir_v3::ir_instructions::decidable::{
+    DeciderKind, serialize_vk, trivial_accumulator_pis,
+};
+use midnight_zkir_v3::ir_instructions::verify_proof::{
+    verify_proof_incircuit, verify_proof_offcircuit,
+};
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage, Zkir,
 };
 
-/// Reads SRS params at runtime from `$MIDNIGHT_PP` (falling back to
-/// `~/.cache/midnight/zk-params`), so this file compiles without the build-time
-/// `env!("MIDNIGHT_PP")` the shared test harness uses.
+/// The value [`Echo`] exposes.
+const ECHO: u64 = 123;
+
+/// Reads SRS params at runtime from `$MIDNIGHT_PP`.
 struct RuntimeParams;
 
 impl ParamsProverProvider for RuntimeParams {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-        let dir = std::env::var("MIDNIGHT_PP").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            format!("{home}/.cache/midnight/zk-params")
-        });
+        let dir = std::env::var("MIDNIGHT_PP")
+            .expect("$MIDNIGHT_PP must name a directory of `bls_midnight_2p<k>` files");
         ParamsProver::read(BufReader::new(File::open(format!(
             "{dir}/bls_midnight_2p{k}"
         ))?))
     }
 }
 
-/// A minimal inner circuit: witnesses one field element and exposes it as the
-/// single public input. Just enough to produce a real, verifiable proof.
-#[derive(Clone)]
-struct InnerRelation;
+// ---------------------------------------------------------------------------
+// The two inner circuits
+// ---------------------------------------------------------------------------
 
-impl Relation for InnerRelation {
+/// Exposes one field element as its only public input.
+#[derive(Clone)]
+struct Echo;
+
+impl Relation for Echo {
     type Instance = Fq;
     type Witness = ();
     type Error = plonk::Error;
@@ -104,8 +93,7 @@ impl Relation for InnerRelation {
         _witness: Value<()>,
     ) -> Result<(), plonk::Error> {
         let x: AssignedNative<Fq> = std_lib.assign(layouter, instance)?;
-        std_lib.constrain_as_public_input(layouter, &x)?;
-        Ok(())
+        std_lib.constrain_as_public_input(layouter, &x)
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
@@ -117,283 +105,283 @@ impl Relation for InnerRelation {
     }
 
     fn read_relation<R: std::io::Read>(_reader: &mut R) -> std::io::Result<Self> {
-        Ok(InnerRelation)
+        Ok(Echo)
     }
 }
 
-/// The inner circuit's public input, and the same value as the `instance`
-/// operand of every `verify_proof` below.
-const INNER_INSTANCE: u64 = 123;
-
-/// Steps 1 and 2, shared by the tests: prove the inner circuit and serialize its
-/// `MidnightVK` (Processed) as the VK blob the ledger resolves out-of-band.
-///
-/// The transcript matters — the in-circuit verifier expects **Poseidon**, not
-/// ZKIR's default Blake2b.
-async fn inner_proof_and_vk_blob(rng: &mut ChaCha20Rng) -> (Vec<u8>, Vec<u8>) {
-    let inner_relation = InnerRelation;
-
-    // Discover the inner circuit's k, then read the matching SRS.
-    let k = {
-        let srs = RuntimeParams.get_params(12).await.expect("inner SRS (probe)");
-        setup_vk(srs.as_ref(), &inner_relation).k()
-    };
-    let inner_srs = RuntimeParams.get_params(k).await.expect("inner SRS");
-    let inner_vk = setup_vk(inner_srs.as_ref(), &inner_relation);
-    let inner_pk = setup_pk(&inner_relation, &inner_vk);
-    let inner_proof = prove::<InnerRelation, PoseidonState<Fq>>(
-        inner_srs.as_ref(),
-        &inner_pk,
-        &inner_relation,
-        &Fq::from(INNER_INSTANCE),
-        (),
-        rng,
-    )
-    .expect("inner prove");
-
-    let vk_blob = {
-        let mut blob = Vec::new();
-        inner_vk
-            .write(&mut blob, SerdeFormat::Processed)
-            .expect("serialize inner vk");
-        blob
-    };
-
-    (inner_proof, vk_blob)
+/// Verifies a proof of `inner_vk` in-circuit, and exposes the accumulator that
+/// verification defers as the tail of its own instance.
+#[derive(Clone)]
+struct Recursive {
+    /// The verifying key of the proof this one verifies, as registered:
+    /// `serialize_vk`'s blob.
+    inner_vk: Vec<u8>,
 }
 
-#[actix_rt::test]
-#[ignore = "outer verifier circuit needs a high-k SRS not available in CI"]
-async fn verify_proof_end_to_end() {
-    let mut rng = ChaCha20Rng::from_seed([7; 32]);
+impl Relation for Recursive {
+    type Instance = Vec<Fq>;
+    type Witness = Vec<u8>;
+    type Error = plonk::Error;
 
-    // ---- 1./2. The inner proof, and the VK blob for it ------------------
-    let (inner_proof, vk_blob) = inner_proof_and_vk_blob(&mut rng).await;
+    fn format_instance(instance: &Vec<Fq>) -> Result<Vec<Fq>, plonk::Error> {
+        Ok(instance.clone())
+    }
 
-    // ---- 3. Outer ZKIR circuit: inner_proof + verify_proof --------------
-    // Built via JSON (`IrSource::load`). The canonical IR is hash-only: the
-    // instruction stores just `hash(vk_blob)`, the inner public input is an
-    // immediate (`INNER_INSTANCE` in hex), and the proof arrives by name from
-    // `inner_proof`. The full VK is supplied out-of-band below.
-    //
-    // The guard is the input `%g` rather than a constant, so a single keygen
-    // serves both guard values below: the guard changes what the accumulator
-    // public inputs are, never the shape of the circuit.
-    let vk_hash = sha2::Sha256::digest(&vk_blob);
+    fn circuit(
+        &self,
+        std_lib: &ZkStdLib,
+        layouter: &mut impl Layouter<Fq>,
+        instance: Value<Vec<Fq>>,
+        witness: Value<Vec<u8>>,
+    ) -> Result<(), plonk::Error> {
+        let x: AssignedNative<Fq> = std_lib.assign(layouter, instance.map(|fields| fields[0]))?;
+        std_lib.constrain_as_public_input(layouter, &x)?;
+
+        // Verifying it constrains the deferred accumulator as the rest of our
+        // public inputs. Nothing here is guarded, so the guard is a fixed one.
+        let on: AssignedBit<Fq> = std_lib.assign_fixed(layouter, true)?;
+        verify_proof_incircuit(std_lib, layouter, &self.inner_vk, &[&[x]], witness, &on)
+    }
+
+    fn used_chips(&self) -> ZkStdLibArch {
+        ZkStdLibArch {
+            poseidon: true,
+            bls12_381: true,
+            nr_pow2range_cols: 4,
+            ..Default::default()
+        }
+    }
+
+    fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(&(self.inner_vk.len() as u64).to_le_bytes())?;
+        writer.write_all(&self.inner_vk)
+    }
+
+    fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut len = [0u8; 8];
+        reader.read_exact(&mut len)?;
+        let mut inner_vk = vec![0u8; u64::from_le_bytes(len) as usize];
+        reader.read_exact(&mut inner_vk)?;
+        Ok(Recursive { inner_vk })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared plumbing
+// ---------------------------------------------------------------------------
+
+/// Keygen and prove `relation`, with the Poseidon transcript the in-circuit
+/// verifier expects.
+async fn prove_inner<R: Relation>(
+    relation: &R,
+    instance: &R::Instance,
+    witness: R::Witness,
+    rng: &mut ChaCha20Rng,
+) -> (Vec<u8>, MidnightVK) {
+    // The SRS files start at k = 12; a smaller circuit is simply padded up.
+    let srs = RuntimeParams
+        .get_params(optimal_k(relation).max(12) as u8)
+        .await
+        .expect("inner SRS");
+    let vk = setup_vk(srs.as_ref(), relation);
+    let pk = setup_pk(relation, &vk);
+    let proof = prove::<R, PoseidonState<Fq>>(srs.as_ref(), &pk, relation, instance, witness, rng)
+        .expect("inner prove");
+    (proof, vk)
+}
+
+/// The outer ZKIR circuit: witness the inner proof's `instance_len` public
+/// inputs, bind the proof, verify it.
+///
+/// ZKIR has no instruction of its own for the inner instance: the fields are
+/// ordinary prover witnesses, and `verify_proof` just names the variables they
+/// were bound to. Here that is one guarded `private_input` per field, which is
+/// what a caller emits; the values travel in `ProofPreimage::private_transcript`.
+///
+/// Everything is under the input guard `%g`, so one keygen serves both guard
+/// values — the guard changes what the accumulator public inputs are, never the
+/// shape of the circuit.
+fn outer_ir(vk_blob: Vec<u8>, instance_len: usize) -> IrSource {
+    let names: Vec<String> = (0..instance_len).map(|i| format!("\"%i_{i}\"")).collect();
+    let witnesses: Vec<String> = names
+        .iter()
+        .map(|name| {
+            format!(
+                r#"{{ "op": "private_input", "guard": "%g",
+                      "type": "Scalar<BLS12-381>", "output": {name} }}"#
+            )
+        })
+        .collect();
     let ir_json = format!(
         r#"{{
            "version": {{ "major": 3, "minor": 0 }},
-           "inputs": [
-              {{ "name": "%g", "type": "Scalar<BLS12-381>" }}
-           ],
+           "inputs": [{{ "name": "%g", "type": "Scalar<BLS12-381>" }}],
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               {{
-                   "op": "inner_proof",
-                   "guard": "%g",
-                   "output": "%p_0"
-               }},
-               {{
-                   "op": "verify_proof",
-                   "guard": "%g",
-                   "vk_hash": "0x{vk_hash_hex}",
-                   "instance": ["0x{instance_hex}"],
-                   "proof": "%p_0"
-               }}
+               {witnesses},
+               {{ "op": "inner_proof", "guard": "%g", "output": "%p" }},
+               {{ "op": "verify_proof", "guard": "%g",
+                  "vk_hash": "0x{vk_hash}",
+                  "instance": [{names}], "proof": "%p" }}
            ]
         }}"#,
-        vk_hash_hex = const_hex::encode(vk_hash),
-        instance_hex = format!("{INNER_INSTANCE:02x}"),
+        witnesses = witnesses.join(",\n               "),
+        names = names.join(", "),
+        vk_hash = const_hex::encode(sha2::Sha256::digest(&vk_blob)),
     );
-    let mut outer_ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
+    let mut ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
+    ir.verify_proof_vks = vec![vk_blob];
+    // One accumulator, whatever the decider kind. That is what keeps the
+    // exposed shape witness-independent and computable at keygen.
+    assert_eq!(ir.accumulator_offsets().len(), 1);
+    ir
+}
 
-    // Resolve the full VK out-of-band (at "compile time"): the hash-only IR
-    // gains its VK side-table. Both passes index it by digest, so the
-    // instruction's `vk_hash` resolves to this blob.
-    outer_ir.verify_proof_vks = vec![vk_blob];
-
-    // ---- 4. keygen + prove + verify the outer ZKIR circuit --------------
-    let (outer_pk, outer_vk) = outer_ir.keygen(&RuntimeParams).await.expect("outer keygen");
-
-    // The inner statement is an immediate, so the only input is the guard; the
-    // rest of the preimage is a binding input with empty transcripts — plus the
-    // inner proof, supplied as the (single) opaque proof witness.
-    let outer_preimage = |guard: u64, proof_witnesses: Vec<Vec<u8>>| ProofPreimage {
+/// The outer proof's preimage. Guarded off, there is no inner proof and no
+/// inner instance to supply at all.
+fn preimage(guard: bool, proof: &[u8], instance: &[Fq]) -> ProofPreimage {
+    ProofPreimage {
         binding_input: Fr::from(99u64),
         communications_commitment: None,
-        inputs: vec![Fr::from(guard)],
-        private_transcript: vec![],
+        inputs: vec![Fr::from(guard as u64)],
+        // The inner instance, as ordinary prover witnesses.
+        private_transcript: guard
+            .then(|| instance.iter().copied().map(Fr).collect())
+            .unwrap_or_default(),
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses,
+        proof_witnesses: guard.then(|| proof.to_vec()).into_iter().collect(),
         key_location: KeyLocation(Cow::Borrowed("builtin")),
-    };
+    }
+}
 
-    // Prove the outer circuit via the normal ZKIR path (Blake2b transcript). If
-    // the inner proof were invalid or incompatible, the off-circuit and
-    // in-circuit `verify_proof` preparation would make this fail — so a
-    // successful prove is itself evidence the inner proof was verified.
-    let (outer_proof, outer_pis, _pi_skips) = outer_ir
+// ---------------------------------------------------------------------------
+// The two scenarios
+// ---------------------------------------------------------------------------
+
+/// An inner proof that defers nothing of its own.
+#[actix_rt::test]
+#[ignore = "in-circuit proof verification needs a high-k SRS, not available in CI"]
+async fn verify_proof_without_a_decider() {
+    let mut rng = ChaCha20Rng::from_seed([7; 32]);
+    let instance = [Fq::from(ECHO)];
+    let (proof, vk) = prove_inner(&Echo, &instance[0], (), &mut rng).await;
+
+    let ir = outer_ir(
+        serialize_vk(&vk, DeciderKind::None).expect("serialize inner vk"),
+        instance.len(),
+    );
+    let (pk, outer_vk) = ir.keygen(&RuntimeParams).await.expect("outer keygen");
+
+    // Proving already runs both `verify_proof` passes, so it fails if the inner
+    // proof does not check out; verifying then discharges the accumulator that
+    // verification deferred.
+    let (outer_proof, pis, _) = ir
         .prove(
             &mut rng,
             &RuntimeParams,
-            outer_pk.clone(),
-            &outer_preimage(1, vec![inner_proof]),
+            pk.clone(),
+            &preimage(true, &proof, &instance),
+        )
+        .await
+        .expect("outer prove");
+    outer_vk
+        .verify(&PARAMS_VERIFIER, &outer_proof, pis.into_iter())
+        .expect("outer verify");
+
+    // Guarded off, with no inner proof and no instance supplied, the exposed
+    // accumulator is the trivial one, whose pairing holds by construction.
+    let (guarded, guarded_pis, _) = ir
+        .prove(&mut rng, &RuntimeParams, pk, &preimage(false, &[], &[]))
+        .await
+        .expect("outer prove (guard off)");
+    assert_eq!(
+        guarded_pis[ir.accumulator_offsets()[0]..],
+        trivial_accumulator_pis()
+            .into_iter()
+            .map(Fr)
+            .collect::<Vec<_>>()[..],
+    );
+    outer_vk
+        .verify(&PARAMS_VERIFIER, &guarded, guarded_pis.into_iter())
+        .expect("outer verify (guard off)");
+}
+
+/// An inner proof carrying an accumulator of its own, which the instruction
+/// folds into the one it exposes.
+#[actix_rt::test]
+#[ignore = "in-circuit proof verification needs a high-k SRS, not available in CI"]
+async fn verify_proof_with_a_collapsed_decider() {
+    let mut rng = ChaCha20Rng::from_seed([17; 32]);
+
+    // The proof to be verified in-circuit, and the accumulator verifying it
+    // defers.
+    let (echo_proof, echo_vk) = prove_inner(&Echo, &Fq::from(ECHO), (), &mut rng).await;
+    let echo_blob = serialize_vk(&echo_vk, DeciderKind::None).expect("serialize echo vk");
+    let deferred = verify_proof_offcircuit(&echo_blob, &[Fq::from(ECHO)], &echo_proof, true)
+        .expect("the accumulator the echo proof defers");
+
+    // The proof that verifies it, carrying that accumulator in its instance
+    // tail.
+    let recursive = Recursive {
+        inner_vk: echo_blob,
+    };
+    let instance: Vec<Fq> = std::iter::once(Fq::from(ECHO)).chain(deferred).collect();
+    let (proof, vk) = prove_inner(&recursive, &instance, echo_proof, &mut rng).await;
+
+    let ir = outer_ir(
+        serialize_vk(&vk, DeciderKind::Collapsed).expect("serialize recursive vk"),
+        instance.len(),
+    );
+    let (pk, outer_vk) = ir.keygen(&RuntimeParams).await.expect("outer keygen");
+
+    let (outer_proof, pis, _) = ir
+        .prove(
+            &mut rng,
+            &RuntimeParams,
+            pk.clone(),
+            &preimage(true, &proof, &instance),
         )
         .await
         .expect("outer prove");
 
-    // The verifying key carries the inner-proof accumulator offset. Assert that
-    // this survives the wire format: serialization is invariant under lazy
-    // initialization, and a serialize -> deserialize round-trip is byte-exact.
-    // We then verify through the *reloaded* key, so the deferred pairing is
-    // driven by offsets that came back off the wire, not from the in-memory VK.
-    let reloaded_vk = {
-        use serialize::{Deserializable, Serializable};
-        let mut bytes = Vec::new();
-        Serializable::serialize(&outer_vk, &mut bytes).expect("serialize vk");
-        outer_vk.init().expect("init vk");
-        let mut bytes_after_init = Vec::new();
-        Serializable::serialize(&outer_vk, &mut bytes_after_init).expect("serialize vk");
-        assert_eq!(
-            bytes, bytes_after_init,
-            "VerifierKey serialization must be invariant under initialization"
-        );
-        let reloaded: transient_crypto::proofs::VerifierKey =
-            Deserializable::deserialize(&mut &bytes[..], 0).expect("deserialize vk");
-        let mut bytes_reloaded = Vec::new();
-        Serializable::serialize(&reloaded, &mut bytes_reloaded).expect("serialize vk");
-        assert_eq!(
-            bytes, bytes_reloaded,
-            "VerifierKey must round-trip byte-for-byte through serialize/deserialize"
-        );
-        
-        // Initialize the wire-parsed key and serialize it again. Unlike the
-        // (uninitialized) pass-through above, this re-derives the blob *from the
-        // parsed structure* (`vk.write()` + offsets).
-        reloaded.init().expect("init reloaded vk");
-        let mut bytes_after_reload_init = Vec::new();
-        Serializable::serialize(&reloaded, &mut bytes_after_reload_init).expect("serialize vk");
-        assert_eq!(
-            bytes, bytes_after_reload_init,
-            "re-serializing a wire-parsed VerifierKey from its parsed structure must reproduce the bytes"
-        );
-        reloaded
-    };
+    // What the instruction exposed is the fold, not the recursive proof's own
+    // accumulator: the carried one is in there too.
+    let own = verify_proof_offcircuit(
+        &serialize_vk(&vk, DeciderKind::None).expect("serialize recursive vk as None"),
+        &instance,
+        &proof,
+        true,
+    )
+    .expect("the recursive proof's own accumulator");
+    let exposed: Vec<Fq> = pis[ir.accumulator_offsets()[0]..]
+        .iter()
+        .map(|f| f.0)
+        .collect();
+    assert_ne!(
+        exposed, own,
+        "the carried accumulator must have been folded in"
+    );
 
-    // Verify the outer proof. This is the whole story: `verify` runs the Plonk
-    // check AND, transparently, the deferred pairing on the inner proof's
-    // accumulator (whose public-input offset is recorded in the VerifierKey and
-    // whose encoding is carried in `outer_pis`). So a single `verify` fully
-    // verifies both the outer circuit and the inner proof. Verification params
-    // are constant-size, so the static `PARAMS_VERIFIER` works regardless of the
-    // outer circuit's k.
-    reloaded_vk
-        .verify(&PARAMS_VERIFIER, &outer_proof, outer_pis.into_iter())
-        .expect("outer verify (incl. deferred pairing)");
+    // One pairing, discharging both.
+    outer_vk
+        .verify(&PARAMS_VERIFIER, &outer_proof, pis.into_iter())
+        .expect("outer verify");
 
-    // ---- 5. The same keys, with the guard off ---------------------------
-    // Re-prove with `%g = 0`, and — the point of the guard — with *no* inner
-    // proof at all. In-circuit the empty blob is still fed through preparation,
-    // since that is fixed circuit structure, but the transcript gadget assigns
-    // default points and zero scalars for the bytes it cannot read, and the
-    // accumulator that computation produces is then discarded by the guard.
-    // Off-circuit, preparation is skipped outright.
-    let (guarded_proof, guarded_pis, _pi_skips) = outer_ir
-        .prove(&mut rng, &RuntimeParams, outer_pk, &outer_preimage(0, vec![]))
+    // Guarded off, as above: the trivial accumulator, and no witnesses at all.
+    let (guarded, guarded_pis, _) = ir
+        .prove(&mut rng, &RuntimeParams, pk, &preimage(false, &[], &[]))
         .await
-        .expect("outer prove (guard off, no inner proof)");
-
-    // The accumulator sits at the offset recorded in the verifying key, and
-    // guarded off it is exactly the trivial accumulator: identity point with
-    // scalar one on each side. That is a fixed encoding — nothing of the
-    // (here absent) proof survives into the public inputs.
-    let acc_pis: Vec<_> = guarded_pis[outer_ir.accumulator_offsets()[0]..].to_vec();
-    let trivial_pis: Vec<Fr> = trivial_accumulator_pis().into_iter().map(Fr).collect();
+        .expect("outer prove (guard off)");
     assert_eq!(
-        acc_pis, trivial_pis,
-        "a guarded-off accumulator must be the trivial accumulator"
+        guarded_pis[ir.accumulator_offsets()[0]..],
+        trivial_accumulator_pis()
+            .into_iter()
+            .map(Fr)
+            .collect::<Vec<_>>()[..],
     );
-
-    reloaded_vk
-        .verify(&PARAMS_VERIFIER, &guarded_proof, guarded_pis.into_iter())
-        .expect("outer verify (guard off, no inner proof)");
-}
-
-/// The proof-witness vector tracks the guards, not the static instruction count.
-///
-/// Two `inner_proof` / `verify_proof` pairs, the first guarded off and the second
-/// on, with a single proof supplied: it has to reach the *second* pair. Were
-/// consumption unconditional — as it was before `inner_proof` took a guard — the
-/// first pair would swallow that proof and the second would find nothing, and the
-/// caller would have to pad the vector for a branch it never took.
-///
-/// This exercises the off-circuit pass alone (`check` runs `preprocess`), so it
-/// needs the inner circuit's low-k SRS but never builds the outer verifier
-/// circuit — unlike the test above, it is quick.
-#[actix_rt::test]
-#[ignore = "needs an SRS for the inner circuit, not available in CI"]
-async fn proof_witnesses_track_the_guards() {
-    let mut rng = ChaCha20Rng::from_seed([9; 32]);
-    let (inner_proof, vk_blob) = inner_proof_and_vk_blob(&mut rng).await;
-
-    let vk_hash_hex = const_hex::encode(sha2::Sha256::digest(&vk_blob));
-    let pair = |i: usize| {
-        format!(
-            r#"
-               {{ "op": "inner_proof", "guard": "%g_{i}", "output": "%p_{i}" }},
-               {{ "op": "verify_proof", "guard": "%g_{i}",
-                  "vk_hash": "0x{vk_hash_hex}",
-                  "instance": ["0x{instance_hex}"], "proof": "%p_{i}" }}"#,
-            instance_hex = format!("{INNER_INSTANCE:02x}"),
-        )
-    };
-    let ir_json = format!(
-        r#"{{
-           "version": {{ "major": 3, "minor": 0 }},
-           "inputs": [
-              {{ "name": "%g_0", "type": "Scalar<BLS12-381>" }},
-              {{ "name": "%g_1", "type": "Scalar<BLS12-381>" }}
-           ],
-           "outputs": [],
-           "do_communications_commitment": false,
-           "instructions": [{},{}]
-        }}"#,
-        pair(0),
-        pair(1),
-    );
-    let mut ir = IrSource::load(ir_json.as_bytes()).expect("two-pair IR must parse");
-    ir.verify_proof_vks = vec![vk_blob];
-
-    let preimage = |guards: [u64; 2], proof_witnesses: Vec<Vec<u8>>| ProofPreimage {
-        binding_input: Fr::from(7u64),
-        communications_commitment: None,
-        inputs: guards.into_iter().map(Fr::from).collect(),
-        private_transcript: vec![],
-        public_transcript_inputs: vec![],
-        public_transcript_outputs: vec![],
-        proof_witnesses,
-        key_location: KeyLocation(Cow::Borrowed("builtin")),
-    };
-
-    // The single proof belongs to the second, active pair. Preprocessing
-    // succeeding is the whole point: the guarded-off first pair consumed
-    // nothing, so the second found the proof — and verified it for real, since
-    // a guarded-on `verify_proof` over the wrong blob would still preprocess.
-    ir.check(&preimage([0, 1], vec![inner_proof.clone()]))
-        .expect("one witness, for the active pair");
-
-    // Two active pairs need two witnesses.
-    assert!(
-        ir.check(&preimage([1, 1], vec![inner_proof.clone()])).is_err(),
-        "two active pairs must not be satisfied by a single witness"
-    );
-
-    // And no active pair needs none: an unconsumed witness is rejected, so the
-    // vector cannot quietly carry a proof for a branch that was not taken.
-    assert!(
-        ir.check(&preimage([0, 0], vec![inner_proof])).is_err(),
-        "a witness left unconsumed must be rejected"
-    );
+    outer_vk
+        .verify(&PARAMS_VERIFIER, &guarded, guarded_pis.into_iter())
+        .expect("outer verify (guard off)");
 }
