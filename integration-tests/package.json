@@ -32,7 +32,6 @@
   },
   "dependencies": {
     "@midnightntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v10",
-    "@midnightntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2",
     "@midnightntwrk/zkir-v3": "link:../result/lib/node_modules/@midnightntwrk/zkir-v3"
   },
   "devDependencies": {

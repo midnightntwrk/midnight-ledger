@@ -15,7 +15,12 @@ import { Zkir } from '@midnightntwrk/zkir-v3';
 import { describe, it, expect } from 'vitest';
 import { keyMaterialProvider } from '../../test-objects';
 
-const keys = [{ keyLocation: 'midnight/dust/spend', k: 13 }];
+const keys = [
+  { keyLocation: 'midnight/zswap/spend', k: 14 },
+  { keyLocation: 'midnight/zswap/output', k: 13 },
+  { keyLocation: 'midnight/zswap/sign', k: 13 },
+  { keyLocation: 'midnight/dust/spend', k: 12 }
+];
 
 describe('ZKIRV3', () => {
   it.concurrent.each(keys)('reports the correct k value for $keyLocation', async ({ keyLocation, k }) => {

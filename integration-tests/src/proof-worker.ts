@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { provingProvider } from '@midnightntwrk/zkir-v2';
+import { provingProvider } from '@midnightntwrk/zkir-v3';
 import { parentPort, workerData } from 'worker_threads';
 import { keyMaterialProvider } from './test-objects.js';
 

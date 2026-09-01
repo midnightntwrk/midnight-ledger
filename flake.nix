@@ -113,6 +113,7 @@
               [
                 self.packages.${system}.local-params
                 self.packages.${system}.zkir
+                self.packages.${system}.zkir-v3
               ] else []);
           };
         mkLedger = {
@@ -156,6 +157,7 @@
                 [
                   self.packages.${system}.local-params
                   self.packages.${system}.zkir
+                  self.packages.${system}.zkir-v3
                   rust-build
                   pkgs.chez
                 ];
@@ -285,7 +287,6 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
               packages.zkir-v3-wasm
             ];
           };
@@ -297,7 +298,6 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
               packages.zkir-v3-wasm
             ];
           };
@@ -397,7 +397,6 @@
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
-          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
