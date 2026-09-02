@@ -37,7 +37,30 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            # crates.io returns 403 to any request whose User-Agent starts with
+            # "curl/", which is exactly what nixpkgs' fetchurl sends
+            # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate
+            # tarball missing from the binary cache fails to download. Replace
+            # the agent for all fetchurl derivations.
+            #
+            # `args` is forwarded untouched because fetchurl also accepts the
+            # fixed-point (`finalAttrs:`) form; the agent is appended to the
+            # built derivation instead. curlOptsList is expanded as an array
+            # after the built-in --user-agent, so it wins.
+            (_final: prev: {
+              fetchurl =
+                args:
+                  (prev.fetchurl args).overrideAttrs (old: {
+                    curlOptsList =
+                      (old.curlOptsList or [])
+                      ++ ["--user-agent" "midnight-ledger/1.0"];
+                  });
+            })
+          ];
+        };
         pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
