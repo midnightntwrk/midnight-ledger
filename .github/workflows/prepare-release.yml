@@ -31,7 +31,10 @@ jobs:
             # instantiated inside other flakes (the pinned zkir input), so override
             # the agent for every fixed-output builder here. curl rejects
             # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
-            extra-experimental-features = configurable-impure-env
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
             impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
