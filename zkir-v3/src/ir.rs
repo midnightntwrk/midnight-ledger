@@ -47,6 +47,12 @@ pub struct IrSource {
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
+    /// Full verifying keys for the circuit's `VerifyProof` instructions. 
+    /// Each entry is
+    /// [`serialize_vk`](crate::ir_instructions::decidable::serialize_vk)'s
+    /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify_proof_vks: Vec<Vec<u8>>,
 }
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
@@ -87,6 +93,7 @@ impl Zkir for IrSource {
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
         use midnight_zk_stdlib::prove;
+        use transient_crypto::proofs::accumulator_pi_len;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let preproc = self.preprocess(preimage)?;
@@ -99,7 +106,27 @@ impl Zkir for IrSource {
 
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
-        Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+        // Split the produced PI vector at `N * accumulator_pi_len()`: the head is
+        // the accumulator block (one entry per `verify_proof` instruction, in
+        // instruction order) carried on the proof, the tail is the external
+        // statement returned to the caller.
+        let acc_len = accumulator_pi_len();
+        let n_accs = self.accumulator_count();
+        let split = n_accs * acc_len;
+        let accumulators: Vec<Vec<Fr>> = pis[..split]
+            .chunks(acc_len)
+            .map(|c| c.iter().copied().map(Fr).collect())
+            .collect();
+        let statement: Vec<Fr> = pis[split..].iter().copied().map(Fr).collect();
+
+        Ok((
+            Proof {
+                bytes: proof,
+                accumulators,
+            },
+            statement,
+            pi_skips,
+        ))
     }
 
     fn k(&self) -> u8 {
@@ -111,10 +138,8 @@ impl Zkir for IrSource {
         params: &impl ParamsProverProvider,
     ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(transient_crypto::proofs::VerifierKey::from(setup_vk(
-            params.get_params(self.k()).await?.as_ref(),
-            self,
-        )))
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        Ok(transient_crypto::proofs::VerifierKey::from(vk))
     }
 
     async fn keygen(
@@ -916,6 +941,53 @@ pub enum Instruction {
         /// The values returned, one per `IrSource::outputs[i]`.
         vals: Vec<Operand>,
     },
+    /// Verifies an inner Plonk proof in-circuit, under a guard condition.
+    /// 
+    /// If `guard` is `false`, a trivial proof is verified in-circuit.
+    /// A guarded-off instruction still consumes one `InnerProof` binding, 
+    /// but never depends on its contents.
+    ///
+    /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
+    /// which VK the circuit was compiled against.
+    ///
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `InnerProof` instruction that produces `proof`. 
+    ///
+    /// No outputs.
+    VerifyProof {
+        /// The boolean condition under which the inner proof is verified. A
+        /// variable reference, or a `0x`-hex immediate for a constant guard.
+        guard: Operand,
+        /// Hash of the inner proof verifying key.
+        #[serde(with = "const_hex::serde")]
+        vk_hash: Vec<u8>,
+        /// The inner proof's public inputs (each of type `Native`).
+        instance: Vec<Operand>,
+        /// The proof to verify, as bound by an `InnerProof` instruction.
+        proof: Identifier,
+    },
+    /// Off-circuit (preprocessing):
+    /// Binds `output` to the next inner proof from
+    /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage),
+    /// consumed in instruction order. If `guard` is `false`, nothing is consumed
+    /// and `output` is bound to the empty blob, so the witness vector only ever
+    /// carries proofs for the path actually taken.
+    ///
+    /// In-circuit:
+    /// Binds `output` to the same blob as a free prover witness. It carries no
+    /// constraints of its own, and the `guard` DOES NOT participate in in-circuit
+    /// constraints.
+    ///
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `VerifyProof` instruction that consumes `output`.
+    ///
+    /// One output, the inner proof.
+    InnerProof {
+        /// The boolean condition under which a proof witness is consumed
+        guard: Operand,
+        /// The output variable name.
+        output: Identifier,
+    },
 }
 tag_enforcement_test!(Instruction);
 
@@ -1008,7 +1080,17 @@ impl IrSource {
 
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
-        Ok(Proof(proof))
+        use transient_crypto::proofs::accumulator_pi_len;
+        let acc_len = accumulator_pi_len();
+        let split = self.accumulator_count() * acc_len;
+        let accumulators: Vec<Vec<Fr>> = pis[..split]
+            .chunks(acc_len)
+            .map(|c| c.iter().copied().map(Fr).collect())
+            .collect();
+        Ok(Proof {
+            bytes: proof,
+            accumulators,
+        })
     }
 }
 

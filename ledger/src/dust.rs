@@ -2174,7 +2174,7 @@ mod tests {
         };
         let binding = Pedersen::from(rng.r#gen::<PedersenRandomness>());
         let proven_dust_spend = dust_spend.prove(prover, 0, binding).await.unwrap();
-        assert_eq!(proven_dust_spend.proof.0.len(), DUST_SPEND_PROOF_SIZE);
+        assert_eq!(proven_dust_spend.proof.bytes.len(), DUST_SPEND_PROOF_SIZE);
     }
 
     struct WrappedSeed(pub Seed);

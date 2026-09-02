@@ -465,7 +465,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         operation: call.entry_point.clone(),
                     }
                 })?;
-                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
+                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.bytes.clone());
                 let old_pis = pis.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
@@ -497,7 +497,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 match mode {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk
-                        .mock_verify(pis.into_iter())
+                        .mock_verify(inner_proof, pis.into_iter())
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                     _ => vk
                         .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())

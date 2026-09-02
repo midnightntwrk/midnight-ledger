@@ -6,7 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (Ledger 10)
 
-- none
+- feat: ZKIR gains `verify_proof` and `inner_proof` instructions.
+- breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<Vec<Fr>> }`.
+- breaking: `VerifierKey::mock_verify` now takes the `Proof` alongside the statement.
 
 ## Ledger 9.1.0.0-rc.3
 

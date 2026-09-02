@@ -114,7 +114,7 @@ pub const VERIFIER_MAX_DEGREE: u8 = 14;
 
 /// Parameters used for verifying with the `KZG` commitment scheme
 #[derive(Clone)]
-pub struct ParamsVerifier(Arc<ParamsVerifierKZG<Bls12>>);
+pub struct ParamsVerifier(pub(crate) Arc<ParamsVerifierKZG<Bls12>>);
 
 impl ParamsVerifier {
     /// Reads in verifier parameters
@@ -134,12 +134,34 @@ lazy_static! {
 }
 
 /// A zero-knowledge proof.
+///
+/// `bytes` is the raw PLONK proof produced by midnight-zk. `accumulators`
+/// carries one deferred KZG accumulator per `verify_proof` instruction in the
+/// outer circuit, encoded as its public-input field elements
+/// (`accumulator_pi_len()` `Fr`s per block).
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "proof[v5]"]
-pub struct Proof(pub Vec<u8>);
+#[tag = "proof[v6]"]
+pub struct Proof {
+    /// The raw PLONK proof bytes.
+    pub bytes: Vec<u8>,
+    /// Deferred KZG accumulators exposed by `verify_proof` instructions.
+    pub accumulators: Vec<Vec<Fr>>,
+}
 tag_enforcement_test!(Proof);
+
+impl Proof {
+    /// Builds a proof from just the PLONK bytes, with no accumulators. Use for
+    /// circuits that contain no `verify_proof` instructions, and for mock or
+    /// erased proofs that are never verified.
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self {
+            bytes,
+            accumulators: Vec::new(),
+        }
+    }
+}
 
 /// A prover key, used for creating proofs.
 #[derive(Clone)]
@@ -397,6 +419,29 @@ pub fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<I
     Some(Accumulator::new(lhs, rhs))
 }
 
+/// Rebuilds one accumulator per block of `accumulator_pi_len()` field elements
+/// carried by `proof.accumulators`.
+fn extract_accumulators(
+    blocks: &[Vec<Fr>],
+) -> Result<Vec<Accumulator<InnerSelfEmulation>>, VerifyingError> {
+    let acc_len = accumulator_pi_len();
+    let mut accumulators = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        if block.len() != acc_len {
+            return Err(anyhow::anyhow!(
+                "accumulator block has length {}, expected {}",
+                block.len(),
+                acc_len
+            ));
+        }
+        let fields: Vec<outer::Scalar> = block.iter().map(|f| f.0).collect();
+        let acc = reconstruct_accumulator(&fields)
+            .ok_or_else(|| anyhow::anyhow!("malformed accumulator in proof"))?;
+        accumulators.push(acc);
+    }
+    Ok(accumulators)
+}
+
 /// A verifier key, used for checking proofs.
 #[derive(Debug, Storable)]
 #[storable(base)]
@@ -596,22 +641,48 @@ impl VerifierKey {
         statement: F,
     ) -> Result<(), VerifyingError> {
         let vk = self.force_init()?;
-        let pi = statement.map(|f| f.0).collect::<Vec<_>>();
+
+        // The caller-facing `statement` covers only the outer circuit's own public
+        // inputs (binding input, communications commitment, impact fields). The
+        // deferred KZG accumulators exposed by `verify_proof` instructions travel
+        // on the proof itself; they are prepended here to reconstruct the full
+        // public-input vector the outer circuit committed to.
+        let mut pi: Vec<outer::Scalar> = proof
+            .accumulators
+            .iter()
+            .flat_map(|block| block.iter().map(|f| f.0))
+            .collect();
+        pi.extend(statement.map(|f| f.0));
         trace!(statement = ?pi, "verifying proof against statement");
         midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash>(
-            &params.0, &vk, &pi, None, &proof.0,
+            &params.0, &vk, &pi, None, &proof.bytes,
         )
-        .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        .map_err(|_| anyhow::anyhow!("Invalid outer proof"))?;
+
+        for acc in extract_accumulators(&proof.accumulators)? {
+            if !acc.check(&params.0, &BTreeMap::new()) {
+                return Err(anyhow::anyhow!("inner-proof accumulator failed pairing check"));
+            }
+        }
+
+        Ok(())
     }
 
     /// Mocks the checking of a proof against a statement
     ///
     /// We do this by running a number of CPU burn cycles calculated to be approximately
-    /// equivalent in time-taken to real proof verification
+    /// equivalent in time-taken to real proof verification, including the deferred
+    /// pairing check that [`verify`](Self::verify) performs on each inner-proof
+    /// accumulator exposed by a `verify_proof` instruction.
     #[cfg(feature = "mock-verify")]
-    pub fn mock_verify<F: Iterator<Item = Fr>>(&self, statement: F) -> Result<(), VerifyingError> {
-        let pi_len = statement.count();
-        crate::mock_verify::mock_verify_for(pi_len)
+    pub fn mock_verify<F: Iterator<Item = Fr>>(
+        &self,
+        proof: &Proof,
+        statement: F,
+    ) -> Result<(), VerifyingError> {
+        let acc_len = accumulator_pi_len();
+        let pi_len = statement.count() + proof.accumulators.len() * acc_len;
+        crate::mock_verify::mock_verify_for(pi_len, proof.accumulators.len())
     }
 
     /// Checks a sequence of proofs against their corresponding statements and verifier keys
@@ -628,17 +699,33 @@ impl VerifierKey {
         let mut vks = vec![];
         let mut pis = vec![];
         let mut proofs = vec![];
+        let mut acc_blocks_per_proof: Vec<Vec<Vec<Fr>>> = vec![];
 
         for (vk, proof, stmt) in parts.into_iter() {
-            let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
+            let mut pi: Vec<outer::Scalar> = proof
+                .accumulators
+                .iter()
+                .flat_map(|block| block.iter().map(|f| f.0))
+                .collect();
+            pi.extend(stmt.map(|f| f.0));
             let vk = vk.force_init()?;
             vks.push(vk);
             pis.push(pi);
-            proofs.push(proof.0.clone());
+            proofs.push(proof.bytes.clone());
+            acc_blocks_per_proof.push(proof.accumulators.clone());
         }
 
         batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+            .map_err(|_| anyhow::anyhow!("Invalid proof"))?;
+
+        for blocks in &acc_blocks_per_proof {
+            for acc in extract_accumulators(blocks)? {
+                if !acc.check(&params.0, &BTreeMap::new()) {
+                    return Err(anyhow::anyhow!("inner-proof accumulator failed pairing check"));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Mocks the checking of a sequence of proofs against a statement
@@ -654,8 +741,8 @@ impl VerifierKey {
     >(
         parts: V,
     ) -> Result<(), VerifyingError> {
-        for (vk, _proof, stmt) in parts {
-            vk.mock_verify(stmt)?;
+        for (vk, proof, stmt) in parts {
+            vk.mock_verify(proof, stmt)?;
         }
         Ok(())
     }
@@ -877,3 +964,83 @@ pub type ProvingError = anyhow::Error;
 /// the public API, although it may be assumed to be [`Debug`]` +
 /// `[`Display`](std::fmt::Display).
 pub type VerifyingError = anyhow::Error;
+
+#[cfg(test)]
+mod accumulator_discharge_tests {
+    use super::*;
+    use group::Group;
+
+    type C = <InnerSelfEmulation as SelfEmulation>::C;
+
+    /// A collapsed accumulator that does *not* satisfy the pairing invariant.
+    fn non_pairing_accumulator() -> Accumulator<InnerSelfEmulation> {
+        let one = outer::Scalar::from(1u64);
+        Accumulator::new(
+            Msm::new(&[C::generator()], &[one], &BTreeMap::new()),
+            Msm::new(&[C::identity()], &[one], &BTreeMap::new()),
+        )
+    }
+
+    fn encode(acc: &Accumulator<InnerSelfEmulation>) -> Vec<outer::Scalar> {
+        <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
+            acc,
+        )
+    }
+
+    #[test]
+    fn a_carried_accumulator_that_does_not_pair_is_rejected() {
+        let trivial = Accumulator::<InnerSelfEmulation>::trivial(&[]);
+        assert!(
+            trivial.check(&PARAMS_VERIFIER.0, &BTreeMap::new()),
+            "the trivial accumulator must pair; a guarded-off instruction exposes it"
+        );
+        assert!(
+            !non_pairing_accumulator().check(&PARAMS_VERIFIER.0, &BTreeMap::new()),
+            "an accumulator whose sides differ must not pair"
+        );
+    }
+
+    #[test]
+    fn every_exposed_accumulator_is_extracted_and_checked() {
+        let trivial = Accumulator::<InnerSelfEmulation>::trivial(&[]);
+        let blocks = vec![
+            encode(&trivial).into_iter().map(Fr).collect::<Vec<_>>(),
+            encode(&non_pairing_accumulator())
+                .into_iter()
+                .map(Fr)
+                .collect::<Vec<_>>(),
+        ];
+
+        let extracted = extract_accumulators(&blocks).expect("both must parse");
+        assert_eq!(extracted.len(), 2);
+
+        let verdicts: Vec<bool> = extracted
+            .iter()
+            .map(|acc| acc.check(&PARAMS_VERIFIER.0, &BTreeMap::new()))
+            .collect();
+        assert_eq!(
+            verdicts,
+            vec![true, false],
+            "each accumulator must be checked on its own, not subsumed by the first"
+        );
+    }
+
+    #[test]
+    fn the_collapsed_encoding_round_trips() {
+        for acc in [
+            Accumulator::<InnerSelfEmulation>::trivial(&[]),
+            non_pairing_accumulator(),
+        ] {
+            let fields = encode(&acc);
+            assert_eq!(fields.len(), accumulator_pi_len());
+            let parsed = reconstruct_accumulator(&fields).expect("well-formed encoding must parse");
+            assert_eq!(encode(&parsed), fields);
+        }
+    }
+
+    #[test]
+    fn a_malformed_encoding_is_rejected() {
+        assert!(reconstruct_accumulator(&[]).is_none());
+        assert!(reconstruct_accumulator(&[outer::Scalar::from(1u64); 3]).is_none());
+    }
+}

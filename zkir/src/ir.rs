@@ -153,7 +153,7 @@ impl Zkir for IrSource {
                     preproc,
                     rng,
                 )?;
-                Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+                Ok((Proof::from_bytes(proof), pis.into_iter().map(Fr).collect(), pi_skips))
             }
         }
     }
@@ -690,7 +690,7 @@ impl IrSource {
         let proof =
             prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
 
-        Ok(Proof(proof))
+        Ok(Proof::from_bytes(proof))
     }
 }
 

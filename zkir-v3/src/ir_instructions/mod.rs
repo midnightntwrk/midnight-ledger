@@ -30,3 +30,4 @@ pub mod inv;
 pub mod mul;
 pub mod neg;
 pub mod select;
+pub mod verify_proof;

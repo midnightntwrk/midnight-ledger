@@ -426,7 +426,7 @@ impl ProvingProvider for MockProver {
             .flat_map(|v| v.into_iter())
             .take(size)
             .collect::<Vec<_>>();
-        let mock_proof = transient_crypto::proofs::Proof(nonsense_data);
+        let mock_proof = transient_crypto::proofs::Proof::from_bytes(nonsense_data);
         Ok(mock_proof)
     }
     fn split(&mut self) -> Self {
