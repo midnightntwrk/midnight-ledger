@@ -43,7 +43,32 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # crates.io returns 403 to any request whose User-Agent starts with
+        # "curl/", which is exactly what nixpkgs' fetchurl sends
+        # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
+        # missing from the binary cache fails to download.
+        # To solve this we replace the agent for all fetchurl derivations.
+        # fetchurl's builder appends curlOptsList after its own --user-agent,
+        # and curl lets the last one win, so this overrides the default.
+        overlays = [
+          (_final: prev: {
+            fetchurl = args:
+              (prev.fetchurl args).overrideAttrs (old: let
+                userAgent = ["--user-agent" "midnight-ledger/1.0"];
+                previous = old.curlOptsList or [];
+              in {
+                # nixpkgs >= 26.05 keeps curlOptsList as a list (structured
+                # attrs); 25.11 and earlier store `lib.escapeShellArgs` of it,
+                # i.e. a string the builder eval's into the curl argv array.
+                # Both shapes are in use across our flake inputs.
+                curlOptsList =
+                  if builtins.isList previous
+                  then previous ++ userAgent
+                  else previous + " " + prev.lib.escapeShellArgs userAgent;
+              });
+          })
+        ];
+        pkgs = import nixpkgs {inherit system overlays;};
         pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
@@ -75,7 +100,7 @@
         ];
         rust = fenix.packages.${system};
         bagel-wasm = (import ./bagel.nix) {
-          inherit system nixpkgs;
+          inherit system nixpkgs overlays;
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
