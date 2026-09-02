@@ -52,6 +52,16 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             netrc-file = ${{ env.HOME }}/.netrc
             access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
