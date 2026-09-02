@@ -373,8 +373,10 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
                 let tag = peek_tag(&mut std::io::Cursor::new(&vk))
                     .map_err(TransactionProvingError::Tokio)?;
                 match tag.as_str() {
-                    "verifier-key[v6]" => ProofVersioned::V2(proof),
-                    "verifier-key[v7]" => ProofVersioned::V3(proof),
+                    "verifier-key[v6]" => {
+                        ProofVersioned::V2(transient_crypto_old::proofs::Proof(proof.bytes))
+                    }
+                    "verifier-key[v7]" => ProofVersioned::V4(proof),
                     _ => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
                 }
             }

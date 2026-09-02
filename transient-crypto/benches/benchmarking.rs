@@ -151,7 +151,7 @@ pub fn proof_verification(c: &mut Criterion) {
             let proof =
                 prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, self.clone(), rng)?;
             Ok((
-                Proof(proof),
+                Proof::from_bytes(proof),
                 preimage.public_transcript_inputs.clone(),
                 vec![],
             ))

@@ -31,9 +31,7 @@ use transient_crypto::proofs::{
 use crate::ir_types::IrType;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
-#[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3-generic]"]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IrSource {
     /// The minor version of this IR.
     pub version: IrMinorVersion,
@@ -54,6 +52,117 @@ pub struct IrSource {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_proof_vks: Vec<Vec<u8>>,
 }
+
+/// Hand-written so `verify_proof_vks` stays empty on a `V0`, which is the
+/// invariant [`Serializable`] enforces.
+#[cfg(feature = "proptest")]
+impl proptest::arbitrary::Arbitrary for IrSource {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        (
+            any::<IrMinorVersion>(),
+            any::<Vec<TypedIdentifier>>(),
+            any::<Vec<IrType>>(),
+            any::<bool>(),
+            any::<Arc<Vec<Instruction>>>(),
+            any::<Vec<Vec<u8>>>(),
+        )
+            .prop_map(
+                |(version, inputs, outputs, do_communications_commitment, instructions, vks)| {
+                    let verify_proof_vks = match version {
+                        IrMinorVersion::V0 => Vec::new(),
+                        _ => vks,
+                    };
+                    IrSource {
+                        version,
+                        inputs,
+                        outputs,
+                        do_communications_commitment,
+                        instructions,
+                        verify_proof_vks,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+impl Tagged for IrSource {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("ir-source[v3-generic]")
+    }
+    fn tag_unique_factor() -> String {
+        format!(
+            "(({},{},{},{},{},v1-only({})))",
+            <IrMinorVersion>::tag(),
+            <Vec<TypedIdentifier>>::tag(),
+            <Vec<IrType>>::tag(),
+            <bool>::tag(),
+            <Arc<Vec<Instruction>>>::tag(),
+            <Vec<Vec<u8>>>::tag(),
+        )
+    }
+}
+
+impl Serializable for IrSource {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> Result<(), io::Error> {
+        if self.version == IrMinorVersion::V0 && !self.verify_proof_vks.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "`verify_proof_vks` requires `IrMinorVersion::V1` or later",
+            ));
+        }
+        Serializable::serialize(&self.version, writer)?;
+        Serializable::serialize(&self.inputs, writer)?;
+        Serializable::serialize(&self.outputs, writer)?;
+        Serializable::serialize(&self.do_communications_commitment, writer)?;
+        Serializable::serialize(&self.instructions, writer)?;
+        if self.version != IrMinorVersion::V0 {
+            Serializable::serialize(&self.verify_proof_vks, writer)?;
+        }
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        let size = self.version.serialized_size()
+            + self.inputs.serialized_size()
+            + self.outputs.serialized_size()
+            + self.do_communications_commitment.serialized_size()
+            + self.instructions.serialized_size();
+        if self.version == IrMinorVersion::V0 {
+            size
+        } else {
+            size + self.verify_proof_vks.serialized_size()
+        }
+    }
+}
+
+impl Deserializable for IrSource {
+    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> Result<Self, io::Error> {
+        let version: IrMinorVersion = Deserializable::deserialize(reader, recursion_depth)?;
+        let inputs = Deserializable::deserialize(reader, recursion_depth)?;
+        let outputs = Deserializable::deserialize(reader, recursion_depth)?;
+        let do_communications_commitment = Deserializable::deserialize(reader, recursion_depth)?;
+        let instructions = Deserializable::deserialize(reader, recursion_depth)?;
+        let verify_proof_vks = if version == IrMinorVersion::V0 {
+            Vec::new()
+        } else {
+            Deserializable::deserialize(reader, recursion_depth)?
+        };
+        Ok(IrSource {
+            version,
+            inputs,
+            outputs,
+            do_communications_commitment,
+            instructions,
+            verify_proof_vks,
+        })
+    }
+}
+
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
 
@@ -71,8 +180,10 @@ tag_enforcement_test!(ProverKey<IrSource>);
 #[repr(u8)]
 #[non_exhaustive]
 pub enum IrMinorVersion {
-    #[default]
     V0,
+    /// Adds [`IrSource::verify_proof_vks`].
+    #[default]
+    V1,
 }
 
 impl Zkir for IrSource {
@@ -381,7 +492,7 @@ tag_enforcement_test!(Operand);
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[serde(rename_all = "snake_case", tag = "op")]
-#[tag = "ir-instruction[v3]"]
+#[tag = "ir-instruction[v4]"]
 pub enum Instruction {
     /// Encodes the given value as a vector of raw Fr elements.
     ///

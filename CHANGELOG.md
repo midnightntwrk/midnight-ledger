@@ -9,6 +9,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: ZKIR gains `verify_proof` and `inner_proof` instructions.
 - breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<Vec<Fr>> }`.
 - breaking: `VerifierKey::mock_verify` now takes the `Proof` alongside the statement.
+- breaking: `transient-crypto` bumped to `4.0.0`. 
+- feat: `ProofPreimage::proof_witnesses` is a `Vec<InnerProofWitness>` rather than a `Vec<Vec<u8>>`.
+- breaking: `ProofPreimage`'s tag moves to `proof-preimage[v2]`, and `ProofPreimageVersioned`'s to `proof-preimage-versioned[v2]`.
+- breaking: `ProofVersioned` gains `V4(Proof)` at discriminant 3, carrying `proof[v6]`. `V2` and `V3` now hold `transient_crypto_old::proofs::Proof`, which is the `proof[v5]` layout they always had on the wire, so every already-written transaction still deserializes. The `proof-versioned` tag is unchanged, since discriminants 1 and 2 keep their exact bytes.
+- breaking: ZKIR's `Instruction` tag moves to `ir-instruction[v4]` for the two new variants.
+- feat: `IrMinorVersion::V1` marks an `IrSource` carrying `verify_proof_vks`, and is now the default. `IrSource`'s `Serializable` is hand-written and branches on it, so `V0` blobs keep their exact byte layout and still load; serializing a `V0` that carries key material is an error rather than a silent drop.
+- fix: `zkir-wasm`'s `prove` and `check` converted a preimage for the v1 pipeline by re-deserializing the raw request bytes as `transient_crypto_old::proofs::ProofPreimage`.
 
 ## Ledger 9.1.0.0-rc.3
 

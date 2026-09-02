@@ -226,8 +226,7 @@ pub async fn prove(
     let mut res = Vec::new();
     match tag.as_str() {
         "verifier-key[v6]" => {
-            let preimage: transient_crypto_old::proofs::ProofPreimage =
-                tagged_deserialize(&mut &ser_preimage.to_vec()[..])?;
+            let preimage = zkir::ir_v1::preimage_to_v1(&preimage);
             let proof = preimage
                 .prove::<IrSource>(OsRng, &provider, &provider)
                 .await
@@ -261,8 +260,7 @@ pub async fn check(ser_preimage: Uint8Array, provider: JsValue) -> Result<Vec<Js
     let ir = IrSource::load_from_tagged(std::io::Cursor::new(&data.ir_source[..]))?;
     let res = match &ir.version {
         IrMinorVersion::V0 | IrMinorVersion::V1 => {
-            let preimage: transient_crypto_old::proofs::ProofPreimage =
-                tagged_deserialize(&mut &ser_preimage.to_vec()[..])?;
+            let preimage = zkir::ir_v1::preimage_to_v1(&preimage);
             preimage
                 .check(&ir)
                 .map_err(|e| JsError::new(&e.to_string()))?

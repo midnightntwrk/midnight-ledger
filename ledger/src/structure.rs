@@ -227,7 +227,7 @@ impl<D: DB> PedersenDowngradeable<D> for Pedersen {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Storable)]
 #[storable(base)]
-#[tag = "proof-preimage-versioned"]
+#[tag = "proof-preimage-versioned[v2]"]
 #[non_exhaustive]
 pub enum ProofPreimageVersioned {
     V2(std::sync::Arc<ProofPreimage>),
@@ -270,7 +270,7 @@ impl Deserializable for ProofPreimageVersioned {
 
 impl Tagged for ProofPreimageVersioned {
     fn tag() -> std::borrow::Cow<'static, str> {
-        "proof-preimage-versioned".into()
+        "proof-preimage-versioned[v2]".into()
     }
     fn tag_unique_factor() -> String {
         format!("[[],{}]", ProofPreimage::tag())
@@ -293,9 +293,12 @@ impl ProofPreimageVersioned {
 #[non_exhaustive]
 pub enum ProofVersioned {
     /// A proof generated against the v1 (zk-stdlib v1) Zkir trait.
-    V2(Proof),
+    V2(transient_crypto_old::proofs::Proof),
+    /// A proof generated against the v2 (zk-stdlib v2) Zkir trait, in the
+    /// pre-accumulator `proof[v5]` format.
+    V3(transient_crypto_old::proofs::Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
-    V3(Proof),
+    V4(Proof),
 }
 
 impl Serializable for ProofVersioned {
@@ -309,11 +312,16 @@ impl Serializable for ProofVersioned {
                 Serializable::serialize(&2u8, writer)?;
                 proof.serialize(writer)
             }
+            ProofVersioned::V4(proof) => {
+                Serializable::serialize(&3u8, writer)?;
+                proof.serialize(writer)
+            }
         }
     }
     fn serialized_size(&self) -> usize {
         match self {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V4(proof) => proof.serialized_size() + 1,
         }
     }
 }
@@ -326,11 +334,15 @@ impl Deserializable for ProofVersioned {
                 std::io::ErrorKind::InvalidData,
                 format!("invalid old discriminant for ProofVersioned: {discrim}"),
             )),
-            1 => Ok(ProofVersioned::V2(Proof::deserialize(
+            1 => Ok(ProofVersioned::V2(Deserializable::deserialize(
                 reader,
                 recursion_depth,
             )?)),
-            2 => Ok(ProofVersioned::V3(Proof::deserialize(
+            2 => Ok(ProofVersioned::V3(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            3 => Ok(ProofVersioned::V4(Proof::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -347,7 +359,12 @@ impl Tagged for ProofVersioned {
         "proof-versioned".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],{}]", Proof::tag())
+        format!(
+            "[[],{},{},{}]",
+            transient_crypto_old::proofs::Proof::tag(),
+            transient_crypto_old::proofs::Proof::tag(),
+            Proof::tag()
+        )
     }
 }
 
@@ -413,7 +430,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
 
 impl From<Proof> for ProofVersioned {
     fn from(proof: Proof) -> Self {
-        Self::V2(proof)
+        Self::V4(proof)
     }
 }
 
@@ -452,12 +469,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let inner_proof = match proof {
-            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
-        };
-
         match proof {
-            ProofVersioned::V2(_) => {
+            ProofVersioned::V2(old_proof) => {
                 let vk = op.v2_vk().ok_or_else(|| {
                     warn!("missing v1 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
@@ -465,7 +478,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         operation: call.entry_point.clone(),
                     }
                 })?;
-                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.bytes.clone());
                 let old_pis = pis.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
@@ -479,14 +491,33 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     _ => vk
                         .verify(
                             &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                            &old_proof,
+                            old_proof,
                             old_pis,
                         )
                         .map_err(|e| anyhow::anyhow!("v1 verification: {e}"))
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                 }
             }
-            ProofVersioned::V3(_) => {
+            ProofVersioned::V3(old_proof) => {
+                let vk = op.v3_vk().ok_or_else(|| {
+                    warn!("missing v2 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                let inner_proof = &Proof::from_bytes(old_proof.0.clone());
+                match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(inner_proof, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                }
+            }
+            ProofVersioned::V4(inner_proof) => {
                 let vk = op.v3_vk().ok_or_else(|| {
                     warn!("missing v2 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
@@ -517,7 +548,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn proof_version_to_operation_version(proof: &Self::Proof) -> Option<ContractOperationVersion> {
         Some(match proof {
             ProofVersioned::V2(_) => ContractOperationVersion::V3,
-            ProofVersioned::V3(_) => ContractOperationVersion::V4,
+            ProofVersioned::V3(_) | ProofVersioned::V4(_) => ContractOperationVersion::V4,
         })
     }
 }

@@ -859,7 +859,7 @@ tag_enforcement_test!(InnerProofWitness);
     ZeroizeOnDrop,
 )]
 #[storable(base)]
-#[tag = "proof-preimage"]
+#[tag = "proof-preimage[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct ProofPreimage {
     /// The inputs to be directly handed to the IR.
