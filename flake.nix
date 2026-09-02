@@ -37,30 +37,31 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            # crates.io returns 403 to any request whose User-Agent starts with
-            # "curl/", which is exactly what nixpkgs' fetchurl sends
-            # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate
-            # tarball missing from the binary cache fails to download. Replace
-            # the agent for all fetchurl derivations.
-            #
-            # `args` is forwarded untouched because fetchurl also accepts the
-            # fixed-point (`finalAttrs:`) form; the agent is appended to the
-            # built derivation instead. curlOptsList is expanded as an array
-            # after the built-in --user-agent, so it wins.
-            (_final: prev: {
-              fetchurl =
-                args:
-                  (prev.fetchurl args).overrideAttrs (old: {
-                    curlOptsList =
-                      (old.curlOptsList or [])
-                      ++ ["--user-agent" "midnight-ledger/1.0"];
-                  });
-            })
-          ];
-        };
+        # crates.io returns 403 to any request whose User-Agent starts with
+        # "curl/", which is exactly what nixpkgs' fetchurl sends
+        # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
+        # missing from the binary cache fails to download. Replace the agent for
+        # all fetchurl derivations.
+        #
+        # `args` is forwarded untouched because fetchurl also accepts the
+        # fixed-point (`finalAttrs:`) form; the agent is appended to the built
+        # derivation instead. curlOptsList is expanded as an array after the
+        # built-in --user-agent, so it wins.
+        #
+        # Every nixpkgs instantiation needs this -- see bagel.nix, which builds
+        # the wasm packages from its own import.
+        overlays = [
+          (_final: prev: {
+            fetchurl =
+              args:
+                (prev.fetchurl args).overrideAttrs (old: {
+                  curlOptsList =
+                    (old.curlOptsList or [])
+                    ++ ["--user-agent" "midnight-ledger/1.0"];
+                });
+          })
+        ];
+        pkgs = import nixpkgs {inherit system overlays;};
         pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
@@ -107,7 +108,7 @@
           doCheck = false;
         };
         bagel-wasm = (import ./bagel.nix) {
-          inherit system nixpkgs;
+          inherit system nixpkgs overlays;
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
