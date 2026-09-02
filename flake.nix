@@ -40,16 +40,8 @@
         # crates.io returns 403 to any request whose User-Agent starts with
         # "curl/", which is exactly what nixpkgs' fetchurl sends
         # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
-        # missing from the binary cache fails to download. Replace the agent for
-        # all fetchurl derivations.
-        #
-        # `args` is forwarded untouched because fetchurl also accepts the
-        # fixed-point (`finalAttrs:`) form; the agent is appended to the built
-        # derivation instead. curlOptsList is expanded as an array after the
-        # built-in --user-agent, so it wins.
-        #
-        # Every nixpkgs instantiation needs this -- see bagel.nix, which builds
-        # the wasm packages from its own import.
+        # missing from the binary cache fails to download.
+        # To solve this we replace the agent for all fetchurl derivations.
         overlays = [
           (_final: prev: {
             fetchurl =
