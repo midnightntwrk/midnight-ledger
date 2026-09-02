@@ -18,6 +18,7 @@ type F = outer::Scalar;
 pub mod add;
 pub mod assign;
 pub mod constrain_eq;
+pub mod decidable;
 pub mod ec_mul;
 pub mod encode;
 pub mod eq;

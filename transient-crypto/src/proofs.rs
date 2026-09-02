@@ -25,7 +25,12 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
+use midnight_circuits::types::Instantiable;
+use midnight_circuits::verifier::{
+    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, SelfEmulation,
+};
 use midnight_zk_stdlib::{MidnightVK, Relation};
+use std::collections::BTreeMap;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -357,6 +362,39 @@ impl<T: Zkir> Deserializable for ProverKey<T> {
         pk.try_cache();
         Ok(Self(Arc::new(Mutex::new(pk))))
     }
+}
+
+/// Self-emulation used for in-circuit BLS12-381 proof verification, and for
+/// reconstructing/finalizing the deferred KZG accumulators such proofs produce.
+pub type InnerSelfEmulation = BlstrsEmulation;
+
+/// Number of public-input field elements occupied by one fully-collapsed,
+/// single-point-per-side accumulator: two points and two scalars, encoded as
+/// field elements per the [`Instantiable`] impl of [`AssignedAccumulator`].
+pub fn accumulator_pi_len() -> usize {
+    <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
+        &Accumulator::<InnerSelfEmulation>::trivial(&[]),
+    )
+    .len()
+}
+
+/// Reconstructs a single-point-per-side accumulator from its public-input
+/// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`).
+pub fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<InnerSelfEmulation>> {
+    if fields.len() != accumulator_pi_len() {
+        return None;
+    }
+    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<InnerSelfEmulation>> {
+        let (point_fields, scalar) = side.split_at(side.len() - 1);
+        let base = <<InnerSelfEmulation as SelfEmulation>::AssignedPoint as Instantiable<outer::Scalar>>::from_public_input(
+            point_fields,
+        )?;
+        Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
+    };
+    let half = fields.len() / 2;
+    let lhs = reconstruct_side(&fields[..half])?;
+    let rhs = reconstruct_side(&fields[half..])?;
+    Some(Accumulator::new(lhs, rhs))
 }
 
 /// A verifier key, used for checking proofs.
