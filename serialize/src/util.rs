@@ -149,16 +149,21 @@ macro_rules! via_scale {
     ($ty:ty, $n:expr_2021) => {
         impl Serializable for $ty {
             fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-                ScaleBigInt::from(*self).serialize(writer)
+                scale_write(u128::from(*self), writer)
             }
             fn serialized_size(&self) -> usize {
-                ScaleBigInt::from(*self).serialized_size()
+                scale_size(u128::from(*self))
             }
         }
 
         impl Deserializable for $ty {
             fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<Self> {
-                <$ty>::try_from(ScaleBigInt::deserialize(reader, recursion_depth)?)
+                <$ty>::try_from(scale_read(reader, recursion_depth)?).map_err(|_| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        concat!("out of range for ", stringify!($ty)),
+                    )
+                })
             }
         }
 
@@ -209,6 +214,115 @@ via_le_bytes!(i128, 16);
 via_scale!(u32, 4);
 via_scale!(u64, 8);
 via_scale!(u128, 16);
+
+/// **ꜱᴄᴀʟᴇ compact, computed rather than scanned.**
+///
+/// The general path is [`ScaleBigInt`], a 67-octet buffer that finds its own length by walking
+/// backwards one octet at a time. That is the right shape for an arbitrary big integer and the
+/// wrong one for a `u64`, which knows its width: decoding one integer through it costs a
+/// 67-octet `memset`, a 67-octet copy out of `deserialize` (returned by value), a 67-octet copy
+/// into `TryFrom` (taken by value), a 59-octet range scan and a 67-octet backward scan — about
+/// 260 octets moved and 126 examined singly, to decode eight.
+///
+/// ⌖ **It is invisible on a host**, where that is a few hundred octets of `memcpy`. Profiled by
+/// instruction count rather than by wall-clock, `ScaleBigInt::serialized_size` alone was 19.45%
+/// of every node decoded.
+///
+/// These three produce **exactly** the octets [`ScaleBigInt`] does — `scale_compat` compares
+/// them directly, over every width boundary either side. That is not tidiness: storage is
+/// content-addressed, so a changed encoding changes every node hash and the state root with it.
+///
+/// The format, for reference (§ꜱᴄᴀʟᴇ compact):
+///
+/// ```text
+///   v < 2⁶     Ɛ₁((v << 2) | 0b00)
+///   v < 2¹⁴    Ɛ₂((v << 2) | 0b01)
+///   v < 2³⁰    Ɛ₄((v << 2) | 0b10)
+///   otherwise  Ɛ₁(((n − 4) << 2) | 0b11) ⌢ Ɛₙ(v)   where n = ⌈bits(v)/8⌉
+/// ```
+fn scale_size(v: u128) -> usize {
+    if v < 1 << 6 {
+        1
+    } else if v < 1 << 14 {
+        2
+    } else if v < 1 << 30 {
+        4
+    } else {
+        // `1 + ⌈bits/8⌉`. Above 2³⁰ the octet count is at least four, so the wide form's
+        // length prefix is always in range and no clamp is needed.
+        1 + (128 - v.leading_zeros() as usize).div_ceil(8)
+    }
+}
+
+fn scale_write(v: u128, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+    match scale_size(v) {
+        1 => writer.write_all(&[(v as u8) << 2]),
+        2 => writer.write_all(&(((v as u16) << 2) | 0b01).to_le_bytes()),
+        4 => writer.write_all(&(((v as u32) << 2) | 0b10).to_le_bytes()),
+        n => {
+            writer.write_all(&[(((n - 5) as u8) << 2) | SCALE_N_BYTE_MARKER])?;
+            writer.write_all(&v.to_le_bytes()[..n - 1])
+        }
+    }
+}
+
+/// ⚠︎ The three `non-canonical` rejections are **consensus rules**, not hygiene: two encodings
+/// of one value would be two hashes for one node. They are reproduced here exactly as
+/// [`ScaleBigInt::deserialize`] states them, and `scale_compat` asserts each one still bites.
+fn scale_read(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<u128> {
+    let non_canonical = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "non-canonical scale encoding",
+        )
+    };
+    let first = u8::deserialize(reader, recursion_depth)?;
+    match first & 0b11 {
+        SCALE_ONE_BYTE_MARKER => Ok(u128::from(first >> 2)),
+        SCALE_TWO_BYTE_MARKER => {
+            let second = u8::deserialize(reader, recursion_depth)?;
+            if second == 0 {
+                return Err(non_canonical());
+            }
+            Ok(u128::from(u16::from_le_bytes([first, second]) >> 2))
+        }
+        SCALE_FOUR_BYTE_MARKER => {
+            let second = u8::deserialize(reader, recursion_depth)?;
+            let third = u8::deserialize(reader, recursion_depth)?;
+            let fourth = u8::deserialize(reader, recursion_depth)?;
+            if third == 0 && fourth == 0 {
+                return Err(non_canonical());
+            }
+            Ok(u128::from(
+                u32::from_le_bytes([first, second, third, fourth]) >> 2,
+            ))
+        }
+        _ => {
+            let n = usize::from(first >> 2) + 4;
+            if n <= 16 {
+                let mut buf = [0u8; 16];
+                reader.read_exact(&mut buf[..n])?;
+                if buf[n - 1] == 0 {
+                    return Err(non_canonical());
+                }
+                Ok(u128::from_le_bytes(buf))
+            } else {
+                // ⌖ Wider than any integer this macro serves. The octets are still consumed
+                // and still checked for canonicity before refusing, so a caller that recovers
+                // from the error finds the reader where the old path left it.
+                let mut buf = [0u8; SCALE_MAX_BYTES];
+                reader.read_exact(&mut buf[..n])?;
+                if buf[n - 1] == 0 {
+                    return Err(non_canonical());
+                }
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "integer wider than 16 octets",
+                ))
+            }
+        }
+    }
+}
 
 const SCALE_MAX_BYTES: usize = 67;
 pub struct ScaleBigInt(pub [u8; SCALE_MAX_BYTES]);
@@ -712,3 +826,146 @@ use crate as serialize;
 
 #[cfg(feature = "proptest")]
 randomised_serialization_test!(String);
+
+#[cfg(test)]
+mod scale_compat {
+    //! **The gate on any change to how integers serialise.**
+    //!
+    //! `ScaleBigInt` is the reference: the general path that every `via_scale!` type went
+    //! through when this was written. Anything faster has to agree with it *byte for byte*,
+    //! and this compares them directly rather than against a golden file, so the oracle
+    //! cannot drift out of date.
+    //!
+    //! ⚠︎ Byte-identical is not a nicety here. Storage is content-addressed — a node's key
+    //! *is* the hash of its serialisation — so a changed encoding changes every node hash,
+    //! every parent that references it, and the state root. That is a migration of the whole
+    //! ᴅᴀɢ, not a version bump.
+    use super::*;
+
+    /// Every value where the encoding changes width, either side of each boundary, plus the
+    /// type extremes. Boundaries are where an encoder is wrong if it is wrong at all.
+    fn corpus_u128() -> Vec<u128> {
+        let mut v = vec![0u128, 1, 63, 64, 65, 255, 256, 16_383, 16_384, 16_385];
+        for k in 0..128u32 {
+            let p = 1u128 << k;
+            v.extend([p.wrapping_sub(1), p, p.wrapping_add(1)]);
+        }
+        v.push(u128::MAX);
+        v.push(u128::from(u64::MAX));
+        v.push(u128::from(u32::MAX));
+        // A deterministic spread, so the corpus is not only powers of two.
+        let mut x = 0x243f_6a88_85a3_08d3u128;
+        for _ in 0..512 {
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            v.push(x);
+        }
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    fn bytes_of(v: &impl Serializable) -> Vec<u8> {
+        let mut b = Vec::new();
+        v.serialize(&mut b).expect("write to a Vec cannot fail");
+        b
+    }
+
+    /// `ScaleBigInt` and the integer impls must produce the same octets and agree on the
+    /// size they claim — the second is what the *encoder* consults, so a disagreement there
+    /// is a wrong length prefix somewhere else in the stream.
+    #[test]
+    fn integers_encode_exactly_as_the_big_int_path_does() {
+        for x in corpus_u128() {
+            let reference = bytes_of(&ScaleBigInt::from(x));
+            assert_eq!(bytes_of(&x), reference, "u128 {x} encodes differently");
+            assert_eq!(x.serialized_size(), reference.len(), "u128 {x} size");
+
+            if let Ok(y) = u64::try_from(x) {
+                assert_eq!(bytes_of(&y), reference, "u64 {y} encodes differently");
+                assert_eq!(y.serialized_size(), reference.len(), "u64 {y} size");
+            }
+            if let Ok(y) = u32::try_from(x) {
+                assert_eq!(bytes_of(&y), reference, "u32 {y} encodes differently");
+                assert_eq!(y.serialized_size(), reference.len(), "u32 {y} size");
+            }
+        }
+    }
+
+    /// Round-trip, and the *reader position* afterwards: a decoder that consumes the wrong
+    /// number of octets round-trips perfectly on its own and corrupts everything after it.
+    #[test]
+    fn integers_round_trip_and_consume_exactly_their_encoding() {
+        for x in corpus_u128() {
+            let b = bytes_of(&x);
+            let mut r = &b[..];
+            assert_eq!(u128::deserialize(&mut r, 0).expect("u128"), x);
+            assert!(r.is_empty(), "u128 {x} left {} octet(s)", r.len());
+
+            if let Ok(y) = u64::try_from(x) {
+                let b = bytes_of(&y);
+                let mut r = &b[..];
+                assert_eq!(u64::deserialize(&mut r, 0).expect("u64"), y);
+                assert!(r.is_empty(), "u64 {y} left {} octet(s)", r.len());
+            }
+            if let Ok(y) = u32::try_from(x) {
+                let b = bytes_of(&y);
+                let mut r = &b[..];
+                assert_eq!(u32::deserialize(&mut r, 0).expect("u32"), y);
+                assert!(r.is_empty(), "u32 {y} left {} octet(s)", r.len());
+            }
+        }
+    }
+
+    /// A value too wide for the target type is an error, not a truncation. Consensus code
+    /// reading a `u32` field must not silently accept a `u64`'s worth of octets.
+    #[test]
+    fn a_value_too_wide_for_its_type_is_refused() {
+        for (x, fits_u32, fits_u64) in [
+            (u128::from(u32::MAX), true, true),
+            (u128::from(u32::MAX) + 1, false, true),
+            (u128::from(u64::MAX), false, true),
+            (u128::from(u64::MAX) + 1, false, false),
+            (u128::MAX, false, false),
+        ] {
+            let b = bytes_of(&x);
+            assert_eq!(
+                u32::deserialize(&mut &b[..], 0).is_ok(),
+                fits_u32,
+                "u32 {x}"
+            );
+            assert_eq!(
+                u64::deserialize(&mut &b[..], 0).is_ok(),
+                fits_u64,
+                "u64 {x}"
+            );
+        }
+    }
+
+    /// The canonicity rejections are consensus rules: two encodings of one value would be
+    /// two hashes for one node. Each case below is a value encoded one octet too wide.
+    #[test]
+    fn non_canonical_encodings_are_refused() {
+        // 1 encoded in the two-octet form: (1 << 2) | 0b01, high octet zero.
+        assert!(
+            u64::deserialize(&mut &[0b0000_0101u8, 0][..], 0).is_err(),
+            "two-octet"
+        );
+        // 1 in the four-octet form: (1 << 2) | 0b10, top two octets zero.
+        assert!(
+            u64::deserialize(&mut &[0b0000_0110u8, 0, 0, 0][..], 0).is_err(),
+            "four-octet"
+        );
+        // 1 in the n-octet form: marker (4-4) << 2 | 0b11, four octets, the last zero.
+        assert!(
+            u64::deserialize(&mut &[0b0000_0011u8, 1, 0, 0, 0][..], 0).is_err(),
+            "n-octet"
+        );
+        // And the canonical forms of the same value are accepted.
+        assert_eq!(
+            u64::deserialize(&mut &[0b0000_0100u8][..], 0).expect("canonical"),
+            1
+        );
+    }
+}
