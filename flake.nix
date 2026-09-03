@@ -39,7 +39,23 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # crates.io returns 403 to any request whose User-Agent starts with
+        # "curl/", which is exactly what nixpkgs' fetchurl sends
+        # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
+        # missing from the binary cache fails to download.
+        # To solve this we replace the agent for all fetchurl derivations.
+        overlays = [
+          (_final: prev: {
+            fetchurl =
+              args:
+                (prev.fetchurl args).overrideAttrs (old: {
+                  curlOptsList =
+                    (old.curlOptsList or [])
+                    ++ ["--user-agent" "midnight-ledger/1.0"];
+                });
+          })
+        ];
+        pkgs = import nixpkgs {inherit system overlays;};
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
         };
@@ -83,7 +99,7 @@
           doCheck = false;
         };
         bagel-wasm = (import ./bagel.nix) {
-          inherit system nixpkgs;
+          inherit system nixpkgs overlays;
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
