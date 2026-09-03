@@ -64,6 +64,11 @@ pub trait ParamsProverProvider {
 /// The hash used during proof transcript processing
 pub type TranscriptHash = blake2b_simd::State;
 
+/// Sources prover parameters from the on-disk/remote Midnight parameter cache.
+///
+/// Behind the `fetch` feature: a verifier has no use for prover parameters, and this is the only
+/// thing tying this crate to `base-crypto`'s data provider.
+#[cfg(feature = "fetch")]
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
         let name = Self::name_k(k);

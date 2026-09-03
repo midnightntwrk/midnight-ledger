@@ -2,6 +2,10 @@
 
 ## Version `3.0.0`
 
+- breaking: `impl ParamsProverProvider for MidnightDataProvider` is now behind
+  the new, non-default `fetch` feature. It was the only tie between this crate
+  and `base-crypto`'s data provider, and verifiers have no use for prover
+  parameters.
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7
 - breaking: `Zkir` trait reworked: removed `Relation + Tagged + Deserializable`
   supertraits, added `type ProverKey` associated type, `read_raw_pk`,
@@ -13,7 +17,6 @@
 - fix: rehashing serde deserialized `MerkleTree`s
 - fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
 - fix: do not panic on indexing into a collapsed `MerkleTree`, but return `None` instead
-
 
 ## Version `2.1.0`
 

@@ -21,6 +21,8 @@ binary = [
   "dep:indicatif",
   "dep:console",
   "dep:futures-executor",
+  "base-crypto/fetch",
+  "transient-crypto/fetch",
 ]
 proptest = [
   "dep:pastey",
