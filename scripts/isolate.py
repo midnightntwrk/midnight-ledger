@@ -46,24 +46,26 @@ def main():
     root = repo / "Cargo.toml"
     text = root.read_text()
 
-    def filter_list(text, key):
+    def rewrite_list(text, key, require_member):
         pattern = re.compile(rf"(?ms)^({re.escape(key)}\s*=\s*\[)(.*?)(\])")
         quoted = f'"{name}"'
 
         def repl(m):
-            head, body, tail = m.group(1), m.group(2), m.group(3)
-            kept = [line for line in body.splitlines() if quoted in line]
-            if not kept:
+            head, tail = m.group(1), m.group(3)
+            if require_member and quoted not in m.group(2):
                 sys.exit(f"{name!r} not found in {key}")
-            return head + "\n" + "\n".join(kept) + "\n" + tail
+            return head + "\n    " + quoted + ",\n" + tail
 
         new_text, n = pattern.subn(repl, text)
         if n == 0:
             sys.exit(f"could not find [{key}] list in root Cargo.toml")
         return new_text
 
-    text = filter_list(text, "members")
-    text = filter_list(text, "default-members")
+    # `name` must really be a workspace member, but it need not be a
+    # *default* member (e.g. `zkir-v3`), so default-members is overwritten
+    # rather than filtered.
+    text = rewrite_list(text, "members", require_member=True)
+    text = rewrite_list(text, "default-members", require_member=False)
     root.write_text(text)
 
     # 2. In foo/Cargo.toml: strip `path = "..."` from [dependencies], and drop
