@@ -75,10 +75,12 @@ In practice, this is not continuously processed, but is calculated at the time
 a Dust UTXO is spent, by computing the "updated" value of this UTXO. For this
 purpose, the creation time of Dust UTXOs is used, as well as metadata
 "generation info" associated with the backing Night UTXO. This metadata
-includes the Dust public key, the creation time of the backing Night UTXO, and
+includes the Dust public key and
 the *deletion* time of the backing Night UTXO (if applicable -- this may also
 be a future time, and is set to the maximum timestamp if backing Night UTXO is
-still present). These allow computing any generation and decay between the
+still present). The creation time of the backing Night UTXO is not stored
+separately; for the first Dust UTXO in a chain it *is* that UTXO's `ctime`.
+Together these allow computing any generation and decay between the
 the time the Dust UTXO being spent was created and the current time.
 
 This Night metadata is stored separately to the main UTXO set, and not all
@@ -97,7 +99,7 @@ given Night public key with the corresponding secret key's signature.
 Finally, because registrations run a challenge of paying for their own fees, if
 the same Night address is used in a registration, and at least one input that
 is *not* backing any Dust, then fees may be taken from the Dust these inputs
-*would have* generated, had they has an associated Dust UTXO (effectively
+*would have* generated, had they had an associated Dust UTXO (effectively
 backdating the registration). Any freshly created Dust UTXOs associated with
 the same Night address get the remaining Dust from this split between them at
 creation time, rather than the typical initial balance of 0.
@@ -260,7 +262,7 @@ subsystem:
   mapping and may affect the Dust generation state and create fresh Dust UTXOs
   if the relevant Night address has Night UTXOs owed Dust in this transaction.
 
-The latter two are captured in an explicit `DustActions` structure, which also includes a timestamp that these actions are made against.
+The latter two are captured in an explicit `DustActions` structure, which also includes a timestamp. `DustSpend`s are evaluated as if they had occurred at this time stamp, while `DustRegistration`s occur at the time of the block that includes them.
 
 The `DustRegistration`s case is the complex one, because these registrations
 *may* pay for fees. This has several preconditions and, differently from the
@@ -431,6 +433,7 @@ fn updated_value(
     let tstart_phase_1 = inp.ctime;
     let tend_phase_12 = min(gen.dtime, now);
     let value_phase_1_unchecked = (tend_phase_12 - tstart_phase_1).as_seconds() * rate + inp.initial_value;
+    assert!(inp.initial_value <= vfull);
     let value_phase_12 = clamp(value_phase_1_unchecked, inp.initial_value, vfull);
     // Again, we aren't constraining the end to be after the start, instead
     // we're clamping the output to the reasonable region of outputs.
@@ -695,7 +698,7 @@ impl DustState {
                 .any(|reg| hash(reg.night_key) == output.owner);
             if !handled_by_registration {
                 let initial_nonce = hash(hash(segment, parent), output_no as u32);
-                self = self.fresh_dust_output(initial_nonce, 0,  output.value, dust_addr, tblock, tblock)?;
+                self = self.fresh_dust_output(initial_nonce, 0,  output.value, dust_addr, tblock)?;
             }
         }
         self
@@ -707,15 +710,14 @@ impl DustState {
         initial_value: u128,
         night_value: u128,
         dust_addr: DustPublicKey,
-        tnow: Timestamp,
-        tblock: Timestamp,
+        night_ctime: Timestamp,
     ) -> Result<Self> {
         let seq = 0;
         let dust_pre_projection = DustPreProjection {
             initial_value: initial_value,
             owner: dust_addr,
             nonce: field::hash((initial_nonce, seq, dust_addr)),
-            ctime: tnow,
+            ctime: night_ctime,
         };
         let dust_commitment = field::hash(dust_pre_projection);
         self.utxo.commitments = self.utxo.commitments.insert(
@@ -761,7 +763,6 @@ impl DustState {
         parent_intent: ErasedIntent,
         reg: DustRegistration<S>,
         params: DustParameters,
-        tnow: Timestamp,
         context: BlockContext,
     ) -> Result<(Self, u128)> {
         let night_address = hash(reg.night_key);
@@ -790,7 +791,7 @@ impl DustState {
                 let ratio = ((output.value * DISTRIBUTION_RESOLUTION) / output_sum);
                 let initial_value = (ratio * dust_out) / DISTRIBUTION_RESOLUTION;
                 let initial_nonce = hash(hash(segment, parent), output_no as u32);
-                self = self.fresh_dust_output(initial_nonce, initial_value, output.value, dust_addr, tnow, context.tblock)?;
+                self = self.fresh_dust_output(initial_nonce, initial_value, output.value, dust_addr, context.tblock)?;
             }
         }
         Ok((self, remaining_fees))
