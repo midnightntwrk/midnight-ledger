@@ -34,7 +34,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

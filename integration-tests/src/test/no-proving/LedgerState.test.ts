@@ -32,7 +32,7 @@ import {
   unshieldedToken,
   WellFormedStrictness,
   ZswapChainState
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { LOCAL_TEST_NETWORK_ID, ONE_KB, Random, Static, TestResource, VERSION_HEADER } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';

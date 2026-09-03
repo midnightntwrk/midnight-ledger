@@ -2,12 +2,13 @@
 name = "midnight-proof-server"
 edition = "2024"
 license.workspace = true
-version = "9.0.0-rc.3"
+version = "9.0.0-rc.6"
 publish = false
 
 [features]
 default = []
-experimental = ["dep:zkir-v3"]
+# Disabled for now, as we currently have no experimental features.
+#experimental = []
 
 [dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features = false, features = ["proving"] }
@@ -18,13 +19,13 @@ storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 zkir = { path = "../zkir", package = "midnight-zkir" }
-zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
+zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3" }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
-actix-web = { version = "^4.13.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies", "http2"] }
+actix-web = { version = "^4.13.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies"] }
 actix-cors = "^0.7.1"
 futures = "^0.3.31"
 futures-util = "0.3.32"
@@ -51,5 +52,5 @@ log = "^0.4.28"
 function_name = "^0.3.0"
 tokio = { version = "^1.46.1", features = ["full"] }
 rustls = "0.23.28"
-reqwest = { version = "^0.13.0", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "^0.13.4", default-features = false, features = ["json", "rustls"] }
 serde_json = "1.0.140"

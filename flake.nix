@@ -24,11 +24,6 @@
     #  inputs.zkir.follows = "zkir";
     #  inputs.onchain-runtime.follows = "";
     #};
-    zkir = {
-      url = "github:midnightntwrk/midnight-ledger/aace4f8f664314f967e440d88fa7a88b617c3684";
-      # Have the self-recursion just be a fixpoint.
-      inputs.zkir.follows = "zkir";
-    };
   };
 
   outputs = {
@@ -38,12 +33,27 @@
     fenix,
     inclusive,
     #compactc,
-    zkir,
     ...
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # crates.io returns 403 to any request whose User-Agent starts with
+        # "curl/", which is exactly what nixpkgs' fetchurl sends
+        # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
+        # missing from the binary cache fails to download.
+        # To solve this we replace the agent for all fetchurl derivations.
+        overlays = [
+          (_final: prev: {
+            fetchurl =
+              args:
+                (prev.fetchurl args).overrideAttrs (old: {
+                  curlOptsList =
+                    (old.curlOptsList or [])
+                    ++ ["--user-agent" "midnight-ledger/1.0"];
+                });
+          })
+        ];
+        pkgs = import nixpkgs {inherit system overlays;};
         pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
@@ -90,7 +100,7 @@
           doCheck = false;
         };
         bagel-wasm = (import ./bagel.nix) {
-          inherit system nixpkgs;
+          inherit system nixpkgs overlays;
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
@@ -118,13 +128,14 @@
             extraBuildInputs = (if require-artifacts then
               [
                 self.packages.${system}.local-params
-                zkir.packages.${system}.zkir
+                self.packages.${system}.zkir
               ] else []);
           };
         mkLedger = {
           isCrossArm ? false,
           heavy-checks ? false,
           build-target ? null,
+          features ? null,
         }: (pkgs.makeRustPlatform {
             rustc = self.packages.${system}.rust-build-toolchain;
             cargo = self.packages.${system}.rust-build-toolchain;
@@ -146,7 +157,7 @@
                 cargo clippy --all-targets --workspace --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
                 ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
-              cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
+              cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}" + (if features != null then " --features ${features}" else "");
 
               MIDNIGHT_PP = "${self.packages.${system}.local-params}";
               MIDNIGHT_LEDGER_TEST_STATIC_DIR =
@@ -160,7 +171,7 @@
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
-                  zkir.packages.${system}.zkir
+                  self.packages.${system}.zkir
                   rust-build
                   pkgs.chez
                 ];
@@ -203,13 +214,14 @@
               else {}
             ));
 
-        mkDocker = isCrossArm:
+        mkDocker = { isCrossArm, experimental ? false }:
           with if isCrossArm
           then pkgs.pkgsCross.aarch64-multiplatform-musl
           else pkgs.pkgsCross.musl64; let
             proof-server = mkLedger {
               inherit isCrossArm;
               build-target = "midnight-proof-server";
+              features = if experimental then "experimental" else null;
             };
           in
             dockerTools.buildImage {
@@ -218,7 +230,7 @@
                 if isCrossArm
                 then "arm64"
                 else "amd64"
-              }";
+              }" + (if experimental then "_experimental" else "");
               copyToRoot = [
                 # When we want tools in /, we need to symlink them in order to
                 # still have libraries in /nix/store. This behavior differs from
@@ -321,8 +333,8 @@
             nativeBuildInputs = [
               pkgs.jq
               packages.public-params
-              zkir.packages.${system}.zkir
-              zkir.packages.${system}.zkir-v3
+              self.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -336,9 +348,9 @@
                 mv $contract-tmp "$contract/zkir"
                 VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
                 if [[ "$VERSION" == "2" ]]; then
-                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 fi
               done
             '';
@@ -362,7 +374,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              zkir.packages.${system}.zkir
+              self.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -406,9 +418,14 @@
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
 
-          packages.proof-server-oci = mkDocker false;
+          packages.proof-server-oci = mkDocker { isCrossArm = false; };
 
-          packages.proof-server-oci-arm64 = mkDocker true;
+          packages.proof-server-oci-arm64 = mkDocker { isCrossArm = true; };
+
+          # NOTE: Will currently fail to build, as we have no experimental features at the moment.
+          packages.proof-server-oci-experimental = mkDocker { isCrossArm = false; experimental = true; };
+
+          packages.proof-server-oci-arm64-experimental = mkDocker { isCrossArm = true; experimental = true; };
 
           packages.zkir = ({
               "x86_64-linux" = pkgsStatic;
@@ -573,7 +590,7 @@
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_104
+              pkgs.wasm-bindgen-cli_0_2_108
             ];
             buildInputs = [packages.public-params];
 

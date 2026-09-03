@@ -13,6 +13,7 @@
 
 use midnight_circuits::{
     CircuitField,
+    ecc::foreign::edwards_chip::AssignedForeignEdwardsPoint,
     field::foreign::params::MultiEmulationParams as MEP,
     instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
@@ -20,7 +21,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, curve25519, k256, p256};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -62,6 +63,18 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         }
         IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
         IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
+
+        IrValue::Secp256r1Point(p) => AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p),
+        IrValue::Secp256r1Base(s) => AssignedField::<F, p256::Fp, MEP>::as_public_input(s),
+        IrValue::Secp256r1Scalar(s) => AssignedField::<F, p256::Fq, MEP>::as_public_input(s),
+
+        IrValue::Curve25519Point(p) => {
+            AssignedForeignEdwardsPoint::<F, curve25519::Curve25519, MEP>::as_public_input(p)
+        }
+        IrValue::Curve25519Base(s) => AssignedField::<F, curve25519::Fp, MEP>::as_public_input(s),
+        IrValue::Curve25519Scalar(s) => {
+            AssignedField::<F, curve25519::Scalar, MEP>::as_public_input(s)
+        }
     };
     encoded
         .into_iter()
@@ -101,6 +114,22 @@ pub fn encode_incircuit(
         }
         CircuitValue::Secp256k1Scalar(s) => {
             (std_lib.secp256k1().scalar_field_chip()).as_public_input(layouter, s)
+        }
+
+        CircuitValue::Secp256r1Point(p) => std_lib.p256().as_public_input(layouter, p),
+        CircuitValue::Secp256r1Base(s) => {
+            (std_lib.p256().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Secp256r1Scalar(s) => {
+            (std_lib.p256().scalar_field_chip()).as_public_input(layouter, s)
+        }
+
+        CircuitValue::Curve25519Point(p) => std_lib.curve25519().as_public_input(layouter, p),
+        CircuitValue::Curve25519Base(s) => {
+            (std_lib.curve25519().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Curve25519Scalar(s) => {
+            (std_lib.curve25519().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
@@ -153,6 +182,34 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
 
         IrType::Secp256k1Scalar => AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
             .map(IrValue::Secp256k1Scalar),
+
+        IrType::Secp256r1Point => {
+            AssignedForeignPoint::<F, p256::P256, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256r1Point)
+        }
+
+        IrType::Secp256r1Base => AssignedField::<F, p256::Fp, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Base),
+
+        IrType::Secp256r1Scalar => AssignedField::<F, p256::Fq, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Scalar),
+
+        IrType::Curve25519Point => {
+            AssignedForeignEdwardsPoint::<F, curve25519::Curve25519, MEP>::from_public_input(
+                &encoded,
+            )
+            .map(IrValue::Curve25519Point)
+        }
+
+        IrType::Curve25519Base => {
+            AssignedField::<F, curve25519::Fp, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Base)
+        }
+
+        IrType::Curve25519Scalar => {
+            AssignedField::<F, curve25519::Scalar, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Scalar)
+        }
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
 }

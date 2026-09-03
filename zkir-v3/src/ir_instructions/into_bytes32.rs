@@ -26,6 +26,10 @@ use crate::{
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
+///  - Secp256r1Base
+///  - Secp256r1Scalar
+///  - Curve25519Base
+///  - Curve25519Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -42,6 +46,14 @@ pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error
 
         Secp256k1Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
 
+        Secp256r1Base(s) => Ok(Bytes32(s.to_bytes_le())),
+
+        Secp256r1Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
+
+        Curve25519Base(s) => Ok(Bytes32(s.to_bytes_le())),
+
+        Curve25519Scalar(s) => Ok(Bytes32(s.to_bytes_le())),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported into_bytes32 for {:?}",
             value.get_type(),
@@ -54,6 +66,10 @@ pub fn into_bytes32_offcircuit(value: &IrValue) -> Result<IrValue, anyhow::Error
 ///  - Native
 ///  - Secp256k1Base
 ///  - Secp256k1Scalar
+///  - Secp256r1Base
+///  - Secp256r1Scalar
+///  - Curve25519Base
+///  - Curve25519Scalar
 ///
 /// In all the above prime fields, the 32-byte representation is the little-endian
 /// byte encoding of the underlying (canonical) integer.
@@ -84,6 +100,30 @@ pub fn into_bytes32_incircuit(
             .assigned_to_le_bytes(layouter, s, Some(32))
             .map(|bytes| Bytes32(bytes.try_into().unwrap())),
 
+        Secp256r1Base(s) => std_lib
+            .p256()
+            .base_field_chip()
+            .assigned_to_le_bytes(layouter, s, Some(32))
+            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+
+        Secp256r1Scalar(s) => std_lib
+            .p256()
+            .scalar_field_chip()
+            .assigned_to_le_bytes(layouter, s, Some(32))
+            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+
+        Curve25519Base(s) => std_lib
+            .curve25519()
+            .base_field_chip()
+            .assigned_to_le_bytes(layouter, s, Some(32))
+            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+
+        Curve25519Scalar(s) => std_lib
+            .curve25519()
+            .scalar_field_chip()
+            .assigned_to_le_bytes(layouter, s, Some(32))
+            .map(|bytes| Bytes32(bytes.try_into().unwrap())),
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported into_bytes32 for {:?}",
             value.get_type(),
@@ -94,7 +134,7 @@ pub fn into_bytes32_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::k256;
+    use midnight_curves::{curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -114,6 +154,22 @@ mod tests {
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
 
         let x = Secp256k1Scalar(k256::Fq::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Secp256r1Base(p256::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Secp256r1Scalar(p256::Fq::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Curve25519Base(curve25519::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Curve25519Scalar(<curve25519::Scalar as Field>::random(OsRng));
         let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
         assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
     }
