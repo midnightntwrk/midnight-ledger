@@ -33,7 +33,7 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[storable(db = D, invariant = MerklePatriciaTrie::invariant)]
+#[storable(db = D, invariant = MerklePatriciaTrie::canonicity)]
 pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
@@ -69,7 +69,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         MerklePatriciaTrie(Sp::new(Node::Empty))
     }
 
-    fn invariant(&self) -> Result<(), std::io::Error> {
+    fn annotation_consistency(&self) -> Result<(), std::io::Error> {
         fn err<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
             ann: &A,
             true_val: A,
@@ -123,6 +123,83 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
 
         let _ = sum_ann(self.0.deref())?;
         Ok(())
+    }
+
+    /// Check that the trie is in canonical form, returning a description of the
+    /// violated rule otherwise. A well-formed trie is *canonical*: its structure
+    /// is uniquely determined by its key-value contents (see the type-level
+    /// docs). This is a hand-enumerated statement of the structural rules,
+    /// composed with the annotation-consistency check.
+    ///
+    /// This is a pure inspection predicate: it is the oracle the property tests
+    /// use, and does not itself change what deserialization accepts.
+    pub fn canonicity(&self) -> Result<(), std::io::Error> {
+        fn err<T>(msg: &str) -> Result<T, std::io::Error> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("canonicity: {msg}"),
+            ))
+        }
+
+        fn structure<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+            node: &Node<V, D, A>,
+        ) -> Result<(), std::io::Error> {
+            match node {
+                Node::Empty | Node::Leaf { .. } => Ok(()),
+                Node::Branch { children, .. } => {
+                    if children
+                        .iter()
+                        .filter(|child| !matches!(***child, Node::Empty))
+                        .count()
+                        < 2
+                    {
+                        return err("Node::Branch must have at least two non-empty children");
+                    }
+                    children
+                        .iter()
+                        .try_for_each(|child| structure(child.deref()))
+                }
+                Node::Extension {
+                    compressed_path,
+                    child,
+                    ..
+                } => {
+                    if compressed_path.is_empty() {
+                        return err("Node::Extension path must be non-empty");
+                    }
+                    if compressed_path.len() > 255 {
+                        return err("Node::Extension path may not be longer than 255");
+                    }
+                    if compressed_path.iter().any(|b| *b > 0x0f) {
+                        return err("Node::Extension path must consist of nibbles");
+                    }
+                    match child.deref() {
+                        Node::Empty => {
+                            return err("Node::Extension child must not be Node::Empty");
+                        }
+                        Node::Extension { .. } if compressed_path.len() != 255 => {
+                            return err(
+                                "Node::Extension may only have a Node::Extension child when its own path is of length 255",
+                            );
+                        }
+                        _ => {}
+                    }
+                    structure(child.deref())
+                }
+                Node::MidBranchLeaf { child, .. } => match child.deref() {
+                    Node::Branch { .. } | Node::Extension { .. } => structure(child.deref()),
+                    _ => err("Node::MidBranchLeaf may only have Node::Branch or Node::Extension children"),
+                },
+            }
+        }
+
+        structure(self.0.deref())?;
+        self.annotation_consistency()
+    }
+
+    /// Whether [`Self::canonicity`] holds.
+    pub fn is_canonical(&self) -> bool {
+        self.canonicity().is_ok()
     }
 
     /// Insert a value into the trie
@@ -1478,9 +1555,12 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             3 => {
                 let ann = A::deserialize(reader, 0)?;
-                let len = u8::deserialize(reader, 0)?;
-                let path =
-                    expand_nibbles(&std::vec::Vec::<u8>::deserialize(reader, 0)?, len as usize);
+                let len = u8::deserialize(reader, 0)? as usize;
+                let data = <std::vec::Vec<u8>>::deserialize(reader, 0)?;
+                if data.len() != len.div_ceil(2) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("inferred nibble byte length {} did not match actual data length of {}", len.div_ceil(2), data.len())));
+                };
+                let path = expand_nibbles(&data, len as usize);
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
                 Node::Extension {
                     ann,

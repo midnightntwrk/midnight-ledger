@@ -887,10 +887,15 @@ tag_enforcement_test!(DustParameters);
 
 impl DustParameters {
     pub const fn time_to_cap(&self) -> Duration {
-        Duration::from_secs(
-            self.night_dust_ratio
-                .div_ceil(self.generation_decay_rate as u64) as i128,
-        )
+        // Should not happen, but panic-guards
+        if self.generation_decay_rate == 0 {
+            Duration::from_secs(i128::MAX)
+        } else {
+            Duration::from_secs(
+                self.night_dust_ratio
+                    .div_ceil(self.generation_decay_rate as u64) as i128,
+            )
+        }
     }
 }
 
@@ -2119,8 +2124,8 @@ pub fn successor_utxo(
         backing_night: utxo.backing_night,
         ctime: *now,
         initial_value: v_now,
-        seq: utxo.seq + 1,
-        nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
+        seq: utxo.seq.saturating_add(1),
+        nonce: dust_nonce(&utxo.backing_night, utxo.seq.saturating_add(1), sk),
         owner: utxo.owner,
         mt_index: new_commitment_index,
     }
