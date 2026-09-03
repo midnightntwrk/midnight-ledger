@@ -1054,7 +1054,6 @@ impl<D: DB> DustState<D> {
         parent_intent: &ErasedIntent<D>,
         registration: &DustRegistration<S, D>,
         dust_params: &DustParameters,
-        tnow: Timestamp,
         context: &TransactionContext<D>,
         mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<(Self, u128), TransactionInvalid<D>> {
@@ -1128,7 +1127,7 @@ impl<D: DB> DustState<D> {
                     initial_value,
                     output.value,
                     **dust_addr,
-                    tnow,
+                    context.block_context.tblock,
                     context.block_context.tblock,
                     &mut event_push,
                 )?;

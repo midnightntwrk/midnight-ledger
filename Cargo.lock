@@ -53,7 +53,6 @@ dependencies = [
  "flate2",
  "foldhash 0.1.5",
  "futures-core",
- "h2",
  "http 0.2.12",
  "httparse",
  "httpdate",
@@ -2100,25 +2099,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "h2"
-version = "0.3.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap 2.14.0",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2895,9 +2875,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.0"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -3477,7 +3457,7 @@ dependencies = [
  "hex",
  "itertools 0.14.0",
  "konst",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-serialize",
  "midnight-storage-core 1.2.0",
@@ -3569,7 +3549,7 @@ dependencies = [
  "group",
  "k256",
  "lazy_static",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.0.0",
  "midnight-circuits 6.3.0",
@@ -3605,7 +3585,7 @@ dependencies = [
  "group",
  "k256",
  "lazy_static",
- "lru 0.18.0",
+ "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.1.0",
  "midnight-circuits 7.2.4",
