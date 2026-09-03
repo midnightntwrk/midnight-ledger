@@ -39,7 +39,6 @@ use midnight_circuits::types::AssignedNative;
 use midnight_curves::Fq;
 use midnight_proofs::circuit::{Layouter, Value};
 use midnight_proofs::plonk;
-use midnight_proofs::utils::SerdeFormat;
 use midnight_zk_stdlib::{
     MidnightPK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
 };
@@ -50,11 +49,12 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
+use midnight_zkir_v3::ir::IrMinorVersion;
+use midnight_zkir_v3::ir_instructions::decidable::{DeciderKind, serialize_vk};
 use transient_crypto::curve::Fr;
-use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::{
-    KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof, ProofPreimage,
-    ProverKey, VerifierKey, Zkir,
+    InnerProofWitness, KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof,
+    ProofPreimage, ProverKey, VerifierKey, Zkir,
 };
 
 /// SRS params read at run time from `$MIDNIGHT_PP`, falling back to
@@ -254,8 +254,12 @@ pub fn pinned_statement() -> ((Modulus, Message), Signature) {
 }
 
 /// Derives `k` from the relation, reads the matching SRS, and generates the key
-/// pair. The VK blob is the `MidnightVK` in `Processed` form — what the ledger
-/// reads back with `MidnightVK::read`.
+/// pair. The VK blob is `serialize_vk`'s output: a leading decider tag byte,
+/// then the `MidnightVK` in `Processed` form.
+///
+/// Every relation here is an ordinary circuit that defers nothing of its own,
+/// so the kind is always [`DeciderKind::None`]. `verify_proof_e2e.rs` covers
+/// [`DeciderKind::Collapsed`].
 pub async fn inner_setup_for<R: Relation + Default>(
     label: &str,
 ) -> (ParamsProver, MidnightPK<R>, Vec<u8>) {
@@ -289,10 +293,7 @@ pub async fn inner_setup_at<R: Relation + Default>(
     );
     let inner_pk = setup_pk(&relation, &inner_vk);
 
-    let mut vk_blob = Vec::new();
-    inner_vk
-        .write(&mut vk_blob, SerdeFormat::Processed)
-        .expect("serialize inner vk");
+    let vk_blob = serialize_vk(&inner_vk, DeciderKind::None).expect("serialize inner vk");
 
     (inner_srs, inner_pk, vk_blob)
 }
@@ -381,6 +382,8 @@ pub fn outer_ir_with(
         }}"#
     );
     let mut ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
+    // `load` accepts only `minor: 0..=0`, and a `V0` may not carry a side-table.
+    ir.version = IrMinorVersion::V1;
     ir.verify_proof_vks = vks;
     ir
 }
@@ -456,13 +459,14 @@ pub async fn scalar_inner_proofs(instances: &[u64], rng: &mut ChaCha20Rng) -> Ve
 /// (VK, instance) pair, in order.
 pub fn outer_ir_for_all(entries: &[(Vec<u8>, Vec<Fq>)]) -> IrSource {
     let bindings = (0..entries.len())
-        .map(|i| format!(r#"{{ "op": "inner_proof", "output": "%p_{i}" }}"#))
+        .map(|i| format!(r#"{{ "op": "inner_proof", "guard": "0x01", "output": "%p_{i}" }}"#))
         .collect::<Vec<_>>();
 
     let verifications = entries.iter().enumerate().map(|(i, (vk_blob, pis))| {
         format!(
             r#"{{
                    "op": "verify_proof",
+                   "guard": "0x01",
                    "vk_hash": "0x{vk_hash}",
                    "instance": [{instance}],
                    "proof": "%p_{i}"
@@ -602,7 +606,10 @@ pub fn outer_preimage_all(inner_proofs: Vec<Vec<u8>>) -> ProofPreimage {
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses: inner_proofs,
+        proof_witnesses: inner_proofs
+            .into_iter()
+            .map(InnerProofWitness::Direct)
+            .collect(),
         key_location: KeyLocation(Cow::Borrowed("builtin")),
     }
 }
@@ -627,19 +634,6 @@ pub fn outer_preimage_with(
     let mut preimage = outer_preimage_all(inner_proofs);
     preimage.inputs = inputs;
     preimage.public_transcript_inputs = public_transcript_inputs;
-    preimage
-}
-
-/// [`outer_preimage_all`] for a circuit compiled with
-/// `do_communications_commitment`.
-///
-/// The commitment is not free: it must be `transient_commit` over the circuit's
-/// inputs followed by its encoded outputs. Every circuit here declares neither,
-/// so the committed sequence is empty and only the opening varies.
-pub fn outer_preimage_committing(inner_proofs: Vec<Vec<u8>>, opening: Fr) -> ProofPreimage {
-    let mut preimage = outer_preimage_all(inner_proofs);
-    let committed: [Fr; 0] = [];
-    preimage.communications_commitment = Some((transient_commit(&committed[..], opening), opening));
     preimage
 }
 
@@ -676,9 +670,9 @@ pub async fn outer_prove_with_skips(
 }
 
 /// Verifies the outer proof. A single `verify` runs the Plonk check *and* the
-/// deferred pairing on every accumulator, at the offsets the `VerifierKey`
-/// records. Verification params are constant-size, so the static
-/// `PARAMS_VERIFIER` works regardless of the circuit's `k`.
+/// deferred pairing on every accumulator the proof carries. Verification params
+/// are constant-size, so the static `PARAMS_VERIFIER` works regardless of the
+/// circuit's `k`.
 pub fn outer_verify(vk: &VerifierKey, proof: &Proof, pis: Vec<Fr>) {
     let t = Instant::now();
     vk.verify(&PARAMS_VERIFIER, proof, pis.into_iter())

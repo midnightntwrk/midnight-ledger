@@ -16,18 +16,32 @@
 
 use std::borrow::Cow;
 
+use midnight_zkir_v3::ir::IrMinorVersion;
 use midnight_zkir_v3::{Instruction, IrSource};
 use sha2::Digest;
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{KeyLocation, ProofPreimage, Zkir};
+use transient_crypto::proofs::{InnerProofWitness, KeyLocation, ProofPreimage, Zkir};
 
 /// The binding input every preimage here carries. Nothing in `unit/` asserts on
 /// it; it just has to be *something*.
 pub const BINDING_INPUT: u64 = 99;
 
 /// Two arbitrary VK blobs, distinct in content and length.
-pub const VK_BLOB_A: [u8; 32] = [0xaa; 32];
-pub const VK_BLOB_B: [u8; 48] = [0xbb; 48];
+///
+/// The leading byte is the decider tag (`0x00` = `DeciderKind::None`) and the
+/// rest is filler. Nothing here parses a blob as a real key, but the tag is
+/// read before anything else is, so an arbitrary first byte would be refused as
+/// an unknown decider before the check under test could ever run.
+pub const VK_BLOB_A: [u8; 32] = {
+    let mut b = [0xaa; 32];
+    b[0] = 0x00;
+    b
+};
+pub const VK_BLOB_B: [u8; 48] = {
+    let mut b = [0xbb; 48];
+    b[0] = 0x00;
+    b
+};
 
 /// A blob's digest, hex-encoded without the `0x` prefix.
 pub fn vk_hash(blob: &[u8]) -> String {
@@ -41,8 +55,13 @@ pub fn ir(instructions: &str) -> IrSource {
 }
 
 /// As [`ir`], with a resolved VK side-table attached.
+///
+/// The version is bumped by hand because `IrSource::load` accepts only
+/// `minor: 0..=0`, so text IR always parses as [`IrMinorVersion::V0`] — and a
+/// `V0` carrying `verify_proof_vks` is refused by `Serializable::serialize`.
 pub fn ir_with_vks(instructions: &str, vks: Vec<Vec<u8>>) -> IrSource {
     let mut ir = ir(instructions);
+    ir.version = IrMinorVersion::V1;
     ir.verify_proof_vks = vks;
     ir
 }
@@ -68,19 +87,19 @@ pub fn ir_with_inputs(
 }
 
 /// A single `inner_proof` binding, bound to `%p_0`.
-pub const BIND_ONE: &str = r#"{ "op": "inner_proof", "output": "%p_0" }"#;
+pub const BIND_ONE: &str = r#"{ "op": "inner_proof", "guard": "0x01", "output": "%p_0" }"#;
 
 /// `inner_proof` bindings `%p_0..%p_n`, then one `verify_proof` per hash, each
 /// over a distinct one-element instance — so a round-trip that mixed instances
 /// up between instructions would show.
 pub fn bind_and_verify(vk_hashes: &[String]) -> String {
     let binds = (0..vk_hashes.len())
-        .map(|i| format!(r#"{{ "op": "inner_proof", "output": "%p_{i}" }}"#))
+        .map(|i| format!(r#"{{ "op": "inner_proof", "guard": "0x01", "output": "%p_{i}" }}"#))
         .collect::<Vec<_>>();
     let verifies = vk_hashes.iter().enumerate().map(|(i, h)| {
         let instance = 0x7b + i;
         format!(
-            r#"{{ "op": "verify_proof", "vk_hash": "0x{h}", "instance": ["0x{instance:02x}"], "proof": "%p_{i}" }}"#
+            r#"{{ "op": "verify_proof", "guard": "0x01", "vk_hash": "0x{h}", "instance": ["0x{instance:02x}"], "proof": "%p_{i}" }}"#
         )
     });
     binds
@@ -104,7 +123,9 @@ pub fn preimage(n: usize) -> ProofPreimage {
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses: (0..n).map(|i| vec![i as u8; 8]).collect(),
+        proof_witnesses: (0..n)
+            .map(|i| InnerProofWitness::Direct(vec![i as u8; 8]))
+            .collect(),
         key_location: KeyLocation(Cow::Borrowed("builtin")),
     }
 }

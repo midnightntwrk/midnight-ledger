@@ -15,15 +15,22 @@
 //!
 //! `inner_proof` binds the next prover-supplied inner proof
 //! (`ProofPreimage::proof_witnesses`) to a name, and `verify_proof` takes that
-//! name as its third input, alongside:
+//! name as its `proof` input. Both carry a `guard`, which should be the same
+//! condition on the two: it decides whether a witness is consumed at all, and
+//! whether the proof is actually verified. Alongside it, `verify_proof` takes:
 //!
 //! - `vk_hash`: hash of the decider-tagged, self-contained `MidnightVK` blob
-//!   (the blob's leading byte is the decider tag, `0x00` = the Standard
-//!   decider). The full VK is resolved out-of-band and carried in the IR's
+//!   (the blob's leading byte is the decider tag, `0x00` = `DeciderKind::None`).
+//!   The full VK is resolved out-of-band and carried in the IR's
 //!   `verify_proof_vks` side-table, keyed by this hash; the canonical text
 //!   stores only the hash.
 //! - `instance`: the inner proof's public inputs, as ordinary `Native`
 //!   operands (variable references or `0x`-hex immediates).
+//!
+//! A guard is an ordinary operand, so it can be a variable (witnessed) or a
+//! `0x`-hex immediate (a circuit constant, in practice `0x01`). Guarded off, the
+//! pair consumes no witness and exposes the trivial accumulator, which the outer
+//! verifier's deferred pairing check accepts unconditionally.
 //!
 //! The `vk_hash` here is fake — this test exercises only the text format and
 //! round-trip, not verification.
@@ -34,29 +41,47 @@ use midnight_zkir_v3::IrSource;
 /// statement is the single public input `%v_0`, and the instruction stores just
 /// the VK hash. Neither the full VK nor the proof appears in the text — both
 /// are supplied out-of-band.
+///
+/// The second `verify_proof` shows the other shape of the same operator: a
+/// constant guard, always `0x01`, i.e. verify unconditionally.
 const VERIFY_PROOF_IR: &str = r#"{
    "version": { "major": 3, "minor": 0 },
    "inputs": [
-      { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+      { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+      { "name": "%g", "type": "Scalar<BLS12-381>" }
    ],
    "outputs": [],
    "do_communications_commitment": false,
    "instructions": [
        {
            "op": "inner_proof",
+           "guard": "%g",
            "output": "%p_0"
        },
        {
            "op": "verify_proof",
+           "guard": "%g",
            "vk_hash": "0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
            "instance": ["%v_0"],
            "proof": "%p_0"
+       },
+       {
+           "op": "inner_proof",
+           "guard": "0x01",
+           "output": "%p_1"
+       },
+       {
+           "op": "verify_proof",
+           "guard": "0x01",
+           "vk_hash": "0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+           "instance": ["%v_0"],
+           "proof": "%p_1"
        }
    ]
 }"#;
 
 #[test]
-fn text_format_round_trips() {
+fn verify_proof_text_format_roundtrips() {
     let ir = IrSource::load(VERIFY_PROOF_IR.as_bytes()).expect("verify_proof IR must parse");
 
     // A hash-only IR carries no VK bytes.
@@ -81,6 +106,17 @@ fn text_format_round_trips() {
         "vk_hash hex missing:\n{json}"
     );
     assert!(json.contains("%v_0"), "instance operand missing:\n{json}");
+
+    // Both guard forms survive as operands: a variable stays a variable, and a
+    // constant round-trips as the canonical `0x`-hex immediate.
+    assert!(
+        json.contains("\"guard\": \"%g\""),
+        "variable guard missing:\n{json}"
+    );
+    assert!(
+        json.contains("\"guard\": \"0x01\""),
+        "constant guard missing:\n{json}"
+    );
     assert!(
         !json.contains("verify_proof_vks"),
         "empty VK side-table should be omitted:\n{json}"

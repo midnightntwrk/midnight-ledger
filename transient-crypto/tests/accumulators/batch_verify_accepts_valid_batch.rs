@@ -11,35 +11,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `batch_verify` accepts a batch mixing keys that carry accumulators with keys
-//! that carry none, and checks the accumulators of the ones that do.
+//! `batch_verify` accepts a batch mixing proofs that carry accumulators with
+//! proofs that carry none, and checks the accumulators of the ones that do.
 //!
 //! The batch path is separate code from `verify`: it runs one batched PLONK
-//! check and then walks each key's offsets against its own statement. Mixing
-//! plain and accumulator-bearing keys is where a mismatch between the two lists
-//! would show — a plain key contributes an empty offsets entry, which must still
-//! line up with its statement.
+//! check and then walks each proof's blocks. Mixing plain and
+//! accumulator-bearing proofs is where a mismatch between the two lists would
+//! show — a plain proof contributes an empty block list, which must still line
+//! up with its statement.
 
 use midnight_curves::Fq;
 
 use midnight_transient_crypto::proofs::{PARAMS_VERIFIER, VerifierKey};
 
-use crate::harness::{acc_len, passing_accumulator, proof_exposing, test_rng};
+use crate::harness::{passing_accumulator, proof_carrying, test_rng};
 
 #[test]
 fn batch_verify_accepts_valid_batch() {
     let mut rng = test_rng();
 
-    // A key with no accumulators at all.
+    // A proof with no accumulators at all.
     let plain_pis: Vec<Fq> = (0..2).map(|i| Fq::from(i as u64 + 1)).collect();
-    let (plain_vk, plain_proof, plain_stmt) = proof_exposing(&plain_pis, &[], &mut rng);
+    let (plain_vk, plain_proof, plain_stmt) = proof_carrying(&[], &plain_pis, &mut rng);
 
-    // A key with one, and a key with two.
+    // A proof with one, and a proof with two.
     let one = passing_accumulator();
-    let (one_vk, one_proof, one_stmt) = proof_exposing(&one, &[0], &mut rng);
-
-    let two: Vec<Fq> = one.iter().chain(one.iter()).copied().collect();
-    let (two_vk, two_proof, two_stmt) = proof_exposing(&two, &[0, acc_len()], &mut rng);
+    let (one_vk, one_proof, one_stmt) = proof_carrying(std::slice::from_ref(&one), &[], &mut rng);
+    let (two_vk, two_proof, two_stmt) = proof_carrying(&[one.clone(), one], &[], &mut rng);
 
     VerifierKey::batch_verify(
         &PARAMS_VERIFIER,

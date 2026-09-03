@@ -11,19 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Scaffolding for the accumulator tests: the verify side — reconstructing
-//! accumulators from public inputs at their recorded offsets and running the
-//! deferred pairing.
+//! Scaffolding for the accumulator tests: the verify side — rebuilding the
+//! accumulators a proof carries and running their deferred pairing.
 //!
 //! This crate cannot build a *real* accumulator: those come from ZKIR's
 //! `verify_proof`, and `zkir-v3` depends on this crate, not the other way
-//! round. What it can do is put a *valid encoding* of one in a proof's public
-//! inputs — [`ExposeAll`] proves a statement that is literally the encoding —
-//! which is enough to drive extraction, reconstruction and pairing through the
-//! public `verify` API.
+//! round. What it can do is exploit how `verify` assembles the public-input
+//! vector — `proof.accumulators` flattened, then the caller's statement — and
+//! prove exactly that vector with [`ExposeAll`]. Handing back the head as
+//! accumulator blocks and the tail as the statement then drives extraction,
+//! reconstruction and pairing through the public `verify` API.
 //!
 //! So these tests cover this layer's plumbing, not end-to-end recursion. That a
-//! genuine `verify_proof` accumulator survives the same path is case 3.2.
+//! genuine `verify_proof` accumulator survives the same path is `zkir-v3`'s
+//! `verify_proof` suite.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -41,7 +42,9 @@ use rand_chacha::ChaCha20Rng;
 use std::collections::BTreeMap;
 
 use midnight_transient_crypto::curve::Fr;
-use midnight_transient_crypto::proofs::{ParamsProver, Proof, S, TranscriptHash, VerifierKey};
+use midnight_transient_crypto::proofs::{
+    InnerSelfEmulation as S, ParamsProver, Proof, TranscriptHash, VerifierKey, accumulator_pi_len,
+};
 
 /// A deterministic RNG, so every test here is reproducible.
 pub fn test_rng() -> ChaCha20Rng {
@@ -59,10 +62,9 @@ pub fn srs(k: u8) -> ParamsProver {
     .expect("read SRS")
 }
 
-/// Public-input width of one fully-collapsed accumulator. Mirrors the crate's
-/// own private `accumulator_pi_len`.
+/// Public-input width of one fully-collapsed accumulator.
 pub fn acc_len() -> usize {
-    encode(&Accumulator::<S>::trivial(&[])).len()
+    accumulator_pi_len()
 }
 
 fn encode(acc: &Accumulator<S>) -> Vec<Fq> {
@@ -137,27 +139,41 @@ impl Relation for ExposeAll {
     }
 }
 
-/// Proves that the public-input vector is exactly `pis`, and returns a
-/// `VerifierKey` recording `offsets` alongside the proof and statement.
-pub fn proof_exposing(
-    pis: &[Fq],
-    offsets: &[usize],
+/// Proves the public-input vector `accs` flattened followed by `tail`, and
+/// hands the pieces back the way [`VerifierKey::verify`] expects them: the
+/// blocks on the `Proof`, only `tail` as the caller-facing statement.
+///
+/// An empty `accs` gives a proof carrying no accumulators at all.
+pub fn proof_carrying(
+    accs: &[Vec<Fq>],
+    tail: &[Fq],
     rng: &mut ChaCha20Rng,
 ) -> (VerifierKey, Proof, Vec<Fr>) {
-    let (vk, proof) = raw_proof_exposing(pis, rng);
+    let mut pis: Vec<Fq> = accs.concat();
+    pis.extend_from_slice(tail);
+    let (vk, bytes) = raw_proof_exposing(&pis, rng);
     (
-        VerifierKey::from_vk_with_accumulator_offsets(vk, offsets),
-        proof,
-        pis.iter().map(|f| Fr(*f)).collect(),
+        VerifierKey::from(vk),
+        Proof {
+            bytes,
+            accumulators: accs.iter().map(|a| fr_vec(a)).collect(),
+        },
+        fr_vec(tail),
     )
 }
 
-/// As [`proof_exposing`], handing back the raw `MidnightVK` so a caller can
-/// record its own offsets — or none at all.
+/// Field elements as the `Fr` newtype the proof API speaks in.
+pub fn fr_vec(fields: &[Fq]) -> Vec<Fr> {
+    fields.iter().copied().map(Fr).collect()
+}
+
+/// As [`proof_carrying`], but hands back the raw `MidnightVK` and proof bytes
+/// so a caller can split the public inputs into blocks and statement however it
+/// likes — including ways no honest prover would.
 pub fn raw_proof_exposing(
     pis: &[Fq],
     rng: &mut ChaCha20Rng,
-) -> (midnight_zk_stdlib::MidnightVK, Proof) {
+) -> (midnight_zk_stdlib::MidnightVK, Vec<u8>) {
     let relation = ExposeAll(pis.len());
     let k = (optimal_k(&relation) as u8).max(MIN_SRS_K);
     let params = srs(k);
@@ -166,7 +182,7 @@ pub fn raw_proof_exposing(
     let bytes =
         prove::<ExposeAll, TranscriptHash>(params.as_ref(), &pk, &relation, &pis.to_vec(), (), rng)
             .expect("prove");
-    (vk, Proof(bytes))
+    (vk, bytes)
 }
 
 /// Floor on the SRS size, since `optimal_k` can report below the smallest

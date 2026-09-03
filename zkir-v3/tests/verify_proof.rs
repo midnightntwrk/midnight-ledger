@@ -46,9 +46,6 @@
 #[path = "verify_proof/unit/text_format_round_trips.rs"]
 mod text_format_round_trips;
 
-#[path = "verify_proof/unit/accumulator_offsets_account_for_preceding_inputs.rs"]
-mod accumulator_offsets_account_for_preceding_inputs;
-
 #[path = "verify_proof/unit/ir_round_trip_preserves_vks_in_order.rs"]
 mod ir_round_trip_preserves_vks_in_order;
 
@@ -64,9 +61,6 @@ mod duplicate_vk_in_side_table_is_rejected;
 #[path = "verify_proof/unit/duplicate_inner_proof_binding_is_rejected.rs"]
 mod duplicate_inner_proof_binding_is_rejected;
 
-#[path = "verify_proof/unit/truncated_binary_ir_is_rejected.rs"]
-mod truncated_binary_ir_is_rejected;
-
 #[path = "verify_proof/unit/unsynthesizable_circuit_is_reported_gracefully.rs"]
 mod unsynthesizable_circuit_is_reported_gracefully;
 
@@ -79,8 +73,8 @@ mod vk_hash_mismatch_is_rejected;
 #[path = "verify_proof/unit/harness.rs"]
 mod unit_harness;
 
-#[path = "verify_proof/e2e/accumulator_at_recorded_offset_matches_offcircuit.rs"]
-mod accumulator_at_recorded_offset_matches_offcircuit;
+#[path = "verify_proof/e2e/accumulator_on_proof_matches_offcircuit.rs"]
+mod accumulator_on_proof_matches_offcircuit;
 
 #[path = "verify_proof/e2e/blake2b_transcript_proof_is_rejected.rs"]
 mod blake2b_transcript_proof_is_rejected;
@@ -97,17 +91,14 @@ mod proof_from_another_vk_is_rejected;
 #[path = "verify_proof/e2e/two_proofs_with_distinct_vks_are_accepted.rs"]
 mod two_proofs_with_distinct_vks_are_accepted;
 
-#[path = "verify_proof/e2e/impact_between_two_proofs_preserves_offsets.rs"]
-mod impact_between_two_proofs_preserves_offsets;
+#[path = "verify_proof/e2e/impact_between_two_proofs_leaves_accumulators_intact.rs"]
+mod impact_between_two_proofs_leaves_accumulators_intact;
 
 #[path = "verify_proof/e2e/valid_proof_of_other_statement_is_rejected.rs"]
 mod valid_proof_of_other_statement_is_rejected;
 
 #[path = "verify_proof/e2e/same_vk_verified_twice_is_accepted.rs"]
 mod same_vk_verified_twice_is_accepted;
-
-#[path = "verify_proof/e2e/communications_commitment_shifts_accumulator.rs"]
-mod communications_commitment_shifts_accumulator;
 
 #[path = "verify_proof/e2e/empty_instance_is_handled_gracefully.rs"]
 mod empty_instance_is_handled_gracefully;

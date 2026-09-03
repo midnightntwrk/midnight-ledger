@@ -26,7 +26,7 @@ use serialize::{Deserializable, Serializable};
 
 use midnight_transient_crypto::proofs::VerifierKey;
 
-use crate::harness::{passing_accumulator, proof_exposing, test_rng};
+use crate::harness::{passing_accumulator, proof_carrying, test_rng};
 
 fn bytes_of(vk: &VerifierKey) -> Vec<u8> {
     let mut out = Vec::new();
@@ -37,7 +37,7 @@ fn bytes_of(vk: &VerifierKey) -> Vec<u8> {
 #[test]
 fn vk_bytes_stable_across_init() {
     let mut rng = test_rng();
-    let (vk, _proof, _statement) = proof_exposing(&passing_accumulator(), &[0], &mut rng);
+    let (vk, _proof, _statement) = proof_carrying(&[passing_accumulator()], &[], &mut rng);
 
     let fresh = bytes_of(&vk);
     vk.init().expect("init vk");

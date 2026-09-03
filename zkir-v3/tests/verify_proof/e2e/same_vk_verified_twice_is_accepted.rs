@@ -54,7 +54,7 @@ async fn same_vk_verified_twice_is_accepted() {
         "the side-table must hold one entry for a key used twice"
     );
     assert_eq!(
-        outer_ir.accumulator_offsets().len(),
+        outer_ir.accumulator_count(),
         2,
         "two instructions still expose two accumulators"
     );

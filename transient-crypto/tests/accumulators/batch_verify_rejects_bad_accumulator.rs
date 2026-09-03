@@ -22,14 +22,14 @@
 
 use midnight_transient_crypto::proofs::{PARAMS_VERIFIER, VerifierKey};
 
-use crate::harness::{failing_accumulator, passing_accumulator, proof_exposing, test_rng};
+use crate::harness::{failing_accumulator, passing_accumulator, proof_carrying, test_rng};
 
 #[test]
 fn batch_verify_rejects_bad_accumulator() {
     let mut rng = test_rng();
 
-    let (good_vk, good_proof, good_stmt) = proof_exposing(&passing_accumulator(), &[0], &mut rng);
-    let (bad_vk, bad_proof, bad_stmt) = proof_exposing(&failing_accumulator(), &[0], &mut rng);
+    let (good_vk, good_proof, good_stmt) = proof_carrying(&[passing_accumulator()], &[], &mut rng);
+    let (bad_vk, bad_proof, bad_stmt) = proof_carrying(&[failing_accumulator()], &[], &mut rng);
 
     // Control: each is individually as expected.
     good_vk

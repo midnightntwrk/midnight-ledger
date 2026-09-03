@@ -65,9 +65,9 @@ async fn malformed_proof_witness_is_rejected() {
     ir.check(&outer_preimage(padded.clone()))
         .expect("trailing bytes are ignored by the transcript reader");
 
-    let from_real = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof)
+    let from_real = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof, true)
         .expect("preparation of the real proof");
-    let from_padded = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &padded)
+    let from_padded = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &padded, true)
         .expect("preparation of the padded proof");
     assert_eq!(
         from_real, from_padded,

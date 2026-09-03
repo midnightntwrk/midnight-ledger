@@ -11,31 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An `Impact` between two `verify_proof`s shifts the second accumulator by its
-//! full declared width, guard on or off, and both accumulators reconstruct.
+//! An `Impact` between two `verify_proof`s leaves both accumulators untouched
+//! and stays out of them, guard on or off.
 //!
-//! `accumulator_offsets_account_for_preceding_inputs` covers the arithmetic;
-//! this shows the pipeline agrees under real proofs. The guard is a circuit
-//! input, so both states run against one circuit and one keygen — they cannot
-//! disagree about layout for any reason but the branch taken.
+//! Carrying accumulators on the proof rather than at offsets in the statement
+//! made the two independent by construction, and this is what pins that they
+//! really are. The blocks come off the head of the public-input vector, so the
+//! statement handed back is the binding input followed by the `Impact`'s slots
+//! and nothing else — an `Impact` between the verifications must not appear in
+//! a block, and must not change how many blocks there are.
 //!
-//! Guarded on, each declared input publishes its resolved value and consumes a
-//! transcript entry; guarded off, each publishes a *zero* and consumes none.
-//! `accumulator_offsets()` counts the width either way and never evaluates the
-//! guard, so they agree only if the off branch really pads. Were it to publish
-//! nothing, every later accumulator would shift.
+//! The guard is a circuit input, so both states run against one circuit and one
+//! keygen — they cannot disagree about layout for any reason but the branch
+//! taken. Guarded on, each declared input publishes its resolved value and
+//! consumes a transcript entry; guarded off, each publishes a *zero* and
+//! consumes none. The statement is the same width either way, so they agree
+//! only if the off branch really pads.
 //!
-//! Skips are asserted too: one entry per `Impact`, none per `verify_proof`. An
-//! entry per verification would let a verifier skip an accumulator region.
+//! Skips are asserted too: one entry per `Impact`, none per `verify_proof`.
+//! Those indices are now read against a statement the accumulators have already
+//! been stripped from, so an entry per verification would not merely be
+//! redundant — it would point the verifier at the wrong slot.
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::verify_proof::{
-    accumulator_pi_len, verify_proof_offcircuit,
-};
+use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use transient_crypto::curve::Fr;
+use transient_crypto::proofs::accumulator_pi_len;
 
 use crate::e2e_harness::{
-    InnerProof, instance_json, outer_ir_with, outer_keygen, outer_preimage_with,
+    BINDING_INPUT, InnerProof, instance_json, outer_ir_with, outer_keygen, outer_preimage_with,
     outer_prove_with_skips, outer_verify, rsa_inner_proof, scalar_inner_proof, test_rng,
     vk_hash_hex,
 };
@@ -49,7 +53,7 @@ const DISCLOSED: u64 = 42;
 
 #[actix_rt::test]
 #[ignore = "outer verifier circuit needs a high-k SRS not available in CI"]
-async fn impact_between_two_proofs_preserves_offsets() {
+async fn impact_between_two_proofs_leaves_accumulators_intact() {
     let mut rng = test_rng();
 
     let inner = [
@@ -58,13 +62,13 @@ async fn impact_between_two_proofs_preserves_offsets() {
     ];
     let ir = interleaved_ir(&inner[0], &inner[1]);
 
-    // Predicted once: the guard is a witness, so the offsets cannot depend on it.
+    // Counted once: the guard is a witness, so the block count cannot depend on
+    // it, and neither can the interleaved `Impact`.
     let acc_len = accumulator_pi_len();
-    let offsets = ir.accumulator_offsets();
     assert_eq!(
-        offsets,
-        vec![1, 1 + acc_len + IMPACT_INPUTS],
-        "the interleaved inputs must push the second accumulator along by their width"
+        ir.accumulator_count(),
+        2,
+        "two verify_proof instructions expose two accumulators, Impact or not"
     );
 
     let (pk, vk) = outer_keygen(&ir, "2 verify_proof, 1 interleaved impact").await;
@@ -93,7 +97,7 @@ async fn impact_between_two_proofs_preserves_offsets() {
             outer_prove_with_skips(&ir, pk.clone(), &preimage, &mut rng).await;
 
         // One entry, for the one `Impact`. Two `verify_proof`s in the same
-        // circuit must not add any, or an accumulator could be skipped over.
+        // circuit must not add any.
         let expected_skips = if guard {
             vec![None]
         } else {
@@ -104,28 +108,44 @@ async fn impact_between_two_proofs_preserves_offsets() {
             "guard {guard}: one skip entry per Impact, none per verify_proof"
         );
 
+        // Two blocks on the proof, and a statement holding only the binding
+        // input and the Impact's slots.
+        assert_eq!(
+            proof.accumulators.len(),
+            2,
+            "guard {guard}: both accumulators must be carried"
+        );
+        assert!(
+            proof.accumulators.iter().all(|b| b.len() == acc_len),
+            "guard {guard}: every block is one accumulator wide"
+        );
         assert_eq!(
             pis.len(),
-            1 + acc_len + IMPACT_INPUTS + acc_len,
-            "the Impact occupies its slots in the statement vector either way"
+            1 + IMPACT_INPUTS,
+            "guard {guard}: the statement is the binding input plus the Impact's slots"
+        );
+        assert_eq!(
+            pis[0],
+            Fr::from(BINDING_INPUT),
+            "guard {guard}: no accumulator field leaked into the statement"
         );
 
-        let middle = &pis[1 + acc_len..1 + acc_len + IMPACT_INPUTS];
+        let middle = &pis[1..1 + IMPACT_INPUTS];
         assert!(
             middle.iter().all(|f| *f == expected_middle),
             "guard {guard}: the interleaved slots should all be {expected_middle:?}, got {middle:?}"
         );
 
-        for (i, (&offset, inner)) in offsets.iter().zip(inner.iter()).enumerate() {
-            let want: Vec<Fr> = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof)
-                .expect("off-circuit preparation")
-                .into_iter()
-                .map(Fr)
-                .collect();
+        for (i, inner) in inner.iter().enumerate() {
+            let want: Vec<Fr> =
+                verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof, true)
+                    .expect("off-circuit preparation")
+                    .into_iter()
+                    .map(Fr)
+                    .collect();
             assert_eq!(
-                &pis[offset..offset + acc_len],
-                want.as_slice(),
-                "guard {guard}: accumulator {i} at offset {offset} must match off-circuit preparation"
+                proof.accumulators[i], want,
+                "guard {guard}: accumulator {i} must match off-circuit preparation"
             );
         }
 
@@ -135,15 +155,17 @@ async fn impact_between_two_proofs_preserves_offsets() {
 
 /// `inner_proof`, `inner_proof`, `verify_proof`, `impact`, `verify_proof` — the
 /// `Impact` deliberately between the two verifications, which is the shape the
-/// harness's `outer_ir_for_all` cannot emit. Its guard is the circuit's single
-/// input, so one circuit serves both branches.
+/// harness's `outer_ir_for_all` cannot emit. The `Impact`'s guard is the
+/// circuit's single input, so one circuit serves both branches; the two
+/// verifications are unguarded, since it is the `Impact` that varies here.
 fn interleaved_ir(a: &InnerProof, b: &InnerProof) -> IrSource {
     let impact_operands = vec![format!(r#""0x{DISCLOSED:02x}""#); IMPACT_INPUTS].join(", ");
     let instructions = format!(
-        r#"{{ "op": "inner_proof", "output": "%p_0" }},
-           {{ "op": "inner_proof", "output": "%p_1" }},
+        r#"{{ "op": "inner_proof", "guard": "0x01", "output": "%p_0" }},
+           {{ "op": "inner_proof", "guard": "0x01", "output": "%p_1" }},
            {{
                "op": "verify_proof",
+               "guard": "0x01",
                "vk_hash": "0x{hash_a}",
                "instance": [{instance_a}],
                "proof": "%p_0"
@@ -151,6 +173,7 @@ fn interleaved_ir(a: &InnerProof, b: &InnerProof) -> IrSource {
            {{ "op": "impact", "guard": "%v_0", "inputs": [{impact_operands}] }},
            {{
                "op": "verify_proof",
+               "guard": "0x01",
                "vk_hash": "0x{hash_b}",
                "instance": [{instance_b}],
                "proof": "%p_1"

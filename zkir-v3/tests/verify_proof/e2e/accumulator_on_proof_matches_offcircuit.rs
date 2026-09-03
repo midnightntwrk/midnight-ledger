@@ -11,14 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The published accumulator sits at its recorded offset, and still does after
-//! the verifying key has been through the wire.
+//! The accumulator the circuit publishes is carried on the proof, matches what
+//! off-circuit preparation computes, and is kept out of the caller's statement.
 //!
-//! Pins the layout: slot 0 is the binding input, the accumulator follows,
-//! nothing else. The offsets read here are the IR's —
-//! `VerifierKey::accumulator_offsets` is private to `transient-crypto` — and
-//! that the VK's own copy agrees is what the two verifications show, since each
-//! extracts at the VK's offsets to pair.
+//! Pins the split. `prove` produces one public-input vector and cuts it at
+//! `accumulator_count() * accumulator_pi_len()`: the head becomes
+//! `Proof::accumulators`, the tail is the statement handed back to the caller.
+//! So a circuit with one `verify_proof` and a binding input must yield exactly
+//! one block and a one-element statement — if the cut were off by a field
+//! element, the binding input would land in the block and the accumulator's
+//! last limb in the statement.
 //!
 //! Read the off-circuit comparison for less than its name suggests: `preprocess`
 //! *builds* the public inputs with `verify_proof_offcircuit`, and the assertion
@@ -28,18 +30,12 @@
 //! constrained to match those inputs, and the pairing from `verify`.
 //!
 //! The second verification uses a *reloaded* key — in the ledger the key is
-//! serialized and parsed back before anyone verifies with it. `VerifierKey`'s
-//! byte-level properties belong to `transient-crypto`, which can exercise them
-//! with no circuit or SRS; only the end of the chain is checked here. Those
-//! delegated properties are currently tested **nowhere**: that crate's
-//! `proofs.rs` has no `mod tests`.
+//! serialized and parsed back before anyone verifies with it.
 
-use midnight_zkir_v3::ir_instructions::verify_proof::{
-    accumulator_pi_len, verify_proof_offcircuit,
-};
+use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use serialize::{Deserializable, Serializable};
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::VerifierKey;
+use transient_crypto::proofs::{VerifierKey, accumulator_pi_len};
 
 use crate::e2e_harness::{
     BINDING_INPUT, outer_preimage, outer_prove, outer_verify, pinned_fixture, test_rng,
@@ -47,64 +43,65 @@ use crate::e2e_harness::{
 
 #[actix_rt::test]
 #[ignore = "outer verifier circuit needs a high-k SRS not available in CI"]
-async fn accumulator_at_recorded_offset_matches_offcircuit() {
+async fn accumulator_on_proof_matches_offcircuit() {
     let mut rng = test_rng();
 
     let fixture = pinned_fixture().await;
     let inner_proof = fixture.correct_proof(&mut rng);
     let inner_pis = fixture.inner_pis();
 
-    // One `verify_proof`, so one accumulator, one slot past the binding input.
+    // One `verify_proof`, so one accumulator block.
     let acc_len = accumulator_pi_len();
-    let offsets = fixture.ir.accumulator_offsets();
     assert_eq!(
-        offsets,
-        vec![1],
-        "a single verify_proof puts its accumulator right after the binding input"
+        fixture.ir.accumulator_count(),
+        1,
+        "a single verify_proof exposes a single accumulator"
     );
-    let offset = offsets[0];
 
     let preimage = outer_preimage(inner_proof.clone());
     let (outer_proof, outer_pis) =
         outer_prove(&fixture.ir, fixture.pk.clone(), &preimage, &mut rng).await;
 
-    // The statement vector is exactly [binding input, accumulator].
+    // The accumulator went onto the proof, not into the caller's statement.
     assert_eq!(
-        outer_pis.len(),
-        1 + acc_len,
-        "statement vector should be the binding input followed by one accumulator"
+        outer_proof.accumulators.len(),
+        1,
+        "one verify_proof must carry exactly one accumulator block"
     );
     assert_eq!(
-        outer_pis[0],
-        Fr::from(BINDING_INPUT),
-        "slot 0 is the binding input, so the accumulator offset is not off by one"
+        outer_proof.accumulators[0].len(),
+        acc_len,
+        "a block is one accumulator wide"
+    );
+    assert_eq!(
+        outer_pis,
+        vec![Fr::from(BINDING_INPUT)],
+        "the statement is the binding input alone; the accumulator is not in it"
     );
 
-    // The accumulator region holds what off-circuit preparation independently
-    // computes for this (vk, instance, proof).
-    let expected: Vec<Fr> = verify_proof_offcircuit(&fixture.vk_blob, &inner_pis, &inner_proof)
-        .expect("off-circuit preparation")
-        .into_iter()
-        .map(Fr)
-        .collect();
+    // The block holds what off-circuit preparation independently computes for
+    // this (vk, instance, proof).
+    let expected: Vec<Fr> =
+        verify_proof_offcircuit(&fixture.vk_blob, &inner_pis, &inner_proof, true)
+            .expect("off-circuit preparation")
+            .into_iter()
+            .map(Fr)
+            .collect();
     assert_eq!(
         expected.len(),
         acc_len,
         "off-circuit accumulator should be acc_len field elements"
     );
     assert_eq!(
-        &outer_pis[offset..offset + acc_len],
-        expected.as_slice(),
-        "the accumulator at the recorded offset must match off-circuit preparation"
+        outer_proof.accumulators[0], expected,
+        "the carried accumulator must match off-circuit preparation"
     );
 
-    // The verifier, reading its own recorded offsets out of the VerifierKey,
-    // agrees: it finds the accumulator there and its pairing check passes.
+    // The verifier re-assembles blocks-then-statement, finds the accumulator,
+    // and its pairing check passes.
     outer_verify(&fixture.vk, &outer_proof, outer_pis.clone());
 
-    // And so does a key that has been through the wire. Had the offsets been
-    // lost the accumulator would not be found; had they shifted, it would not
-    // pair.
+    // And so does a key that has been through the wire.
     let mut bytes = Vec::new();
     Serializable::serialize(&fixture.vk, &mut bytes).expect("serialize vk");
     let reloaded: VerifierKey =

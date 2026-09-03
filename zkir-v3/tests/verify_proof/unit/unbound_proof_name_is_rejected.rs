@@ -41,8 +41,8 @@ fn unbound_proof_name_is_rejected() {
 /// One `inner_proof` binding `%p_0`, and one `verify_proof` reading `proof`.
 fn verifying(proof: &str) -> midnight_zkir_v3::IrSource {
     let instructions = format!(
-        r#"{{ "op": "inner_proof", "output": "%p_0" }},
-           {{ "op": "verify_proof", "vk_hash": "0x{hash}", "instance": ["0x7b"], "proof": "{proof}" }}"#,
+        r#"{{ "op": "inner_proof", "guard": "0x01", "output": "%p_0" }},
+           {{ "op": "verify_proof", "guard": "0x01", "vk_hash": "0x{hash}", "instance": ["0x7b"], "proof": "{proof}" }}"#,
         hash = vk_hash(&VK_BLOB_A),
     );
     ir_with_vks(&instructions, vec![VK_BLOB_A.to_vec()])
