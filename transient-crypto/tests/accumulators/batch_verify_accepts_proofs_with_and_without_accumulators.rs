@@ -11,14 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `batch_verify` accepts a batch mixing proofs that carry accumulators with
-//! proofs that carry none, and checks the accumulators of the ones that do.
+//! `batch_verify` accepts a batch mixing proofs that carry accumulators with one
+//! that carries none.
 //!
-//! The batch path is separate code from `verify`: it runs one batched PLONK
-//! check and then walks each proof's blocks. Mixing plain and
-//! accumulator-bearing proofs is where a mismatch between the two lists would
-//! show — a plain proof contributes an empty block list, which must still line
-//! up with its statement.
+//! A plain proof contributes an empty block list, which must still line up with
+//! its statement.
 
 use midnight_curves::Fq;
 
@@ -27,7 +24,7 @@ use midnight_transient_crypto::proofs::{PARAMS_VERIFIER, VerifierKey};
 use crate::harness::{passing_accumulator, proof_carrying, test_rng};
 
 #[test]
-fn batch_verify_accepts_valid_batch() {
+fn batch_verify_accepts_proofs_with_and_without_accumulators() {
     let mut rng = test_rng();
 
     // A proof with no accumulators at all.

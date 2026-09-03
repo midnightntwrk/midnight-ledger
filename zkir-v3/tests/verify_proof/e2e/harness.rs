@@ -16,7 +16,8 @@
 //!
 //! [`RsaSignatureRelation`] is the default inner workload; [`SingleScalarRelation`]
 //! is deliberately unlike it, for cases needing two distinct keys or a cheaper
-//! circuit. [`rsa_inner_proof`] and [`scalar_inner_proofs`] are the usual entry
+//! circuit. [`RecursiveRelation`] verifies another proof in-circuit and exposes
+//! the accumulator that defers, which is what a `Collapsed` decider describes. [`rsa_inner_proof`] and [`scalar_inner_proofs`] are the usual entry
 //! points; the `inner_setup*` / `prove_inner*` pairs underneath are for cases
 //! that vary one step, such as a different domain or transcript.
 //!
@@ -35,12 +36,12 @@ use midnight_circuits::hash::poseidon::PoseidonState;
 use midnight_circuits::instructions::{
     AssertionInstructions, AssignmentInstructions, PublicInputInstructions,
 };
-use midnight_circuits::types::AssignedNative;
+use midnight_circuits::types::{AssignedBit, AssignedNative};
 use midnight_curves::Fq;
 use midnight_proofs::circuit::{Layouter, Value};
 use midnight_proofs::plonk;
 use midnight_zk_stdlib::{
-    MidnightPK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
+    MidnightPK, MidnightVK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
 };
 use num_bigint::BigUint;
 use num_traits::{Num, One};
@@ -51,6 +52,7 @@ use sha2::Digest;
 use midnight_zkir_v3::IrSource;
 use midnight_zkir_v3::ir::IrMinorVersion;
 use midnight_zkir_v3::ir_instructions::decidable::{DeciderKind, serialize_vk};
+use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_incircuit;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     InnerProofWitness, KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof,
@@ -193,6 +195,89 @@ impl Relation for SingleScalarRelation {
     fn read_relation<R: std::io::Read>(_reader: &mut R) -> std::io::Result<Self> {
         Ok(SingleScalarRelation)
     }
+}
+
+/// Verifies a proof of `inner_vk` in-circuit and exposes the accumulator that
+/// verification defers as the tail of its own instance — which is exactly what
+/// [`DeciderKind::Collapsed`] promises about a key registered under it.
+#[derive(Clone)]
+pub struct RecursiveRelation {
+    /// `serialize_vk`'s blob for the proof this one verifies.
+    pub inner_vk: Vec<u8>,
+}
+
+impl Relation for RecursiveRelation {
+    type Instance = Vec<Fq>;
+    type Witness = Vec<u8>;
+    type Error = plonk::Error;
+
+    fn format_instance(instance: &Vec<Fq>) -> Result<Vec<Fq>, plonk::Error> {
+        Ok(instance.clone())
+    }
+
+    fn circuit(
+        &self,
+        std_lib: &ZkStdLib,
+        layouter: &mut impl Layouter<Fq>,
+        instance: Value<Vec<Fq>>,
+        witness: Value<Vec<u8>>,
+    ) -> Result<(), plonk::Error> {
+        let x: AssignedNative<Fq> = std_lib.assign(layouter, instance.map(|fields| fields[0]))?;
+        std_lib.constrain_as_public_input(layouter, &x)?;
+
+        // Unguarded, so the accumulator it defers is always the real one.
+        let on: AssignedBit<Fq> = std_lib.assign_fixed(layouter, true)?;
+        verify_proof_incircuit(std_lib, layouter, &self.inner_vk, &[&[x]], witness, &on)
+    }
+
+    fn used_chips(&self) -> ZkStdLibArch {
+        ZkStdLibArch {
+            poseidon: true,
+            bls12_381: true,
+            nr_pow2range_cols: 4,
+            ..Default::default()
+        }
+    }
+
+    fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(&(self.inner_vk.len() as u64).to_le_bytes())?;
+        writer.write_all(&self.inner_vk)
+    }
+
+    fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let mut len = [0u8; 8];
+        reader.read_exact(&mut len)?;
+        let mut inner_vk = vec![0u8; u64::from_le_bytes(len) as usize];
+        reader.read_exact(&mut inner_vk)?;
+        Ok(RecursiveRelation { inner_vk })
+    }
+}
+
+/// Keygen and prove [`RecursiveRelation`], with the Poseidon transcript the
+/// in-circuit verifier requires. The harness's `prove_inner_for` needs
+/// `R: Default`, which this relation cannot be — it carries the key it verifies.
+pub async fn prove_recursive(
+    relation: &RecursiveRelation,
+    instance: &Vec<Fq>,
+    witness: Vec<u8>,
+    rng: &mut ChaCha20Rng,
+) -> (Vec<u8>, MidnightVK) {
+    let k = (optimal_k(relation) as u8).max(MIN_SRS_K);
+    println!("recursive circuit k = {k}");
+    let srs = RuntimeParams.get_params(k).await.expect("recursive SRS");
+    let vk = setup_vk(srs.as_ref(), relation);
+    let pk = setup_pk(relation, &vk);
+    let proof = prove::<RecursiveRelation, PoseidonState<Fq>>(
+        srs.as_ref(),
+        &pk,
+        relation,
+        instance,
+        witness,
+        rng,
+    )
+    .expect("recursive prove");
+    println!("recursive prove: {} proof bytes", proof.len());
+    (proof, vk)
 }
 
 /// A deterministic RNG, so every test in this suite is reproducible.

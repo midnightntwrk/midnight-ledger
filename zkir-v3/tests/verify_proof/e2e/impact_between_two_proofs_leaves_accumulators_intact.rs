@@ -11,27 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An `Impact` between two `verify_proof`s leaves both accumulators untouched
-//! and stays out of them, guard on or off.
+//! An `Impact` between two `verify_proof`s leaves both blocks untouched and stays
+//! out of them, guard on or off.
 //!
-//! Carrying accumulators on the proof rather than at offsets in the statement
-//! made the two independent by construction, and this is what pins that they
-//! really are. The blocks come off the head of the public-input vector, so the
-//! statement handed back is the binding input followed by the `Impact`'s slots
-//! and nothing else — an `Impact` between the verifications must not appear in
-//! a block, and must not change how many blocks there are.
-//!
-//! The guard is a circuit input, so both states run against one circuit and one
-//! keygen — they cannot disagree about layout for any reason but the branch
-//! taken. Guarded on, each declared input publishes its resolved value and
-//! consumes a transcript entry; guarded off, each publishes a *zero* and
-//! consumes none. The statement is the same width either way, so they agree
-//! only if the off branch really pads.
-//!
-//! Skips are asserted too: one entry per `Impact`, none per `verify_proof`.
-//! Those indices are now read against a statement the accumulators have already
-//! been stripped from, so an entry per verification would not merely be
-//! redundant — it would point the verifier at the wrong slot.
+//! The guard is a circuit input, so both states run against one keygen. Guarded
+//! off the `Impact` publishes zeros, so the statement is the same width either
+//! way. Skips are one per `Impact`, none per `verify_proof` — those indices are
+//! read against a statement the accumulators have been stripped from.
 
 use midnight_zkir_v3::IrSource;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;

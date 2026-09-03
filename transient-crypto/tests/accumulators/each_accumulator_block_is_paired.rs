@@ -11,18 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A proof carrying one accumulator and a proof carrying two both verify.
+//! One accumulator block and two both verify.
 //!
-//! `verify` runs the PLONK check, then rebuilds each block the proof carries
-//! and pairs it. Two blocks exercise the loop rather than a single-element
-//! special case, and each must be paired on its own — a second block that were
-//! ignored, or the first paired twice, would both pass a one-block test.
+//! Two passing blocks only show the loop runs; a mixed pair, in both orders, is
+//! what distinguishes every block being paired from just the first or the last.
 
-use crate::harness::{acc_len, passing_accumulator, proof_carrying, test_rng};
+use crate::harness::{acc_len, failing_accumulator, passing_accumulator, proof_carrying, test_rng};
 use midnight_transient_crypto::proofs::PARAMS_VERIFIER;
 
 #[test]
-fn accumulators_verify_one_and_multiple() {
+fn each_accumulator_block_is_paired() {
     let mut rng = test_rng();
     let acc = passing_accumulator();
     assert_eq!(
@@ -38,8 +36,26 @@ fn accumulators_verify_one_and_multiple() {
         .expect("one accumulator must verify");
 
     // Two, back to back.
-    let (vk, proof, pis) = proof_carrying(&[acc.clone(), acc], &[], &mut rng);
+    let (vk, proof, pis) = proof_carrying(&[acc.clone(), acc.clone()], &[], &mut rng);
     assert_eq!(proof.accumulators.len(), 2);
     vk.verify(&PARAMS_VERIFIER, &proof, pis.into_iter())
         .expect("two accumulators must both verify");
+
+    // The discriminating case. Two passing blocks cannot tell "every block is
+    // paired" from "the first block is paired" — only a mixed pair can, and it
+    // has to be tried in both orders to rule out either position being skipped.
+    let bad = failing_accumulator();
+    for (label, blocks) in [
+        ("failing second", vec![acc.clone(), bad.clone()]),
+        ("failing first", vec![bad, acc]),
+    ] {
+        let (vk, proof, pis) = proof_carrying(&blocks, &[], &mut rng);
+        let err = vk
+            .verify(&PARAMS_VERIFIER, &proof, pis.into_iter())
+            .expect_err("a block that does not pair must reject, wherever it sits");
+        assert!(
+            format!("{err:#}").contains("pairing"),
+            "{label}: expected a pairing failure, got: {err:#}"
+        );
+    }
 }

@@ -11,23 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A circuit that cannot be synthesized is reported, not fatal.
+//! A blob that hashes to its instruction's `vk_hash` but is not a verifying key
+//! is reported by `check()`, naming the unreadable key.
 //!
-//! The blob here hashes to the `vk_hash` naming it, so resolution is satisfied
-//! and the bytes are handed on; only reading them as a key fails. `check()`
-//! reports that gracefully and every entry point should agree.
-//!
-//! `IrSource::k()` does not: `Zkir::k()` returns `u8` with no error path and is
-//! `optimal_k(self)`, which unwraps the synthesis result, so the process aborts.
-//! `keygen_vk` calls `k()` first, which makes it reachable.
-//!
-//! Asserting only the absence of a panic is deliberate — giving `k()` an error
-//! path is a signature change, and this should hold however that is resolved.
-//!
-//! KNOWN GAP, hence `#[ignore]`: `k()` still aborts. `Zkir::k` returns a bare
-//! `u8`, so `optimal_k` has nowhere to report a synthesis failure and unwraps
-//! inside `cost_model`. Unchanged from before this suite was ported. Drop the
-//! `#[ignore]` once `k()` can fail.
+//! FAILING: `IrSource::k()` aborts on the same circuit. `Zkir::k` returns a bare
+//! `u8` with no error path, so `optimal_k` unwraps the synthesis result inside
+//! `cost_model` and the process dies. Fixing it is a trait signature change, so
+//! the assertion is only that it does not panic — it should hold however that is
+//! resolved. Deployer-side tooling only; nothing node-side calls `k()`.
 
 use transient_crypto::proofs::Zkir;
 
@@ -36,7 +27,6 @@ use crate::unit_harness::{
 };
 
 #[test]
-#[ignore = "KNOWN GAP: IrSource::k() aborts on an unsynthesizable circuit instead of reporting"]
 fn unsynthesizable_circuit_is_reported_gracefully() {
     let ir = ir_with_vks(
         &bind_and_verify_one(&vk_hash(&VK_BLOB_A)),
@@ -53,6 +43,6 @@ fn unsynthesizable_circuit_is_reported_gracefully() {
     let k = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ir.k()));
     assert!(
         k.is_ok(),
-        "k() must report an unsynthesizable circuit, not panic"
+        "k() must report an unsynthesizable circuit, not abort the process"
     );
 }

@@ -11,14 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A batch containing one proof whose accumulator does not pair is rejected,
-//! even though every proof in it passes the PLONK check.
+//! One proof whose accumulator does not pair rejects the whole batch.
 //!
-//! The batched PLONK check cannot see this: the offending accumulator is a
-//! well-formed part of a genuinely valid proof, so the only thing that can
-//! refuse it is the deferred pairing the batch runs afterwards. Rejecting the
-//! whole batch is the required behaviour — accepting the batch and leaving the
-//! caller to notice would defeat the point.
+//! The batched PLONK check cannot see it: the block is a well-formed part of a
+//! genuinely valid proof, so only the deferred pairing can refuse it.
 
 use midnight_transient_crypto::proofs::{PARAMS_VERIFIER, VerifierKey};
 

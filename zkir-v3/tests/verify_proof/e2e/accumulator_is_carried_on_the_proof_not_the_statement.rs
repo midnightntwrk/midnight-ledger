@@ -11,26 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The accumulator the circuit publishes is carried on the proof, matches what
-//! off-circuit preparation computes, and is kept out of the caller's statement.
+//! The accumulator is carried on the proof, matches what off-circuit preparation
+//! computes, and is kept out of the caller's statement.
 //!
-//! Pins the split. `prove` produces one public-input vector and cuts it at
-//! `accumulator_count() * accumulator_pi_len()`: the head becomes
-//! `Proof::accumulators`, the tail is the statement handed back to the caller.
-//! So a circuit with one `verify_proof` and a binding input must yield exactly
-//! one block and a one-element statement — if the cut were off by a field
-//! element, the binding input would land in the block and the accumulator's
-//! last limb in the statement.
-//!
-//! Read the off-circuit comparison for less than its name suggests: `preprocess`
-//! *builds* the public inputs with `verify_proof_offcircuit`, and the assertion
-//! recomputes with the same arguments, so it compares a function to itself. What
-//! this establishes is the layout; in-circuit/off-circuit agreement comes from
-//! `prove` succeeding, since `verify_proof_incircuit` is separate code
-//! constrained to match those inputs, and the pairing from `verify`.
-//!
-//! The second verification uses a *reloaded* key — in the ledger the key is
-//! serialized and parsed back before anyone verifies with it.
+//! Pins the split: one `verify_proof` must yield exactly one block and a
+//! one-element statement. The second verification uses a reloaded key, which is
+//! how the ledger uses it.
 
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use serialize::{Deserializable, Serializable};
@@ -43,7 +29,7 @@ use crate::e2e_harness::{
 
 #[actix_rt::test]
 #[ignore = "outer verifier circuit needs a high-k SRS not available in CI"]
-async fn accumulator_on_proof_matches_offcircuit() {
+async fn accumulator_is_carried_on_the_proof_not_the_statement() {
     let mut rng = test_rng();
 
     let fixture = pinned_fixture().await;

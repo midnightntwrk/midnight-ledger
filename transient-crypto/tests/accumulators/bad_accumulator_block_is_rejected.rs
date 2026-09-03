@@ -11,19 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An accumulator block that cannot be read is refused gracefully, not by
-//! panicking or by reconstructing something arbitrary.
+//! A block that cannot be read is refused gracefully: one of the wrong width,
+//! and one whose fields are not a point encoding.
 //!
-//! Two ways to be unreadable. A block that is not `accumulator_pi_len()` wide
-//! has no valid reading, and field elements that are not a valid point encoding
-//! decode to nothing.
-//!
-//! Both are reached with a *genuine* proof, and that is the delicate part:
-//! `verify` rebuilds the public-input vector as the blocks flattened followed
-//! by the statement, and runs PLONK on it *before* looking at the blocks. So a
-//! mis-split proof only reaches the accumulator code if the concatenation still
-//! comes out right — which is why the wrong-width case moves the boundary
-//! between block and statement rather than adding or dropping a field element.
+//! `verify` runs PLONK on the concatenation before looking at the blocks, so the
+//! wrong-width case moves the block/statement boundary rather than adding or
+//! dropping a field element. A control shows a readable block that does not pair
+//! fails at the pairing instead.
 
 use midnight_curves::Fq;
 

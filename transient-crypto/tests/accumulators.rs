@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tests for the verify side of inner-proof accumulators: reconstructing them
-//! from a proof's public inputs at the offsets the `VerifierKey` records, and
-//! running the deferred pairing.
+//! Tests for the verify side of inner-proof accumulators: rebuilding the blocks
+//! a proof carries, running their deferred pairing, and the serialization of the
+//! types that changed to carry them.
 //!
 //! One case per file under `tests/accumulators/`, pulled in with `#[path]`.
 //! Each file's doc comment says what it covers.
@@ -22,23 +22,23 @@
 //! `bls_midnight_2p<k>` files, or rely on `~/.cache/midnight/zk-params`. The
 //! circuits are small, so unlike the ZKIR e2e suite they are not `#[ignore]`d.
 
-#[path = "accumulators/harness.rs"]
-mod harness;
-
-#[path = "accumulators/accumulators_verify_one_and_multiple.rs"]
-mod accumulators_verify_one_and_multiple;
-
-#[path = "accumulators/vk_bytes_stable_across_init.rs"]
-mod vk_bytes_stable_across_init;
-
 #[path = "accumulators/bad_accumulator_block_is_rejected.rs"]
 mod bad_accumulator_block_is_rejected;
 
-#[path = "accumulators/batch_verify_accepts_valid_batch.rs"]
-mod batch_verify_accepts_valid_batch;
+#[path = "accumulators/batch_verify_accepts_proofs_with_and_without_accumulators.rs"]
+mod batch_verify_accepts_proofs_with_and_without_accumulators;
 
 #[path = "accumulators/batch_verify_rejects_bad_accumulator.rs"]
 mod batch_verify_rejects_bad_accumulator;
 
-#[path = "accumulators/non_collapsed_accumulator_is_rejected.rs"]
-mod non_collapsed_accumulator_is_rejected;
+#[path = "accumulators/each_accumulator_block_is_paired.rs"]
+mod each_accumulator_block_is_paired;
+
+#[path = "accumulators/proof_preimage_round_trip_preserves_witnesses.rs"]
+mod proof_preimage_round_trip_preserves_witnesses;
+
+#[path = "accumulators/proof_round_trip_preserves_accumulators.rs"]
+mod proof_round_trip_preserves_accumulators;
+
+#[path = "accumulators/harness.rs"]
+mod harness;
