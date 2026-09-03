@@ -46,7 +46,7 @@ use storage::storage::HashMap;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
-    KeyLocation, ProofPreimage, ProvingKeyMaterial, ProvingProvider, Resolver,
+    InnerProofWitness, KeyLocation, ProofPreimage, ProvingKeyMaterial, ProvingProvider, Resolver,
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -114,6 +114,7 @@ impl PrePartitionContractCall {
         output: JsValue,
         communication_commitment_rand: &str,
         key_location: &str,
+        proof_witnesses: Vec<Uint8Array>,
     ) -> Result<PrePartitionContractCall, JsError> {
         Ok(PrePartitionContractCall(
             ledger::construct::PrePartitionContractCall {
@@ -129,6 +130,10 @@ impl PrePartitionContractCall {
                 output: from_value(output)?,
                 communication_commitment_rand: from_hex_ser(communication_commitment_rand)?,
                 key_location: KeyLocation(std::borrow::Cow::Owned(key_location.to_owned())),
+                proof_witnesses: proof_witnesses
+                    .into_iter()
+                    .map(|b| InnerProofWitness::Direct(b.to_vec()))
+                    .collect(),
             },
         ))
     }

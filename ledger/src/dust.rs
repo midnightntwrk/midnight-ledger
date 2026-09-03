@@ -2148,6 +2148,7 @@ mod tests {
     async fn test_proof_size() {
         use base_crypto::rng::SplittableRng;
         use rand::{Rng, SeedableRng, rngs::StdRng};
+        use serialize::Serializable;
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
         use zkir_v2::LocalProvingProvider;
@@ -2174,7 +2175,7 @@ mod tests {
         };
         let binding = Pedersen::from(rng.r#gen::<PedersenRandomness>());
         let proven_dust_spend = dust_spend.prove(prover, 0, binding).await.unwrap();
-        assert_eq!(proven_dust_spend.proof.bytes.len(), DUST_SPEND_PROOF_SIZE);
+        assert_eq!(proven_dust_spend.proof.serialized_size(), DUST_SPEND_PROOF_SIZE);
     }
 
     struct WrappedSeed(pub Seed);

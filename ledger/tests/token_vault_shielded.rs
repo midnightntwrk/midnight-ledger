@@ -214,6 +214,7 @@ async fn test_shielded_full_lifecycle() {
     .unwrap();
 
     let call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"depositShielded"[..].into(),
         op: deposit_shielded_op.clone(),
@@ -345,6 +346,7 @@ async fn test_shielded_full_lifecycle() {
     .unwrap();
 
     let call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"depositShielded"[..].into(),
         op: deposit_shielded_op.clone(),
@@ -508,6 +510,7 @@ async fn test_shielded_full_lifecycle() {
     .unwrap();
 
     let call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"withdrawShielded"[..].into(),
         op: withdraw_shielded_op.clone(),

@@ -225,6 +225,9 @@ impl<D: DB> PedersenDowngradeable<D> for Pedersen {
     }
 }
 
+// Backwards-compat note: pre-`verify_proof` preimages (loaded via a
+// separately-versioned `transient-crypto`) would land here as an
+// additional variant; deferred.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Storable)]
 #[storable(base)]
 #[tag = "proof-preimage-versioned[v2]"]

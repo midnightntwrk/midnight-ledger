@@ -131,6 +131,7 @@ async fn fallible() {
         .unwrap();
     let tx = {
         let call = ContractCallPrototype {
+            proof_witnesses: vec![],
             address: addr,
             entry_point: b"count"[..].into(),
             op: count_op.clone(),
@@ -170,6 +171,7 @@ async fn fallible() {
     println!(":: Part 3: Duplicate count");
     let tx = {
         let call = ContractCallPrototype {
+            proof_witnesses: vec![],
             address: addr,
             entry_point: b"count"[..].into(),
             op: count_op.clone(),

@@ -376,7 +376,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
                     "verifier-key[v6]" => {
                         ProofVersioned::V2(transient_crypto_old::proofs::Proof(proof.bytes))
                     }
-                    "verifier-key[v7]" => ProofVersioned::V4(proof),
+                    "verifier-key[v8]" => ProofVersioned::V4(proof),
                     _ => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
                 }
             }

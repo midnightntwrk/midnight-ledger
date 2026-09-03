@@ -234,7 +234,7 @@ pub async fn prove(
                 .0;
             tagged_serialize(&proof, &mut res)?;
         }
-        "verifier-key[v7]" => {
+        "verifier-key[v8]" => {
             let proof = preimage
                 .prove::<IrSource>(OsRng, &provider, &provider)
                 .await

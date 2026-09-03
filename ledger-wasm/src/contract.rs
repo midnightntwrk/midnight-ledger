@@ -22,6 +22,7 @@ use onchain_runtime_wasm::state::{
 use rand::rngs::OsRng;
 use serialize::Serializable;
 use storage::db::InMemoryDB;
+use transient_crypto::proofs::InnerProofWitness;
 use transient_crypto::proofs::KeyLocation;
 use transient_crypto::proofs::ProofPreimage;
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -80,6 +81,7 @@ impl ContractCallPrototype {
         output: JsValue,
         communication_commitment_rand: &str,
         key_location: &str,
+        proof_witnesses: Vec<Uint8Array>,
     ) -> Result<ContractCallPrototype, JsError> {
         Ok(ContractCallPrototype(
             ledger::construct::ContractCallPrototype {
@@ -96,6 +98,10 @@ impl ContractCallPrototype {
                 output: from_value(output)?,
                 communication_commitment_rand: from_hex_ser(communication_commitment_rand)?,
                 key_location: KeyLocation(std::borrow::Cow::Owned(key_location.to_owned())),
+                proof_witnesses: proof_witnesses
+                    .into_iter()
+                    .map(|b| InnerProofWitness::Direct(b.to_vec()))
+                    .collect(),
             },
         ))
     }

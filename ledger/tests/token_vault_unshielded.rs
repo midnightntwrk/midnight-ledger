@@ -237,6 +237,7 @@ async fn test_unshielded_contract_deposit() {
     );
 
     let call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"depositUnshielded"[..].into(),
         op: deposit_unshielded_op.clone(),
@@ -515,6 +516,7 @@ async fn test_unshielded_contract_withdraw() {
     );
 
     let deposit_call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"depositUnshielded"[..].into(),
         op: deposit_unshielded_op.clone(),
@@ -697,6 +699,7 @@ async fn test_unshielded_contract_withdraw() {
     );
 
     let withdraw_call = ContractCallPrototype {
+        proof_witnesses: vec![],
         address: addr,
         entry_point: b"withdrawUnshielded"[..].into(),
         op: withdraw_unshielded_op.clone(),
