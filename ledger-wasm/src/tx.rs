@@ -114,7 +114,7 @@ impl PrePartitionContractCall {
         output: JsValue,
         communication_commitment_rand: &str,
         key_location: &str,
-        proof_witnesses: Vec<Uint8Array>,
+        proof_witnesses: Option<Vec<Uint8Array>>,
     ) -> Result<PrePartitionContractCall, JsError> {
         Ok(PrePartitionContractCall(
             ledger::construct::PrePartitionContractCall {
@@ -131,6 +131,7 @@ impl PrePartitionContractCall {
                 communication_commitment_rand: from_hex_ser(communication_commitment_rand)?,
                 key_location: KeyLocation(std::borrow::Cow::Owned(key_location.to_owned())),
                 proof_witnesses: proof_witnesses
+                    .unwrap_or_default()
                     .into_iter()
                     .map(|b| InnerProofWitness::Direct(b.to_vec()))
                     .collect(),
