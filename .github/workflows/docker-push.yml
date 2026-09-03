@@ -54,21 +54,32 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Create proof-server images
         run: |
@@ -108,21 +119,32 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Build and push arm64 image
         run: |
@@ -132,7 +154,7 @@ jobs:
           docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
 
   docker-manifest:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [docker-amd64, docker-arm64]
     permissions:
       contents: read
@@ -164,21 +186,32 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
       - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Create and push manifest
         run: |
