@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
+use crate::dust::{DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
 use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
@@ -85,7 +85,7 @@ pub enum SystemTransactionError {
         distributed_amount: u128,
         reserve_supply: u128,
     },
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
     TreasuryDisabled,
@@ -162,10 +162,10 @@ impl Display for SystemTransactionError {
                     "illegal distribution of {distributed_amount} reserve tokens, exceeding remaining supply of {reserve_supply}"
                 )
             }
-            SystemTransactionError::GenerationInfoAlreadyPresent(gen_info) => write!(
+            SystemTransactionError::InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             SystemTransactionError::InvalidBasisPoints(bp) => {
                 write!(
@@ -222,7 +222,7 @@ pub enum TransactionInvalid<D: DB> {
     InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvariantViolation(InvariantViolation),
     RewardTooSmall {
         claimed: u128,
@@ -315,10 +315,10 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
             ),
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            InitialNonceAlreadyPresent(nonce) => write!(
                 formatter,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
@@ -372,8 +372,8 @@ impl<D: DB> From<onchain_runtime::error::TranscriptRejected<D>> for TransactionI
 impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
     fn from(err: DustStateError) -> TransactionInvalid<D> {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                TransactionInvalid::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                TransactionInvalid::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => TransactionInvalid::MerkleTreeError(err),
         }
@@ -383,8 +383,8 @@ impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
 impl From<DustStateError> for SystemTransactionError {
     fn from(err: DustStateError) -> SystemTransactionError {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                SystemTransactionError::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                SystemTransactionError::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => SystemTransactionError::MerkleTreeError(err),
         }
@@ -1493,7 +1493,7 @@ impl Error for DustLocalStateError {}
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum DustStateError {
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     MerkleTreeError(InvalidUpdate),
 }
 
@@ -1501,10 +1501,10 @@ impl Display for DustStateError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use DustStateError::*;
         match self {
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             MerkleTreeError(err) => err.fmt(f),
         }

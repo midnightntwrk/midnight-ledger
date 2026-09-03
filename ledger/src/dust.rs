@@ -434,6 +434,14 @@ impl DustGenerationInfo {
     }
 }
 
+/// Deprecated. Retained only to preserve the serialized shape of
+/// [`DustGenerationState`] (`dust-generation-state[v1]`) so that pre-patch wasm
+/// libraries can still deserialize ledger state produced by patched binaries.
+///
+/// It is no longer consulted for soundness: generation uniqueness is now enforced
+/// via [`DustGenerationState::night_indices`], which keys on the initial nonce
+/// alone (the spend circuit binds `gen.nonce` to that nonce). Do not reintroduce
+/// this into any validity check.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable)]
 #[storable(base)]
 #[tag = "dust-generation-uniqueness-info"]
@@ -954,7 +962,20 @@ pub struct DustGenerationState<D: DB> {
     pub address_delegation: Map<UserAddress, DustPublicKey, D>,
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
     pub generating_tree_first_free: u64,
+    /// Deprecated. No longer populated or consulted; retained solely to preserve
+    /// the serialized shape of this struct (`dust-generation-state[v1]`) for
+    /// pre-patch wasm libraries. Soundness now relies on `night_indices` below.
+    /// See [`DustGenerationUniquenessInfo`].
     pub generating_set: HashSet<DustGenerationUniquenessInfo, D>,
+    /// Maps each generation's initial nonce to its index in `generating_tree`.
+    ///
+    /// This map MUST be append-only: a nonce, once inserted, is never removed.
+    /// Dust-spend soundness depends on it — `fresh_dust_output` uses it to reject
+    /// a second generation reusing an existing initial nonce, and the spend circuit
+    /// binds `gen.nonce` to the spent UTXO's initial nonce. If an entry could be
+    /// dropped, a nonce could recur with a different value and the binding would no
+    /// longer uniquely determine the generation. (Contrast `DustLocalState`'s own
+    /// `night_indices`, which is wallet-local and safe to prune in `process_ttls`.)
     pub night_indices: HashMap<InitialNonce, u64, D>,
     pub root_history: TimeFilterMap<Identity<MerkleTreeDigest>, D>,
 }
@@ -1150,11 +1171,10 @@ impl<D: DB> DustState<D> {
             nonce: initial_nonce,
             dtime: Timestamp::MAX,
         };
-        if self.generation.generating_set.member(&gen_info.into()) {
-            warn!(?gen_info, "already present generation info");
-            return Err(DustStateError::GenerationInfoAlreadyPresent(gen_info));
+        if self.generation.night_indices.contains_key(&initial_nonce) {
+            warn!(?initial_nonce, "already present initial_nonce info");
+            return Err(DustStateError::InitialNonceAlreadyPresent(initial_nonce));
         }
-        state.generation.generating_set = state.generation.generating_set.insert(gen_info.into());
         state.generation.generating_tree = state
             .generation
             .generating_tree

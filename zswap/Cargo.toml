@@ -19,7 +19,7 @@ coin-structure = { version = "3.0.0", path = "../coin-structure", package = "mid
 storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
-midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
+midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.

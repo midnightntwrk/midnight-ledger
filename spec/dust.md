@@ -325,25 +325,22 @@ struct DustGenerationInfo {
 }
 ```
 
-In order to ensure that Dust generation is unique, a variant of this without
-the timestamp is also kept in the state, preventing duplicate Dust generations.
-
-```rust
-struct DustGenerationUniquenessInfo {
-    value: u128,
-    owner: DustPublicKey,
-    nonce: InitialNonce,
-}
-```
+Dust generation is kept unique by the initial nonce: each `DustGenerationInfo`
+is created with a distinct `nonce`, and the state records every nonce it has
+seen (via `night_indices`, below), rejecting any attempt to insert a second
+generation with an already-present nonce. This uniqueness is load-bearing for
+spend soundness — the spend circuit binds the generation info used to compute a
+Dust UTXO's value to the UTXO's initial nonce, so a nonce must determine at most
+one generation.
 
 The ledger's state related to the Dust generation information has a number of
 components:
 - A mapping from Night addresses to Dust addresses, to provide the Dust owner value for new Night outputs.
 - A sequential Merkle tree of `DustGenerationInfo`, which can be directly used
   to assert the presence of a specific Dust generation info in ZK proofs.
-- A corresponding set of the `DustGenerationUniquenessInfo`s, to prevent
-  collisions in these.
-- A mapping from Night UTXOs to their position in the Merkle tree.
+- A mapping from each generation's initial nonce to its position in the Merkle
+  tree. This is append-only, and doubles as the uniqueness check preventing two
+  generations from sharing an initial nonce.
 - A history of valid Merkle tree roots (valid for the Dust grace period).
 
 ```rust
@@ -351,7 +348,7 @@ struct DustGenerationState {
     address_delegation: Map<NightAddress, DustPublicKey>,
     generating_tree: MerkleTree<DustGenerationInfo>,
     generating_tree_first_free: usize,
-    generating_set: Set<DustGenerationUniquenessInfo>,
+    /// Append-only; also enforces initial-nonce uniqueness (see above).
     night_indices: Map<InitialNonce, u64>,
     root_history: TimeFilterMap<MerkleTreeRoot>,
 }
@@ -479,7 +476,8 @@ Locally, users need to supply:
 - The Dust secret key demonstrating ownership
 - The backing generation info
 - The paths to both the Dust commitment being spent and the generation info.
-- The nonce and sequence number of the new output.
+- The initial nonce of the backing Night UTXO, and the sequence number of the
+  Dust UTXO being spent.
 
 ```rust
 fn dust_spend_valid(
@@ -493,9 +491,9 @@ fn dust_spend_valid(
     gen: Private<DustGenerationInfo>,
     commitment_merkle_tree: Private<MerkleTree<DustCommitment>>,
     generation_merkle_tree: Private<MerkleTree<DustGenerationInfo>>,
-    // Note these are for the new coin, and there is no need to validate these,
-    // as the secret key ensures these are provided by the same user as consumes
-    // them.
+    // The initial nonce of the backing Night UTXO, and the sequence number of
+    // the spent UTXO. Both are bound below, tying the generation info and the
+    // spent UTXO's nonce to a shared origin.
     initial_nonce: Private<InitialNonce>,
     seq_no: Private<u32>,
 ) -> bool {
@@ -510,6 +508,15 @@ fn dust_spend_valid(
     assert!(commitment_root = commitment_merkle_tree.root());
     assert!(generation_merkle_tree.contains(gen));
     assert!(genration_root = generation_merkle_tree.root());
+    // Bind both the spent UTXO's nonce and the generation info to a shared
+    // initial nonce. Without this the generation info is unconstrained: any
+    // entry in the generation tree could be paired with the spent UTXO, letting
+    // a spender substitute a higher-value backing Night to inflate the computed
+    // updated value. The first UTXO in a chain (seq 0) is bound to the public
+    // key, all subsequent ones to the secret key (see the nonce discussion above).
+    let old_key = if seq_no == 0 { dust.owner } else { sk };
+    assert!(dust.nonce == field::hash((initial_nonce, seq_no, old_key)));
+    assert!(gen.nonce == initial_nonce);
     let nullifier = field::hash(DustPreProjection {
         initial_value: dust.initial_value,
         owner: sk,
@@ -520,7 +527,7 @@ fn dust_spend_valid(
     let v_pre = updated_value(inp, gen, tnow, params);
     assert!(v_pre >= dust_spend.v_fee);
     let v = v_pre - dust_spend.v_fee;
-    let nonce = field::hash((initial_nonce, seq_no, sk));
+    let nonce = field::hash((initial_nonce, seq_no + 1, sk));
     let post_commitment = field::hash(DustPreProjection {
         initial_value: v,
         owner: dust.owner,
@@ -731,10 +738,9 @@ impl DustState {
             nonce: initial_nonce,
             dtime: Timestamp::MAX,
         };
-        assert!(!self.generation.generating_set.contains(gen_info.into()));
-        self.generation.generating_set = self.generation.generating_set.insert(
-            gen_info.into(),
-        );
+        // `night_indices` doubles as the uniqueness check: an initial nonce may
+        // only ever be inserted once.
+        assert!(!self.generation.night_indices.contains(initial_nonce));
         self.generation.generating_tree = self.generation.generating_tree.insert(
             self.generation.generating_tree_first_free,
             gen_info,
