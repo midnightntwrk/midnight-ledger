@@ -73,7 +73,7 @@ impl<K: Serializable + Ord, V: Serializable> Serializable for HashMap<K, V> {
     }
 
     fn serialized_size(&self) -> usize {
-        self.iter().fold(4, |acc, (k, v)| {
+        self.iter().fold((self.len() as u32).serialized_size(), |acc, (k, v)| {
             acc + k.serialized_size() + v.serialized_size()
         })
     }
@@ -93,7 +93,7 @@ impl<T: Serializable + Ord> Serializable for HashSet<T> {
 
     fn serialized_size(&self) -> usize {
         self.iter()
-            .fold(4, |acc, elem| acc + elem.serialized_size())
+            .fold((self.len() as u32).serialized_size(), |acc, elem| acc + elem.serialized_size())
     }
 }
 

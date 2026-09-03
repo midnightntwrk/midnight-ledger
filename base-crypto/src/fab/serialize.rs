@@ -136,6 +136,9 @@ impl Deserializable for Value {
                 x, y, int, reader,
             )?])),
             (true, false) => {
+                if int == 1 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "singleton value encoded as multi-entry value"));
+                };
                 let mut res = Vec::new();
                 for _ in 0..int {
                     res.push(<ValueAtom as Deserializable>::deserialize(
@@ -298,6 +301,9 @@ impl Deserializable for AlignedValue {
         Self::check_rec(&mut recursion_depth)?;
         let value: Value = Deserializable::deserialize(reader, recursion_depth)?;
         let alignment: Alignment = Deserializable::deserialize(reader, recursion_depth)?;
+        if !alignment.fits(&value) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "deserialized AlignedValue is not aligned"));
+        }
         Ok(AlignedValue { value, alignment })
     }
 }
@@ -411,6 +417,11 @@ impl ValueAtom {
                 Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "ValueAtom ended with zero byte",
+                ))
+            } else if int == 1 && res[0] < 32 {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "ValueAtom fitting into single-byte form encoded as multiple bytes",
                 ))
             } else {
                 Ok(ValueAtom(res))
