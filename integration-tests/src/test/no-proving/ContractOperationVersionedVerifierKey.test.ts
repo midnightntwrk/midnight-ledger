@@ -18,17 +18,17 @@ describe('Ledger API - ContractOperationVersionedVerifierKey', () => {
   /**
    * Test constructor functionality.
    *
-   * @given A version string 'v3' and an operation verifier key
+   * @given A version string 'v4' and an operation verifier key
    * @when Creating a ContractOperationVersionedVerifierKey
    * @then Should store version and verifier key correctly and format string representation
    */
   test('should construct with version and verifier key', () => {
     const contractOperationVersionedVerifierKey = new ContractOperationVersionedVerifierKey(
-      'v3',
+      'v4',
       TestResource.operationVerifierKey()
     );
 
-    expect(contractOperationVersionedVerifierKey.version).toEqual('v3');
-    expect(contractOperationVersionedVerifierKey.toString(true)).toMatch(/V3\(VerifierKey\(.*/);
+    expect(contractOperationVersionedVerifierKey.version).toEqual('v4');
+    expect(contractOperationVersionedVerifierKey.toString(true)).toMatch(/V4\(VerifierKey\(.*/);
   });
 });

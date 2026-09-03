@@ -544,7 +544,7 @@ __metadata:
     "@dao-xyz/borsh": "npm:5.2.3"
     "@eslint/compat": "npm:1.3.2"
     "@midnightntwrk/ledger": "link:../result/lib/node_modules/@midnightntwrk/ledger-v10"
-    "@midnightntwrk/zkir-v2": "link:../result/lib/node_modules/@midnightntwrk/zkir-v2"
+    "@midnightntwrk/zkir-v3": "link:../result/lib/node_modules/@midnightntwrk/zkir-v3"
     "@tsconfig/node24": "npm:24.0.4"
     "@types/eslint": "npm:9.6.1"
     "@types/eslint-config-prettier": "npm:6.11.3"
@@ -586,9 +586,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@midnightntwrk/zkir-v2@link:../result/lib/node_modules/@midnightntwrk/zkir-v2::locator=%40midnight%2Fledger-api-tests%40workspace%3A.":
+"@midnightntwrk/zkir-v3@link:../result/lib/node_modules/@midnightntwrk/zkir-v3::locator=%40midnight%2Fledger-api-tests%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@midnightntwrk/zkir-v2@link:../result/lib/node_modules/@midnightntwrk/zkir-v2::locator=%40midnight%2Fledger-api-tests%40workspace%3A."
+  resolution: "@midnightntwrk/zkir-v3@link:../result/lib/node_modules/@midnightntwrk/zkir-v3::locator=%40midnight%2Fledger-api-tests%40workspace%3A."
   languageName: node
   linkType: soft
 

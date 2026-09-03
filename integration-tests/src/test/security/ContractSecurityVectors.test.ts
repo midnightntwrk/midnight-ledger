@@ -376,7 +376,7 @@ describe('Contract Security Vector Tests', () => {
      * @then operations should complete safely without exposing sensitive data
      */
     test('should secure verifier key management operations', () => {
-      const versionedKey = new ContractOperationVersionedVerifierKey('v3', TestResource.operationVerifierKey());
+      const versionedKey = new ContractOperationVersionedVerifierKey('v4', TestResource.operationVerifierKey());
       const keyInsert = new VerifierKeyInsert('op', versionedKey);
 
       expect(keyInsert).toBeDefined();

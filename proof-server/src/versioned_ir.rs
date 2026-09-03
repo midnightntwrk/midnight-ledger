@@ -92,3 +92,91 @@ pub(crate) async fn prove(
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
+
+/// A [`ProvingProvider`] that routes each proof preimage to the prover matching
+/// the ZKIR version of its resolved key material.
+///
+/// `/prove-tx` proves a whole transaction, whose calls may target circuits of
+/// different ZKIR versions, so the version cannot be chosen up front the way
+/// [`prove`] does for a single preimage.
+pub(crate) struct VersionedProvingProvider<'a> {
+    pub rng: OsRng,
+    pub resolver: &'a Resolver,
+}
+
+impl<'a> VersionedProvingProvider<'a> {
+    async fn ir_tag(&self, preimage: &ProofPreimage) -> Result<(String, Vec<u8>), anyhow::Error> {
+        use transient_crypto::proofs::Resolver as _;
+        let key_material = self
+            .resolver
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "could not resolve key location: {}",
+                    preimage.key_location.0
+                )
+            })?;
+        let tag = peek_tag(&mut Cursor::new(&key_material.ir_source))?;
+        Ok((tag, key_material.ir_source))
+    }
+}
+
+impl<'a> transient_crypto::proofs::ProvingProvider for VersionedProvingProvider<'a> {
+    async fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, anyhow::Error> {
+        let (tag, ir_source) = self.ir_tag(preimage).await?;
+        match tag.as_str() {
+            "ir-source[v2]" | "ir-source[v2-generic]" => {
+                let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(&ir_source[..]))?;
+                preimage.check(&ir)
+            }
+            "ir-source[v3-generic]" => {
+                let ir: zkir_v3::IrSource = tagged_deserialize(&mut &ir_source[..])?;
+                preimage.check(&ir)
+            }
+            _ => Err(anyhow::anyhow!("unsupported ZKIR tag: '{tag}'")),
+        }
+    }
+
+    async fn prove(
+        self,
+        preimage: &ProofPreimage,
+        overwrite_binding_input: Option<transient_crypto::curve::Fr>,
+    ) -> Result<Proof, anyhow::Error> {
+        let (tag, _) = self.ir_tag(preimage).await?;
+        match tag.as_str() {
+            "ir-source[v2]" | "ir-source[v2-generic]" => {
+                // LocalProvingProvider handles the V0/V1 backward compat routing.
+                let provider = zkir_v2::LocalProvingProvider {
+                    rng: self.rng,
+                    params: self.resolver,
+                    resolver: self.resolver,
+                };
+                provider.prove(preimage, overwrite_binding_input).await
+            }
+            "ir-source[v3-generic]" => {
+                let mut preimage = preimage.clone();
+                if let Some(binding_input) = overwrite_binding_input {
+                    preimage.binding_input = binding_input;
+                }
+                preimage
+                    .prove::<zkir_v3::IrSource>(self.rng, self.resolver, self.resolver)
+                    .await
+                    .map(|(proof, _)| proof)
+            }
+            _ => Err(anyhow::anyhow!("unsupported ZKIR tag: '{tag}'")),
+        }
+    }
+
+    fn split(&mut self) -> Self {
+        use base_crypto::rng::SplittableRng;
+        Self {
+            rng: self.rng.split(),
+            resolver: self.resolver,
+        }
+    }
+
+    fn resolver(&self) -> &impl transient_crypto::proofs::Resolver {
+        self.resolver
+    }
+}

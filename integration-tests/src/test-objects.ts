@@ -55,7 +55,7 @@ import {
 import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { ProvingKeyMaterial } from '@midnightntwrk/zkir-v2';
+import type { ProvingKeyMaterial } from '@midnightntwrk/zkir-v3';
 import { generateHex, loadBinaryFile } from './test-utils';
 
 export const VERSION_HEADER = '0200';

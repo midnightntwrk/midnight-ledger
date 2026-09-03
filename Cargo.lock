@@ -3134,7 +3134,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "9.0.0"
+version = "10.0.0"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -3322,6 +3322,7 @@ version = "10.0.0-alpha.1"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "anyhow",
  "async-channel",
  "clap",
  "env_logger",
@@ -3826,7 +3827,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir-v3",
  "pastey",
  "rand 0.8.6",
  "rayon",

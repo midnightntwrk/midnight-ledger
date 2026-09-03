@@ -129,6 +129,7 @@
               [
                 self.packages.${system}.local-params
                 self.packages.${system}.zkir
+                self.packages.${system}.zkir-v3
               ] else []);
           };
         mkLedger = {
@@ -172,6 +173,7 @@
                 [
                   self.packages.${system}.local-params
                   self.packages.${system}.zkir
+                  self.packages.${system}.zkir-v3
                   rust-build
                   pkgs.chez
                 ];
@@ -301,7 +303,7 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -312,7 +314,6 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
               packages.zkir-v3-wasm
             ];
           };
@@ -374,7 +375,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              self.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -382,7 +383,7 @@
               mkdir -p zswap/zkir
               mkdir -p zswap/keys
               cp zkir-precompiles/zswap/* zswap/zkir
-              zkir compile-many zswap/zkir zswap/keys
+              ${self.packages.${system}.zkir-v3}/bin/zkir compile-many zswap/zkir zswap/keys
               #compactc --no-communications-commitment zswap/zswap.compact zswap
               for file in zswap/keys/* zswap/zkir/*; do
                 sha256sum "$file" > "$file.sha256"
@@ -390,7 +391,7 @@
               mkdir -p dust/zkir
               mkdir -p dust/keys
               cp zkir-precompiles/dust/* dust/zkir
-              zkir compile-many dust/zkir dust/keys
+              ${self.packages.${system}.zkir-v3}/bin/zkir compile-many dust/zkir dust/keys
               #compactc --no-communications-commitment ledger/dust.compact dust
               for file in dust/keys/* dust/zkir/*; do
                 sha256sum "$file" > "$file.sha256"
@@ -412,7 +413,6 @@
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
-          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output

@@ -8,7 +8,7 @@ description = "Implementation of the Zswap shielded token atomic swap mechanism.
 
 [features]
 default = ["proof-verifying"]
-proof-verifying = ["dep:zkir_v2"]
+proof-verifying = ["dep:zkir_v3"]
 
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
@@ -18,8 +18,8 @@ anyhow = "^1.0.102"
 coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
-midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
+midnight-onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = ["vendored"] }
+midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
@@ -30,7 +30,7 @@ tracing = { version = "^0.1.41" }
 itertools = "^0.14.0"
 zeroize = "^1.8.0"
 
-zkir_v2 = { path = "../zkir", version = "2.2.0", package = "midnight-zkir", optional = true }
+zkir_v3 = { path = "../zkir-v3", version = "3.0.0", package = "midnight-zkir-v3", optional = true }
 
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }

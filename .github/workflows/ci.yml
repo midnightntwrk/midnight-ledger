@@ -129,7 +129,7 @@ jobs:
         run: nix build .#onchain-runtime-wasm
 
       - name: Build zkir-wasm
-        run: nix build .#zkir-wasm
+        run: nix build .#zkir-v3-wasm
 
   # Inline matrix job (not a reusable-workflow call) so the check name stays
   # `integration-tests (ubuntu-latest)`. The steps live in a composite action
