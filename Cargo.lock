@@ -3322,6 +3322,7 @@ version = "10.0.0-alpha.1"
 dependencies = [
  "actix-cors",
  "actix-web",
+ "anyhow",
  "async-channel",
  "clap",
  "env_logger",
