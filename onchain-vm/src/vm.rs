@@ -218,7 +218,7 @@ fn idx<D: DB>(
         }
         StateValue::BoundedMerkleTree(tree) => {
             let key = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
-            if 1u64.checked_shl(tree.height() as u32).map_or(false, |bound| key >= bound) {
+            if 1u64.checked_shl(tree.height() as u32).is_some_and(|bound| key >= bound) {
                 Err(OnchainProgramError::MissingKey)
             } else {
                 Ok((
@@ -1024,7 +1024,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         }
                         StateValue::BoundedMerkleTree(t) => {
                             let idx = (&**AsRef::<Value>::as_ref(&key_cell)).try_into()?;
-                            if 1u64.checked_shl(t.height() as u32).map_or(true, |bound| idx < bound) {
+                            if 1u64.checked_shl(t.height() as u32).is_none_or(|bound| idx < bound) {
                                 let cell_ref = curr.0.as_cell_ref().map_err(|e| {
                                     OnchainProgramError::TypeError(format!(
                                         "attempted to ins a non-cell value into a bmt: {e}"

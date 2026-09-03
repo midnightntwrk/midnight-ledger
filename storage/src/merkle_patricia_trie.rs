@@ -1560,7 +1560,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 if data.len() != len.div_ceil(2) {
                     return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("inferred nibble byte length {} did not match actual data length of {}", len.div_ceil(2), data.len())));
                 };
-                let path = expand_nibbles(&data, len as usize);
+                let path = expand_nibbles(&data, len);
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
                 Node::Extension {
                     ann,
