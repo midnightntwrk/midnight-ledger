@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Fewer `proof_witnesses` or `verify_proof_vks` than the circuit needs bails
+//! Fewer `inner_proofs` or `verify_proof_vks` than the circuit needs bails
 //! during preprocessing rather than indexing out of bounds.
 //!
 //! The control matters: every assertion here is on an `Err`, so "it errored"

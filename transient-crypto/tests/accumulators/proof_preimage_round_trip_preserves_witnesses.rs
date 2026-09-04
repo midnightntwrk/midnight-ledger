@@ -14,7 +14,7 @@
 //! A `ProofPreimage` carries its inner-proof witnesses across serialization, and
 //! the fields after them survive too.
 //!
-//! `proof_witnesses` sits mid-struct in a bare concatenation, so its length
+//! `inner_proofs` sits mid-struct in a bare concatenation, so its length
 //! prefix is the only thing marking where it ends — misjudge it and every later
 //! field reads from the wrong offset. Hence the individual tail assertions.
 //!
@@ -28,7 +28,7 @@ use serialize::{Deserializable, Serializable, tagged_deserialize, tagged_seriali
 use midnight_transient_crypto::curve::Fr;
 use midnight_transient_crypto::proofs::{InnerProofWitness, KeyLocation, ProofPreimage};
 
-/// Distinctive values in every field after `proof_witnesses`, so a shifted read
+/// Distinctive values in every field after `inner_proofs`, so a shifted read
 /// cannot coincidentally land on the right ones.
 const BINDING: u64 = 0xB1D;
 const COMM: u64 = 0xC0;
@@ -40,7 +40,7 @@ fn preimage(witnesses: Vec<InnerProofWitness>) -> ProofPreimage {
         private_transcript: vec![Fr::from(3u64)],
         public_transcript_inputs: vec![Fr::from(4u64)],
         public_transcript_outputs: vec![Fr::from(5u64)],
-        proof_witnesses: witnesses,
+        inner_proofs: witnesses,
         binding_input: Fr::from(BINDING),
         communications_commitment: Some((Fr::from(COMM), Fr::from(OPENING))),
         key_location: KeyLocation(Cow::Borrowed("builtin")),
@@ -58,7 +58,7 @@ fn round_trip(p: &ProofPreimage) -> ProofPreimage {
     Deserializable::deserialize(&mut &bytes[..], 0).expect("deserialize preimage")
 }
 
-/// Every field after `proof_witnesses`, checked individually: these are what a
+/// Every field after `inner_proofs`, checked individually: these are what a
 /// misread of the witness vector's length would shift.
 fn assert_tail_intact(p: &ProofPreimage, label: &str) {
     assert_eq!(p.binding_input, Fr::from(BINDING), "{label}: binding input");
@@ -93,7 +93,7 @@ fn proof_preimage_round_trip_preserves_witnesses() {
         let back = round_trip(&p);
         assert_eq!(back, p, "{label}: round-trip must be exact");
         assert_eq!(
-            back.proof_witnesses, witnesses,
+            back.inner_proofs, witnesses,
             "{label}: witnesses must come back verbatim"
         );
         assert_tail_intact(&back, label);

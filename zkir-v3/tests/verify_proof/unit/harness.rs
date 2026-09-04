@@ -123,7 +123,7 @@ pub fn preimage(n: usize) -> ProofPreimage {
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses: (0..n)
+        inner_proofs: (0..n)
             .map(|i| InnerProofWitness::Direct(vec![i as u8; 8]))
             .collect(),
         key_location: KeyLocation(Cow::Borrowed("builtin")),

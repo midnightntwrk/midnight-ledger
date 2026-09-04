@@ -51,7 +51,7 @@ use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
 use midnight_zkir_v3::ir::IrMinorVersion;
-use midnight_zkir_v3::ir_instructions::decidable::{DeciderKind, serialize_vk};
+use midnight_zkir_v3::ir_instructions::decider::{DeciderKind, serialize_vk};
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_incircuit;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
@@ -691,7 +691,7 @@ pub fn outer_preimage_all(inner_proofs: Vec<Vec<u8>>) -> ProofPreimage {
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses: inner_proofs
+        inner_proofs: inner_proofs
             .into_iter()
             .map(InnerProofWitness::Direct)
             .collect(),

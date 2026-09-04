@@ -14,22 +14,28 @@
 //! A `Collapsed` decider must discharge the accumulator its inner proof carried,
 //! not just the one verifying it produced.
 //!
-//! Nothing here is malformed. A proof of `BOGUS` prepared against `GOOD` yields a
+//! Nothing here is malformed. A proof of `BOGUS` prepared against `GOOD` gives a
 //! well-formed collapsed accumulator that does not pair, and the recursive proof
-//! carrying it proves successfully — the deferred model working as designed.
+//! carrying it proves successfully — the deferred model working as designed. So
+//! only the fold stands between it and acceptance, and the assertion checks that
+//! the *pairing* is what refuses it, not merely that verification failed.
 //!
-//! The control is the sharper half: under `DeciderKind::None` the same recursive
-//! proof verifies, because `None` never folds the carried accumulator in. The tag
-//! on a `verify_proof_vks` entry is therefore security-critical.
+//! The `None` leg is a control, not a defect being pinned: `None` declares the
+//! proof carries no obligation of its own, so ignoring the instance tail is that
+//! branch behaving correctly. It establishes that the rejection above came from
+//! the fold rather than anything incidental. Whether `None` was the *right* tag
+//! to register is a separate question, and nothing at this layer can check it.
 
 use midnight_curves::Fq;
 
-use midnight_zkir_v3::ir_instructions::decidable::{DeciderKind, serialize_vk};
+use midnight_zkir_v3::ir_instructions::decider::{DeciderKind, accumulator_pis, serialize_vk};
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 
+use transient_crypto::proofs::PARAMS_VERIFIER;
+
 use crate::e2e_harness::{
-    RecursiveRelation, Rejection, expect_rejected, outer_ir_for, outer_keygen, outer_preimage,
-    outer_prove, outer_verify, prove_recursive, scalar_inner_proofs, test_rng,
+    RecursiveRelation, outer_ir_for, outer_keygen, outer_preimage, outer_prove, outer_verify,
+    prove_recursive, scalar_inner_proofs, test_rng,
 };
 
 /// The statement the recursive circuit names.
@@ -61,7 +67,12 @@ async fn collapsed_decider_catches_a_bad_carried_accumulator() {
     let relation = RecursiveRelation {
         inner_vk: good.vk_blob.clone(),
     };
-    let instance: Vec<Fq> = good.pis.iter().copied().chain(deferred_bad).collect();
+    let instance: Vec<Fq> = good
+        .pis
+        .iter()
+        .copied()
+        .chain(accumulator_pis(&deferred_bad))
+        .collect();
     let (recursive_proof, recursive_vk) =
         prove_recursive(&relation, &instance, bogus.proof.clone(), &mut rng).await;
 
@@ -69,11 +80,17 @@ async fn collapsed_decider_catches_a_bad_carried_accumulator() {
     let collapsed = serialize_vk(&recursive_vk, DeciderKind::Collapsed).expect("collapsed blob");
     let ir = outer_ir_for(&collapsed, &instance);
     let (pk, vk) = outer_keygen(&ir, "collapsed decider, bad carried accumulator").await;
-    let stage = expect_rejected(&ir, pk, &vk, recursive_proof.clone(), &mut rng).await;
-    assert_eq!(
-        stage,
-        Rejection::AtVerify,
-        "nothing is malformed, so only the deferred pairing can refuse it"
+
+    // Proving succeeds: both passes agree, and nothing is malformed.
+    let (outer_proof, pis) =
+        outer_prove(&ir, pk, &outer_preimage(recursive_proof.clone()), &mut rng).await;
+
+    let err = vk
+        .verify(&PARAMS_VERIFIER, &outer_proof, pis.into_iter())
+        .expect_err("a carried accumulator that does not pair must poison the fold");
+    assert!(
+        format!("{err:#}").contains("pairing"),
+        "the deferred pairing must be what refuses it, not the PLONK check: {err:#}"
     );
 
     // ---- Control: `None` over the *same* recursive proof is accepted ----

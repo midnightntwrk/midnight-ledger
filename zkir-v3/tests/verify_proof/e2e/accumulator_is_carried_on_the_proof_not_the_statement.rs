@@ -18,6 +18,7 @@
 //! one-element statement. The second verification uses a reloaded key, which is
 //! how the ledger uses it.
 
+use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use serialize::{Deserializable, Serializable};
 use transient_crypto::curve::Fr;
@@ -67,12 +68,13 @@ async fn accumulator_is_carried_on_the_proof_not_the_statement() {
 
     // The block holds what off-circuit preparation independently computes for
     // this (vk, instance, proof).
-    let expected: Vec<Fr> =
-        verify_proof_offcircuit(&fixture.vk_blob, &inner_pis, &inner_proof, true)
-            .expect("off-circuit preparation")
-            .into_iter()
-            .map(Fr)
-            .collect();
+    let expected: Vec<Fr> = accumulator_pis(
+        &verify_proof_offcircuit(&fixture.vk_blob, &inner_pis, &inner_proof, true)
+            .expect("off-circuit preparation"),
+    )
+    .into_iter()
+    .map(Fr)
+    .collect();
     assert_eq!(
         expected.len(),
         acc_len,

@@ -20,6 +20,7 @@
 //! read against a statement the accumulators have been stripped from.
 
 use midnight_zkir_v3::IrSource;
+use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::accumulator_pi_len;
@@ -123,12 +124,13 @@ async fn impact_between_two_proofs_leaves_accumulators_intact() {
         );
 
         for (i, inner) in inner.iter().enumerate() {
-            let want: Vec<Fr> =
-                verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof, true)
-                    .expect("off-circuit preparation")
-                    .into_iter()
-                    .map(Fr)
-                    .collect();
+            let want: Vec<Fr> = accumulator_pis(
+                &verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof, true)
+                    .expect("off-circuit preparation"),
+            )
+            .into_iter()
+            .map(Fr)
+            .collect();
             assert_eq!(
                 proof.accumulators[i], want,
                 "guard {guard}: accumulator {i} must match off-circuit preparation"

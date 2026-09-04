@@ -21,6 +21,7 @@
 //! accepted, because the transcript reader stops once it has what it needs. The
 //! padding is inert — the resulting accumulator is byte-identical.
 
+use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use transient_crypto::proofs::Zkir;
 
@@ -70,7 +71,8 @@ async fn malformed_proof_witness_is_rejected() {
     let from_padded = verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &padded, true)
         .expect("preparation of the padded proof");
     assert_eq!(
-        from_real, from_padded,
+        accumulator_pis(&from_real),
+        accumulator_pis(&from_padded),
         "trailing bytes must not perturb the accumulator, or they would not be inert"
     );
 }

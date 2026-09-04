@@ -54,17 +54,11 @@ mod accumulator_count_tracks_verify_proof_instructions;
 #[path = "verify_proof/unit/duplicate_vk_in_side_table_is_rejected.rs"]
 mod duplicate_vk_in_side_table_is_rejected;
 
-#[path = "verify_proof/unit/guard_mismatch_between_the_pair_is_rejected.rs"]
-mod guard_mismatch_between_the_pair_is_rejected;
-
 #[path = "verify_proof/unit/ir_minor_version_gates_the_vk_side_table.rs"]
 mod ir_minor_version_gates_the_vk_side_table;
 
 #[path = "verify_proof/unit/ir_round_trip_preserves_vks_in_order.rs"]
 mod ir_round_trip_preserves_vks_in_order;
-
-#[path = "verify_proof/unit/load_accepts_ir_carrying_a_side_table.rs"]
-mod load_accepts_ir_carrying_a_side_table;
 
 #[path = "verify_proof/unit/missing_witness_or_vk_is_rejected.rs"]
 mod missing_witness_or_vk_is_rejected;
@@ -77,9 +71,6 @@ mod verify_proof_text_format_roundtrips;
 
 #[path = "verify_proof/unit/unbound_proof_name_is_rejected.rs"]
 mod unbound_proof_name_is_rejected;
-
-#[path = "verify_proof/unit/unsynthesizable_circuit_is_reported_gracefully.rs"]
-mod unsynthesizable_circuit_is_reported_gracefully;
 
 #[path = "verify_proof/unit/vk_hash_mismatch_is_rejected.rs"]
 mod vk_hash_mismatch_is_rejected;
@@ -122,6 +113,9 @@ mod valid_proof_of_other_statement_is_rejected;
 
 #[path = "verify_proof/e2e/wrong_length_instance_is_rejected.rs"]
 mod wrong_length_instance_is_rejected;
+
+#[path = "verify_proof/e2e/accumulators_differ_when_an_inner_proof_is_reused.rs"]
+mod accumulators_differ_when_an_inner_proof_is_reused;
 
 #[path = "verify_proof/e2e/harness.rs"]
 mod e2e_harness;

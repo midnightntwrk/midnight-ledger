@@ -20,7 +20,7 @@
 //! output.
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decidable::trivial_accumulator_pis;
+use midnight_zkir_v3::ir_instructions::decider::trivial_accumulator_pis;
 use transient_crypto::curve::Fr;
 
 use crate::e2e_harness::{
