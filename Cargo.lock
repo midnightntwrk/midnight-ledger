@@ -3045,7 +3045,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-serialize",
- "midnight-storage-core 1.2.0",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 3.0.0",
  "pastey",
  "proptest",
@@ -3144,7 +3144,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
- "midnight-storage-core 1.2.0",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir",
@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.2"
+version = "2.0.4"
 dependencies = [
  "criterion",
  "crypto",
@@ -3426,7 +3426,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
- "midnight-storage-core 1.2.0",
+ "midnight-storage-core 1.2.2",
  "os_pipe",
  "parking_lot",
  "pastey",
@@ -3437,43 +3437,6 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "sha2 0.11.0",
- "sysinfo 0.39.1",
- "tempfile",
-]
-
-[[package]]
-name = "midnight-storage-core"
-version = "1.2.0"
-dependencies = [
- "archery",
- "criterion",
- "crypto",
- "derive-where",
- "digest 0.11.3",
- "fake",
- "fs2",
- "hashbrown 0.17.1",
- "hex",
- "itertools 0.14.0",
- "konst",
- "lru 0.18.2",
- "midnight-base-crypto",
- "midnight-serialize",
- "midnight-storage-core 1.2.0",
- "midnight-storage-macros 1.0.0",
- "parity-db",
- "parking_lot",
- "pastey",
- "pprof",
- "proptest",
- "proptest-derive",
- "r2d2",
- "r2d2_sqlite",
- "rand 0.8.6",
- "rayon",
- "rusqlite",
- "serde",
  "sha2 0.11.0",
  "sysinfo 0.39.1",
  "tempfile",
@@ -3505,13 +3468,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-storage-core"
+version = "1.2.2"
+dependencies = [
+ "archery",
+ "criterion",
+ "crypto",
+ "derive-where",
+ "digest 0.11.3",
+ "fake",
+ "fs2",
+ "hashbrown 0.17.1",
+ "hex",
+ "itertools 0.14.0",
+ "konst",
+ "lru 0.18.2",
+ "midnight-base-crypto",
+ "midnight-serialize",
+ "midnight-storage-core 1.2.2",
+ "midnight-storage-macros 1.0.0",
+ "parity-db",
+ "parking_lot",
+ "pastey",
+ "pprof",
+ "proptest",
+ "proptest-derive",
+ "r2d2",
+ "r2d2_sqlite",
+ "rand 0.8.6",
+ "rayon",
+ "rusqlite",
+ "serde",
+ "sha2 0.11.0",
+ "sysinfo 0.39.1",
+ "tempfile",
+]
+
+[[package]]
 name = "midnight-storage-macros"
 version = "1.0.0"
 dependencies = [
  "derive-where",
  "midnight-serialize",
  "midnight-serialize-macros 1.0.0",
- "midnight-storage-core 1.2.0",
+ "midnight-storage-core 1.2.2",
  "pastey",
  "proc-macro2",
  "proptest",
@@ -3556,7 +3556,7 @@ dependencies = [
  "midnight-curves 0.2.1",
  "midnight-proofs 0.7.3",
  "midnight-serialize",
- "midnight-storage-core 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-storage-core 1.2.0",
  "midnight-zk-stdlib 1.3.0",
  "pastey",
  "rand 0.8.6",
@@ -3592,7 +3592,7 @@ dependencies = [
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
- "midnight-storage-core 1.2.0",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.5",
  "pastey",
