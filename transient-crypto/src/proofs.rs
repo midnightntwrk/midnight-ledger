@@ -872,7 +872,7 @@ pub struct ProofPreimage {
     pub public_transcript_outputs: Vec<Fr>,
     /// Prover-supplied inner proofs consumed positionally by `VerifyProof`
     /// instructions — one per `VerifyProof`, in instruction order.
-    pub proof_witnesses: Vec<InnerProofWitness>,
+    pub inner_proofs: Vec<InnerProofWitness>,
     /// An arbitrary input to be bound to in the proof.
     pub binding_input: Fr,
     /// The communications commitment that will be checked, and its randomness.

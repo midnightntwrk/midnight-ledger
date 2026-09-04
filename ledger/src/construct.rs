@@ -148,7 +148,7 @@ impl<S: SignatureKind<D>, D: DB>
                 output: call.output.clone(),
                 communication_commitment_rand: call.communication_commitment_rand,
                 key_location: call.key_location.clone(),
-                proof_witnesses: call.proof_witnesses.clone(),
+                inner_proofs: call.inner_proofs.clone(),
             })
             .collect::<Vec<_>>();
         let zswap_input_is_fallible = zswap_inputs
@@ -480,7 +480,7 @@ pub struct PrePartitionContractCall<D: DB> {
     pub output: AlignedValue,
     pub communication_commitment_rand: Fr,
     pub key_location: KeyLocation,
-    pub proof_witnesses: Vec<InnerProofWitness>,
+    pub inner_proofs: Vec<InnerProofWitness>,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -504,7 +504,7 @@ pub struct ContractCallPrototype<D: DB> {
     pub output: AlignedValue,
     pub communication_commitment_rand: Fr,
     pub key_location: KeyLocation,
-    pub proof_witnesses: Vec<InnerProofWitness>,
+    pub inner_proofs: Vec<InnerProofWitness>,
 }
 
 pub trait ContractCallExt<D: DB> {
@@ -562,7 +562,7 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
         let binding_input = 0u8.into();
 
         let proof = ProofPreimage {
-            proof_witnesses: call.proof_witnesses.clone(),
+            inner_proofs: call.inner_proofs.clone(),
             inputs,
             private_transcript,
             public_transcript_inputs,

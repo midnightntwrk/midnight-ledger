@@ -588,7 +588,7 @@ async fn balanced_utxos_1_intent() {
         .clone()
         .unwrap();
     let call = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -805,7 +805,7 @@ async fn intents_cannot_balance_across_segments() {
     .unwrap();
     assert!(transcripts_1[0].1.is_none());
     let call_1 = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -902,7 +902,7 @@ async fn intents_cannot_balance_across_segments() {
     .unwrap();
     assert!(transcripts_2[0].1.is_none());
     let call_2 = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -1101,7 +1101,7 @@ async fn causality_check_sanity_check() {
         .clone()
         .unwrap();
     let call_1 = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -1213,7 +1213,7 @@ async fn causality_check_sanity_check() {
         .clone()
         .unwrap();
     let call_2 = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -1407,7 +1407,7 @@ async fn imbalanced_utxos_1_intent() {
         .clone()
         .unwrap();
     let call = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -1599,7 +1599,7 @@ async fn imbalanced_utxos_1_intent_fallible() {
         .clone()
         .unwrap();
     let call = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),
@@ -2243,7 +2243,7 @@ async fn setup() -> (
         .clone()
         .unwrap();
     let call = ContractCallPrototype {
-        proof_witnesses: vec![],
+        inner_proofs: vec![],
         address: addr,
         entry_point: b"count"[..].into(),
         op: count_op.clone(),

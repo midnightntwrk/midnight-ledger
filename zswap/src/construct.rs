@@ -66,7 +66,7 @@ impl AuthorizedClaim<ProofPreimage> {
             op.field_repr(&mut public_transcript_inputs);
         }
         let proof_preimage = ProofPreimage {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,
@@ -205,7 +205,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             op.field_repr(&mut public_transcript_inputs);
         }
         let proof_preimage = ProofPreimage {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,
@@ -359,7 +359,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             op.field_repr(&mut public_transcript_inputs);
         }
         let proof_preimage = ProofPreimage {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,

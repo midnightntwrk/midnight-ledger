@@ -255,7 +255,7 @@ fn preimage(guard: bool, proof: &[u8], instance: &[Fq]) -> ProofPreimage {
         },
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses: guard
+        inner_proofs: guard
             .then(|| InnerProofWitness::Direct(proof.to_vec()))
             .into_iter()
             .collect(),

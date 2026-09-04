@@ -1079,7 +1079,7 @@ pub enum Instruction {
     },
     /// Off-circuit (preprocessing):
     /// Binds `output` to the next inner proof from
-    /// [`ProofPreimage::proof_witnesses`](transient_crypto::proofs::ProofPreimage),
+    /// [`ProofPreimage::inner_proofs`](transient_crypto::proofs::ProofPreimage),
     /// consumed in instruction order. If `guard` is `false`, nothing is consumed
     /// and `output` is bound to the empty blob, so the witness vector only ever
     /// carries proofs for the path actually taken.

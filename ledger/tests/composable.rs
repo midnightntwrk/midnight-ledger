@@ -235,7 +235,7 @@ async fn composable() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -248,7 +248,7 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -320,7 +320,7 @@ async fn composable() {
         )
         .unwrap();
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -405,7 +405,7 @@ async fn composable() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -418,7 +418,7 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -501,7 +501,7 @@ async fn composable() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -514,7 +514,7 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -599,7 +599,7 @@ async fn composable() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -614,7 +614,7 @@ async fn composable() {
         dbg!(&transcripts);
         // Manually move things to the fallible section.
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -779,7 +779,7 @@ async fn guaranteed_in_fallible() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -792,7 +792,7 @@ async fn guaranteed_in_fallible() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -866,7 +866,7 @@ async fn guaranteed_in_fallible() {
         )
         .unwrap();
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -951,7 +951,7 @@ async fn guaranteed_in_fallible() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -964,7 +964,7 @@ async fn guaranteed_in_fallible() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -1047,7 +1047,7 @@ async fn guaranteed_in_fallible() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -1060,7 +1060,7 @@ async fn guaranteed_in_fallible() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -1145,7 +1145,7 @@ async fn guaranteed_in_fallible() {
         )
         .unwrap();
         let call_inner = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
@@ -1159,7 +1159,7 @@ async fn guaranteed_in_fallible() {
         };
         dbg!(&transcripts);
         let call_outer = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
@@ -1370,7 +1370,7 @@ async fn composable_funded() {
         )
         .unwrap();
         let call_burn = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_burn,
             entry_point: b"burn"[..].into(),
             op: burn_op.clone(),
@@ -1384,7 +1384,7 @@ async fn composable_funded() {
         };
 
         let call_relay = ContractCallPrototype {
-            proof_witnesses: vec![],
+            inner_proofs: vec![],
             address: addr_relay,
             entry_point: b"send_to_burn"[..].into(),
             op: send_to_burn_op.clone(),

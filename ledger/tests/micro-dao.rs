@@ -273,7 +273,7 @@ async fn micro_dao_inner(mode: TestMode) {
             )
             .unwrap();
             let call = ContractCallPrototype {
-                proof_witnesses: vec![],
+                inner_proofs: vec![],
                 address: addr,
                 entry_point: b"setTopic"[..].into(),
                 op: set_topic_op.clone(),
@@ -451,7 +451,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     (None, [(1, offer)].into_iter().collect())
                 };
                 let call = ContractCallPrototype {
-                    proof_witnesses: vec![],
+                    inner_proofs: vec![],
                     address: addr,
                     entry_point: b"buyIn"[..].into(),
                     op: buy_in_op.clone(),
@@ -563,7 +563,7 @@ async fn micro_dao_inner(mode: TestMode) {
                 )
                 .unwrap();
                 let call = ContractCallPrototype {
-                    proof_witnesses: vec![],
+                    inner_proofs: vec![],
                     address: addr,
                     entry_point: b"voteCommit"[..].into(),
                     op: vote_commit_op.clone(),
@@ -618,7 +618,7 @@ async fn micro_dao_inner(mode: TestMode) {
             )
             .unwrap();
             let call = ContractCallPrototype {
-                proof_witnesses: vec![],
+                inner_proofs: vec![],
                 address: addr,
                 entry_point: b"advance"[..].into(),
                 op: advance_op.clone(),
@@ -729,7 +729,7 @@ async fn micro_dao_inner(mode: TestMode) {
                 )
                 .unwrap();
                 let call = ContractCallPrototype {
-                    proof_witnesses: vec![],
+                    inner_proofs: vec![],
                     address: addr,
                     entry_point: b"voteReveal"[..].into(),
                     op: vote_reveal_op.clone(),
@@ -795,7 +795,7 @@ async fn micro_dao_inner(mode: TestMode) {
             )
             .unwrap();
             let call = ContractCallPrototype {
-                proof_witnesses: vec![],
+                inner_proofs: vec![],
                 address: addr,
                 entry_point: b"advance"[..].into(),
                 op: advance_op.clone(),
@@ -909,7 +909,7 @@ async fn micro_dao_inner(mode: TestMode) {
             )
             .unwrap();
             let call = ContractCallPrototype {
-                proof_witnesses: vec![],
+                inner_proofs: vec![],
                 address: addr,
                 entry_point: b"cashOut"[..].into(),
                 op: cash_out_op.clone(),

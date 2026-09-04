@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `inner_proof` consumes from `ProofPreimage::proof_witnesses` only when its
+//! `inner_proof` consumes from `ProofPreimage::inner_proofs` only when its
 //! guard is on, so a caller never has to pad the vector for a branch it did not
 //! take.
 
@@ -21,7 +21,7 @@ use midnight_zkir_v3::IrSource;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{InnerProofWitness, KeyLocation, ProofPreimage, Zkir};
 
-fn preimage(guards: [u64; 2], proof_witnesses: Vec<InnerProofWitness>) -> ProofPreimage {
+fn preimage(guards: [u64; 2], inner_proofs: Vec<InnerProofWitness>) -> ProofPreimage {
     ProofPreimage {
         binding_input: Fr::from(7u64),
         communications_commitment: None,
@@ -29,7 +29,7 @@ fn preimage(guards: [u64; 2], proof_witnesses: Vec<InnerProofWitness>) -> ProofP
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        proof_witnesses,
+        inner_proofs,
         key_location: KeyLocation(Cow::Borrowed("builtin")),
     }
 }

@@ -79,7 +79,7 @@ pub struct Preprocessed {
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
     /// The inner-proof witnesses each `InnerProof` bound, one per instruction in
     /// instruction order; empty for a guarded-off one.
-    pub inner_proof_witnesses: Vec<Vec<u8>>,
+    pub inner_proofs: Vec<Vec<u8>>,
 }
 
 fn fab_decode_to_bytes(
@@ -283,7 +283,7 @@ impl IrSource {
         let mut public_transcript_inputs_idx: usize = 0;
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
-        let mut proof_witnesses_idx: usize = 0;
+        let mut inner_proofs_idx: usize = 0;
         // One entry per `InnerProof` instruction, in instruction order.
         let mut inner_proof_witnesses: Vec<Vec<u8>> = Vec::new();
         let mut outputs = Vec::new();
@@ -737,15 +737,15 @@ impl IrSource {
                 I::InnerProof { guard, output } => {
                     let proof = if resolve_operand_bool(&memory, guard)? {
                         let witness = preimage
-                            .proof_witnesses
-                            .get(proof_witnesses_idx)
+                            .inner_proofs
+                            .get(inner_proofs_idx)
                             .ok_or_else(|| {
                                 anyhow!(
                                     "Not enough proof witnesses: ran out at index {}",
-                                    proof_witnesses_idx
+                                    inner_proofs_idx
                                 )
                             })?;
-                        proof_witnesses_idx += 1;
+                        inner_proofs_idx += 1;
                         match witness {
                             InnerProofWitness::Direct(bytes) => bytes.clone(),
                         }
@@ -775,11 +775,11 @@ impl IrSource {
                 "Transcripts not fully consumed");
             bail!("Transcripts not fully consumed");
         }
-        if preimage.proof_witnesses.len() != proof_witnesses_idx {
+        if preimage.inner_proofs.len() != inner_proofs_idx {
             bail!(
                 "Expected {} proof witnesses (one per active InnerProof), received {}",
-                proof_witnesses_idx,
-                preimage.proof_witnesses.len()
+                inner_proofs_idx,
+                preimage.inner_proofs.len()
             );
         }
         if self.do_communications_commitment {
@@ -817,7 +817,7 @@ impl IrSource {
             comm_comm: preimage
                 .communications_commitment
                 .map(|(comm, rand)| (comm.0, rand.0)),
-            inner_proof_witnesses,
+            inner_proofs: inner_proof_witnesses,
         })
     }
 }
@@ -1371,7 +1371,7 @@ impl Relation for IrSource {
                     inner_proof_idx += 1;
                     let proof_value = witness
                         .as_ref()
-                        .map(|w| w.inner_proof_witnesses[idx].clone());
+                        .map(|w| w.inner_proofs[idx].clone());
                     proofs.insert(output.clone(), proof_value);
                 }
             }
