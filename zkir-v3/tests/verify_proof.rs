@@ -36,6 +36,8 @@
 //! round-trip, not verification.
 
 use midnight_zkir_v3::IrSource;
+use midnight_zkir_v3::ir::IrMinorVersion;
+use serialize::tagged_serialize;
 
 /// Canonical, hash-only IR: `%p_0` is bound to the inner proof, the inner
 /// statement is the single public input `%v_0`, and the instruction stores just
@@ -120,5 +122,32 @@ fn verify_proof_text_format_roundtrips() {
     assert!(
         !json.contains("verify_proof_vks"),
         "empty VK side-table should be omitted:\n{json}"
+    );
+}
+
+/// The canonical IR with a side-table written inline, declaring `minor`.
+/// `Vec<Vec<u8>>` is an array of byte arrays in JSON. The blobs are arbitrary
+/// here: nothing about them is checked until the VM resolves them by hash.
+fn ir_with_side_table(minor: u8) -> String {
+    VERIFY_PROOF_IR
+        .replace("\"minor\": 0", &format!("\"minor\": {minor}"))
+        .replace(
+            "\"do_communications_commitment\": false,",
+            "\"do_communications_commitment\": false,\n   \"verify_proof_vks\": [[0, 1, 2]],",
+        )
+}
+
+/// A side-table exists only from `V1` on, so text carrying one must declare
+/// `minor: 1`. The inconsistent document is refused at load.
+#[test]
+fn side_table_requires_minor_1() {
+    let ir = IrSource::load(ir_with_side_table(1).as_bytes()).expect("`minor: 1` must load");
+    assert_eq!(ir.version, IrMinorVersion::V1);
+    assert_eq!(ir.verify_proof_vks, vec![vec![0u8, 1, 2]]);
+    tagged_serialize(&ir, &mut Vec::new()).expect("a V1 carrying a side-table must serialize");
+
+    assert!(
+        IrSource::load(ir_with_side_table(0).as_bytes()).is_err(),
+        "`minor: 0` must not accept a side-table"
     );
 }

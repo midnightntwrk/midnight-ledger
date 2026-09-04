@@ -45,7 +45,7 @@ pub struct IrSource {
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
-    /// Full verifying keys for the circuit's `VerifyProof` instructions. 
+    /// Full verifying keys for the circuit's `VerifyProof` instructions.
     /// Each entry is
     /// [`serialize_vk`](crate::ir_instructions::decidable::serialize_vk)'s
     /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
@@ -1053,16 +1053,16 @@ pub enum Instruction {
         vals: Vec<Operand>,
     },
     /// Verifies an inner Plonk proof in-circuit, under a guard condition.
-    /// 
+    ///
     /// If `guard` is `false`, a trivial proof is verified in-circuit.
-    /// A guarded-off instruction still consumes one `InnerProof` binding, 
+    /// A guarded-off instruction still consumes one `InnerProof` binding,
     /// but never depends on its contents.
     ///
     /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
     /// which VK the circuit was compiled against.
     ///
     /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
-    /// the `InnerProof` instruction that produces `proof`. 
+    /// the `InnerProof` instruction that produces `proof`.
     ///
     /// No outputs.
     VerifyProof {
@@ -1150,13 +1150,20 @@ impl IrSource {
                 match ver {
                     SerdeVersion {
                         major: 3,
-                        minor: 0..=0,
+                        minor: 0..=1,
                     } => {
                         obj.insert(
                             "version".into(),
                             serde_json::Value::Number(ver.minor.into()),
                         );
-                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                        let ir: Self = serde_json::from_value(serde_json::Value::Object(obj))?;
+                        if ir.version == IrMinorVersion::V0 && !ir.verify_proof_vks.is_empty() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "`verify_proof_vks` requires `minor: 1` or later",
+                            ));
+                        }
+                        Ok(ir)
                     }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,

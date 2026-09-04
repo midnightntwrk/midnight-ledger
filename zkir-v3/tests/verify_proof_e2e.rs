@@ -215,7 +215,7 @@ fn outer_ir(vk_blob: Vec<u8>, instance_len: usize) -> IrSource {
         .collect();
     let ir_json = format!(
         r#"{{
-           "version": {{ "major": 3, "minor": 0 }},
+           "version": {{ "major": 3, "minor": 1 }},
            "inputs": [{{ "name": "%g", "type": "Scalar<BLS12-381>" }}],
            "outputs": [],
            "do_communications_commitment": false,
@@ -232,6 +232,7 @@ fn outer_ir(vk_blob: Vec<u8>, instance_len: usize) -> IrSource {
         vk_hash = const_hex::encode(sha2::Sha256::digest(&vk_blob)),
     );
     let mut ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
+    // `minor: 1` above: the side-table is only in the `V1` wire shape.
     ir.verify_proof_vks = vec![vk_blob];
     // One accumulator, whatever the decider kind. That is what keeps the
     // exposed shape witness-independent and computable at keygen.
@@ -247,9 +248,11 @@ fn preimage(guard: bool, proof: &[u8], instance: &[Fq]) -> ProofPreimage {
         communications_commitment: None,
         inputs: vec![Fr::from(guard as u64)],
         // The inner instance, as ordinary prover witnesses.
-        private_transcript: guard
-            .then(|| instance.iter().copied().map(Fr).collect())
-            .unwrap_or_default(),
+        private_transcript: if guard {
+            instance.iter().copied().map(Fr).collect()
+        } else {
+            vec![]
+        },
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
         proof_witnesses: guard
