@@ -255,16 +255,16 @@ pub fn proof_data_into_serialized_preimage(
     input.value_only_field_repr(&mut comm_comm_preimage);
     output.value_only_field_repr(&mut comm_comm_preimage);
     let preimage = transient_crypto::proofs::ProofPreimage {
-        inner_proofs: inner_proofs
-            .unwrap_or_default()
-            .into_iter()
-            .map(|b| transient_crypto::proofs::InnerProofWitness::Direct(b.to_vec()))
-            .collect(),
         inputs: ValueReprAlignedValue(input).field_vec(),
         binding_input: 0.into(),
         private_transcript,
         public_transcript_inputs,
         public_transcript_outputs,
+        inner_proofs: inner_proofs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| transient_crypto::proofs::InnerProofWitness::Direct(b.to_vec()))
+            .collect(),
         key_location: transient_crypto::proofs::KeyLocation(
             key_location
                 .map(Cow::Owned)

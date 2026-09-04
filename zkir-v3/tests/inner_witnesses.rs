@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! `inner_proof` consumes from `ProofPreimage::inner_proofs` only when its
-//! guard is on, so a caller never has to pad the vector for a branch it did not
-//! take.
+//! `inner_proof` consumes one entry of `ProofPreimage::inner_proofs` per
+//! instruction, whatever its guard, so the vector's length is fixed by the
+//! circuit and not by the path taken.
 
 use std::borrow::Cow;
 
@@ -51,22 +51,28 @@ fn load(instructions: &str) -> IrSource {
 }
 
 #[test]
-fn proof_witnesses_track_the_guards() {
+fn one_proof_witness_per_instruction_whatever_the_guard() {
     let ir = load(
         r#"{ "op": "inner_proof", "guard": "%g_0", "output": "%p_0" },
            { "op": "inner_proof", "guard": "%g_1", "output": "%p_1" }"#,
     );
-    let proof = || vec![InnerProofWitness::Direct(vec![1u8, 2, 3])];
+    let proof = || InnerProofWitness::Direct(vec![1u8, 2, 3]);
+    let blank = || InnerProofWitness::Direct(vec![]);
 
-    // The single witness belongs to the second, active instruction: the
-    // guarded-off first consumed nothing.
-    ir.check(&preimage([0, 1], proof()))
-        .expect("one witness, for the active instruction");
+    // Two instructions, two witnesses, on every combination of guards. The
+    // guarded-off ones can be blank, since their witness is ignored.
+    ir.check(&preimage([1, 1], vec![proof(), proof()]))
+        .expect("both active");
+    ir.check(&preimage([0, 1], vec![blank(), proof()]))
+        .expect("first guarded off");
+    ir.check(&preimage([0, 0], vec![blank(), blank()]))
+        .expect("both guarded off");
 
-    // Two active instructions need two witnesses...
-    assert!(ir.check(&preimage([1, 1], proof())).is_err());
-
-    // ...and none needs none: an unconsumed witness is rejected, so the vector
-    // cannot quietly carry a proof for a branch that was not taken.
-    assert!(ir.check(&preimage([0, 0], proof())).is_err());
+    // The count does not depend on the guards, so too few is rejected even
+    // when only one instruction is active, and too many always is.
+    assert!(ir.check(&preimage([0, 1], vec![proof()])).is_err());
+    assert!(
+        ir.check(&preimage([1, 1], vec![proof(), proof(), proof()]))
+            .is_err()
+    );
 }

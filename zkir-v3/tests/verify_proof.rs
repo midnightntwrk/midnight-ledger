@@ -14,10 +14,11 @@
 //! Shows the ZKIR text format of the `inner_proof` / `verify_proof` pair.
 //!
 //! `inner_proof` binds the next prover-supplied inner proof
-//! (`ProofPreimage::proof_witnesses`) to a name, and `verify_proof` takes that
+//! (`ProofPreimage::inner_proofs`) to a name, and `verify_proof` takes that
 //! name as its `proof` input. Both carry a `guard`, which should be the same
-//! condition on the two: it decides whether a witness is consumed at all, and
-//! whether the proof is actually verified. Alongside it, `verify_proof` takes:
+//! condition on the two: it decides whether the witness is bound at all, and
+//! whether the proof is actually verified. A witness slot is consumed either
+//! way. Alongside it, `verify_proof` takes:
 //!
 //! - `vk_hash`: hash of the decider-tagged, self-contained `MidnightVK` blob
 //!   (the blob's leading byte is the decider tag, `0x00` = `DeciderKind::None`).
@@ -29,8 +30,8 @@
 //!
 //! A guard is an ordinary operand, so it can be a variable (witnessed) or a
 //! `0x`-hex immediate (a circuit constant, in practice `0x01`). Guarded off, the
-//! pair consumes no witness and exposes the trivial accumulator, which the outer
-//! verifier's deferred pairing check accepts unconditionally.
+//! pair takes an empty witness slot and exposes the trivial accumulator, which
+//! the outer verifier's deferred pairing check accepts unconditionally.
 //!
 //! The `vk_hash` here is fake — this test exercises only the text format and
 //! round-trip, not verification.

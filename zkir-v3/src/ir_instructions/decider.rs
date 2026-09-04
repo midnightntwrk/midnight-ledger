@@ -48,7 +48,7 @@ type AssignedPoint = <S as SelfEmulation>::AssignedPoint;
 /// # Wire format
 ///
 /// The tag is a single byte written by declaration order: `None = 0`,
-/// `Simple = 1`. It is consensus wire format, so **never reorder or remove a
+/// `Collapsed = 1`. It is consensus wire format, so **never reorder or remove a
 /// variant**; only append.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DeciderKind {
@@ -97,13 +97,15 @@ pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> 
     Ok((kind, vk))
 }
 
-/// Public-input encoding of the accumulator a guarded-off `verify_proof`
-/// exposes: the trivial accumulator, whose sides both evaluate to the identity
-/// and which therefore satisfies the pairing invariant by construction.
+/// Public-input encoding of a resolved, collapsed accumulator.
+pub fn accumulator_pis(acc: &Accumulator<S>) -> Vec<outer::Scalar> {
+    <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(acc)
+}
+
+/// Encoding of the accumulator a guarded-off `verify_proof` exposes: the
+/// trivial one, which satisfies the pairing invariant by construction.
 pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
-    <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(
-        &Accumulator::<S>::trivial(&[]),
-    )
+    accumulator_pis(&Accumulator::<S>::trivial(&[]))
 }
 
 /// The last [`accumulator_pi_len`] entries of an inner proof's instance. 
@@ -115,19 +117,20 @@ fn accumulator_tail<T>(instance: &[T]) -> anyhow::Result<&[T]> {
         .map(|start| &instance[start..])
         .ok_or_else(|| {
             anyhow!(
-                "a `Simple` inner proof's instance must end with the {acc_len} fields of a \
+                "a `Collapsed` inner proof's instance must end with the {acc_len} fields of a \
                  collapsed accumulator, but it has {}",
                 instance.len()
             )
         })
 }
 
-/// Constructs the accumulator from the instance.
+/// Reads the accumulator a `Collapsed` inner proof carries in the tail of its
+/// instance, and checks it is collapsed.
 fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator<S>> {
     let tail = accumulator_tail(instance)?;
     let acc = reconstruct_accumulator(tail).ok_or_else(|| {
         anyhow!(
-            "the tail of a `Simple` inner proof's instance is not a well-formed collapsed \
+            "the tail of a `Collapsed` inner proof's instance is not a well-formed collapsed \
              accumulator; producers must normalise with `collapse -> resolve_fixed_bases -> \
              collapse` before exposing it"
         )
@@ -145,34 +148,38 @@ fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator
     Ok(acc)
 }
 
-/// Final off-circuit verification step for a `DeciderKind`.
+/// Final off-circuit step for a `DeciderKind`: folds in whatever the inner proof
+/// carries, then resolves and collapses the result.
+///
+/// Takes no `guard`, unlike [`decide_incircuit`]: a guarded-off instruction
+/// never reaches here, `verify_proof_offcircuit` returns early instead.
 pub fn decide_offcircuit(
     kind: DeciderKind,
-    own: Accumulator<S>,
+    own_acc: Accumulator<S>,
     bases: &BTreeMap<String, <S as SelfEmulation>::C>,
     instance: &[outer::Scalar],
-) -> anyhow::Result<Vec<outer::Scalar>> {
+) -> anyhow::Result<Accumulator<S>> {
     let mut acc = match kind {
-        DeciderKind::None => own,
-        DeciderKind::Collapsed => Accumulator::accumulate(&[own, carried_accumulator(instance)?]),
+        DeciderKind::None => own_acc,
+        DeciderKind::Collapsed => Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?]),
     };
 
     acc.resolve_fixed_bases(bases);
     acc.collapse();
 
-    Ok(<AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(&acc))
+    Ok(acc)
 }
 
-/// In-circuit mirror of [`decide_offcircuit`], constraining the single resulting
+/// In-circuit counterpart of [`decide_offcircuit`], constraining the resulting
 /// accumulator as public inputs.
 ///
-/// `guard` is taken as input to select the trivial accumulator in case it is 
-/// enabled. 
+/// Takes `guard` because a circuit's shape cannot depend on a witness: where the
+/// off-circuit pass returns early, this one folds the guard in instead.
 pub fn decide_incircuit(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
     kind: DeciderKind,
-    own: AssignedAccumulator<S>,
+    own_acc: AssignedAccumulator<S>,
     bases: &BTreeMap<String, AssignedPoint>,
     instance: &[AssignedNative<outer::Scalar>],
     guard: &AssignedBit<outer::Scalar>,
@@ -184,10 +191,10 @@ pub fn decide_incircuit(
     // TODO: if we use truncated challenges it may make sense to collapse before
     // accumulating. 
     let mut acc = match kind {
-        DeciderKind::None => own,
+        DeciderKind::None => own_acc,
         DeciderKind::Collapsed => {
-            let carried = assign_carried_accumulator(std, layouter, instance, guard)?;
-            verifier.accumulate(layouter, &[own, carried])?
+            let carried = compute_carried_accumulator(std, layouter, instance, guard)?;
+            verifier.accumulate(layouter, &[own_acc, carried])?
         }
     };
 
@@ -201,7 +208,7 @@ pub fn decide_incircuit(
 
 /// Reconstructs, in-circuit, the accumulator an inner proof carries in
 /// its instance tail.
-fn assign_carried_accumulator(
+fn compute_carried_accumulator(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
     instance: &[AssignedNative<outer::Scalar>],
@@ -215,27 +222,31 @@ fn assign_carried_accumulator(
         selected_limbs.push(std.select(layouter, guard, instance, &trivial)?);
     }
 
-    // NOTE: this could be replaced once we have 'from_public_inputs'
-    let accumulator = selected_limbs
-        .iter()
-        .map(|wire| wire.value().copied())
-        .collect::<Value<Vec<_>>>()
-        .map_with_result(|fields| {
-            reconstruct_accumulator(&fields).ok_or_else(|| {
-                Error::Synthesis("the carried accumulator's encoding is malformed".into())
-            })
-        })?;
+    // All following operations are required when assigning the accumulator. 
+    let assigned_accumulator = {
+        // NOTE: this could be replaced once we have 'from_public_inputs'
+        let accumulator = selected_limbs
+            .iter()
+            .map(|wire| wire.value().copied())
+            .collect::<Value<Vec<_>>>()
+            .map_with_result(|fields| {
+                reconstruct_accumulator(&fields).ok_or_else(|| {
+                    Error::Synthesis("the carried accumulator's encoding is malformed".into())
+                })
+            })?;
 
-    let assigned_accumulator = std
-        .verifier()
-        .assign_collapsed_accumulator(layouter, &[], accumulator)?;
+        let assigned_accumulator = std
+            .verifier()
+            .assign_collapsed_accumulator(layouter, &[], accumulator)?;
 
-    for (selected, assigned) in selected_limbs
-        .iter()
-        .zip(std.verifier().as_public_input(layouter, &assigned_accumulator)?)
-    {
-        std.assert_equal(layouter, selected, &assigned)?;
-    }
+        for (selected, assigned) in selected_limbs
+            .iter()
+            .zip(std.verifier().as_public_input(layouter, &assigned_accumulator)?)
+        {
+            std.assert_equal(layouter, selected, &assigned)?;
+        }
+        assigned_accumulator
+    };
 
     Ok(assigned_accumulator)
 }

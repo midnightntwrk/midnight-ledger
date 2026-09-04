@@ -562,11 +562,11 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
         let binding_input = 0u8.into();
 
         let proof = ProofPreimage {
-            inner_proofs: call.inner_proofs.clone(),
             inputs,
             private_transcript,
             public_transcript_inputs,
             public_transcript_outputs,
+            inner_proofs: call.inner_proofs.clone(),
             binding_input,
             communications_commitment: Some((
                 communication_commitment,

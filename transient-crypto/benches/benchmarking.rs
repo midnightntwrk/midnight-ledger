@@ -253,13 +253,13 @@ pub fn proof_verification(c: &mut Criterion) {
         }
         let inp = (0..size).map(|_| OsRng.r#gen()).collect::<Vec<_>>();
         let preimage = ProofPreimage {
-            inner_proofs: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: inp.clone(),
             private_transcript: vec![],
             public_transcript_inputs: inp.clone(),
             public_transcript_outputs: vec![],
+            inner_proofs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let (proof, _) = block_on(preimage.prove::<TestIr>(

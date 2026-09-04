@@ -1825,10 +1825,10 @@ impl<D: DB> DustLocalState<D> {
         let public_transcript_outputs =
             (true, true, erased_spend, ctime, self.params, ctime).field_vec();
         let proof = ProofPreimage {
-            inner_proofs: vec![],
             inputs,
             public_transcript_inputs,
             public_transcript_outputs,
+            inner_proofs: vec![],
             binding_input: Default::default(),
             communications_commitment: None,
             private_transcript: vec![(v_new - v_fee).into()],

@@ -47,7 +47,7 @@ pub struct IrSource {
     pub instructions: Arc<Vec<Instruction>>,
     /// Full verifying keys for the circuit's `VerifyProof` instructions.
     /// Each entry is
-    /// [`serialize_vk`](crate::ir_instructions::decidable::serialize_vk)'s
+    /// [`serialize_vk`](crate::ir_instructions::decider::serialize_vk)'s
     /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_proof_vks: Vec<Vec<u8>>,
@@ -1080,9 +1080,10 @@ pub enum Instruction {
     /// Off-circuit (preprocessing):
     /// Binds `output` to the next inner proof from
     /// [`ProofPreimage::inner_proofs`](transient_crypto::proofs::ProofPreimage),
-    /// consumed in instruction order. If `guard` is `false`, nothing is consumed
-    /// and `output` is bound to the empty blob, so the witness vector only ever
-    /// carries proofs for the path actually taken.
+    /// consumed in instruction order: one per instruction, whatever its guard,
+    /// so the vector's length is fixed by the circuit and not by the path taken.
+    /// If `guard` is `false` the witness is ignored and `output` is bound to the
+    /// empty blob, so the caller can pass a blank entry there.
     ///
     /// In-circuit:
     /// Binds `output` to the same blob as a free prover witness. It carries no
@@ -1094,7 +1095,8 @@ pub enum Instruction {
     ///
     /// One output, the inner proof.
     InnerProof {
-        /// The boolean condition under which a proof witness is consumed
+        /// The boolean condition under which the proof witness is bound. One
+        /// witness is consumed either way.
         guard: Operand,
         /// The output variable name.
         output: Identifier,

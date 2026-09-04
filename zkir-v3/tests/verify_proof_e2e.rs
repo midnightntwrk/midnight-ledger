@@ -41,8 +41,8 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decidable::{
-    DeciderKind, serialize_vk, trivial_accumulator_pis,
+use midnight_zkir_v3::ir_instructions::decider::{
+    DeciderKind, accumulator_pis, serialize_vk, trivial_accumulator_pis,
 };
 use midnight_zkir_v3::ir_instructions::verify_proof::{
     verify_proof_incircuit, verify_proof_offcircuit,
@@ -255,10 +255,13 @@ fn preimage(guard: bool, proof: &[u8], instance: &[Fq]) -> ProofPreimage {
         },
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
-        inner_proofs: guard
-            .then(|| InnerProofWitness::Direct(proof.to_vec()))
-            .into_iter()
-            .collect(),
+        // One slot for the circuit's single `inner_proof`, whatever the guard;
+        // blank where it is off.
+        inner_proofs: vec![InnerProofWitness::Direct(if guard {
+            proof.to_vec()
+        } else {
+            vec![]
+        })],
         key_location: KeyLocation(Cow::Borrowed("builtin")),
     }
 }
@@ -326,8 +329,10 @@ async fn verify_proof_with_a_collapsed_decider() {
     // defers.
     let (echo_proof, echo_vk) = prove_inner(&Echo, &Fq::from(ECHO), (), &mut rng).await;
     let echo_blob = serialize_vk(&echo_vk, DeciderKind::None).expect("serialize echo vk");
-    let deferred = verify_proof_offcircuit(&echo_blob, &[Fq::from(ECHO)], &echo_proof, true)
-        .expect("the accumulator the echo proof defers");
+    let deferred = accumulator_pis(
+        &verify_proof_offcircuit(&echo_blob, &[Fq::from(ECHO)], &echo_proof, true)
+            .expect("the accumulator the echo proof defers"),
+    );
 
     // The proof that verifies it, carrying that accumulator in its instance
     // tail.
@@ -355,13 +360,15 @@ async fn verify_proof_with_a_collapsed_decider() {
 
     // What the instruction exposed is the fold, not the recursive proof's own
     // accumulator: the carried one is in there too.
-    let own = verify_proof_offcircuit(
-        &serialize_vk(&vk, DeciderKind::None).expect("serialize recursive vk as None"),
-        &instance,
-        &proof,
-        true,
-    )
-    .expect("the recursive proof's own accumulator");
+    let own = accumulator_pis(
+        &verify_proof_offcircuit(
+            &serialize_vk(&vk, DeciderKind::None).expect("serialize recursive vk as None"),
+            &instance,
+            &proof,
+            true,
+        )
+        .expect("the recursive proof's own accumulator"),
+    );
     let exposed: Vec<Fq> = outer_proof.accumulators[0].iter().map(|f| f.0).collect();
     assert_ne!(
         exposed, own,

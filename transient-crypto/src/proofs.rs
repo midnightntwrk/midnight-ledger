@@ -402,6 +402,10 @@ pub fn accumulator_pi_len() -> usize {
 
 /// Reconstructs a single-point-per-side accumulator from its public-input
 /// encoding (`lhs_point || lhs_scalar || rhs_point || rhs_scalar`).
+///
+/// `None` on a wrong field count, or a side whose point fields do not decode to
+/// a curve point in the prime-order subgroup. Does not check that the
+/// accumulator is collapsed.
 pub fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<InnerSelfEmulation>> {
     if fields.len() != accumulator_pi_len() {
         return None;
