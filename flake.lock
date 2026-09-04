@@ -74,7 +74,8 @@
         "fenix": "fenix",
         "inclusive": "inclusive",
         "nixpkgs": "nixpkgs_2",
-        "utils": "utils"
+        "utils": "utils",
+        "zkir": "zkir"
       }
     },
     "rust-analyzer-src": {
@@ -139,6 +140,36 @@
       "original": {
         "owner": "numtide",
         "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "zkir": {
+      "inputs": {
+        "fenix": [
+          "fenix"
+        ],
+        "inclusive": [
+          "inclusive"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "utils": [
+          "utils"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788524368,
+        "narHash": "sha256-soRBk7EFsecl+5DxeUrEHJdXkj+cGRm3txAoUaOw8ks=",
+        "owner": "midnightntwrk",
+        "repo": "midnight-zkir",
+        "rev": "96fd1058e466c49ebe9dea7451840311878e5277",
+        "type": "github"
+      },
+      "original": {
+        "owner": "midnightntwrk",
+        "repo": "midnight-zkir",
+        "rev": "96fd1058e466c49ebe9dea7451840311878e5277",
         "type": "github"
       }
     }

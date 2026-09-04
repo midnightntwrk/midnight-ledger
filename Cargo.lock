@@ -2347,7 +2347,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -3661,19 +3661,13 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "2.2.0"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.0.0-rc.1#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
- "actix-rt",
  "anyhow",
- "clap",
- "console 0.16.3",
  "const-hex",
- "env_logger",
  "flate2",
- "futures-executor",
  "group",
  "hex",
- "indicatif",
- "log",
  "midnight-base-crypto",
  "midnight-circuits 6.3.0",
  "midnight-circuits 7.2.4",
@@ -3684,38 +3678,25 @@ dependencies = [
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 1.3.0",
  "midnight-zk-stdlib 2.3.5",
- "midnight-zkir",
  "num-bigint",
- "pastey",
- "proptest",
- "proptest-derive",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
  "serde_bytes",
  "serde_json",
  "serde_repr",
- "sha2 0.11.0",
- "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
 name = "midnight-zkir-v3"
 version = "3.0.0"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.0.0-rc.1#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
- "actix-rt",
  "anyhow",
- "clap",
- "console 0.16.3",
  "const-hex",
- "env_logger",
- "futures-executor",
  "group",
  "hex",
- "indicatif",
- "log",
  "midnight-base-crypto",
  "midnight-circuits 7.2.4",
  "midnight-curves 0.3.1",
@@ -3723,12 +3704,8 @@ dependencies = [
  "midnight-serialize",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.5",
- "midnight-zkir-v3",
  "num-bigint",
  "num-traits",
- "pastey",
- "proptest",
- "proptest-derive",
  "rand 0.8.6",
  "rand_chacha 0.3.1",
  "serde",
@@ -3737,31 +3714,13 @@ dependencies = [
  "serde_repr",
  "sha2 0.11.0",
  "sha3",
- "tokio",
  "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "midnight-zkir-v3-wasm"
-version = "3.0.0-rc.2"
-dependencies = [
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "hex",
- "js-sys",
- "midnight-serialize",
- "midnight-transient-crypto 3.0.0",
- "midnight-zkir-v3",
- "rand 0.8.6",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
 name = "midnight-zkir-wasm"
 version = "2.2.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.0.0-rc.1#a9e8f97e40d7d8db37ac579dad1c580ef5fa67dc"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -4488,7 +4447,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4526,7 +4485,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
