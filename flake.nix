@@ -21,7 +21,14 @@
     inclusive.url = "github:input-output-hk/nix-inclusive";
     # TODO: point back at the default branch (or a release tag) once
     # alexshielded/nix-wasm-packaging is merged into midnight-zkir.
-    zkir.url = "github:midnightntwrk/midnight-zkir/e10f5cd36df5f05d6a4de0d36b008b67f4facce9";
+    zkir.url = "github:midnightntwrk/midnight-zkir/96fd1058e466c49ebe9dea7451840311878e5277";
+    # Share our nixpkgs and rust toolchain with the zkir flake; without this
+    # the CI runners build two full toolchain stacks, which OOMs the smaller
+    # runners (the nix daemon gets killed mid-build).
+    zkir.inputs.nixpkgs.follows = "nixpkgs";
+    zkir.inputs.fenix.follows = "fenix";
+    zkir.inputs.utils.follows = "utils";
+    zkir.inputs.inclusive.follows = "inclusive";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
