@@ -111,6 +111,7 @@ async fn simple_merkle_tree() {
         )
         .unwrap();
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"store"[..].into(),
             op: store_op.clone(),
@@ -174,6 +175,7 @@ async fn simple_merkle_tree() {
             transcript.gas = transcript.gas * 1.2;
         }
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"check"[..].into(),
             op: check_op.clone(),
@@ -217,6 +219,7 @@ async fn simple_merkle_tree() {
     .unwrap();
     let tx = {
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"store"[..].into(),
             op: store_op.clone(),

@@ -1828,6 +1828,7 @@ impl<D: DB> DustLocalState<D> {
             inputs,
             public_transcript_inputs,
             public_transcript_outputs,
+            inner_proofs: vec![],
             binding_input: Default::default(),
             communications_commitment: None,
             private_transcript: vec![(v_new - v_fee).into()],
@@ -2131,7 +2132,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 2_912;
+pub const DUST_SPEND_PROOF_SIZE: usize = 2_915;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]
@@ -2147,6 +2148,7 @@ mod tests {
     async fn test_proof_size() {
         use base_crypto::rng::SplittableRng;
         use rand::{Rng, SeedableRng, rngs::StdRng};
+        use serialize::Serializable;
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
         use zkir_v2::LocalProvingProvider;
@@ -2173,7 +2175,7 @@ mod tests {
         };
         let binding = Pedersen::from(rng.r#gen::<PedersenRandomness>());
         let proven_dust_spend = dust_spend.prove(prover, 0, binding).await.unwrap();
-        assert_eq!(proven_dust_spend.proof.0.len(), DUST_SPEND_PROOF_SIZE);
+        assert_eq!(proven_dust_spend.proof.serialized_size(), DUST_SPEND_PROOF_SIZE);
     }
 
     struct WrappedSeed(pub Seed);

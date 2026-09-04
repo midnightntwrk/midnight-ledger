@@ -107,7 +107,7 @@ impl<
                     &old_preimage,
                 )
                 .await?;
-                Ok(Proof(proof.0))
+                Ok(Proof::from_bytes(proof.0))
             }
             _ => {
                 // V2+: use the current pipeline.

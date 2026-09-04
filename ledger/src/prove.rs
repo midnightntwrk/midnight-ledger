@@ -373,8 +373,10 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
                 let tag = peek_tag(&mut std::io::Cursor::new(&vk))
                     .map_err(TransactionProvingError::Tokio)?;
                 match tag.as_str() {
-                    "verifier-key[v6]" => ProofVersioned::V2(proof),
-                    "verifier-key[v7]" => ProofVersioned::V3(proof),
+                    "verifier-key[v6]" => {
+                        ProofVersioned::V2(transient_crypto_old::proofs::Proof(proof.bytes))
+                    }
+                    "verifier-key[v8]" => ProofVersioned::V4(proof),
                     _ => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
                 }
             }
@@ -426,7 +428,7 @@ impl ProvingProvider for MockProver {
             .flat_map(|v| v.into_iter())
             .take(size)
             .collect::<Vec<_>>();
-        let mock_proof = transient_crypto::proofs::Proof(nonsense_data);
+        let mock_proof = transient_crypto::proofs::Proof::from_bytes(nonsense_data);
         Ok(mock_proof)
     }
     fn split(&mut self) -> Self {

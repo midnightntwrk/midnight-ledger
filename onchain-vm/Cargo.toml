@@ -11,7 +11,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "r
 
 [dependencies]
 coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto = { version = "4.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }

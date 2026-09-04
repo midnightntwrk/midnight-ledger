@@ -31,9 +31,7 @@ use transient_crypto::proofs::{
 use crate::ir_types::IrType;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
-#[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3-generic]"]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IrSource {
     /// The minor version of this IR.
     pub version: IrMinorVersion,
@@ -47,7 +45,124 @@ pub struct IrSource {
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
+    /// Full verifying keys for the circuit's `VerifyProof` instructions.
+    /// Each entry is
+    /// [`serialize_vk`](crate::ir_instructions::decider::serialize_vk)'s
+    /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verify_proof_vks: Vec<Vec<u8>>,
 }
+
+/// Hand-written so `verify_proof_vks` stays empty on a `V0`, which is the
+/// invariant [`Serializable`] enforces.
+#[cfg(feature = "proptest")]
+impl proptest::arbitrary::Arbitrary for IrSource {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        (
+            any::<IrMinorVersion>(),
+            any::<Vec<TypedIdentifier>>(),
+            any::<Vec<IrType>>(),
+            any::<bool>(),
+            any::<Arc<Vec<Instruction>>>(),
+            any::<Vec<Vec<u8>>>(),
+        )
+            .prop_map(
+                |(version, inputs, outputs, do_communications_commitment, instructions, vks)| {
+                    let verify_proof_vks = match version {
+                        IrMinorVersion::V0 => Vec::new(),
+                        _ => vks,
+                    };
+                    IrSource {
+                        version,
+                        inputs,
+                        outputs,
+                        do_communications_commitment,
+                        instructions,
+                        verify_proof_vks,
+                    }
+                },
+            )
+            .boxed()
+    }
+}
+
+impl Tagged for IrSource {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("ir-source[v3-generic]")
+    }
+    fn tag_unique_factor() -> String {
+        format!(
+            "(({},{},{},{},{},v1-only({})))",
+            <IrMinorVersion>::tag(),
+            <Vec<TypedIdentifier>>::tag(),
+            <Vec<IrType>>::tag(),
+            <bool>::tag(),
+            <Arc<Vec<Instruction>>>::tag(),
+            <Vec<Vec<u8>>>::tag(),
+        )
+    }
+}
+
+impl Serializable for IrSource {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> Result<(), io::Error> {
+        if self.version == IrMinorVersion::V0 && !self.verify_proof_vks.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "`verify_proof_vks` requires `IrMinorVersion::V1` or later",
+            ));
+        }
+        Serializable::serialize(&self.version, writer)?;
+        Serializable::serialize(&self.inputs, writer)?;
+        Serializable::serialize(&self.outputs, writer)?;
+        Serializable::serialize(&self.do_communications_commitment, writer)?;
+        Serializable::serialize(&self.instructions, writer)?;
+        if self.version != IrMinorVersion::V0 {
+            Serializable::serialize(&self.verify_proof_vks, writer)?;
+        }
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        let size = self.version.serialized_size()
+            + self.inputs.serialized_size()
+            + self.outputs.serialized_size()
+            + self.do_communications_commitment.serialized_size()
+            + self.instructions.serialized_size();
+        if self.version == IrMinorVersion::V0 {
+            size
+        } else {
+            size + self.verify_proof_vks.serialized_size()
+        }
+    }
+}
+
+impl Deserializable for IrSource {
+    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> Result<Self, io::Error> {
+        let version: IrMinorVersion = Deserializable::deserialize(reader, recursion_depth)?;
+        let inputs = Deserializable::deserialize(reader, recursion_depth)?;
+        let outputs = Deserializable::deserialize(reader, recursion_depth)?;
+        let do_communications_commitment = Deserializable::deserialize(reader, recursion_depth)?;
+        let instructions = Deserializable::deserialize(reader, recursion_depth)?;
+        let verify_proof_vks = if version == IrMinorVersion::V0 {
+            Vec::new()
+        } else {
+            Deserializable::deserialize(reader, recursion_depth)?
+        };
+        Ok(IrSource {
+            version,
+            inputs,
+            outputs,
+            do_communications_commitment,
+            instructions,
+            verify_proof_vks,
+        })
+    }
+}
+
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
 
@@ -65,8 +180,10 @@ tag_enforcement_test!(ProverKey<IrSource>);
 #[repr(u8)]
 #[non_exhaustive]
 pub enum IrMinorVersion {
-    #[default]
     V0,
+    /// Adds [`IrSource::verify_proof_vks`].
+    #[default]
+    V1,
 }
 
 impl Zkir for IrSource {
@@ -87,6 +204,7 @@ impl Zkir for IrSource {
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
         use midnight_zk_stdlib::prove;
+        use transient_crypto::proofs::accumulator_pi_len;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let preproc = self.preprocess(preimage)?;
@@ -99,7 +217,27 @@ impl Zkir for IrSource {
 
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
-        Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+        // Split the produced PI vector at `N * accumulator_pi_len()`: the head is
+        // the accumulator block (one entry per `verify_proof` instruction, in
+        // instruction order) carried on the proof, the tail is the external
+        // statement returned to the caller.
+        let acc_len = accumulator_pi_len();
+        let n_accs = self.accumulator_count();
+        let split = n_accs * acc_len;
+        let accumulators: Vec<Vec<Fr>> = pis[..split]
+            .chunks(acc_len)
+            .map(|c| c.iter().copied().map(Fr).collect())
+            .collect();
+        let statement: Vec<Fr> = pis[split..].iter().copied().map(Fr).collect();
+
+        Ok((
+            Proof {
+                bytes: proof,
+                accumulators,
+            },
+            statement,
+            pi_skips,
+        ))
     }
 
     fn k(&self) -> u8 {
@@ -111,10 +249,8 @@ impl Zkir for IrSource {
         params: &impl ParamsProverProvider,
     ) -> Result<transient_crypto::proofs::VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(transient_crypto::proofs::VerifierKey::from(setup_vk(
-            params.get_params(self.k()).await?.as_ref(),
-            self,
-        )))
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        Ok(transient_crypto::proofs::VerifierKey::from(vk))
     }
 
     async fn keygen(
@@ -356,7 +492,7 @@ tag_enforcement_test!(Operand);
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[serde(rename_all = "snake_case", tag = "op")]
-#[tag = "ir-instruction[v3]"]
+#[tag = "ir-instruction[v4]"]
 pub enum Instruction {
     /// Encodes the given value as a vector of raw Fr elements.
     ///
@@ -916,6 +1052,55 @@ pub enum Instruction {
         /// The values returned, one per `IrSource::outputs[i]`.
         vals: Vec<Operand>,
     },
+    /// Verifies an inner Plonk proof in-circuit, under a guard condition.
+    ///
+    /// If `guard` is `false`, a trivial proof is verified in-circuit.
+    /// A guarded-off instruction still consumes one `InnerProof` binding,
+    /// but never depends on its contents.
+    ///
+    /// The VK is fixed circuit data, resolved out-of-band: `vk_hash` binds
+    /// which VK the circuit was compiled against.
+    ///
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `InnerProof` instruction that produces `proof`.
+    ///
+    /// No outputs.
+    VerifyProof {
+        /// The boolean condition under which the inner proof is verified. A
+        /// variable reference, or a `0x`-hex immediate for a constant guard.
+        guard: Operand,
+        /// Hash of the inner proof verifying key.
+        #[serde(with = "const_hex::serde")]
+        vk_hash: Vec<u8>,
+        /// The inner proof's public inputs (each of type `Native`).
+        instance: Vec<Operand>,
+        /// The proof to verify, as bound by an `InnerProof` instruction.
+        proof: Identifier,
+    },
+    /// Off-circuit (preprocessing):
+    /// Binds `output` to the next inner proof from
+    /// [`ProofPreimage::inner_proofs`](transient_crypto::proofs::ProofPreimage),
+    /// consumed in instruction order: one per instruction, whatever its guard,
+    /// so the vector's length is fixed by the circuit and not by the path taken.
+    /// If `guard` is `false` the witness is ignored and `output` is bound to the
+    /// empty blob, so the caller can pass a blank entry there.
+    ///
+    /// In-circuit:
+    /// Binds `output` to the same blob as a free prover witness. It carries no
+    /// constraints of its own, and the `guard` DOES NOT participate in in-circuit
+    /// constraints.
+    ///
+    /// WARNING: the `guard` here must be the same `Operand` as the `guard` of
+    /// the `VerifyProof` instruction that consumes `output`.
+    ///
+    /// One output, the inner proof.
+    InnerProof {
+        /// The boolean condition under which the proof witness is bound. One
+        /// witness is consumed either way.
+        guard: Operand,
+        /// The output variable name.
+        output: Identifier,
+    },
 }
 tag_enforcement_test!(Instruction);
 
@@ -967,13 +1152,20 @@ impl IrSource {
                 match ver {
                     SerdeVersion {
                         major: 3,
-                        minor: 0..=0,
+                        minor: 0..=1,
                     } => {
                         obj.insert(
                             "version".into(),
                             serde_json::Value::Number(ver.minor.into()),
                         );
-                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                        let ir: Self = serde_json::from_value(serde_json::Value::Object(obj))?;
+                        if ir.version == IrMinorVersion::V0 && !ir.verify_proof_vks.is_empty() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "`verify_proof_vks` requires `minor: 1` or later",
+                            ));
+                        }
+                        Ok(ir)
                     }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
@@ -1008,7 +1200,17 @@ impl IrSource {
 
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
-        Ok(Proof(proof))
+        use transient_crypto::proofs::accumulator_pi_len;
+        let acc_len = accumulator_pi_len();
+        let split = self.accumulator_count() * acc_len;
+        let accumulators: Vec<Vec<Fr>> = pis[..split]
+            .chunks(acc_len)
+            .map(|c| c.iter().copied().map(Fr).collect())
+            .collect();
+        Ok(Proof {
+            bytes: proof,
+            accumulators,
+        })
     }
 }
 

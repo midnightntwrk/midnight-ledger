@@ -306,7 +306,7 @@ pub(crate) async fn prove(
                             .map_err(WorkError::BadInput)?
                             .0;
 
-                        ProofVersioned::V2(proof)
+                        ProofVersioned::V4(proof)
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.

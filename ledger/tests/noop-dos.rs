@@ -141,6 +141,7 @@ async fn noop_dos() {
         .unwrap();
     let mut tx = {
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"count"[..].into(),
             op: count_op.clone(),

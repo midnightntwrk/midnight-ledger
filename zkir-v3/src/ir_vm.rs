@@ -32,6 +32,8 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
+use crate::ir_instructions::decider::accumulator_pis;
+use crate::ir_instructions::verify_proof::{verify_proof_incircuit, verify_proof_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -56,12 +58,14 @@ use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged
 use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
-use transient_crypto::proofs::{ProofPreimage, ProvingError};
+use transient_crypto::proofs::{
+    InnerProofWitness, ProofPreimage, ProvingError, accumulator_pi_len,
+};
 
 /// The raw data prior to proving. Note that this should *not* be considered part of the public
 /// API, and is subject to change at any time. It may be used in combination with
@@ -74,6 +78,9 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
+    /// The inner-proof witnesses each `InnerProof` bound, one per instruction in
+    /// instruction order; the empty blob for a guarded-off one.
+    pub inner_proofs: Vec<Vec<u8>>,
 }
 
 fn fab_decode_to_bytes(
@@ -180,13 +187,61 @@ fn fab_decode_to_bytes_atom(
 }
 
 impl IrSource {
+    /// Number of `verify_proof` instructions in this circuit.
+    pub fn accumulator_count(&self) -> usize {
+        self.instructions
+            .iter()
+            .filter(|i| matches!(i, I::VerifyProof { .. }))
+            .count()
+    }
+
+    /// Indexes [`IrSource::verify_proof_vks`] by digest, so each `VerifyProof`
+    /// can resolve its key by `vk_hash`.
+    ///
+    /// Rejects a duplicated blob, and one left unused by every instruction, so
+    /// the side-table stays a canonical set of the keys the circuit needs.
+    fn resolve_verify_proof_vks(&self) -> anyhow::Result<HashMap<Vec<u8>, &[u8]>> {
+        let mut vk_map: HashMap<Vec<u8>, &[u8]> = HashMap::new();
+        for vk_blob in self.verify_proof_vks.iter() {
+            let vk_hash = Sha256::digest(vk_blob).to_vec();
+            if vk_map.insert(vk_hash, vk_blob).is_some() {
+                bail!("duplicate verifying key in `verify_proof_vks`");
+            }
+        }
+
+        let mut used = HashSet::new();
+        for ins in self.instructions.iter() {
+            if let I::VerifyProof { vk_hash, .. } = ins {
+                if !vk_map.contains_key(vk_hash) {
+                    bail!(
+                        "no verifying key in `verify_proof_vks` for vk_hash 0x{}",
+                        const_hex::encode(vk_hash)
+                    );
+                }
+                used.insert(vk_hash);
+            }
+        }
+        
+        if used.len() != vk_map.len() {
+            bail!(
+                "`verify_proof_vks` holds {} keys but only {} are used",
+                vk_map.len(),
+                used.len()
+            );
+        }
+        Ok(vk_map)
+    }
+
     /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
     /// to produce a public input vector, and public input skip information.
     pub(crate) fn preprocess(
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
+        let verify_proof_vks = self.resolve_verify_proof_vks()?;
+
         let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
+        let mut proofs: HashMap<Identifier, Vec<u8>> = HashMap::new();
 
         let mut idx = 0;
         for input_id in self.inputs.iter() {
@@ -210,7 +265,13 @@ impl IrSource {
             );
         }
 
-        let mut pis = vec![preimage.binding_input];
+        // ZKIR's own public inputs (binding input, communications commitment,
+        // impact fields) are collected in `pis` here. The deferred accumulator
+        // PIs emitted by `verify_proof` are collected separately in `acc_pis`;
+        // the two are stitched together at the end as `acc_pis ++ pis`,
+        // matching the layout the in-circuit `circuit()` synthesis produces.
+        let mut acc_pis: Vec<Fr> = Vec::new();
+        let mut pis: Vec<Fr> = vec![preimage.binding_input];
         if self.do_communications_commitment {
             pis.push(
                 preimage
@@ -223,6 +284,9 @@ impl IrSource {
         let mut public_transcript_inputs_idx: usize = 0;
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
+        let mut inner_proofs_idx: usize = 0;
+        // One entry per `InnerProof` instruction, in instruction order.
+        let mut inner_proof_witnesses: Vec<Vec<u8>> = Vec::new();
         let mut outputs = Vec::new();
         let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
             let res = memory
@@ -642,6 +706,59 @@ impl IrSource {
                         outputs.push(value);
                     }
                 }
+                I::VerifyProof {
+                    guard,
+                    vk_hash,
+                    instance,
+                    proof,
+                } => {
+                    let guard = resolve_operand_bool(&memory, guard)?;
+                    let instance = instance
+                        .iter()
+                        .map(|op| resolve_operand(&memory, op))
+                        .map(|r| r.and_then(|v| Ok::<_, anyhow::Error>(Fr::try_from(v)?.0)))
+                        .collect::<Result<Vec<outer::Scalar>, _>>()?;
+
+                    let proof = proofs
+                        .get(proof)
+                        .ok_or_else(|| anyhow!("not an inner proof: {:?}", proof))?;
+
+                    let vk_blob = verify_proof_vks.get(vk_hash).ok_or_else(|| {
+                        anyhow!(
+                            "no verifying key for vk_hash 0x{}",
+                            const_hex::encode(vk_hash)
+                        )
+                    })?;
+
+                    let acc = verify_proof_offcircuit(vk_blob, &instance, proof, guard)?;
+                    for f in accumulator_pis(&acc) {
+                        acc_pis.push(Fr(f));
+                    }
+                }
+                I::InnerProof { guard, output } => {
+                    // One witness per instruction, whatever the guard, so both
+                    // passes index them the same way.
+                    let InnerProofWitness::Direct(bytes) = preimage
+                        .inner_proofs
+                        .get(inner_proofs_idx)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "Not enough proof witnesses: ran out at index {}",
+                                inner_proofs_idx
+                            )
+                        })?;
+                    inner_proofs_idx += 1;
+
+                    // Guarded off, the witness is ignored: the `VerifyProof`
+                    // under the same guard discards the accumulator it produces.
+                    let proof = if resolve_operand_bool(&memory, guard)? {
+                        bytes.clone()
+                    } else {
+                        Vec::new()
+                    };
+                    inner_proof_witnesses.push(proof.clone());
+                    proofs.insert(output.clone(), proof);
+                }
             }
         }
         trace!(?outputs, "Finished instructions with output");
@@ -658,6 +775,13 @@ impl IrSource {
                 ?private_transcript_outputs_idx,
                 "Transcripts not fully consumed");
             bail!("Transcripts not fully consumed");
+        }
+        if preimage.inner_proofs.len() != inner_proofs_idx {
+            bail!(
+                "Expected {} proof witnesses (one per InnerProof), received {}",
+                inner_proofs_idx,
+                preimage.inner_proofs.len()
+            );
         }
         if self.do_communications_commitment {
             let comm_comm = preimage
@@ -679,14 +803,22 @@ impl IrSource {
                 bail!("Communications commitment mismatch");
             }
         }
+        // Accumulator PIs first, ZKIR's own PIs after.
+        let out_pis: Vec<outer::Scalar> = acc_pis
+            .into_iter()
+            .chain(pis)
+            .map(|x| x.0)
+            .collect();
+
         Ok(Preprocessed {
             memory,
-            pis: pis.into_iter().map(|x| x.0).collect(),
+            pis: out_pis,
             pi_skips,
             binding_input: preimage.binding_input.0,
             comm_comm: preimage
                 .communications_commitment
                 .map(|(comm, rand)| (comm.0, rand.0)),
+            inner_proofs: inner_proof_witnesses,
         })
     }
 }
@@ -709,6 +841,10 @@ impl Relation for IrSource {
         _instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
+        let verify_proof_vks = self
+            .resolve_verify_proof_vks()
+            .map_err(|e| Error::Synthesis(e.to_string()))?;
+
         let mut input_values = Vec::new();
         for id in &self.inputs {
             let value = witness.as_ref().map(|preproc| {
@@ -725,6 +861,7 @@ impl Relation for IrSource {
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
         let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
+        let mut proofs: HashMap<Identifier, Value<Vec<u8>>> = HashMap::new();
 
         for (id, value) in self.inputs.iter().zip(input_values) {
             let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
@@ -780,10 +917,24 @@ impl Relation for IrSource {
             Ok(())
         };
 
-        let pi_push = |cell: AssignedNative<outer::Scalar>,
-                       pis: &mut Vec<AssignedNative<outer::Scalar>>|
+        // ZKIR's own public inputs (binding input, communications commitment,
+        // impact fields) are collected here and constrained *after* the
+        // instruction loop. midnight-zk's `verify_proof` chip constrains its
+        // accumulator PIs inline as it runs, so deferring ZKIR's own constrains
+        // makes the accumulator block naturally occupy the first
+        // `N * accumulator_pi_len()` slots of the public-input vector (where
+        // `N` is the number of `verify_proof` instructions) with ZKIR's own
+        // PIs following.
+        let mut zkir_pi_cells: Vec<AssignedNative<outer::Scalar>> = Vec::new();
+        // Offset into `preproc.pis` where ZKIR's own PIs begin: the accumulator
+        // block occupies the first `N * accumulator_pi_len()` slots.
+        let acc_offset = self.accumulator_count() * accumulator_pi_len();
+
+        let pi_push = |pi_idx: &mut usize,
+                       cells: &mut Vec<AssignedNative<outer::Scalar>>,
+                       cell: AssignedNative<outer::Scalar>|
          -> Result<(), Error> {
-            let idx = pis.len();
+            let idx = acc_offset + *pi_idx;
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
@@ -794,14 +945,15 @@ impl Relation for IrSource {
                         false
                     }
                 })?;
-            pis.push(cell);
+            cells.push(cell);
+            *pi_idx += 1;
             Ok(())
         };
 
-        let mut public_inputs = vec![];
-        pi_push(binding_input, &mut public_inputs)?;
+        let mut pi_idx: usize = 0;
+        pi_push(&mut pi_idx, &mut zkir_pi_cells, binding_input)?;
 
-        if self.do_communications_commitment {
+        let comm_pi = if self.do_communications_commitment {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
@@ -810,9 +962,13 @@ impl Relation for IrSource {
                 .unwrap()
                 .0
             });
-            let comm_comm = std.assign(layouter, comm_comm_value)?;
-            pi_push(comm_comm, &mut public_inputs)?;
-        }
+            let comm_comm: AssignedNative<outer::Scalar> = std.assign(layouter, comm_comm_value)?;
+            pi_push(&mut pi_idx, &mut zkir_pi_cells, comm_comm.clone())?;
+            Some(comm_comm)
+        } else {
+            None
+        };
+        let mut inner_proof_idx: usize = 0;
         for ins in self.instructions.iter() {
             match ins {
                 I::Encode { input, outputs } => {
@@ -877,7 +1033,7 @@ impl Relation for IrSource {
                         let val_assigned = resolve_operand(std, layouter, &memory, input)?;
                         let x: AssignedNative<_> = val_assigned.try_into()?;
                         let guarded_x = std.select(layouter, &guard, &x, &zero)?;
-                        pi_push(guarded_x, &mut public_inputs)?;
+                        pi_push(&mut pi_idx, &mut zkir_pi_cells, guarded_x)?;
                     }
                 }
                 I::TransientHash { inputs, output } => {
@@ -1168,6 +1324,60 @@ impl Relation for IrSource {
                         outputs.push(value);
                     }
                 }
+                I::VerifyProof {
+                    guard,
+                    vk_hash,
+                    instance,
+                    proof,
+                } => {
+                    let guard: AssignedBit<_> = {
+                        let guard = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
+                        std.convert(layouter, &guard)?
+                    };
+
+                    let mut assigned_instance = Vec::new();
+                    for op in instance {
+                        let v = resolve_operand(std, layouter, &memory, op)?;
+                        let x: AssignedNative<_> = v.try_into()?;
+                        assigned_instance.push(x);
+                    }
+
+                    let proof_value = proofs
+                        .get(proof)
+                        .cloned()
+                        .ok_or_else(|| Error::Synthesis(format!("not an inner proof: {proof:?}")))?;
+
+                    let vk_blob = verify_proof_vks.get(vk_hash).ok_or_else(|| {
+                        Error::Synthesis(format!(
+                            "no verifying key for vk_hash 0x{}",
+                            const_hex::encode(vk_hash)
+                        ))
+                    })?;
+
+                    verify_proof_incircuit(
+                        std,
+                        layouter,
+                        vk_blob,
+                        &[assigned_instance.as_slice()],
+                        proof_value,
+                        &guard,
+                    )?;
+                }
+                // The guard is off-circuit bookkeeping only: `preprocess` already
+                // resolved it, binding the empty blob where it was off, and
+                // recorded one witness per instruction for us to index.
+                // Both passes walk one slot per instruction, so this index
+                // advances with the instruction list exactly as the off-circuit
+                // one does.
+                I::InnerProof { guard: _, output } => {
+                    let idx = inner_proof_idx;
+                    inner_proof_idx += 1;
+                    let proof_value = witness
+                        .as_ref()
+                        .map(|w| w.inner_proofs[idx].clone());
+                    proofs.insert(output.clone(), proof_value);
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1199,14 +1409,20 @@ impl Relation for IrSource {
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;
-            // Nb. The communications commitment is the second public input
-            // by convention
-            std.assert_equal(layouter, &comm_comm, &public_inputs[1])?;
+            // Assert the recomputed commitment equals the cell we exposed as the
+            // second public input above.
+            let comm_pi = comm_pi
+                .as_ref()
+                .expect("comm_pi is Some when do_communications_commitment");
+            std.assert_equal(layouter, &comm_comm, comm_pi)?;
         }
 
-        public_inputs
-            .iter()
-            .try_for_each(|x| std.constrain_as_public_input(layouter, x))
+        // Constrain ZKIR's own PIs last.
+        for cell in &zkir_pi_cells {
+            std.constrain_as_public_input(layouter, cell)?;
+        }
+
+        Ok(())
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
@@ -1237,7 +1453,10 @@ impl Relation for IrSource {
                 || involves_instructions(&|op| matches!(op, I::HashToCurve { .. })),
             poseidon: self.do_communications_commitment
                 || involves_instructions(&|op| {
-                    matches!(op, I::TransientHash { .. } | I::HashToCurve { .. })
+                    matches!(
+                        op,
+                        I::TransientHash { .. } | I::HashToCurve { .. } | I::VerifyProof { .. }
+                    )
                 }),
             sha2_256: involves_instructions(&|op| matches!(op, I::PersistentHash { .. })),
             sha2_512: false,
@@ -1251,7 +1470,7 @@ impl Relation for IrSource {
                 IrType::Secp256k1Scalar,
             ]),
             p256: involves_types(&[IrType::Secp256r1Point, IrType::Secp256r1Base, IrType::Secp256r1Scalar]),
-            bls12_381: false,
+            bls12_381: involves_instructions(&|op| matches!(op, I::VerifyProof { .. })),
             curve25519: involves_types(&[
                 IrType::Curve25519Point,
                 IrType::Curve25519Base,

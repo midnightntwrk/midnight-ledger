@@ -34,7 +34,7 @@ proptest = [
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = [
+transient-crypto = { version = "4.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = [
   "cli",
 ] }
 
@@ -44,7 +44,7 @@ midnight-circuits = { version = "^7.2.2" }
 midnight-zk-stdlib = { version = "^2.3.3" }
 
 group = "^0.13.0"
-const-hex = "^1.14.0"
+const-hex = { version = "^1.14.0", features = ["serde"] }
 serde = { version = "^1.0.0", features = ["derive", "rc"] }
 serde_bytes = { version = "^0.11.0" }
 serde_json = { version = "^1.0.0" }

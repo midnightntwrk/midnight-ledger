@@ -87,6 +87,10 @@ pub struct TestParams;
 impl ParamsProverProvider for TestParams {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
         const DIR: &str = env!("MIDNIGHT_PP");
+        // Floor at 5 because the Midnight SRS cache starts at bls_midnight_2p5.
+        // Reverting `ir_vm.rs` to collect-then-constrain shrank tiny circuits
+        // enough that `optimal_k` can now return 4 for a single-Assert relation.
+        let k = k.max(5);
         ParamsProver::read(BufReader::new(File::open(format!(
             "{DIR}/bls_midnight_2p{k}"
         ))?))
@@ -98,6 +102,7 @@ impl ParamsProverProvider for TestParams {
 /// commitment (e.g. negative-conformance tests) pass `None`.
 fn make_preimage(inputs: Vec<Fr>, communications_commitment: Option<(Fr, Fr)>) -> ProofPreimage {
     ProofPreimage {
+        inner_proofs: vec![],
         binding_input: BINDING.into(),
         communications_commitment,
         inputs,
