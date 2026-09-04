@@ -19,7 +19,9 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
-    zkir.url = "github:midnightntwrk/midnight-zkir";
+    # TODO: point back at the default branch (or a release tag) once
+    # alexshielded/nix-wasm-packaging is merged into midnight-zkir.
+    zkir.url = "github:midnightntwrk/midnight-zkir/e10f5cd36df5f05d6a4de0d36b008b67f4facce9";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -297,6 +299,7 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
+              packages.zkir-wasm
             ];
           };
 
@@ -314,6 +317,10 @@
           # zkir repository; its test-artifacts output has the same layout
           # this flake used to build.
           packages.test-artifacts = zkir.packages.${system}.test-artifacts;
+
+          # The zkir-v2 wasm bindings also come from the zkir repository; the
+          # integration tests use them for local proving.
+          packages.zkir-wasm = zkir.packages.${system}.zkir-wasm;
 
           packages.local-params = pkgs.stdenvNoCC.mkDerivation rec {
             pname = "midnight-local-params";
