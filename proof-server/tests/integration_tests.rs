@@ -103,7 +103,7 @@ mod common {
 mod test_data {
     use std::sync::{Arc, LazyLock};
 
-    use base_crypto::schnorr::Signature;
+    use base_crypto::signatures::Signature;
     use base_crypto::time::Timestamp;
     use coin_structure::coin;
     use ledger::structure::{
@@ -301,7 +301,7 @@ mod health_endpoints {
 mod prove_tx_endpoint {
     use super::common::*;
     use super::test_data::*;
-    use base_crypto::schnorr::Signature;
+    use base_crypto::signatures::Signature;
     use ledger::structure::{ProofMarker, Transaction};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
@@ -802,6 +802,8 @@ mod prove_endpoint {
     use super::test_data::create_zswap_output_proof_preimage;
     use serialize::{tagged_deserialize, tagged_serialize};
     use transient_crypto::proofs::ProvingKeyMaterial;
+    #[cfg(feature = "gcp_cs")]
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn rejects_empty_body() {
@@ -875,6 +877,17 @@ mod prove_endpoint {
             "Unexpected status: {}",
             response.status()
         );
+
+        #[cfg(feature = "gcp_cs")]
+        {
+            let job_id = response
+                .headers()
+                .get("proof-job-id")
+                .expect("missing proof-job-id header")
+                .to_str()
+                .expect("proof-job-id should be valid ASCII");
+            Uuid::parse_str(job_id).expect("proof-job-id should be a UUID");
+        }
 
         let bytes = response
             .bytes()
