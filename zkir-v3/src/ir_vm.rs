@@ -1373,9 +1373,11 @@ impl Relation for IrSource {
                 I::InnerProof { guard: _, output } => {
                     let idx = inner_proof_idx;
                     inner_proof_idx += 1;
-                    let proof_value = witness
-                        .as_ref()
-                        .map(|w| w.inner_proofs[idx].clone());
+                    let proof_value = witness.as_ref().map_with_result(|w| {
+                        w.inner_proofs.get(idx).cloned().ok_or_else(|| {
+                            Error::Synthesis(format!("no inner-proof witness at index {idx}"))
+                        })
+                    })?;
                     proofs.insert(output.clone(), proof_value);
                 }
             }
