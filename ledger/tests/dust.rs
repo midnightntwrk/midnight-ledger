@@ -16,7 +16,7 @@ use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
     dust::{
-        DustActions, DustLocalState, DustPublicKey, DustRegistration, DustSecretKey,
+        DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
         INITIAL_DUST_PARAMETERS, InitialNonce,
     },
     events::{Event, EventDetails},
@@ -118,6 +118,88 @@ async fn test_registration_dust_payment() {
         dt.as_seconds() as u128 * NIGHT_VAL * INITIAL_DUST_PARAMETERS.generation_decay_rate as u128;
     assert!(dust_bal > dust_generated);
     assert!(dbg!(dust_bal) <= dbg!(DUST_VAL - dust_fee + dust_generated));
+}
+
+#[tokio::test]
+async fn test_registration_does_not_backdate_new_dust() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    let verifying_key = state.night_key.verifying_key();
+    let addr = UserAddress::from(verifying_key.clone());
+
+    // Registers before rewarding, so the NIGHT spent below is already tracked for
+    // generation. That is what drives the registration's generationless
+    // availability to zero, leaving the declared `ctime` as the only thing that
+    // could give the replacement output a head start.
+    state.give_fee_token(&mut rng, 1).await;
+
+    let utxo = state
+        .ledger
+        .utxo
+        .utxos
+        .iter()
+        .map(|kv| (*kv.0).clone())
+        .find(|utxo| utxo.owner == addr && utxo.type_ == NIGHT)
+        .expect("rewarded NIGHT UTXO");
+
+    let mut intent = Intent::<Signature, _, _, _>::empty(&mut rng, state.time);
+    intent.guaranteed_unshielded_offer = Some(Sp::new(UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: utxo.intent_hash,
+            output_no: utxo.output_no,
+            owner: verifying_key.clone(),
+            type_: NIGHT,
+            value: utxo.value,
+        }]
+        .into(),
+        outputs: vec![UtxoOutput {
+            owner: addr,
+            type_: NIGHT,
+            value: utxo.value,
+        }]
+        .into(),
+        signatures: vec![].into(),
+    }));
+    intent.dust_actions = Some(Sp::new(DustActions {
+        spends: vec![].into(),
+        registrations: vec![DustRegistration {
+            allow_fee_payment: 0,
+            dust_address: Some(Sp::new(DustPublicKey::from(state.dust_key.clone()))),
+            night_key: verifying_key,
+            signature: None,
+        }]
+        .into(),
+        // The oldest timestamp the validity window admits.
+        ctime: state.time - INITIAL_DUST_PARAMETERS.dust_grace_period,
+    }));
+
+    let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    strictness.verify_signatures = false;
+    let result = state.apply(&tx, strictness).unwrap();
+    assert!(matches!(result, TransactionResult::Success(_)));
+
+    let (output, generation, block_time) = result
+        .events()
+        .iter()
+        .find_map(|event| match &event.content {
+            EventDetails::DustInitialUtxo {
+                output,
+                generation,
+                block_time,
+                ..
+            } => Some((*output, *generation, *block_time)),
+            _ => None,
+        })
+        .expect("registration should replace the spent output's DUST");
+
+    // The backing NIGHT output comes into existence in this block, so its DUST
+    // holds nothing yet, whatever time the author declared.
+    assert_eq!(
+        DustOutput::from(output).updated_value(&generation, block_time, &INITIAL_DUST_PARAMETERS),
+        0,
+    );
 }
 
 #[tokio::test]

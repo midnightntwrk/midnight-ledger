@@ -260,13 +260,15 @@ impl<D: DB> Input<ProofPreimage, D> {
     pub fn binding_randomness(&self) -> PedersenRandomness {
         // NOTE: This is tied to the implementation in construct.rs
         // rc is the last input, and should be a single Fr element.
-        (*self
+        //
+        // If retrieval fails, we return default – this is incorrect, but this should not happen
+        // during honest usage, and the alternative is largely to panic.
+        self
             .proof
             .inputs
             .last()
-            .expect("must have witness to extract from"))
-        .try_into()
-        .expect("extracted binding randomness is invalid")
+            .and_then(|inp| (*inp).try_into().ok())
+            .unwrap_or_default()
     }
 }
 
@@ -340,14 +342,15 @@ impl<D: DB> Output<ProofPreimage, D> {
         // NOTE: This is tied to the implementation in construct.rs.
         // rc is the last input, and should be a single Fr element.
         // NOTE: rc negated because output commitments are subtracted
-        -PedersenRandomness::try_from(
-            *self
-                .proof
-                .inputs
-                .last()
-                .expect("must have witness to extract from"),
-        )
-        .expect("extracted binding randomness is invalid")
+        //
+        // If retrieval fails, we return default – this is incorrect, but this should not happen
+        // during honest usage, and the alternative is largely to panic.
+        -self
+            .proof
+            .inputs
+            .last()
+            .and_then(|inp| PedersenRandomness::try_from(*inp).ok())
+            .unwrap_or_default()
     }
     pub fn segment(&self) -> Option<u16> {
         self.proof
@@ -551,7 +554,8 @@ impl Debug for DebugDelta {
 pub fn normalize_deltas<T: Ord, I: Iterator<Item = (T, i128)>>(deltas: I) -> Vec<(T, i128)> {
     let mut new_deltas: Vec<_> = deltas
         .fold(BTreeMap::new(), |mut map, (k, v)| {
-            *map.entry(k).or_insert(0) += v;
+            let entry = map.entry(k).or_insert(0i128);
+            *entry = (*entry).saturating_add(v);
             map
         })
         .into_iter()

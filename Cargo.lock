@@ -53,7 +53,6 @@ dependencies = [
  "flate2",
  "foldhash 0.1.5",
  "futures-core",
- "h2",
  "http 0.2.12",
  "httparse",
  "httpdate",
@@ -2100,25 +2099,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "h2"
-version = "0.3.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0beca50380b1fc32983fc1cb4587bfa4bb9e78fc259aad4a0032d2080309222d"
-dependencies = [
- "bytes",
- "fnv",
- "futures-core",
- "futures-sink",
- "futures-util",
- "http 0.2.12",
- "indexmap 2.14.0",
- "slab",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3133,7 +3113,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "9.0.0"
+version = "10.0.0"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -3188,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm-v9"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3317,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.0-rc.6"
+version = "9.0.0-rc.7"
 dependencies = [
  "actix-cors",
  "actix-web",

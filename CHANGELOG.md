@@ -4,6 +4,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+## Ledger 9.1.0.0-rc.4
+
+- fix: dust registration accounting moved to block time, rather than declared
+  transaction time.
+
 ## Ledger 9.1.0.0-rc.3
 
 - breaking: `ledger`'s `proving` feature is no longer a no-op marker. It now
