@@ -3,25 +3,60 @@ name: Merge current release into next
 on:
   workflow_dispatch:
   schedule:
-    # Every Friday at 08:00 UTC
+    # Every Thursday at 08:00 UTC: ledger-8 -> ledger-9
+    - cron: "0 8 * * 4"
+    # Every Friday at 08:00 UTC: ledger-9 -> ledger-10
     - cron: "0 8 * * 5"
 
 jobs:
   create-merge-pr:
+    name: ${{ matrix.from }} into ${{ matrix.to }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - from: ledger-8
+            to: ledger-9
+            cron: "0 8 * * 4"
+          - from: ledger-9
+            to: ledger-10
+            cron: "0 8 * * 5"
     steps:
-      - name: Checkout ledger-8
+      # Job-level `if` cannot see the matrix context, so gate the steps instead.
+      # A scheduled run only handles the pair matching the cron that fired; a
+      # manual run handles every pair.
+      - name: Select pair for this trigger
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          CRON: ${{ matrix.cron }}
+        run: |
+          if [ "$EVENT" = "schedule" ] && [ "$SCHEDULE" != "$CRON" ]; then
+            echo "Skipping: this run was triggered by '$SCHEDULE'."
+            echo "selected=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "selected=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout ${{ matrix.from }}
+        if: steps.gate.outputs.selected == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ledger-8
+          ref: ${{ matrix.from }}
           fetch-depth: 0
 
       - name: Check for new commits
         id: check
+        if: steps.gate.outputs.selected == 'true'
+        env:
+          FROM: ${{ matrix.from }}
+          TO: ${{ matrix.to }}
         run: |
-          git fetch origin ledger-9
-          if git merge-base --is-ancestor ledger-8 origin/ledger-9; then
-            echo "No new commits on ledger-8 since last merge."
+          git fetch origin "$TO"
+          if git merge-base --is-ancestor "$FROM" "origin/$TO"; then
+            echo "No new commits on $FROM since last merge."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -31,23 +66,25 @@ jobs:
         if: steps.check.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FROM: ${{ matrix.from }}
+          TO: ${{ matrix.to }}
         run: |
-          MERGE_BRANCH="merge/ledger-8-into-ledger-9"
+          MERGE_BRANCH="merge/$FROM-into-$TO"
 
           # Check if an open PR already exists
-          existing=$(gh pr list --base ledger-9 --head "$MERGE_BRANCH" --state open --json number --jq '.[0].number')
+          existing=$(gh pr list --base "$TO" --head "$MERGE_BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             echo "PR #$existing already open, skipping."
             exit 0
           fi
 
-          # Create a branch from ledger-8. The reviewer is responsible for
-          # merging ledger-9 into this branch to satisfy branch protection.
-          git checkout -b "$MERGE_BRANCH" ledger-8
+          # Create a branch from $FROM. The reviewer is responsible for
+          # merging $TO into this branch to satisfy branch protection.
+          git checkout -b "$MERGE_BRANCH" "$FROM"
           git push origin "$MERGE_BRANCH" --force
 
           gh pr create \
-            --base ledger-9 \
+            --base "$TO" \
             --head "$MERGE_BRANCH" \
-            --title "Merge ledger-8 into ledger-9" \
-            --body "Automated weekly PR to merge \`ledger-8\` into \`ledger-9\`."
+            --title "Merge $FROM into $TO" \
+            --body "Automated weekly PR to merge \`$FROM\` into \`$TO\`."
