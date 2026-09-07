@@ -21,7 +21,11 @@
     inclusive.url = "github:input-output-hk/nix-inclusive";
     # TODO: point back at the default branch (or a release tag) once
     # alexshielded/nix-wasm-packaging is merged into midnight-zkir.
-    zkir.url = "github:midnightntwrk/midnight-zkir/96fd1058e466c49ebe9dea7451840311878e5277";
+    # This pin is nix-wasm-packaging plus the ledger-10 dust spend precompile
+    # update (branch alexshielded/nix-wasm-packaging-dust-fix); without it the
+    # generated dust keys fail the ledger's committed sha256 checks, and later
+    # zkir commits drop the v2 toolchain that still generates the zswap keys.
+    zkir.url = "github:midnightntwrk/midnight-zkir/5663f47e42e9680dfb21762a5bdfb0adff1d9c72";
     # Share our nixpkgs and rust toolchain with the zkir flake; without this
     # the CI runners build two full toolchain stacks, which OOMs the smaller
     # runners (the nix daemon gets killed mid-build).
