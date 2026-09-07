@@ -358,8 +358,10 @@ describe('Ledger API - QueryContext', () => {
    */
   test('should allow claiming unshielded spends', () => {
     const amount = 100n;
-    const color = encodeRawTokenType(createRawTokenType(Random.generate32Bytes(), sampleContractAddress()));
-    const recipient = encodeContractAddress(sampleContractAddress());
+    const color = Static.trimTrailingZeros(
+      encodeRawTokenType(createRawTokenType(Random.generate32Bytes(), sampleContractAddress()))
+    );
+    const recipient = Static.trimTrailingZeros(encodeContractAddress(sampleContractAddress()));
 
     const stateValue = new ChargedState(StateValue.newArray());
     const queryContext = new QueryContext(stateValue, sampleContractAddress());
@@ -462,10 +464,10 @@ describe('Ledger API - QueryContext', () => {
             value: StateValue.newCell({
               value: [
                 ONE_VALUE,
-                encodeRawTokenType(rawTokenType),
+                Static.trimTrailingZeros(encodeRawTokenType(rawTokenType)),
                 EMPTY_VALUE,
                 ONE_VALUE,
-                encodeContractAddress(selfRawAddress),
+                Static.trimTrailingZeros(encodeContractAddress(selfRawAddress)),
                 EMPTY_VALUE
               ],
               alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
