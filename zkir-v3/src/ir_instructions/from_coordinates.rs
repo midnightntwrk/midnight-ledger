@@ -53,13 +53,11 @@ pub fn from_coordinates_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, 
                 "Cannot build a Secp256k1Point point from ({x:?}, {y:?})",
             )),
 
-        (Secp256r1Base(x), Secp256r1Base(y)) => {
-            p256::P256::from_xy(*x, *y)
-                .map(Secp256r1Point)
-                .ok_or(anyhow::anyhow!(
-                    "Cannot build a Secp256r1Point point from ({x:?}, {y:?})",
-                ))
-        }
+        (Secp256r1Base(x), Secp256r1Base(y)) => p256::P256::from_xy(*x, *y)
+            .map(Secp256r1Point)
+            .ok_or(anyhow::anyhow!(
+                "Cannot build a Secp256r1Point point from ({x:?}, {y:?})",
+            )),
 
         (Curve25519Base(x), Curve25519Base(y)) => curve25519::Curve25519::from_xy(*x, *y)
             .and_then(|p| curve25519::Curve25519Subgroup::from_edwards(p.0))
@@ -166,7 +164,9 @@ mod tests {
         assert!(from_coordinates_offcircuit(&Secp256r1Base(x), &Secp256r1Base(x)).is_err());
 
         let p = curve25519::Curve25519Subgroup::random(OsRng);
-        let (x, y) = Into::<curve25519::Curve25519>::into(p).coordinates().unwrap();
+        let (x, y) = Into::<curve25519::Curve25519>::into(p)
+            .coordinates()
+            .unwrap();
         assert_eq!(
             from_coordinates_offcircuit(&Curve25519Base(x), &Curve25519Base(y)).unwrap(),
             Curve25519Point(p)

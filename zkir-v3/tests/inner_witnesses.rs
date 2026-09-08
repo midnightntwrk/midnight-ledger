@@ -104,7 +104,8 @@ fn one_proof_witness_per_instruction_whatever_the_guard() {
 
     assert!(ir.check(&preimage(vec![blank()])).is_err(), "too few");
     assert!(
-        ir.check(&preimage(vec![blank(), blank(), blank()])).is_err(),
+        ir.check(&preimage(vec![blank(), blank(), blank()]))
+            .is_err(),
         "too many"
     );
 }

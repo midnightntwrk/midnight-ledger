@@ -14,6 +14,7 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
+use crate::ir_instructions::decider::accumulator_pis;
 use crate::ir_instructions::ec_mul::{ec_mul_incircuit, ec_mul_offcircuit};
 use crate::ir_instructions::encode::{
     decode_offcircuit, encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
@@ -32,7 +33,6 @@ use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
-use crate::ir_instructions::decider::accumulator_pis;
 use crate::ir_instructions::verify_proof::{verify_proof_incircuit, verify_proof_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
@@ -242,7 +242,10 @@ impl IrSource {
             if let I::InnerProof { output, .. } = ins
                 && bound[output].1 == 0
             {
-                bail!("`inner_proof` binds {}, which no `verify_proof` uses", output.0);
+                bail!(
+                    "`inner_proof` binds {}, which no `verify_proof` uses",
+                    output.0
+                );
             }
         }
 
@@ -275,7 +278,7 @@ impl IrSource {
                 used.insert(vk_hash);
             }
         }
-        
+
         if used.len() != vk_map.len() {
             bail!(
                 "`verify_proof_vks` holds {} keys but only {} are used",
@@ -793,10 +796,8 @@ impl IrSource {
                 I::InnerProof { guard, output } => {
                     // One witness per instruction, whatever the guard, so both
                     // passes index them the same way.
-                    let InnerProofWitness::Direct(bytes) = preimage
-                        .inner_proofs
-                        .get(inner_proofs_idx)
-                        .ok_or_else(|| {
+                    let InnerProofWitness::Direct(bytes) =
+                        preimage.inner_proofs.get(inner_proofs_idx).ok_or_else(|| {
                             anyhow!(
                                 "Not enough proof witnesses: ran out at index {}",
                                 inner_proofs_idx
@@ -859,11 +860,7 @@ impl IrSource {
             }
         }
         // Accumulator PIs first, ZKIR's own PIs after.
-        let out_pis: Vec<outer::Scalar> = acc_pis
-            .into_iter()
-            .chain(pis)
-            .map(|x| x.0)
-            .collect();
+        let out_pis: Vec<outer::Scalar> = acc_pis.into_iter().chain(pis).map(|x| x.0).collect();
 
         Ok(Preprocessed {
             memory,
@@ -1400,10 +1397,9 @@ impl Relation for IrSource {
                         assigned_instance.push(x);
                     }
 
-                    let proof_value = proofs
-                        .get(proof)
-                        .cloned()
-                        .ok_or_else(|| Error::Synthesis(format!("not an inner proof: {proof:?}")))?;
+                    let proof_value = proofs.get(proof).cloned().ok_or_else(|| {
+                        Error::Synthesis(format!("not an inner proof: {proof:?}"))
+                    })?;
 
                     let vk_blob = verify_proof_vks.get(vk_hash).ok_or_else(|| {
                         Error::Synthesis(format!(
@@ -1528,7 +1524,11 @@ impl Relation for IrSource {
                 IrType::Secp256k1Base,
                 IrType::Secp256k1Scalar,
             ]),
-            p256: involves_types(&[IrType::Secp256r1Point, IrType::Secp256r1Base, IrType::Secp256r1Scalar]),
+            p256: involves_types(&[
+                IrType::Secp256r1Point,
+                IrType::Secp256r1Base,
+                IrType::Secp256r1Scalar,
+            ]),
             bls12_381: involves_instructions(&|op| matches!(op, I::VerifyProof { .. })),
             curve25519: involves_types(&[
                 IrType::Curve25519Point,

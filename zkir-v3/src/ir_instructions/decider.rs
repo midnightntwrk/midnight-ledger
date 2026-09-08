@@ -108,7 +108,7 @@ pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
     accumulator_pis(&Accumulator::<S>::trivial(&[]))
 }
 
-/// The last [`accumulator_pi_len`] entries of an inner proof's instance. 
+/// The last [`accumulator_pi_len`] entries of an inner proof's instance.
 fn accumulator_tail<T>(instance: &[T]) -> anyhow::Result<&[T]> {
     let acc_len = accumulator_pi_len();
     instance
@@ -161,7 +161,9 @@ pub fn decide_offcircuit(
 ) -> anyhow::Result<Accumulator<S>> {
     let mut acc = match kind {
         DeciderKind::None => own_acc,
-        DeciderKind::Collapsed => Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?]),
+        DeciderKind::Collapsed => {
+            Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?])
+        }
     };
 
     acc.resolve_fixed_bases(bases);
@@ -189,7 +191,7 @@ pub fn decide_incircuit(
     let scalar_chip = bls.scalar_field_chip();
 
     // TODO: if we use truncated challenges it may make sense to collapse before
-    // accumulating. 
+    // accumulating.
     let mut acc = match kind {
         DeciderKind::None => own_acc,
         DeciderKind::Collapsed => {
@@ -222,7 +224,7 @@ fn compute_carried_accumulator(
         selected_limbs.push(std.select(layouter, guard, instance, &trivial)?);
     }
 
-    // All following operations are required when assigning the accumulator. 
+    // All following operations are required when assigning the accumulator.
     let assigned_accumulator = {
         // NOTE: this could be replaced once we have 'from_public_inputs'
         let accumulator = selected_limbs
@@ -235,14 +237,14 @@ fn compute_carried_accumulator(
                 })
             })?;
 
-        let assigned_accumulator = std
-            .verifier()
-            .assign_collapsed_accumulator(layouter, &[], accumulator)?;
+        let assigned_accumulator =
+            std.verifier()
+                .assign_collapsed_accumulator(layouter, &[], accumulator)?;
 
-        for (selected, assigned) in selected_limbs
-            .iter()
-            .zip(std.verifier().as_public_input(layouter, &assigned_accumulator)?)
-        {
+        for (selected, assigned) in selected_limbs.iter().zip(
+            std.verifier()
+                .as_public_input(layouter, &assigned_accumulator)?,
+        ) {
             std.assert_equal(layouter, selected, &assigned)?;
         }
         assigned_accumulator

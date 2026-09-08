@@ -164,7 +164,10 @@ mod tests {
         let [r, s] = core::array::from_fn(|_| p256::Fq::random(OsRng));
 
         assert_eq!(Secp256r1Base(x) * Secp256r1Base(y), Secp256r1Base(x * y));
-        assert_eq!(Secp256r1Scalar(r) * Secp256r1Scalar(s), Secp256r1Scalar(r * s));
+        assert_eq!(
+            Secp256r1Scalar(r) * Secp256r1Scalar(s),
+            Secp256r1Scalar(r * s)
+        );
 
         // Negative test: multiplying incompatible types should fail
         let result = mul_offcircuit(&Secp256r1Base(x), &Secp256r1Scalar(r));

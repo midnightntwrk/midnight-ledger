@@ -94,7 +94,9 @@ pub fn select_incircuit(
             (std_lib.secp256k1().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 
-        (Secp256r1Point(p), Secp256r1Point(q)) => Ok(Secp256r1Point(std_lib.p256().select(layouter, bit, p, q)?)),
+        (Secp256r1Point(p), Secp256r1Point(q)) => {
+            Ok(Secp256r1Point(std_lib.p256().select(layouter, bit, p, q)?))
+        }
         (Secp256r1Base(s), Secp256r1Base(r)) => Ok(Secp256r1Base(
             (std_lib.p256().base_field_chip()).select(layouter, bit, s, r)?,
         )),

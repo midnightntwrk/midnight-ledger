@@ -53,7 +53,9 @@ pub fn inv_offcircuit(x: &IrValue) -> Result<IrValue, anyhow::Error> {
             .ok_or_else(zero_err)
             .map(Secp256k1Scalar),
 
-        Secp256r1Base(s) => Option::from(s.invert()).ok_or_else(zero_err).map(Secp256r1Base),
+        Secp256r1Base(s) => Option::from(s.invert())
+            .ok_or_else(zero_err)
+            .map(Secp256r1Base),
 
         Secp256r1Scalar(s) => Option::from(s.invert())
             .ok_or_else(zero_err)
