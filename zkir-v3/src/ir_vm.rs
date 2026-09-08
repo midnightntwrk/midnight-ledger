@@ -209,7 +209,8 @@ impl IrSource {
         for ins in self.instructions.iter() {
             match ins {
                 I::InnerProof { guard, output } => {
-                    if bound.insert(output, (guard, 0)).is_some() {
+                    let rebound = bound.insert(output, (guard, 0)).is_some();
+                    if rebound {
                         bail!("`inner_proof` rebinds {}", output.0);
                     }
                 }
