@@ -11,7 +11,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: `DeferredAccumulator` carries a `verify_proof` instruction's deferred KZG accumulator as the two points it collapses to, rather than as its public-input field elements. The always-one side scalars are regenerated rather than stored, taking each accumulator from 384 bytes to 96, and a point off the curve or outside the prime-order subgroup is now refused when the proof is deserialized rather than after it verifies.
 - breaking: `VerifierKey::mock_verify` now takes the `Proof` alongside the statement.
 - breaking: `transient-crypto` bumped to `4.0.0`. 
-- feat: `ProofPreimage::proof_witnesses` is a `Vec<InnerProofWitness>` rather than a `Vec<Vec<u8>>`.
+- feat: `ProofPreimage` gains `inner_proofs`, a `Vec<InnerProofWitness>` holding one entry per `inner_proof` instruction, in instruction order. `preimage_to_v1` refuses a preimage carrying any, the v1 pipeline having no `verify_proof` to consume them.
 - breaking: `ProofPreimage`'s tag moves to `proof-preimage[v2]`, and `ProofPreimageVersioned`'s to `proof-preimage-versioned[v2]`.
 - breaking: `ProofVersioned` gains `V4(Proof)` at discriminant 3, carrying `proof[v6]`. `V2` and `V3` now hold `transient_crypto_old::proofs::Proof`, which is the `proof[v5]` layout they always had on the wire, so every already-written transaction still deserializes. The `proof-versioned` tag is unchanged, since discriminants 1 and 2 keep their exact bytes.
 - breaking: ZKIR's `Instruction` tag moves to `ir-instruction[v4]` for the two new variants.
