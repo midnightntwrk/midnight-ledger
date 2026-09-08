@@ -46,7 +46,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decider::{
+use midnight_zkir_v3::decider::{
     DeciderKind, accumulator_pis, serialize_vk, trivial_accumulator_pis,
 };
 use midnight_zkir_v3::ir_instructions::verify_proof::{

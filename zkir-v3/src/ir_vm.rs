@@ -14,7 +14,7 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
-use crate::ir_instructions::decider::accumulator_pis;
+use crate::decider::accumulator_pis;
 use crate::ir_instructions::ec_mul::{ec_mul_incircuit, ec_mul_offcircuit};
 use crate::ir_instructions::encode::{
     decode_offcircuit, encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
