@@ -84,6 +84,20 @@ mod tests {
             );
         }
 
+        // lt over values exceeding u64::MAX (e.g. unshielded balances are u128)
+        let cmp_operands_u128 = vec![
+            (u64::MAX as u128 + 1, u64::MAX as u128 + 2),
+            (u128::MAX, u128::MAX),
+            (u128::MAX, 5u128),
+            (5u128, u128::MAX),
+        ];
+        for ops in cmp_operands_u128 {
+            assert_eq!(
+                run_program(&[vmval!((ops.0)), vmval!((ops.1))], &ops![lt]),
+                Ok((vec![vmval!((ops.0 < ops.1))], vec![]))
+            );
+        }
+
         for ops in logic_operands {
             // and
             assert_eq!(
