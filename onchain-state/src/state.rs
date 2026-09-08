@@ -12,7 +12,9 @@
 // limitations under the License.
 
 use base_crypto::cost_model::RunningCost;
-use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom};
+use base_crypto::fab::{
+    Aligned, AlignedValue, Alignment, AlignmentAtom, InvalidBuiltinDecode, Value,
+};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
 use base_crypto::schnorr::VerifyingKey;
@@ -68,6 +70,46 @@ fn proptest_valid<D: DB>(value: &StateValue<D>) -> bool {
 
 /// The size limit for Cell's. Currently 32 kiB
 pub const CELL_BOUND: usize = 1 << 15;
+
+/// Reasons a single [`StateValue::idx`] call can fail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdxError {
+    /// An `Array` step's key did not decode as a `u8` index.
+    InvalidArrayIndex(InvalidBuiltinDecode),
+    /// An `Array` step's key was a valid `u8` but outside `0..len`.
+    ArrayIndexOutOfBounds { idx: u8, len: usize },
+    /// A `BoundedMerkleTree` step's key did not decode as a `u64` position.
+    InvalidMerkleTreePosition(InvalidBuiltinDecode),
+    /// A `BoundedMerkleTree` position was numerically out of range for the
+    /// tree's height.
+    MerkleTreePositionOutOfRange { pos: u64, max: u64 },
+    /// The current node is `Cell` or `Null`, neither of which can be indexed.
+    NotIndexable,
+}
+
+impl fmt::Display for IdxError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidArrayIndex(err) => {
+                write!(f, "invalid array index: {err}")
+            }
+            Self::ArrayIndexOutOfBounds { idx, len } => {
+                write!(f, "array index out of bounds: {idx} >= {len}")
+            }
+            Self::InvalidMerkleTreePosition(err) => {
+                write!(f, "invalid merkle tree position: {err}")
+            }
+            Self::MerkleTreePositionOutOfRange { pos, max } => {
+                write!(f, "merkle tree position {pos} out of range (max {max})")
+            }
+            Self::NotIndexable => f.write_str(
+                "value cannot be indexed: only Array, Map, and BoundedMerkleTree support indexing",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for IdxError {}
 
 #[derive(Default, Storable)]
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
@@ -464,6 +506,58 @@ impl<D: DB> StateValue<D> {
             Map(m) => (m.size() as u128).next_power_of_two().ilog2() as usize,
             Array(a) => (a.len() as u128).next_power_of_two().ilog2() as usize,
             BoundedMerkleTree(t) => t.height() as usize,
+        }
+    }
+
+    /// Index into this `StateValue` with `key`.
+    ///
+    /// Each `StateValue` variant interprets `key` differently:
+    ///
+    /// * `Array(arr)`: `key` must decode as a `u8` index `i < arr.len()`
+    ///   (matching the VM's `idx` instruction; `Array` is capped at 16
+    ///   entries by ledger invariant, so 8 bits suffice). Returns
+    ///   `arr[i]`.
+    /// * `Map(map)`: returns the stored value at `key`, or
+    ///   [`StateValue::Null`] on miss (matching the VM's `idx` instruction).
+    /// * `BoundedMerkleTree(tree)`: `key` must decode as a `u64` position
+    ///   strictly less than `1 << tree.height()`. Returns a `Cell` wrapping
+    ///   the leaf hash if the slot holds a leaf, or `Null` if the slot is
+    ///   empty (same continuation rule as the `Map` miss case).
+    /// * `Cell(_)` or `Null`: returns [`IdxError::NotIndexable`].
+    pub fn idx(&self, key: &AlignedValue) -> Result<StateValue<D>, IdxError> {
+        match self {
+            StateValue::Array(arr) => {
+                let idx: u8 = (&**AsRef::<Value>::as_ref(key))
+                    .try_into()
+                    .map_err(IdxError::InvalidArrayIndex)?;
+                arr.get(idx as usize)
+                    .cloned()
+                    .ok_or(IdxError::ArrayIndexOutOfBounds {
+                        idx,
+                        len: arr.len(),
+                    })
+            }
+            StateValue::Map(map) => Ok(match map.get(key) {
+                Some(sp) => (*sp).clone(),
+                None => StateValue::Null,
+            }),
+            StateValue::BoundedMerkleTree(tree) => {
+                let pos: u64 = (&**AsRef::<Value>::as_ref(key))
+                    .try_into()
+                    .map_err(IdxError::InvalidMerkleTreePosition)?;
+                let max_leaves = 1u64 << tree.height();
+                if pos >= max_leaves {
+                    return Err(IdxError::MerkleTreePositionOutOfRange {
+                        pos,
+                        max: max_leaves,
+                    });
+                }
+                Ok(match tree.index(pos) {
+                    Some((hash, ())) => StateValue::Cell(Sp::new(hash.into())),
+                    None => StateValue::Null,
+                })
+            }
+            StateValue::Cell(_) | StateValue::Null => Err(IdxError::NotIndexable),
         }
     }
 }
@@ -1046,5 +1140,44 @@ mod tests {
         for h in 0..16 {
             assert_eq!(s!({MT(h) {}}).log_size(), h as usize);
         }
+    }
+
+    #[test]
+    fn idx_array_returns_element() {
+        let sv: StateValue<InMemoryDB> = stval!([(10u64), (20u64), (30u64)]);
+        let key = AlignedValue::from(1u8);
+        assert_eq!(sv.idx(&key).unwrap(), stval!((20u64)));
+    }
+
+    #[test]
+    fn idx_map_hit_returns_value() {
+        let sv: StateValue<InMemoryDB> = stval!({ 7u32 => (99u64) });
+        let key = AlignedValue::from(7u32);
+        assert_eq!(sv.idx(&key).unwrap(), stval!((99u64)));
+    }
+
+    #[test]
+    fn idx_bmt_hit_returns_cell_with_hash() {
+        let h = HashOutput([7u8; 32]);
+        let tree: MerkleTree<(), InMemoryDB> = MerkleTree::blank(4).update_hash(0, h, ()).rehash();
+        let sv: StateValue<InMemoryDB> = StateValue::BoundedMerkleTree(tree);
+        let key = AlignedValue::from(0u64);
+        assert_eq!(sv.idx(&key).unwrap(), StateValue::Cell(Sp::new(h.into())));
+    }
+
+    #[test]
+    fn idx_array_returns_inner_map() {
+        let expected: StateValue<InMemoryDB> = stval!({ 7u32 => (99u64) });
+        let sv: StateValue<InMemoryDB> =
+            StateValue::Array(vec![StateValue::Null, expected.clone()].into());
+        let key = AlignedValue::from(1u8);
+        assert_eq!(sv.idx(&key).unwrap(), expected);
+    }
+
+    #[test]
+    fn idx_cell_returns_not_indexable() {
+        let sv: StateValue<InMemoryDB> = stval!((42u64));
+        let key = AlignedValue::from(0u8);
+        assert!(matches!(sv.idx(&key), Err(IdxError::NotIndexable)));
     }
 }
