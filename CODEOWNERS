@@ -1,5 +1,6 @@
 * @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-qa
 /.github/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
+/.github/release-notes/ @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-qa
 CODE_OF_CONDUCT.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CODEOWNERS @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CONTRIBUTING.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
