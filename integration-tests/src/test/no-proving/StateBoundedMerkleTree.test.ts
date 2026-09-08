@@ -20,14 +20,19 @@ describe('Ledger API - StateBoundedMerkleTree', () => {
    *
    * @given StateBoundedMerkleTree with heights 0 and 256
    * @when Creating the trees
-   * @then Both should have height 0 (invalid height above 255 defaults to 0)
+   * @then Both should have height 0 (invalid height above 255 throw)
    */
-  test('should limit the height to 255', () => {
+  test('should reject invalid heights above 255', () => {
     const stateBoundedMerkleTree = new StateBoundedMerkleTree(0);
     expect(stateBoundedMerkleTree.height).toEqual(0);
 
-    const stateBoundedMerkleTree2 = new StateBoundedMerkleTree(256);
-    expect(stateBoundedMerkleTree2.height).toEqual(0);
+    expect(() => new StateBoundedMerkleTree(-1)).toThrow();
+    expect(() => new StateBoundedMerkleTree(1.5)).toThrow();
+    expect(() => new StateBoundedMerkleTree(256)).toThrow();
+    expect(() => new StateBoundedMerkleTree(257)).toThrow();
+    expect(() => new StateBoundedMerkleTree(Number.MAX_SAFE_INTEGER)).toThrow();
+    expect(() => new StateBoundedMerkleTree(Number.NaN)).toThrow();
+    expect(() => new StateBoundedMerkleTree(Number.POSITIVE_INFINITY)).toThrow();
   });
 
   /**

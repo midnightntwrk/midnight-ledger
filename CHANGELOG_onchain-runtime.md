@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix: reject invalid `StateBoundedMerkleTree` heights instead of wrapping them modulo 256.
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 
 ## Version `3.1.0`
