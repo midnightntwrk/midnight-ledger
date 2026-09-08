@@ -1194,6 +1194,14 @@ mod accumulator_discharge_tests {
         );
     }
 
+    /// Derived from midnight-circuits' foreign-field encoding, and it fixes the
+    /// public-input layout of every proof carrying an accumulator. A change to
+    /// it is a wire-format change, so pin the value rather than discover it.
+    #[test]
+    fn the_accumulator_public_input_length_is_fixed() {
+        assert_eq!(accumulator_pi_len(), 12);
+    }
+
     #[test]
     fn a_malformed_encoding_is_rejected() {
         assert!(DeferredAccumulator::from_public_input(&[]).is_none());

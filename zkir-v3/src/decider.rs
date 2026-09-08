@@ -45,6 +45,12 @@ type AssignedPoint = <S as SelfEmulation>::AssignedPoint;
 /// Which deferred obligation, if any, an inner proof carries into the proof that
 /// verifies it.
 ///
+/// # WARNING
+///
+/// It is the verifier responsibility to declare the `DeciderKind` correctly.
+/// Using `DeciderKind::None` on an inner proof that has a deferred accumulator
+/// is a silent soundness bug.
+///
 /// # Wire format
 ///
 /// The tag is a single byte written by declaration order: `None = 0`,
@@ -92,8 +98,17 @@ pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> 
         .split_first()
         .ok_or_else(|| anyhow!("empty `verify_proof_vks` entry"))?;
     let kind = DeciderKind::from_tag(*tag)?;
-    let vk = MidnightVK::read(&mut { vk_bytes }, SerdeFormat::Processed)
+    let mut vk_bytes = vk_bytes;
+    let vk = MidnightVK::read(&mut vk_bytes, SerdeFormat::Processed)
         .map_err(|e| anyhow!("reading inner verifying key: {e}"))?;
+    // The blob's digest names the key's fixed bases, so padding it would give
+    // the same key a second identity, and the circuit a second shape.
+    if !vk_bytes.is_empty() {
+        bail!(
+            "`verify_proof_vks` entry has {} trailing bytes after its verifying key",
+            vk_bytes.len()
+        );
+    }
     Ok((kind, vk))
 }
 
@@ -274,6 +289,17 @@ mod tests {
             );
         }
         assert!(deserialize_vk(&[]).is_err(), "an empty blob must not parse");
+    }
+
+    #[test]
+    fn a_padded_blob_is_rejected() {
+        // Not a real key, so this stops at the trailing-byte check only if the
+        // key itself parses; the empty and unknown-tag cases cover the rest.
+        let padded = deserialize_vk(&[DeciderKind::None.tag(), 0, 0, 0, 0]);
+        assert!(
+            padded.is_err(),
+            "a blob that is not exactly one key must fail"
+        );
     }
 
     #[test]
