@@ -89,7 +89,7 @@ impl FieldRepr for Key {
 ))]
 #[serde(rename_all = "lowercase", expecting = "operation")]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[storable(db = D)]
+#[storable(db = D, invariant = Op::invariant)]
 #[tag = "impact-op[v1]"]
 #[phantom(M)]
 pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
@@ -342,6 +342,14 @@ impl<M: ResultMode<D>, D: DB> Debug for Op<M, D> {
 }
 
 impl<M: ResultMode<D>, D: DB> Op<M, D> {
+    fn invariant(&self) -> std::io::Result<()> {
+        match self {
+            Op::Dup { n } | Op::Swap { n } | Op::Ins { n, .. } if *n >= 16 => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "stack operation out of legal encoding bound")),
+            Op::Idx { path, .. } if !(1..=16).contains(&path.len()) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid `idx` sequence length")),
+            _ => Ok(()),
+        }
+    }
+
     pub fn translate<M2: ResultMode<D>, F: FnOnce(M::ReadResult) -> M2::ReadResult>(
         self,
         f: F,

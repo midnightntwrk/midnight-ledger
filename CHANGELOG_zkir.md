@@ -5,6 +5,11 @@
 - feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
 - feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
 
+## Version `2.1.1`
+
+- pull in hardened `serialize`, `base-crypto` and `transient-crypto`
+  deserialization.
+
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes

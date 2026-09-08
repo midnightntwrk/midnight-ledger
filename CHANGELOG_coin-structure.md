@@ -1,5 +1,10 @@
 # `coin-structure` Changelog
 
+## Version `2.0.2`
+
+- pull in hardened `serialize`, `base-crypto`, `storage-core` and
+  `transient-crypto` deserialization.
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking transient-crypto changes

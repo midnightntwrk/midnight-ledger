@@ -339,11 +339,13 @@ impl<'de, D: DB> Visitor<'de> for StateValueVisitor<D> {
 
 impl<'de, D1: DB> Deserialize<'de> for StateValue<D1> {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        de.deserialize_struct(
+        let v = de.deserialize_struct(
             "StateValue",
             &["tag", "content"],
             StateValueVisitor(PhantomData),
-        )
+        )?;
+        v.invariant().map_err(serde::de::Error::custom)?;
+        Ok(v)
     }
 }
 

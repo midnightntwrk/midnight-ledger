@@ -36,7 +36,7 @@ pub trait VecExt {
 impl<T> VecExt for Vec<T> {
     fn with_bounded_capacity(n: usize) -> Self {
         const MEMORY_LIMIT: usize = 1 << 25; // 32 MiB
-        let alloc_limit = MEMORY_LIMIT / std::mem::size_of::<T>();
+        let alloc_limit = MEMORY_LIMIT.checked_div(std::mem::size_of::<T>()).unwrap_or(n);
         Self::with_capacity(usize::min(alloc_limit, n))
     }
 }
@@ -298,7 +298,10 @@ impl Deserializable for ScaleBigInt {
             SCALE_N_BYTE_MARKER => {
                 let n = top6bits(first) as usize + 4;
                 reader.read_exact(&mut res.0[..n])?;
-                if res.0[n - 1] == 0 {
+                // Trailing zeros imply this encoding isn't sufficiently compact.
+                // If n == 4, this integer should be *outside* the legal encoding for the 4-byte
+                // limit.
+                if res.0[n - 1] == 0 || (n == 4 && res.0[3] < 64) {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
                         "non-canonical scale encoding",

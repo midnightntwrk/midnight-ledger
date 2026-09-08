@@ -1970,11 +1970,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2847,7 +2849,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2915,7 +2917,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "fake",
  "lazy_static",
@@ -3043,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3074,7 +3076,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3095,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "3.0.0"
+version = "3.0.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -3116,7 +3118,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "3.1.0"
+version = "3.1.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -3200,7 +3202,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.1.0"
+version = "1.1.1"
 dependencies = [
  "crypto",
  "konst",
@@ -3226,7 +3228,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "criterion",
  "crypto",
@@ -3254,7 +3256,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "archery",
  "criterion",
@@ -3308,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3373,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3467,7 +3469,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-wasm"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -4180,15 +4182,16 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.15"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fcb935c5bec503c2f0e306bdd3e58bb9029dcb14fa8d9ac76e3a5256ac0763e"
+checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
 dependencies = [
  "aws-lc-rs",
  "bytes",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "lru-slab",
- "rand 0.9.4",
+ "rand 0.10.1",
+ "rand_pcg",
  "ring",
  "rustc-hash",
  "rustls",
@@ -4344,6 +4347,15 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "rand_pcg"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
+dependencies = [
+ "rand_core 0.10.1",
+]
 
 [[package]]
 name = "rand_xorshift"
