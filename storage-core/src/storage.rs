@@ -300,6 +300,26 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db.get_roots()
     }
 
+    #[cfg(feature = "gc-v1")]
+    fn get_root_metadata(&self, key: &ArenaHash<Self::Hasher>) -> Option<Vec<u8>> {
+        self.db.get_root_metadata(key)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn set_root_metadata(&mut self, key: ArenaHash<Self::Hasher>, metadata: Vec<u8>) {
+        self.db.set_root_metadata(key, metadata)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn delete_root_metadata(&mut self, key: &ArenaHash<Self::Hasher>) {
+        self.db.delete_root_metadata(key)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_all_root_metadata(&self) -> std::collections::HashMap<ArenaHash<Self::Hasher>, Vec<u8>> {
+        self.db.get_all_root_metadata()
+    }
+
     fn size(&self) -> usize {
         self.db.size()
     }
