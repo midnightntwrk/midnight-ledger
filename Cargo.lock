@@ -3169,7 +3169,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm-v9"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",

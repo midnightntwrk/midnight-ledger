@@ -23,7 +23,7 @@ public-internal-structure = []
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
+storage-core = { version = "1.2.2", path = "../storage-core", package = "midnight-storage-core" }
 
 ff = "^0.13.1"
 group = "^0.13.0"

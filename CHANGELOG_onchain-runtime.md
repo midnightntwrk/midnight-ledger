@@ -5,6 +5,15 @@
 - feat: `ContractOperation` includes ir field
 - feat: add support for ECDSA signatures.
 - feat: Changed the structure of logged events according to events MIP (link tbd).
+- security: `Op` deserialization rejects operands outside their legal encoding
+  bound: `dup`, `swap` and `ins` with `n >= 16`, and `idx` with a path length
+  outside `1..=16`.
+- security: serde `StateValue` deserialization now enforces the type's
+  invariant.
+- security: taking the `type` of an array with more than 16 entries is a type
+  error instead of producing an out-of-range tag byte.
+- fix: the Merkle tree bound checks in `idx` and `ins` no longer overflow for
+  large tree heights.
 
 ## Unreleased (3.2)
 

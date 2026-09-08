@@ -13,6 +13,8 @@
 - fix: rehashing serde deserialized `MerkleTree`s
 - fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
 - fix: do not panic on indexing into a collapsed `MerkleTree`, but return `None` instead
+- security: reject a verifier key with trailing bytes after the encoded key, so
+  that two encodings cannot map to the same key.
 
 
 ## Version `2.1.0`

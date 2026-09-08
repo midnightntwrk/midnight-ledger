@@ -131,8 +131,10 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     /// docs). This is a hand-enumerated statement of the structural rules,
     /// composed with the annotation-consistency check.
     ///
-    /// This is a pure inspection predicate: it is the oracle the property tests
-    /// use, and does not itself change what deserialization accepts.
+    /// This is wired in as the `Storable` invariant, so it is also what
+    /// deserialization enforces: it replaces the narrower
+    /// annotation-consistency-only check, and a trie whose *structure* is
+    /// non-canonical no longer decodes.
     pub fn canonicity(&self) -> Result<(), std::io::Error> {
         fn err<T>(msg: &str) -> Result<T, std::io::Error> {
             Err(std::io::Error::new(
