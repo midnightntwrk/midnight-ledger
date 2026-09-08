@@ -365,11 +365,8 @@ async fn verify_proof_without_a_decider() {
         .await
         .expect("outer prove (guard off)");
     assert_eq!(
-        guarded.accumulators[0],
-        trivial_accumulator_pis()
-            .into_iter()
-            .map(Fr)
-            .collect::<Vec<_>>(),
+        guarded.accumulators[0].as_public_input(),
+        trivial_accumulator_pis(),
     );
     outer_vk
         .verify(&params.verifier(), &guarded, guarded_pis.into_iter())
@@ -428,7 +425,7 @@ async fn verify_proof_with_a_collapsed_decider() {
         )
         .expect("the recursive proof's own accumulator"),
     );
-    let exposed: Vec<Fq> = outer_proof.accumulators[0].iter().map(|f| f.0).collect();
+    let exposed = outer_proof.accumulators[0].as_public_input();
     assert_ne!(
         exposed, own,
         "the carried accumulator must have been folded in"
@@ -445,11 +442,8 @@ async fn verify_proof_with_a_collapsed_decider() {
         .await
         .expect("outer prove (guard off)");
     assert_eq!(
-        guarded.accumulators[0],
-        trivial_accumulator_pis()
-            .into_iter()
-            .map(Fr)
-            .collect::<Vec<_>>(),
+        guarded.accumulators[0].as_public_input(),
+        trivial_accumulator_pis(),
     );
     outer_vk
         .verify(&params.verifier(), &guarded, guarded_pis.into_iter())

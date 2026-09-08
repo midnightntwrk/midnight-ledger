@@ -7,7 +7,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## Unreleased (Ledger 10)
 
 - feat: ZKIR gains `verify_proof` and `inner_proof` instructions.
-- breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<Vec<Fr>> }`.
+- breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<DeferredAccumulator> }`.
+- feat: `DeferredAccumulator` carries a `verify_proof` instruction's deferred KZG accumulator as the two points it collapses to, rather than as its public-input field elements. The always-one side scalars are regenerated rather than stored, taking each accumulator from 384 bytes to 96, and a point off the curve or outside the prime-order subgroup is now refused when the proof is deserialized rather than after it verifies.
 - breaking: `VerifierKey::mock_verify` now takes the `Proof` alongside the statement.
 - breaking: `transient-crypto` bumped to `4.0.0`. 
 - feat: `ProofPreimage::proof_witnesses` is a `Vec<InnerProofWitness>` rather than a `Vec<Vec<u8>>`.
