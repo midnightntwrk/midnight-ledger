@@ -16,9 +16,9 @@ public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
 
 [dependencies]
-storage-core = { version = "1.2.2", path = "../storage-core", package = "midnight-storage-core" }
-base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+storage-core = { version = "1.2.2", package = "midnight-storage-core" }
+base-crypto = { version = "1.1.0", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 derive-where = "^1.6.1"
 digest = "^0.11.2"
@@ -35,12 +35,6 @@ pprof = { version = "0.15", optional = true, features = ["criterion", "flamegrap
 os_pipe = { version = "1.2.2", optional = true }
 criterion = { version = "^0.5.1", optional = true }
 sysinfo = "0.39.1"
-
-[dev-dependencies]
-pastey = "0.2.1"
-rayon = "^1.10.0"
-storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }
-onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 
 [[bench]]
 name = "benchmarking"
