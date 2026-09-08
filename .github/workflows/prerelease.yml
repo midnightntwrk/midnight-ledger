@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.ids.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
       - name: Install Dependencies
         run: |
@@ -44,7 +44,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           always-auth: true
           registry-url: https://npm.pkg.github.com/
@@ -52,8 +52,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
+      - name: Update NPM
+        run: npm install -g npm@12.0.2
+
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             # crates.io 403s any User-Agent starting with "curl/", which is what
@@ -77,7 +80,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Get project versions
         run: |
@@ -284,10 +288,10 @@ jobs:
 
   integration:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
 
@@ -296,10 +300,10 @@ jobs:
     runs-on: ubuntu-latest-8-core-x64
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -324,7 +328,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -401,10 +406,10 @@ jobs:
     runs-on: ubuntu-latest-8-core-x64
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             # crates.io 403s any User-Agent starting with "curl/", which is what
@@ -428,7 +433,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -449,7 +455,7 @@ jobs:
     # irreversible job create/announce the release anyway.
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.coverage.result == 'success' && needs.integration.result == 'success' && needs.unit-tests.result == 'success' && (needs.publish-npm.result == 'success' || (github.event.inputs.dry_run == 'true' && needs.publish-npm.result == 'skipped')) }}
     needs: [ build, coverage, integration, unit-tests, publish-npm ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -457,7 +463,7 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
       - name: Download all release artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -475,8 +481,8 @@ jobs:
 
           for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
           for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-latest/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-latest/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-junit.xml"; done
           for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
 
           if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then

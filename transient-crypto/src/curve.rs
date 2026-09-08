@@ -384,6 +384,19 @@ impl EmbeddedFr {
         embedded::Scalar::from_repr(repr).map(EmbeddedFr).into()
     }
 
+    /// Interpret a little-endian byte-string of at most 32 bytes as an [`EmbeddedFr`],
+    /// reducing modulo the embedded scalar field order via wide reduction.
+    ///
+    /// Returns `None` if `bytes.len() > FR_BYTES`.
+    pub fn from_le_bytes_wide(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() > FR_BYTES {
+            return None;
+        }
+        let mut wide = [0u8; 64];
+        wide[..bytes.len()].copy_from_slice(bytes);
+        Some(EmbeddedFr(embedded::Scalar::from_bytes_wide(&wide)))
+    }
+
     /// Output an [`EmbeddedFr`] as a little-endian bytes-string
     pub fn as_le_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()

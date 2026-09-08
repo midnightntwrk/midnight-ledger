@@ -44,7 +44,7 @@ pub use base_crypto::fab::{
 };
 pub use base_crypto::hash::{HashOutput, persistent_commit};
 pub use base_crypto::rng::SplittableRng;
-pub use base_crypto::signatures::Signature;
+pub use base_crypto::schnorr::Signature;
 pub use base_crypto::time::Timestamp;
 pub use coin_structure::coin::{
     Info as CoinInfo, NIGHT, QualifiedInfo as QualifiedCoinInfo, TokenType, UnshieldedTokenType,

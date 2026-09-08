@@ -77,7 +77,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout Code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
         with:
           ref: ${{ github.event.inputs.ref }}
 
@@ -85,12 +85,12 @@ jobs:
         # The checkout above is the dispatched ref, which may be a historical
         # branch/tag that predates the helper scripts. The scripts must always
         # come from the workflow's own commit, so check them out separately.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  #v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
         with:
           path: .publish-scripts
 
       - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6.4.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
           registry-url: https://npm.pkg.github.com/
         env:
@@ -98,7 +98,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: |
             # crates.io 403s any User-Agent starting with "curl/", which is what
@@ -122,7 +122,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Build and publish
         env:

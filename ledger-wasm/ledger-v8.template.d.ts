@@ -433,6 +433,13 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class DustGenerationTreeInsertionPath {
+  constructor(state: DustGenerationState, index: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): DustGenerationTreeInsertionPath;
+  toString(compact?: boolean): string;
+}
+
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
   static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
@@ -452,11 +459,12 @@ export class DustState {
 }
 
 export class DustStateChanges {
-  private constructor();
+  constructor(source: TransactionHash, receivedUtxos: QualifiedDustOutput[], spentUtxos: QualifiedDustOutput[]);
+  toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The UTXOs that were received in this state change
    */
@@ -487,6 +495,7 @@ export class DustLocalState {
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
   applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  updateGenerationTreeFromEvidence(evidence: DustGenerationTreeInsertionPath): DustLocalState;
   generatingTreeRoot(): bigint | undefined;
   insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
   removeCommitment(commitmentIndex: bigint): DustLocalState;
@@ -498,22 +507,21 @@ export class DustLocalState {
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
   /**
-   * Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+   * Replays a direct concatenation of serialized ledger events. Otherwise, acts as `replayEventsWithChanges`.
    */
   replayRawEvents(sk: DustSecretKey, rawEvents: Uint8Array): DustLocalStateWithChanges;
   addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
-  /**
-   * Returns a new UTXO with a reduced value and the sequential nonce
-   */
-  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
+  readonly nullifiers: Map<DustNullifier, QualifiedDustOutput>;
   readonly params: DustParameters;
-  readonly syncTime: Date;
+  syncTime: Date;
+  readonly generatingTreeFirstFree: bigint;
+  readonly commitmentTreeFirstFree: bigint;
 }
 
 /**
@@ -1506,9 +1514,19 @@ export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): Dust
 export function dustNonce(initialNonce: DustInitialNonce, seq: bigint, sk: DustSecretKey): DustNonce;
 
 /**
+ * Calculate Dust first nonce (when seq=0)
+ */
+export function dustFirstNonce(backingNight: DustInitialNonce, dustAddress: DustPublicKey): DustNonce;
+
+/**
  * Calculate Dust initial nonce (a backing night hash)
  */
 export function dustInitialNonce(outputNo: bigint, intentHash: IntentHash): DustInitialNonce;
+
+/**
+ * Returns a new Dust UTXO with a reduced value and the sequential nonce
+ */
+export function successorDustUtxo(qdo: QualifiedDustOutput, now: Date, subtractFee: bigint, newCommitmentIndex: bigint, genInfo: DustGenerationInfo, sk: DustSecretKey, dustParams: DustParameters): QualifiedDustOutput;
 
 /**
  * Parameters used by the Midnight ledger, including transaction fees and
@@ -1717,11 +1735,12 @@ export class ZswapChainState {
 }
 
 export class ZswapStateChanges {
-  private constructor();
+  constructor(source: TransactionHash, receivedCoins: QualifiedShieldedCoinInfo[], spentCoins: QualifiedShieldedCoinInfo[]);
+  toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The coins that were received in this state change
    */

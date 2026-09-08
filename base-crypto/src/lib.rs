@@ -24,11 +24,15 @@
 
 pub mod cost_model;
 pub mod data_provider;
+pub mod ecdsa;
 pub mod fab;
 pub mod hash;
 pub mod repr;
 pub mod rng;
-pub mod signatures;
+pub mod schnorr;
 pub mod time;
+
+#[deprecated = "`signatures` has been renamed to `schnorr` due to the addition of new signature schemes. Please prefer `schnorr`."]
+pub use schnorr as signatures;
 
 pub use repr::*;

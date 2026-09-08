@@ -40,8 +40,12 @@ pub use onchain_vm::vm_value;
 
 use base_crypto::fab::AlignedValue;
 use transient_crypto::curve::Fr;
+use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::hash::transient_commit;
 
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
-    transient_commit(&AlignedValue::concat([&input, &output]), rand)
+    transient_commit(
+        &ValueReprAlignedValue(AlignedValue::concat([&input, &output])),
+        rand,
+    )
 }

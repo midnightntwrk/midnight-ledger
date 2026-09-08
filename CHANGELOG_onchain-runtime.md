@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
+
 ## Version `3.1.1`
 
 Covers `onchain-state` `3.0.1` and `onchain-vm` `3.1.1`.

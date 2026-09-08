@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures;
+use base_crypto::schnorr;
 use js_sys::{Array, BigInt, JsString, Uint8Array};
 use ledger::structure::{ProofMarker, ProofPreimageMarker, SingleUpdate};
 use onchain_runtime::state::EntryPointBuf;
@@ -503,7 +503,7 @@ impl MaintenanceUpdate {
 
     #[wasm_bindgen(js_name = "addSignature")]
     pub fn add_signature(&self, idx: u64, signature: &str) -> Result<MaintenanceUpdate, JsError> {
-        let signature: signatures::Signature = from_hex_ser(signature)?;
+        let signature: schnorr::Signature = from_hex_ser(signature)?;
         if idx > u32::MAX as u64 {
             return Err(JsError::new("idx exceeded u32 max"));
         }

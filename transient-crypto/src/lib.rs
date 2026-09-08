@@ -34,3 +34,4 @@ pub mod merkle_tree;
 pub mod mock_verify;
 pub mod proofs;
 pub mod repr;
+pub mod schnorr;

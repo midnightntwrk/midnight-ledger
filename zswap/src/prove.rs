@@ -196,7 +196,7 @@ mod tests {
             use std::fs::File;
             use std::path::PathBuf;
             let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
-            let ir = tagged_deserialize::<IrSource>(&mut File::open(file).unwrap()).unwrap();
+            let ir = IrSource::load_from_tagged(&mut File::open(file).unwrap()).unwrap();
             ir.instructions
                 .iter()
                 .filter_map(|ins| match ins {
