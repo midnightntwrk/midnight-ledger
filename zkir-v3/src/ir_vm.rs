@@ -195,6 +195,60 @@ impl IrSource {
             .count()
     }
 
+    /// Rejects a malformed `inner_proof` / `verify_proof` pairing: each
+    /// `verify_proof` must name a proof an earlier `inner_proof` bound, under
+    /// the same guard, and each bound proof must be used exactly once.
+    ///
+    /// Guards must match because each instruction reads only its own: guarded
+    /// off, `inner_proof` binds an empty blob that a `verify_proof` guarded on
+    /// would then fail to verify.
+    fn validate_inner_proofs(&self) -> anyhow::Result<()> {
+        // Guard the proof was bound under, and how many `VerifyProof`s took it.
+        let mut bound: HashMap<&Identifier, (&Operand, usize)> = HashMap::new();
+
+        for ins in self.instructions.iter() {
+            match ins {
+                I::InnerProof { guard, output } => {
+                    if bound.insert(output, (guard, 0)).is_some() {
+                        bail!("`inner_proof` rebinds {}", output.0);
+                    }
+                }
+                I::VerifyProof { guard, proof, .. } => {
+                    let (bound_guard, consumers) = bound.get_mut(proof).ok_or_else(|| {
+                        anyhow!(
+                            "`verify_proof` names {}, which no preceding `inner_proof` binds",
+                            proof.0
+                        )
+                    })?;
+                    if *bound_guard != guard {
+                        bail!(
+                            "`verify_proof` on {} is guarded differently to the `inner_proof` \
+                             that bound it",
+                            proof.0
+                        );
+                    }
+                    *consumers += 1;
+                    if *consumers > 1 {
+                        bail!("{} is verified more than once", proof.0);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Walk the instructions again rather than the map, so the first
+        // offender is reported in instruction order.
+        for ins in self.instructions.iter() {
+            if let I::InnerProof { output, .. } = ins
+                && bound[output].1 == 0
+            {
+                bail!("`inner_proof` binds {}, which no `verify_proof` uses", output.0);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Indexes [`IrSource::verify_proof_vks`] by digest, so each `VerifyProof`
     /// can resolve its key by `vk_hash`.
     ///
@@ -238,6 +292,7 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
+        self.validate_inner_proofs()?;
         let verify_proof_vks = self.resolve_verify_proof_vks()?;
 
         let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
@@ -841,6 +896,8 @@ impl Relation for IrSource {
         _instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
+        self.validate_inner_proofs()
+            .map_err(|e| Error::Synthesis(e.to_string()))?;
         let verify_proof_vks = self
             .resolve_verify_proof_vks()
             .map_err(|e| Error::Synthesis(e.to_string()))?;

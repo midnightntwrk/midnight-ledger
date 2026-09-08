@@ -13,19 +13,32 @@
 
 //! `inner_proof` consumes one entry of `ProofPreimage::inner_proofs` per
 //! instruction, whatever its guard, so the vector's length is fixed by the
-//! circuit and not by the path taken.
+//! circuit and not by the path taken. Its pairing with `verify_proof` is
+//! checked before either pass runs.
+//!
+//! Every guard here is a constant `0x00`, which is what keeps these tests fast:
+//! a guarded-off `verify_proof` returns the trivial accumulator without reading
+//! its verifying key, so the side-table entry can be a stub. Guarded-on
+//! verification needs a real key and a real inner proof, and is covered by
+//! `verify_proof_e2e`.
 
 use std::borrow::Cow;
+
+use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{InnerProofWitness, KeyLocation, ProofPreimage, Zkir};
 
-fn preimage(guards: [u64; 2], inner_proofs: Vec<InnerProofWitness>) -> ProofPreimage {
+/// Stands in for a verifying key. Never parsed, because nothing here is
+/// verified; `verify_proof_vks` is only indexed by digest.
+const STUB_VK: &[u8] = &[0u8, 1, 2, 3];
+
+fn preimage(inner_proofs: Vec<InnerProofWitness>) -> ProofPreimage {
     ProofPreimage {
         binding_input: Fr::from(7u64),
         communications_commitment: None,
-        inputs: guards.into_iter().map(Fr::from).collect(),
+        inputs: vec![],
         private_transcript: vec![],
         public_transcript_inputs: vec![],
         public_transcript_outputs: vec![],
@@ -34,45 +47,94 @@ fn preimage(guards: [u64; 2], inner_proofs: Vec<InnerProofWitness>) -> ProofPrei
     }
 }
 
-fn load(instructions: &str) -> IrSource {
+fn blank() -> InnerProofWitness {
+    InnerProofWitness::Direct(vec![])
+}
+
+/// The rejection message, so each test can say *why* it expected a rejection
+/// rather than accept any error at all.
+fn rejection(instructions: Vec<String>, witnesses: usize) -> String {
+    load(instructions)
+        .check(&preimage(vec![blank(); witnesses]))
+        .expect_err("must be rejected")
+        .to_string()
+}
+
+fn inner(name: &str, guard: &str) -> String {
+    format!(r#"{{ "op": "inner_proof", "guard": "{guard}", "output": "{name}" }}"#)
+}
+
+fn verify(name: &str, guard: &str) -> String {
+    format!(
+        r#"{{ "op": "verify_proof", "guard": "{guard}", "vk_hash": "0x{vk}",
+              "instance": [], "proof": "{name}" }}"#,
+        vk = const_hex::encode(sha2::Sha256::digest(STUB_VK)),
+    )
+}
+
+/// A well-formed, guarded-off `inner_proof` / `verify_proof` pair.
+fn pair(name: &str) -> Vec<String> {
+    vec![inner(name, "0x00"), verify(name, "0x00")]
+}
+
+fn load(instructions: Vec<String>) -> IrSource {
     let ir_json = format!(
         r#"{{
-           "version": {{ "major": 3, "minor": 0 }},
-           "inputs": [
-              {{ "name": "%g_0", "type": "Scalar<BLS12-381>" }},
-              {{ "name": "%g_1", "type": "Scalar<BLS12-381>" }}
-           ],
+           "version": {{ "major": 3, "minor": 1 }},
+           "inputs": [],
            "outputs": [],
            "do_communications_commitment": false,
-           "instructions": [{instructions}]
-        }}"#
+           "instructions": [{}]
+        }}"#,
+        instructions.join(",\n")
     );
-    IrSource::load(ir_json.as_bytes()).expect("IR must parse")
+    let mut ir = IrSource::load(ir_json.as_bytes()).expect("IR must parse");
+    ir.verify_proof_vks = vec![STUB_VK.to_vec()];
+    ir
 }
 
 #[test]
 fn one_proof_witness_per_instruction_whatever_the_guard() {
-    let ir = load(
-        r#"{ "op": "inner_proof", "guard": "%g_0", "output": "%p_0" },
-           { "op": "inner_proof", "guard": "%g_1", "output": "%p_1" }"#,
-    );
-    let proof = || InnerProofWitness::Direct(vec![1u8, 2, 3]);
-    let blank = || InnerProofWitness::Direct(vec![]);
+    let ir = load([pair("%p_0"), pair("%p_1")].concat());
 
-    // Two instructions, two witnesses, on every combination of guards. The
-    // guarded-off ones can be blank, since their witness is ignored.
-    ir.check(&preimage([1, 1], vec![proof(), proof()]))
-        .expect("both active");
-    ir.check(&preimage([0, 1], vec![blank(), proof()]))
-        .expect("first guarded off");
-    ir.check(&preimage([0, 0], vec![blank(), blank()]))
-        .expect("both guarded off");
+    // Neither proof is verified, yet both slots must still be supplied: the
+    // count follows the instruction list, not the guards.
+    ir.check(&preimage(vec![blank(), blank()]))
+        .expect("two instructions, two witnesses");
 
-    // The count does not depend on the guards, so too few is rejected even
-    // when only one instruction is active, and too many always is.
-    assert!(ir.check(&preimage([0, 1], vec![proof()])).is_err());
+    assert!(ir.check(&preimage(vec![blank()])).is_err(), "too few");
     assert!(
-        ir.check(&preimage([1, 1], vec![proof(), proof(), proof()]))
-            .is_err()
+        ir.check(&preimage(vec![blank(), blank(), blank()])).is_err(),
+        "too many"
     );
+}
+
+#[test]
+fn a_verify_proof_must_name_a_proof_bound_before_it() {
+    let msg = rejection(vec![verify("%p_9", "0x00")], 0);
+    assert!(msg.contains("no preceding `inner_proof` binds"), "{msg}");
+
+    // Binding it later does not help: both passes resolve in instruction order.
+    let msg = rejection(vec![verify("%p_0", "0x00"), inner("%p_0", "0x00")], 1);
+    assert!(msg.contains("no preceding `inner_proof` binds"), "{msg}");
+}
+
+#[test]
+fn the_two_guards_must_agree() {
+    let msg = rejection(vec![inner("%p_0", "0x01"), verify("%p_0", "0x00")], 1);
+    assert!(msg.contains("guarded differently"), "{msg}");
+}
+
+#[test]
+fn a_bound_proof_is_verified_exactly_once() {
+    let twice = vec![
+        inner("%p_0", "0x00"),
+        verify("%p_0", "0x00"),
+        verify("%p_0", "0x00"),
+    ];
+    let msg = rejection(twice, 1);
+    assert!(msg.contains("verified more than once"), "{msg}");
+
+    let msg = rejection(vec![inner("%p_0", "0x00")], 1);
+    assert!(msg.contains("no `verify_proof` uses"), "{msg}");
 }
