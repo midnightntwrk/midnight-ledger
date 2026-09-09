@@ -18,7 +18,7 @@
 //! one-element statement. The second verification uses a reloaded key, which is
 //! how the ledger uses it.
 
-use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
+use midnight_zkir_v3::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use serialize::{Deserializable, Serializable};
 use transient_crypto::curve::Fr;
@@ -56,11 +56,6 @@ async fn accumulator_is_carried_on_the_proof_not_the_statement() {
         "one verify_proof must carry exactly one accumulator block"
     );
     assert_eq!(
-        outer_proof.accumulators[0].len(),
-        acc_len,
-        "a block is one accumulator wide"
-    );
-    assert_eq!(
         outer_pis,
         vec![Fr::from(BINDING_INPUT)],
         "the statement is the binding input alone; the accumulator is not in it"
@@ -68,20 +63,18 @@ async fn accumulator_is_carried_on_the_proof_not_the_statement() {
 
     // The block holds what off-circuit preparation independently computes for
     // this (vk, instance, proof).
-    let expected: Vec<Fr> = accumulator_pis(
+    let expected = accumulator_pis(
         &verify_proof_offcircuit(&fixture.vk_blob, &inner_pis, &inner_proof, true)
             .expect("off-circuit preparation"),
-    )
-    .into_iter()
-    .map(Fr)
-    .collect();
+    );
     assert_eq!(
         expected.len(),
         acc_len,
         "off-circuit accumulator should be acc_len field elements"
     );
     assert_eq!(
-        outer_proof.accumulators[0], expected,
+        outer_proof.accumulators[0].as_public_input(),
+        expected,
         "the carried accumulator must match off-circuit preparation"
     );
 

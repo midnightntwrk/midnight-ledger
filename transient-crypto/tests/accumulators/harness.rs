@@ -43,7 +43,7 @@ use std::collections::BTreeMap;
 
 use midnight_transient_crypto::curve::Fr;
 use midnight_transient_crypto::proofs::{
-    InnerSelfEmulation as S, ParamsProver, Proof, TranscriptHash, VerifierKey, accumulator_pi_len,
+    DeferredAccumulator, InnerSelfEmulation as S, ParamsProver, Proof, TranscriptHash, VerifierKey,
 };
 
 /// A deterministic RNG, so every test here is reproducible.
@@ -60,11 +60,6 @@ pub fn srs(k: u8) -> ParamsProver {
         File::open(format!("{dir}/bls_midnight_2p{k}")).expect("SRS params"),
     ))
     .expect("read SRS")
-}
-
-/// Public-input width of one fully-collapsed accumulator.
-pub fn acc_len() -> usize {
-    accumulator_pi_len()
 }
 
 fn encode(acc: &Accumulator<S>) -> Vec<Fq> {
@@ -139,11 +134,8 @@ impl Relation for ExposeAll {
     }
 }
 
-/// Proves the public-input vector `accs` flattened followed by `tail`, and
-/// hands the pieces back the way [`VerifierKey::verify`] expects them: the
-/// blocks on the `Proof`, only `tail` as the caller-facing statement.
-///
-/// An empty `accs` gives a proof carrying no accumulators at all.
+/// Proves `accs` followed by `tail`, returning accumulators on the `Proof` and
+/// `tail` as the caller-facing statement.
 pub fn proof_carrying(
     accs: &[Vec<Fq>],
     tail: &[Fq],
@@ -156,10 +148,16 @@ pub fn proof_carrying(
         VerifierKey::from(vk),
         Proof {
             bytes,
-            accumulators: accs.iter().map(|a| fr_vec(a)).collect(),
+            accumulators: accs.iter().map(|a| deferred(a)).collect(),
         },
         fr_vec(tail),
     )
+}
+
+/// Converts a collapsed accumulator encoding for use on a [`Proof`].
+pub fn deferred(fields: &[Fq]) -> DeferredAccumulator {
+    DeferredAccumulator::from_public_input(fields)
+        .expect("test accumulator must be collapsed and fixed-base-resolved")
 }
 
 /// Field elements as the `Fr` newtype the proof API speaks in.

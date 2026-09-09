@@ -50,8 +50,8 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
+use midnight_zkir_v3::decider::{DeciderKind, serialize_vk};
 use midnight_zkir_v3::ir::IrMinorVersion;
-use midnight_zkir_v3::ir_instructions::decider::{DeciderKind, serialize_vk};
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_incircuit;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{

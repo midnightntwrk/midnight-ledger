@@ -11,16 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A guarded-off `verify_proof` exposes the trivial accumulator whatever bytes
-//! the prover supplied, and the outer proof still verifies.
-//!
-//! Reachable because the guards are separate operands: `inner_proof` on consumes
-//! a witness, `verify_proof` off discards it. Two witnesses through one circuit —
-//! a genuine proof and bytes that are not one — must be indistinguishable in the
-//! output.
+//! A guarded-off pair exposes the trivial accumulator regardless of the inner
+//! proof bytes, while the outer proof still verifies.
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decider::trivial_accumulator_pis;
+use midnight_zkir_v3::decider::trivial_accumulator_pis;
 use transient_crypto::curve::Fr;
 
 use crate::e2e_harness::{
@@ -28,19 +23,17 @@ use crate::e2e_harness::{
     outer_verify, scalar_inner_proof, test_rng, vk_hash_hex,
 };
 
-/// `inner_proof` and `verify_proof` taking their guards from separate inputs,
-/// so one circuit covers every combination.
-fn split_guard_ir(inner: &InnerProof) -> IrSource {
+/// An `inner_proof` / `verify_proof` pair sharing its required guard.
+fn shared_guard_ir(inner: &InnerProof) -> IrSource {
     let instructions = format!(
-        r#"{{ "op": "inner_proof", "guard": "%g_i", "output": "%p_0" }},
-           {{ "op": "verify_proof", "guard": "%g_v", "vk_hash": "0x{hash}",
+        r#"{{ "op": "inner_proof", "guard": "%g", "output": "%p_0" }},
+           {{ "op": "verify_proof", "guard": "%g", "vk_hash": "0x{hash}",
               "instance": [{instance}], "proof": "%p_0" }}"#,
         hash = vk_hash_hex(&inner.vk_blob),
         instance = instance_json(&inner.pis),
     );
     outer_ir_with(
-        r#"{ "name": "%g_i", "type": "Scalar<BLS12-381>" },
-           { "name": "%g_v", "type": "Scalar<BLS12-381>" }"#,
+        r#"{ "name": "%g", "type": "Scalar<BLS12-381>" }"#,
         false,
         &instructions,
         vec![inner.vk_blob.clone()],
@@ -52,10 +45,10 @@ fn split_guard_ir(inner: &InnerProof) -> IrSource {
 async fn guarded_off_verify_proof_is_witness_independent() {
     let mut rng = test_rng();
     let inner = scalar_inner_proof(&mut rng).await;
-    let ir = split_guard_ir(&inner);
-    let (pk, vk) = outer_keygen(&ir, "split guards, verify_proof off").await;
+    let ir = shared_guard_ir(&inner);
+    let (pk, vk) = outer_keygen(&ir, "shared guard, off").await;
 
-    let trivial: Vec<Fr> = trivial_accumulator_pis().into_iter().map(Fr).collect();
+    let trivial = trivial_accumulator_pis();
 
     // Bytes that are not a proof, and the same length as one so the difference
     // cannot be dismissed as a size check somewhere.
@@ -69,9 +62,8 @@ async fn guarded_off_verify_proof_is_witness_independent() {
     ] {
         println!("--- guarded off, witness: {label} ---");
 
-        // `%g_i` on, so the witness is consumed; `%g_v` off, so it is discarded.
-        let preimage =
-            outer_preimage_with(vec![witness], vec![Fr::from(1u64), Fr::from(0u64)], vec![]);
+        // The guard is off, but the witness slot is still consumed.
+        let preimage = outer_preimage_with(vec![witness], vec![Fr::from(0u64)], vec![]);
         let (proof, pis) = outer_prove(&ir, pk.clone(), &preimage, &mut rng).await;
 
         assert_eq!(
@@ -80,16 +72,15 @@ async fn guarded_off_verify_proof_is_witness_independent() {
             "{label}: a guarded-off verify_proof still occupies its block"
         );
         assert_eq!(
-            proof.accumulators[0], trivial,
+            proof.accumulators[0].as_public_input(),
+            trivial,
             "{label}: the exposed accumulator must be the trivial one"
         );
 
-        // The pairing holds by construction, so the outer proof verifies.
         outer_verify(&vk, &proof, pis);
-        exposed.push(proof.accumulators[0].clone());
+        exposed.push(proof.accumulators[0]);
     }
 
-    // The crux: the witness had no influence on anything the verifier sees.
     assert_eq!(
         exposed[0], exposed[1],
         "a genuine proof and garbage must be indistinguishable once guarded off"

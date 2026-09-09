@@ -22,14 +22,17 @@
 //! `bls_midnight_2p<k>` files, or rely on `~/.cache/midnight/zk-params`. The
 //! circuits are small, so unlike the ZKIR e2e suite they are not `#[ignore]`d.
 
-#[path = "accumulators/bad_accumulator_block_is_rejected.rs"]
-mod bad_accumulator_block_is_rejected;
+#[path = "accumulators/both_accumulator_points_are_checked.rs"]
+mod both_accumulator_points_are_checked;
 
 #[path = "accumulators/batch_verify_accepts_proofs_with_and_without_accumulators.rs"]
 mod batch_verify_accepts_proofs_with_and_without_accumulators;
 
 #[path = "accumulators/batch_verify_rejects_bad_accumulator.rs"]
 mod batch_verify_rejects_bad_accumulator;
+
+#[path = "accumulators/the_caller_statement_pins_the_accumulator_count.rs"]
+mod the_caller_statement_pins_the_accumulator_count;
 
 #[path = "accumulators/each_accumulator_block_is_paired.rs"]
 mod each_accumulator_block_is_paired;

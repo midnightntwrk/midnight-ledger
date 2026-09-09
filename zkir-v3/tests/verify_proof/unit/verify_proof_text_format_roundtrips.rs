@@ -15,10 +15,8 @@
 //!
 //! `inner_proof` binds the next prover-supplied inner proof
 //! (`ProofPreimage::inner_proofs`) to a name, and `verify_proof` takes that
-//! name as its `proof` input. Both carry a `guard`, which should be the same
-//! condition on the two: it decides whether the witness is bound at all, and
-//! whether the proof is actually verified. A witness slot is consumed either
-//! way. Alongside it, `verify_proof` takes:
+//! name as its `proof` input. Both must use the same `guard`; a witness slot is
+//! consumed either way. Alongside it, `verify_proof` takes:
 //!
 //! - `vk_hash`: hash of the decider-tagged, self-contained `MidnightVK` blob
 //!   (the blob's leading byte is the decider tag, `0x00` = `DeciderKind::None`).

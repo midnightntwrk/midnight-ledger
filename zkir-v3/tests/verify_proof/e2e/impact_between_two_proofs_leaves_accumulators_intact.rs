@@ -20,10 +20,9 @@
 //! read against a statement the accumulators have been stripped from.
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
+use midnight_zkir_v3::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::accumulator_pi_len;
 
 use crate::e2e_harness::{
     BINDING_INPUT, InnerProof, instance_json, outer_ir_with, outer_keygen, outer_preimage_with,
@@ -51,7 +50,6 @@ async fn impact_between_two_proofs_leaves_accumulators_intact() {
 
     // Counted once: the guard is a witness, so the block count cannot depend on
     // it, and neither can the interleaved `Impact`.
-    let acc_len = accumulator_pi_len();
     assert_eq!(
         ir.accumulator_count(),
         2,
@@ -102,10 +100,6 @@ async fn impact_between_two_proofs_leaves_accumulators_intact() {
             2,
             "guard {guard}: both accumulators must be carried"
         );
-        assert!(
-            proof.accumulators.iter().all(|b| b.len() == acc_len),
-            "guard {guard}: every block is one accumulator wide"
-        );
         assert_eq!(
             pis.len(),
             1 + IMPACT_INPUTS,
@@ -124,15 +118,13 @@ async fn impact_between_two_proofs_leaves_accumulators_intact() {
         );
 
         for (i, inner) in inner.iter().enumerate() {
-            let want: Vec<Fr> = accumulator_pis(
+            let want = accumulator_pis(
                 &verify_proof_offcircuit(&inner.vk_blob, &inner.pis, &inner.proof, true)
                     .expect("off-circuit preparation"),
-            )
-            .into_iter()
-            .map(Fr)
-            .collect();
+            );
             assert_eq!(
-                proof.accumulators[i], want,
+                proof.accumulators[i].as_public_input(),
+                want,
                 "guard {guard}: accumulator {i} must match off-circuit preparation"
             );
         }

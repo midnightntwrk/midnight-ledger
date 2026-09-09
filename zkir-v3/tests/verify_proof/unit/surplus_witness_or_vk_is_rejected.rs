@@ -11,17 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Witnesses or keys the circuit never consumes are refused by the count
-//! checks, not ignored.
+//! Unconsumed witnesses and keys are rejected rather than ignored.
 //!
-//! Silently ignoring either is the dangerous behaviour: an unbound witness is a
-//! prover asserting something the circuit never checks, and an unreferenced key
-//! is material with no bearing on what is verified. A blob listed *twice* is a
-//! separate case, in `duplicate_vk_in_side_table_is_rejected`.
+//! Duplicate keys are covered by `duplicate_vk_in_side_table_is_rejected`.
 
 use transient_crypto::proofs::Zkir;
 
-use crate::unit_harness::{BIND_ONE, VK_BLOB_A, expect_check_err, ir, ir_with_vks, preimage};
+use crate::unit_harness::{
+    VK_BLOB_A, bind_and_verify_off, expect_check_err, ir, ir_with_vks, preimage, vk_hash,
+};
 
 #[test]
 fn surplus_witness_or_vk_is_rejected() {
@@ -36,13 +34,17 @@ fn surplus_witness_or_vk_is_rejected() {
         "got: {err}"
     );
 
-    // Surplus alongside a binding that does consume one.
-    let err = expect_check_err(&ir(BIND_ONE), preimage(2));
+    // A guarded-off pair lets this test use a stub verifying key.
+    let paired = ir_with_vks(
+        &bind_and_verify_off(&[vk_hash(&VK_BLOB_A)]),
+        vec![VK_BLOB_A.to_vec()],
+    );
+    let err = expect_check_err(&paired, preimage(2));
     assert!(err.contains("proof witnesses"), "got: {err}");
 
-    // Controls: nothing surplus passes outright.
+    // Controls with no surplus material.
     ir("").check(&preimage(0)).expect("empty circuit");
-    ir(BIND_ONE)
+    paired
         .check(&preimage(1))
         .expect("one binding, one witness");
 }

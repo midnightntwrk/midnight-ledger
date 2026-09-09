@@ -14,8 +14,8 @@
 //! `vk_hash` and the `verify_proof_vks` side-table survive JSON and the binary
 //! form, intact and in order.
 //!
-//! `IrSource::load` is covered separately by
-//! `load_accepts_ir_carrying_a_side_table`, which currently fails.
+//! Text IR accepts only `minor: 0`; `verify_proof_text_format_roundtrips`
+//! covers that gate.
 
 use midnight_zkir_v3::IrSource;
 use serialize::{tagged_deserialize, tagged_serialize};

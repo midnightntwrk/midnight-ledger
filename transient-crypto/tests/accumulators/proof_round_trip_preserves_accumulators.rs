@@ -11,18 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A `Proof` carries its accumulator blocks across serialization, intact and in
-//! order.
-//!
-//! Order matters because the blocks are positional, one per `verify_proof`: a
-//! round-trip that reordered them would still yield the right number of
-//! well-formed blocks that still pair, against the wrong instructions.
+//! A `Proof` preserves its positional accumulators across raw and tagged
+//! serialization.
 
 use serialize::{Deserializable, Serializable, tagged_deserialize, tagged_serialize};
 
 use midnight_transient_crypto::proofs::Proof;
 
-use crate::harness::{failing_accumulator, fr_vec, passing_accumulator};
+use crate::harness::{deferred, failing_accumulator, passing_accumulator};
 
 /// The `bytes` field stands in for a PLONK proof; nothing here reads it.
 const PROOF_BYTES: &[u8] = b"not a real plonk proof, but it must survive too";
@@ -41,40 +37,48 @@ fn round_trip(proof: &Proof) -> Proof {
 #[test]
 fn proof_round_trip_preserves_accumulators() {
     // Two distinct, well-formed encodings, so a swap is detectable.
-    let a = fr_vec(&passing_accumulator());
-    let b = fr_vec(&failing_accumulator());
+    let a = deferred(&passing_accumulator());
+    let b = deferred(&failing_accumulator());
     assert_ne!(
         a, b,
         "the two fixtures must differ for order to be testable"
     );
 
-    for blocks in [vec![], vec![a.clone()], vec![a.clone(), b.clone()]] {
+    for accs in [vec![], vec![a], vec![a, b]] {
         let proof = Proof {
             bytes: PROOF_BYTES.to_vec(),
-            accumulators: blocks.clone(),
+            accumulators: accs.clone(),
         };
 
         let back = round_trip(&proof);
         assert_eq!(
             back,
             proof,
-            "{} block(s): round-trip must be exact",
-            blocks.len()
+            "{} accumulator(s): round-trip must be exact",
+            accs.len()
         );
-        assert_eq!(back.accumulators, blocks, "blocks must come back verbatim");
+        assert_eq!(
+            back.accumulators, accs,
+            "accumulators must come back verbatim"
+        );
         assert_eq!(back.bytes, PROOF_BYTES, "the plonk bytes must survive too");
 
         // And through the tagged envelope, which is how the ledger writes it.
         let mut tagged = Vec::new();
         tagged_serialize(&proof, &mut tagged).expect("tagged serialize");
         let back: Proof = tagged_deserialize(&tagged[..]).expect("tagged deserialize");
-        assert_eq!(back, proof, "{} block(s): tagged round-trip", blocks.len());
+        assert_eq!(
+            back,
+            proof,
+            "{} accumulator(s): tagged round-trip",
+            accs.len()
+        );
     }
 
-    // Order is load-bearing: the blocks are positional, one per `verify_proof`.
+    // Order is load-bearing: they are positional, one per `verify_proof`.
     let forward = Proof {
         bytes: PROOF_BYTES.to_vec(),
-        accumulators: vec![a.clone(), b.clone()],
+        accumulators: vec![a, b],
     };
     let reversed = Proof {
         bytes: PROOF_BYTES.to_vec(),
@@ -82,12 +86,12 @@ fn proof_round_trip_preserves_accumulators() {
     };
     assert_ne!(
         forward, reversed,
-        "equality must distinguish block order, or the round-trip assertions above prove little"
+        "equality must distinguish order, or the round-trip assertions above prove little"
     );
     assert_eq!(round_trip(&forward), forward, "order must survive the wire");
     assert_ne!(
         round_trip(&forward),
         reversed,
-        "a round-trip must not reorder the blocks"
+        "a round-trip must not reorder the accumulators"
     );
 }

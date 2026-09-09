@@ -21,7 +21,7 @@
 //! accepted, because the transcript reader stops once it has what it needs. The
 //! padding is inert — the resulting accumulator is byte-identical.
 
-use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
+use midnight_zkir_v3::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use transient_crypto::proofs::Zkir;
 

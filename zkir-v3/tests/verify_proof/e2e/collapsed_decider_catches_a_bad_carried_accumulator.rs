@@ -28,7 +28,7 @@
 
 use midnight_curves::Fq;
 
-use midnight_zkir_v3::ir_instructions::decider::{DeciderKind, accumulator_pis, serialize_vk};
+use midnight_zkir_v3::decider::{DeciderKind, accumulator_pis, serialize_vk};
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 
 use transient_crypto::proofs::PARAMS_VERIFIER;

@@ -15,19 +15,18 @@
 //!
 //! Two passing blocks only show the loop runs; a mixed pair, in both orders, is
 //! what distinguishes every block being paired from just the first or the last.
+//!
+//! This is the "given a fixed split" half. That the split itself is the
+//! caller's to pin, not something `verify` authenticates, is
+//! `the_caller_statement_pins_the_accumulator_count`.
 
-use crate::harness::{acc_len, failing_accumulator, passing_accumulator, proof_carrying, test_rng};
+use crate::harness::{failing_accumulator, passing_accumulator, proof_carrying, test_rng};
 use midnight_transient_crypto::proofs::PARAMS_VERIFIER;
 
 #[test]
 fn each_accumulator_block_is_paired() {
     let mut rng = test_rng();
     let acc = passing_accumulator();
-    assert_eq!(
-        acc.len(),
-        acc_len(),
-        "encoding should be one accumulator wide"
-    );
 
     // One accumulator, and nothing else in the public inputs.
     let (vk, proof, pis) = proof_carrying(std::slice::from_ref(&acc), &[], &mut rng);

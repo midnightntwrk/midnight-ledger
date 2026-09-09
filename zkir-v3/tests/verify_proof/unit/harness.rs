@@ -86,7 +86,7 @@ pub fn ir_with_inputs(
     IrSource::load(json.as_bytes()).expect("IR must parse")
 }
 
-/// A single `inner_proof` binding, bound to `%p_0`.
+/// A standalone `inner_proof` binding for parsing or serialization tests.
 pub const BIND_ONE: &str = r#"{ "op": "inner_proof", "guard": "0x01", "output": "%p_0" }"#;
 
 /// `inner_proof` bindings `%p_0..%p_n`, then one `verify_proof` per hash, each
@@ -107,6 +107,11 @@ pub fn bind_and_verify(vk_hashes: &[String]) -> String {
         .chain(verifies)
         .collect::<Vec<_>>()
         .join(",\n")
+}
+
+/// [`bind_and_verify`] guarded off, avoiding verifier-key parsing.
+pub fn bind_and_verify_off(vk_hashes: &[String]) -> String {
+    bind_and_verify(vk_hashes).replace(r#""guard": "0x01""#, r#""guard": "0x00""#)
 }
 
 /// [`bind_and_verify`] for the single-`verify_proof` case.

@@ -26,6 +26,11 @@
 //! in its assertion message rather than describing it in prose. They go green
 //! when the fix lands.
 //!
+//! One is still red: `e2e/accumulators_differ_when_an_inner_proof_is_reused`.
+//! It is waiting on a decision rather than a fix — see its own doc comment.
+//!
+//! `tests/inner_witnesses.rs` covers pairing and witness-count rules.
+//!
 //! # `unit/` — IR and VM logic, checked directly
 //!
 //! No SRS and no proving, so these run in CI in milliseconds:
@@ -60,17 +65,11 @@ mod ir_minor_version_gates_the_vk_side_table;
 #[path = "verify_proof/unit/ir_round_trip_preserves_vks_in_order.rs"]
 mod ir_round_trip_preserves_vks_in_order;
 
-#[path = "verify_proof/unit/missing_witness_or_vk_is_rejected.rs"]
-mod missing_witness_or_vk_is_rejected;
-
 #[path = "verify_proof/unit/surplus_witness_or_vk_is_rejected.rs"]
 mod surplus_witness_or_vk_is_rejected;
 
 #[path = "verify_proof/unit/verify_proof_text_format_roundtrips.rs"]
 mod verify_proof_text_format_roundtrips;
-
-#[path = "verify_proof/unit/unbound_proof_name_is_rejected.rs"]
-mod unbound_proof_name_is_rejected;
 
 #[path = "verify_proof/unit/vk_hash_mismatch_is_rejected.rs"]
 mod vk_hash_mismatch_is_rejected;
@@ -113,6 +112,9 @@ mod valid_proof_of_other_statement_is_rejected;
 
 #[path = "verify_proof/e2e/wrong_length_instance_is_rejected.rs"]
 mod wrong_length_instance_is_rejected;
+
+#[path = "verify_proof/e2e/vk_blob_round_trips_with_a_stable_hash.rs"]
+mod vk_blob_round_trips_with_a_stable_hash;
 
 #[path = "verify_proof/e2e/accumulators_differ_when_an_inner_proof_is_reused.rs"]
 mod accumulators_differ_when_an_inner_proof_is_reused;

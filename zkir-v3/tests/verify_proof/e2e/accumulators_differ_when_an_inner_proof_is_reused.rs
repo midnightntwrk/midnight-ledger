@@ -28,7 +28,7 @@
 
 use midnight_curves::Fq;
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decider::accumulator_pis;
+use midnight_zkir_v3::decider::accumulator_pis;
 use midnight_zkir_v3::ir_instructions::verify_proof::verify_proof_offcircuit;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
