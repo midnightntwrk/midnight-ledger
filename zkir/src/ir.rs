@@ -153,7 +153,11 @@ impl Zkir for IrSource {
                     preproc,
                     rng,
                 )?;
-                Ok((Proof::from_bytes(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+                Ok((
+                    Proof::from_bytes(proof),
+                    pis.into_iter().map(Fr).collect(),
+                    pi_skips,
+                ))
             }
         }
     }

@@ -47,7 +47,7 @@ pub struct IrSource {
     pub instructions: Arc<Vec<Instruction>>,
     /// Full verifying keys for the circuit's `VerifyProof` instructions.
     /// Each entry is
-    /// [`serialize_vk`](crate::ir_instructions::decider::serialize_vk)'s
+    /// [`serialize_vk`](crate::decider::serialize_vk)'s
     /// output: the declared `DeciderKind`'s tag byte, then the `MidnightVK`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub verify_proof_vks: Vec<Vec<u8>>,
@@ -204,7 +204,7 @@ impl Zkir for IrSource {
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
         use midnight_zk_stdlib::prove;
-        use transient_crypto::proofs::accumulator_pi_len;
+        use transient_crypto::proofs::{DeferredAccumulator, accumulator_pi_len};
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let preproc = self.preprocess(preimage)?;
@@ -224,10 +224,14 @@ impl Zkir for IrSource {
         let acc_len = accumulator_pi_len();
         let n_accs = self.accumulator_count();
         let split = n_accs * acc_len;
-        let accumulators: Vec<Vec<Fr>> = pis[..split]
+        let accumulators = pis[..split]
             .chunks(acc_len)
-            .map(|c| c.iter().copied().map(Fr).collect())
-            .collect();
+            .map(|c| {
+                DeferredAccumulator::from_public_input(c).ok_or_else(|| {
+                    anyhow::anyhow!("`verify_proof` exposed a malformed accumulator")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let statement: Vec<Fr> = pis[split..].iter().copied().map(Fr).collect();
 
         Ok((
@@ -1200,13 +1204,17 @@ impl IrSource {
 
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
-        use transient_crypto::proofs::accumulator_pi_len;
+        use transient_crypto::proofs::{DeferredAccumulator, accumulator_pi_len};
         let acc_len = accumulator_pi_len();
         let split = self.accumulator_count() * acc_len;
-        let accumulators: Vec<Vec<Fr>> = pis[..split]
+        let accumulators = pis[..split]
             .chunks(acc_len)
-            .map(|c| c.iter().copied().map(Fr).collect())
-            .collect();
+            .map(|c| {
+                DeferredAccumulator::from_public_input(c).ok_or_else(|| {
+                    anyhow::anyhow!("`verify_proof` exposed a malformed accumulator")
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Proof {
             bytes: proof,
             accumulators,

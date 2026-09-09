@@ -22,17 +22,22 @@
 //!   * [`Echo`] defers nothing: [`DeciderKind::None`].
 //!   * [`Recursive`] verifies an [`Echo`] proof in-circuit, so it carries the
 //!     accumulator that verification defers: [`DeciderKind::Collapsed`].
+//!
+//! Both are `#[ignore]`d for runtime alone: they prove k=18 and k=19 circuits,
+//! which takes minutes. They pass, and `--ignored` runs them.
 
 use std::borrow::Cow;
-use std::fs::File;
-use std::io::BufReader;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use midnight_circuits::hash::poseidon::PoseidonState;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
 use midnight_circuits::types::{AssignedBit, AssignedNative};
-use midnight_curves::Fq;
+use midnight_curves::{Bls12, Fq};
 use midnight_proofs::circuit::{Layouter, Value};
 use midnight_proofs::plonk;
+use midnight_proofs::poly::kzg::params::ParamsKZG;
+use midnight_proofs::utils::SerdeFormat;
 use midnight_zk_stdlib::{
     MidnightVK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
 };
@@ -41,7 +46,7 @@ use rand_chacha::ChaCha20Rng;
 use sha2::Digest;
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::decider::{
+use midnight_zkir_v3::decider::{
     DeciderKind, accumulator_pis, serialize_vk, trivial_accumulator_pis,
 };
 use midnight_zkir_v3::ir_instructions::verify_proof::{
@@ -49,23 +54,78 @@ use midnight_zkir_v3::ir_instructions::verify_proof::{
 };
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
-    InnerProofWitness, KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider,
+    InnerProofWitness, KeyLocation, ParamsProver, ParamsProverProvider, ParamsVerifier,
     ProofPreimage, Zkir,
 };
 
 /// The value [`Echo`] exposes.
 const ECHO: u64 = 123;
 
-/// Reads SRS params at runtime from `$MIDNIGHT_PP`.
-struct RuntimeParams;
+/// The largest degree these tests need: the outer circuit of the `Collapsed`
+/// case. `None`'s outer circuit needs 18, and the inner proofs less again.
+const MAX_K: u32 = 19;
 
-impl ParamsProverProvider for RuntimeParams {
+/// An SRS generated in-process, rather than read from `$MIDNIGHT_PP`.
+///
+/// The published parameters stop at degree 17, and in-circuit proof
+/// verification needs more, so these tests would otherwise require two
+/// downloads totalling 150MB that no other test wants. Nothing here proves
+/// anything about soundness, so a known toxic waste costs us nothing.
+struct GeneratedParams {
+    /// Generated once at [`MAX_K`], then downsized per request. `downsize`
+    /// keeps `s_g2`, so every degree shares one setup, as verifying an inner
+    /// proof against an outer one requires.
+    full: ParamsKZG<Bls12>,
+    verifier: ParamsVerifier,
+    by_k: Mutex<HashMap<u8, ParamsProver>>,
+}
+
+impl GeneratedParams {
+    fn new(rng: &mut impl rand::RngCore) -> Self {
+        let full = ParamsKZG::<Bls12>::unsafe_setup(MAX_K, rng);
+        GeneratedParams {
+            verifier: verifier_for(&full),
+            full,
+            by_k: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn params_for(&self, k: u8) -> ParamsProver {
+        let mut cache = self.by_k.lock().expect("params cache");
+        cache
+            .entry(k)
+            .or_insert_with(|| {
+                let mut params = self.full.clone();
+                params.downsize(k as u32);
+                ParamsProver(Arc::new(params))
+            })
+            .clone()
+    }
+
+    /// Verifier parameters for this SRS. The global `PARAMS_VERIFIER` belongs to
+    /// a different setup, so proofs made here do not verify against it.
+    fn verifier(&self) -> ParamsVerifier {
+        self.verifier.clone()
+    }
+}
+
+/// `ParamsVerifier` is only constructible by reading an SRS, so the generated one
+/// takes a round-trip through that. Verifier parameters hold nothing but `G2`
+/// elements, so a one-degree SRS carrying the same `s_g2` yields the same result
+/// as the full one, for a few hundred bytes rather than a hundred megabytes.
+fn verifier_for(full: &ParamsKZG<Bls12>) -> ParamsVerifier {
+    let mut minimal = full.clone();
+    minimal.downsize(1);
+    let mut bytes = Vec::new();
+    minimal
+        .write_custom(&mut bytes, SerdeFormat::RawBytesUnchecked)
+        .expect("writing generated params");
+    ParamsVerifier::read(&bytes[..]).expect("reading generated verifier params")
+}
+
+impl ParamsProverProvider for GeneratedParams {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-        let dir = std::env::var("MIDNIGHT_PP")
-            .expect("$MIDNIGHT_PP must name a directory of `bls_midnight_2p<k>` files");
-        ParamsProver::read(BufReader::new(File::open(format!(
-            "{dir}/bls_midnight_2p{k}"
-        ))?))
+        Ok(self.params_for(k))
     }
 }
 
@@ -174,16 +234,13 @@ impl Relation for Recursive {
 /// Keygen and prove `relation`, with the Poseidon transcript the in-circuit
 /// verifier expects.
 async fn prove_inner<R: Relation>(
+    params: &GeneratedParams,
     relation: &R,
     instance: &R::Instance,
     witness: R::Witness,
     rng: &mut ChaCha20Rng,
 ) -> (Vec<u8>, MidnightVK) {
-    // The SRS files start at k = 12; a smaller circuit is simply padded up.
-    let srs = RuntimeParams
-        .get_params(optimal_k(relation).max(12) as u8)
-        .await
-        .expect("inner SRS");
+    let srs = params.params_for(optimal_k(relation) as u8);
     let vk = setup_vk(srs.as_ref(), relation);
     let pk = setup_pk(relation, &vk);
     let proof = prove::<R, PoseidonState<Fq>>(srs.as_ref(), &pk, relation, instance, witness, rng)
@@ -272,17 +329,18 @@ fn preimage(guard: bool, proof: &[u8], instance: &[Fq]) -> ProofPreimage {
 
 /// An inner proof that defers nothing of its own.
 #[actix_rt::test]
-#[ignore = "in-circuit proof verification needs a high-k SRS, not available in CI"]
+#[ignore = "proves a k=18 circuit in-circuit; too slow for CI, run with --ignored"]
 async fn verify_proof_without_a_decider() {
     let mut rng = ChaCha20Rng::from_seed([7; 32]);
+    let params = GeneratedParams::new(&mut rng);
     let instance = [Fq::from(ECHO)];
-    let (proof, vk) = prove_inner(&Echo, &instance[0], (), &mut rng).await;
+    let (proof, vk) = prove_inner(&params, &Echo, &instance[0], (), &mut rng).await;
 
     let ir = outer_ir(
         serialize_vk(&vk, DeciderKind::None).expect("serialize inner vk"),
         instance.len(),
     );
-    let (pk, outer_vk) = ir.keygen(&RuntimeParams).await.expect("outer keygen");
+    let (pk, outer_vk) = ir.keygen(&params).await.expect("outer keygen");
 
     // Proving already runs both `verify_proof` passes, so it fails if the inner
     // proof does not check out; verifying then discharges the accumulator that
@@ -290,44 +348,42 @@ async fn verify_proof_without_a_decider() {
     let (outer_proof, pis, _) = ir
         .prove(
             &mut rng,
-            &RuntimeParams,
+            &params,
             pk.clone(),
             &preimage(true, &proof, &instance),
         )
         .await
         .expect("outer prove");
     outer_vk
-        .verify(&PARAMS_VERIFIER, &outer_proof, pis.into_iter())
+        .verify(&params.verifier(), &outer_proof, pis.into_iter())
         .expect("outer verify");
 
     // Guarded off, with no inner proof and no instance supplied, the exposed
     // accumulator is the trivial one, whose pairing holds by construction.
     let (guarded, guarded_pis, _) = ir
-        .prove(&mut rng, &RuntimeParams, pk, &preimage(false, &[], &[]))
+        .prove(&mut rng, &params, pk, &preimage(false, &[], &[]))
         .await
         .expect("outer prove (guard off)");
     assert_eq!(
-        guarded.accumulators[0],
-        trivial_accumulator_pis()
-            .into_iter()
-            .map(Fr)
-            .collect::<Vec<_>>(),
+        guarded.accumulators[0].as_public_input(),
+        trivial_accumulator_pis(),
     );
     outer_vk
-        .verify(&PARAMS_VERIFIER, &guarded, guarded_pis.into_iter())
+        .verify(&params.verifier(), &guarded, guarded_pis.into_iter())
         .expect("outer verify (guard off)");
 }
 
 /// An inner proof carrying an accumulator of its own, which the instruction
 /// folds into the one it exposes.
 #[actix_rt::test]
-#[ignore = "in-circuit proof verification needs a high-k SRS, not available in CI"]
+#[ignore = "proves a k=19 circuit in-circuit; too slow for CI, run with --ignored"]
 async fn verify_proof_with_a_collapsed_decider() {
     let mut rng = ChaCha20Rng::from_seed([17; 32]);
+    let params = GeneratedParams::new(&mut rng);
 
     // The proof to be verified in-circuit, and the accumulator verifying it
     // defers.
-    let (echo_proof, echo_vk) = prove_inner(&Echo, &Fq::from(ECHO), (), &mut rng).await;
+    let (echo_proof, echo_vk) = prove_inner(&params, &Echo, &Fq::from(ECHO), (), &mut rng).await;
     let echo_blob = serialize_vk(&echo_vk, DeciderKind::None).expect("serialize echo vk");
     let deferred = accumulator_pis(
         &verify_proof_offcircuit(&echo_blob, &[Fq::from(ECHO)], &echo_proof, true)
@@ -340,18 +396,18 @@ async fn verify_proof_with_a_collapsed_decider() {
         inner_vk: echo_blob,
     };
     let instance: Vec<Fq> = std::iter::once(Fq::from(ECHO)).chain(deferred).collect();
-    let (proof, vk) = prove_inner(&recursive, &instance, echo_proof, &mut rng).await;
+    let (proof, vk) = prove_inner(&params, &recursive, &instance, echo_proof, &mut rng).await;
 
     let ir = outer_ir(
         serialize_vk(&vk, DeciderKind::Collapsed).expect("serialize recursive vk"),
         instance.len(),
     );
-    let (pk, outer_vk) = ir.keygen(&RuntimeParams).await.expect("outer keygen");
+    let (pk, outer_vk) = ir.keygen(&params).await.expect("outer keygen");
 
     let (outer_proof, pis, _) = ir
         .prove(
             &mut rng,
-            &RuntimeParams,
+            &params,
             pk.clone(),
             &preimage(true, &proof, &instance),
         )
@@ -369,7 +425,7 @@ async fn verify_proof_with_a_collapsed_decider() {
         )
         .expect("the recursive proof's own accumulator"),
     );
-    let exposed: Vec<Fq> = outer_proof.accumulators[0].iter().map(|f| f.0).collect();
+    let exposed = outer_proof.accumulators[0].as_public_input();
     assert_ne!(
         exposed, own,
         "the carried accumulator must have been folded in"
@@ -377,22 +433,19 @@ async fn verify_proof_with_a_collapsed_decider() {
 
     // One pairing, discharging both.
     outer_vk
-        .verify(&PARAMS_VERIFIER, &outer_proof, pis.into_iter())
+        .verify(&params.verifier(), &outer_proof, pis.into_iter())
         .expect("outer verify");
 
     // Guarded off, as above: the trivial accumulator, and no witnesses at all.
     let (guarded, guarded_pis, _) = ir
-        .prove(&mut rng, &RuntimeParams, pk, &preimage(false, &[], &[]))
+        .prove(&mut rng, &params, pk, &preimage(false, &[], &[]))
         .await
         .expect("outer prove (guard off)");
     assert_eq!(
-        guarded.accumulators[0],
-        trivial_accumulator_pis()
-            .into_iter()
-            .map(Fr)
-            .collect::<Vec<_>>(),
+        guarded.accumulators[0].as_public_input(),
+        trivial_accumulator_pis(),
     );
     outer_vk
-        .verify(&PARAMS_VERIFIER, &guarded, guarded_pis.into_iter())
+        .verify(&params.verifier(), &guarded, guarded_pis.into_iter())
         .expect("outer verify (guard off)");
 }

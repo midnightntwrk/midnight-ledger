@@ -1,1 +1,1 @@
-((vec(u8),vec(vec(fr-bls))))
+((vec(u8),vec(deferred-accumulator)))

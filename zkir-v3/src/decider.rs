@@ -45,6 +45,12 @@ type AssignedPoint = <S as SelfEmulation>::AssignedPoint;
 /// Which deferred obligation, if any, an inner proof carries into the proof that
 /// verifies it.
 ///
+/// # WARNING
+///
+/// It is the verifier responsibility to declare the `DeciderKind` correctly.
+/// Using `DeciderKind::None` on an inner proof that has a deferred accumulator
+/// is a silent soundness bug.
+///
 /// # Wire format
 ///
 /// The tag is a single byte written by declaration order: `None = 0`,
@@ -92,8 +98,17 @@ pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> 
         .split_first()
         .ok_or_else(|| anyhow!("empty `verify_proof_vks` entry"))?;
     let kind = DeciderKind::from_tag(*tag)?;
-    let vk = MidnightVK::read(&mut { vk_bytes }, SerdeFormat::Processed)
+    let mut vk_bytes = vk_bytes;
+    let vk = MidnightVK::read(&mut vk_bytes, SerdeFormat::Processed)
         .map_err(|e| anyhow!("reading inner verifying key: {e}"))?;
+    // The blob's digest names the key's fixed bases, so padding it would give
+    // the same key a second identity, and the circuit a second shape.
+    if !vk_bytes.is_empty() {
+        bail!(
+            "`verify_proof_vks` entry has {} trailing bytes after its verifying key",
+            vk_bytes.len()
+        );
+    }
     Ok((kind, vk))
 }
 
@@ -108,7 +123,7 @@ pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
     accumulator_pis(&Accumulator::<S>::trivial(&[]))
 }
 
-/// The last [`accumulator_pi_len`] entries of an inner proof's instance. 
+/// The last [`accumulator_pi_len`] entries of an inner proof's instance.
 fn accumulator_tail<T>(instance: &[T]) -> anyhow::Result<&[T]> {
     let acc_len = accumulator_pi_len();
     instance
@@ -161,7 +176,9 @@ pub fn decide_offcircuit(
 ) -> anyhow::Result<Accumulator<S>> {
     let mut acc = match kind {
         DeciderKind::None => own_acc,
-        DeciderKind::Collapsed => Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?]),
+        DeciderKind::Collapsed => {
+            Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?])
+        }
     };
 
     acc.resolve_fixed_bases(bases);
@@ -189,7 +206,7 @@ pub fn decide_incircuit(
     let scalar_chip = bls.scalar_field_chip();
 
     // TODO: if we use truncated challenges it may make sense to collapse before
-    // accumulating. 
+    // accumulating.
     let mut acc = match kind {
         DeciderKind::None => own_acc,
         DeciderKind::Collapsed => {
@@ -222,7 +239,7 @@ fn compute_carried_accumulator(
         selected_limbs.push(std.select(layouter, guard, instance, &trivial)?);
     }
 
-    // All following operations are required when assigning the accumulator. 
+    // All following operations are required when assigning the accumulator.
     let assigned_accumulator = {
         // NOTE: this could be replaced once we have 'from_public_inputs'
         let accumulator = selected_limbs
@@ -235,14 +252,14 @@ fn compute_carried_accumulator(
                 })
             })?;
 
-        let assigned_accumulator = std
-            .verifier()
-            .assign_collapsed_accumulator(layouter, &[], accumulator)?;
+        let assigned_accumulator =
+            std.verifier()
+                .assign_collapsed_accumulator(layouter, &[], accumulator)?;
 
-        for (selected, assigned) in selected_limbs
-            .iter()
-            .zip(std.verifier().as_public_input(layouter, &assigned_accumulator)?)
-        {
+        for (selected, assigned) in selected_limbs.iter().zip(
+            std.verifier()
+                .as_public_input(layouter, &assigned_accumulator)?,
+        ) {
             std.assert_equal(layouter, selected, &assigned)?;
         }
         assigned_accumulator
@@ -272,6 +289,17 @@ mod tests {
             );
         }
         assert!(deserialize_vk(&[]).is_err(), "an empty blob must not parse");
+    }
+
+    #[test]
+    fn a_padded_blob_is_rejected() {
+        // Not a real key, so this stops at the trailing-byte check only if the
+        // key itself parses; the empty and unknown-tag cases cover the rest.
+        let padded = deserialize_vk(&[DeciderKind::None.tag(), 0, 0, 0, 0]);
+        assert!(
+            padded.is_err(),
+            "a blob that is not exactly one key must fail"
+        );
     }
 
     #[test]

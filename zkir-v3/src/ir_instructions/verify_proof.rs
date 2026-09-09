@@ -14,7 +14,7 @@
 //! The `verify_proof` instruction: verify an inner Midnight proof, exposing the
 //! resulting (deferred) accumulator as public inputs. Built directly on the
 //! verifier-gadget primitives that midnight-circuits exposes. The inner proofs
-//! may have a deciding function listed in [`crate::ir_instructions::decider`]. 
+//! may have a deciding function listed in [`crate::decider`].
 //! Other deciding strategies are not supported. The verifier side (reconstructing
 //! each accumulator from the public inputs and running its pairing check) lives
 //! in `transient-crypto`.
@@ -38,7 +38,7 @@ use sha2::{Digest, Sha256};
 use transient_crypto::curve::outer;
 use transient_crypto::proofs::InnerSelfEmulation as S;
 
-use crate::ir_instructions::decider::{decide_incircuit, decide_offcircuit, deserialize_vk};
+use crate::decider::{decide_incircuit, decide_offcircuit, deserialize_vk};
 
 /// Label prefix for an inner verifying key's fixed bases.
 ///
@@ -103,8 +103,8 @@ pub fn verify_proof_incircuit(
     proof: Value<Vec<u8>>,
     guard: &AssignedBit<outer::Scalar>,
 ) -> Result<(), Error> {
-    let (kind, vk) =
-        deserialize_vk(vk_blob).map_err(|e| Error::Synthesis(format!("inner verifying key: {e}")))?;
+    let (kind, vk) = deserialize_vk(vk_blob)
+        .map_err(|e| Error::Synthesis(format!("inner verifying key: {e}")))?;
     let plonk_vk = vk.vk();
     let vk_name = vk_name(vk_blob);
     let verifier = std.verifier();

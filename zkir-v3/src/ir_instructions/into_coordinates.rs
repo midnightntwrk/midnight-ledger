@@ -177,7 +177,9 @@ mod tests {
         assert!(into_coordinates_offcircuit(&Secp256r1Point(p256::P256::identity())).is_err());
 
         let p = curve25519::Curve25519Subgroup::random(OsRng);
-        let (x, y) = Into::<curve25519::Curve25519>::into(p).coordinates().unwrap();
+        let (x, y) = Into::<curve25519::Curve25519>::into(p)
+            .coordinates()
+            .unwrap();
         assert_eq!(
             into_coordinates_offcircuit(&Curve25519Point(p)).unwrap(),
             (Curve25519Base(x), Curve25519Base(y))

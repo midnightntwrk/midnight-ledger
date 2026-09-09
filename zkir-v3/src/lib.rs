@@ -14,6 +14,7 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod decider;
 pub mod ir;
 pub mod ir_instructions;
 pub mod ir_types;
