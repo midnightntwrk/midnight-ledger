@@ -26,6 +26,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
 
+      # False-positive suppressions live in .gitleaks.toml at the repo root,
+      # each with a written justification.
       - name: Scan code
         uses: midnightntwrk/upload-sarif-github-action@07dad711370cc5985885ebcf07cb8c9264bc4167
-        #TODO: with: file-filter: "!key-derivation-test-vectors.json"
