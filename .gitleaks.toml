@@ -1,0 +1,29 @@
+# gitleaks configuration for midnight-ledger.
+#
+# Everything here is an allowlist of FALSE POSITIVES. This repo publishes no
+# credentials; the hits below are cryptographic test vectors and key *names*,
+# both of which trip gitleaks' entropy-plus-"key"-keyword heuristic.
+#
+# See the scan action's docs for the two suppression mechanisms and when to
+# prefer each: https://github.com/midnightntwrk/upload-sarif-github-action#secrets-always-fail-the-build
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Key-derivation test vectors. Deterministic outputs of the derivation functions \
+applied to published seeds (0x00..00, 0x01..01, ...); the whole point of the \
+file is that anyone can recompute every byte in it from the seed column. No \
+value here guards anything, and they must stay verbatim or the conformance \
+tests stop conforming."""
+targetRules = ["generic-api-key"]
+paths = ['''(^|/)key-derivation-test-vectors\.json$''']
+
+[[allowlists]]
+description = """
+ZK key *locations*, not keys: 'midnight/zswap/spend' and friends are lookup \
+paths into the SRS key material. gitleaks fires on the `keyLocation` \
+identifier next to a slashed string, not on anything secret."""
+targetRules = ["generic-api-key"]
+paths = ['''^integration-tests/src/test/no-proving/ZKIRV2\.test\.ts$''']
