@@ -175,26 +175,10 @@ async fn noop_dos() {
         noop_dos.push(Op::Dup { n: 1 });
         noop_dos.push(Op::Pop);
     }
+
     match &mut tx {
         Transaction::Standard(stx) => {
-            let mut call_action = (*stx
-                .intents
-                .clone()
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>()
-                .iter()
-                .flat_map(|i| i.1.actions.iter_deref().cloned())
-                .find_map(|action| {
-                    if let ContractAction::Call(call) = action {
-                        Some(call)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap())
-            .clone();
-
-            call_action.fallible_transcript = Some(Sp::new(
+            let noop_transcript = Sp::new(
                 partition_transcripts(
                     &[PreTranscript {
                         context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
@@ -203,12 +187,39 @@ async fn noop_dos() {
                     }],
                     &INITIAL_PARAMETERS,
                 )
-                .unwrap()[0]
+                    .unwrap()[0]
                     .1
                     .clone()
                     .unwrap(),
-            ));
-            dbg!(call_action);
+            );
+            // The mutated call has to go *back* into the transaction: the
+            // whole point is to make `well_formed` walk the hostile transcript.
+            let mut intents = stx.intents.clone();
+            let mut patched = false;
+            for (segment, intent) in stx.intents.clone().into_iter() {
+                let actions = intent
+                    .actions
+                    .iter_deref()
+                    .cloned()
+                    .map(|action| match action {
+                        ContractAction::Call(call) => {
+                            let mut call = (*call).clone();
+                            call.fallible_transcript = Some(noop_transcript.clone());
+                            patched = true;
+                            ContractAction::Call(Sp::new(call))
+                        }
+                        other => other,
+                    })
+                    .collect::<Vec<_>>();
+                let mut intent = intent.clone();
+                intent.actions = actions.into();
+                intents = intents.insert(segment, intent);
+            }
+            assert!(
+                patched,
+                "no contract call found to attach the transcript to"
+            );
+            stx.intents = intents;
         }
         _ => unreachable!(),
     }

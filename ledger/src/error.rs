@@ -489,6 +489,12 @@ pub enum MalformedTransaction<D: DB> {
         tx_size: usize,
         limit: u64,
     },
+    TooManyPublicInputs {
+        address: ContractAddress,
+        operation: EntryPointBuf,
+        public_inputs: usize,
+        limit: usize,
+    },
     VerifierKeyTooLarge {
         actual: u64,
         limit: u64,
@@ -888,6 +894,15 @@ impl<D: DB> Display for MalformedTransaction<D> {
             TransactionTooLarge { tx_size, limit } => write!(
                 formatter,
                 "transaction too large (size: {tx_size}, limit: {limit})"
+            ),
+            TooManyPublicInputs {
+                address,
+                operation,
+                public_inputs,
+                limit,
+            } => write!(
+                formatter,
+                "call to {address:?}'s {operation:?} declares {public_inputs} public inputs, exceeding the limit of {limit}"
             ),
             VerifierKeyTooLarge { actual, limit } => write!(
                 formatter,

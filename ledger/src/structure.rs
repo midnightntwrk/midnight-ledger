@@ -3514,4 +3514,33 @@ mod tests {
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
     }
+
+
+    /// The fee path prices a call by its *declared* public-input count
+    /// ([`ContractCall::public_inputs_len`]). A count that can be inflated via
+    /// `Op::Noop { n }` must therefore price the transaction out rather than
+    /// merely being counted cheaply: the cost arithmetic saturates, and a
+    /// saturated cost cannot be normalized against the block limits, so
+    /// `fees()` fails with `BlockLimitExceeded`.
+    #[test]
+    fn absurd_public_input_counts_are_priced_out() {
+        let model = &INITIAL_PARAMETERS.cost_model;
+        let limits = INITIAL_PARAMETERS.limits;
+
+        // What a single `Op::Noop { n: u32::MAX }` declares.
+        let inflated = u32::MAX as usize + 2;
+        let cost = SyntheticCost::from(model.proof_verify(inflated));
+        assert!(
+            cost.max_time() > limits.min_time_to_dismiss,
+            "an inflated public-input count must exceed the dismissal window"
+        );
+        assert!(
+            cost.normalize(limits.block_limits).is_none(),
+            "an inflated public-input count must exceed the block limits"
+        );
+
+        // A realistic count must not be priced out by the same arithmetic.
+        let realistic = SyntheticCost::from(model.proof_verify(64));
+        assert!(realistic.normalize(limits.block_limits).is_some());
+    }
 }

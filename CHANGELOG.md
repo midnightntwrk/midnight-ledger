@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: reject contract calls declaring more than `MAX_CALL_PUBLIC_INPUTS` public inputs, 
+  bounding the allocation on paths where fee enforcement is disabled.
+
 ## Ledger 9.1.0.0-rc.5
 
 Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
