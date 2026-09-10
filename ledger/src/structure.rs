@@ -2009,8 +2009,7 @@ where
                         match &*action {
                             ContractAction::Call(call) => {
                                 cost.compute_time += model.runtime_cost_model.verifier_key_load;
-                                cost += model
-                                    .proof_verify(call.public_inputs_len());
+                                cost += model.proof_verify(call.public_inputs_len());
                             }
                             ContractAction::Maintain(upd) => {
                                 cost.compute_time +=
@@ -3514,7 +3513,6 @@ mod tests {
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
     }
-
 
     /// The fee path prices a call by its *declared* public-input count
     /// ([`ContractCall::public_inputs_len`]). A count that can be inflated via

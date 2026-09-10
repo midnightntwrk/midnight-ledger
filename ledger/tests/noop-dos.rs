@@ -187,7 +187,7 @@ async fn noop_dos() {
                     }],
                     &INITIAL_PARAMETERS,
                 )
-                    .unwrap()[0]
+                .unwrap()[0]
                     .1
                     .clone()
                     .unwrap(),
