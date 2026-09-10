@@ -2007,20 +2007,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     /// The number of field elements [`Self::public_inputs`] would produce,
     /// computed without materializing them.
     pub fn public_inputs_len(&self) -> usize {
-        // The binding input and the communication commitment.
-        let mut res: usize = 2;
-        for transcript in [
-            self.guaranteed_transcript.as_ref(),
-            self.fallible_transcript.as_ref(),
-        ]
-            .into_iter()
-            .flatten()
-        {
-            for op in transcript.program.iter() {
-                res = res.saturating_add(op.field_size());
-            }
-        }
-        res
+        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
