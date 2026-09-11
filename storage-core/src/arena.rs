@@ -675,6 +675,15 @@ impl<D: DB> Arena<D> {
     /// recursing down to the leaves and building DAG up from there. If this is
     /// not acceptable, then use [`Self::get_lazy`] instead, which has no
     /// unbounded recursion, and instead loads nested `Sp`s on demand.
+    ///
+    /// This is only safe because the depth of anything *in* the arena is
+    /// bounded: values allocated in-process are as deep as the caller made
+    /// them, and values arriving over the wire go through
+    /// [`Self::deserialize_sp`], whose `IrLoader` refuses graphs nested deeper
+    /// than [`serialize::RECURSION_LIMIT`]. Anything that lets untrusted input
+    /// into the arena at an unbounded depth would make this path a stack
+    /// overflow; use [`BackendLoader::new`] with a `max_depth` for bounded
+    /// loading in that case.
     pub fn get<T: Storable<D>>(
         &self,
         key: &TypedArenaKey<T, D::Hasher>,
@@ -910,6 +919,7 @@ impl<D: DB> Arena<D> {
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
         }
         .get(&ArenaKey::Ref(key))?;
@@ -1057,6 +1067,11 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     }
 }
 
+/// Memo table for in-lined values deserialized by a single [`IrLoader`],
+/// holding erased `Sp<T, D>`s keyed by (hash, `TypeId::of::<T>()`).
+type InlineMemo<D> =
+    Rc<RefCell<HashMap<DynTypedArenaHash<<D as DB>::Hasher>, Box<dyn Any + Send + Sync>>>>;
+
 /// A `Loader` that uses `IntermediateRepr` objects to get the binary data for
 /// deserialization.
 ///
@@ -1081,6 +1096,13 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
+    /// The in-lined ([`ArenaKey::Direct`]) values we've already deserialized
+    /// once.
+    ///
+    /// In-lined values get their own memo table because, unlike by-reference
+    /// values, they are not tracked in the arena's `Sp` cache (see
+    /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
+    inlined: InlineMemo<D>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
 }
 
@@ -1096,6 +1118,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             all,
             recursion_depth: 0,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
         }
     }
@@ -1113,23 +1136,54 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
-        let key = match child {
-            ArenaKey::Direct(child) => {
-                let value = T::from_binary_repr(
-                    &mut &child.data[..],
-                    &mut child.children.iter().cloned(),
-                    self,
-                )?;
-                return Ok(self.arena.alloc(value));
-            }
-            ArenaKey::Ref(key) => key,
+        // Every nesting level counts towards the recursion limit, whether the
+        // child is by-reference or in-lined: both arms below recurse into
+        // `Storable::from_binary_repr`, and so consume stack. Checking here,
+        // *before* recursing, keeps the recursion depth of this loader (and
+        // hence our stack usage) bounded by `RECURSION_LIMIT` for arbitrary input.
+        if self.recursion_depth > serialize::RECURSION_LIMIT {
+            return Err(std::io::Error::other("Reached recursion limit".to_string()));
+        }
+        let loader = IrLoader {
+            arena: self.arena,
+            all: self.all,
+            recursion_depth: self.recursion_depth + 1,
+            visited: self.visited.clone(),
+            inlined: self.inlined.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
         };
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
         //
         // Mistakes have been made:
         // https://shielded.atlassian.net/browse/PM-16347
-        let typed_key = (key.clone(), TypeId::of::<T>());
+        let typed_key = (child.hash().clone(), TypeId::of::<T>());
+        let key = match child {
+            ArenaKey::Direct(direct) => {
+                // In-lined values are memoized here, rather than via the `Sp`
+                // cache, since `Arena::alloc` doesn't put them there.
+                if let Some(sp) = self
+                    .inlined
+                    .borrow()
+                    .get(&typed_key)
+                    .and_then(|sp| sp.downcast_ref::<Sp<T, D>>())
+                {
+                    assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+                    return Ok(sp.clone());
+                }
+                let value = T::from_binary_repr(
+                    &mut &direct.data[..],
+                    &mut direct.children.iter().cloned(),
+                    &loader,
+                )?;
+                let sp = self.arena.alloc(value);
+                self.inlined
+                    .borrow_mut()
+                    .insert(typed_key, Box::new(sp.clone()));
+                return Ok(sp);
+            }
+            ArenaKey::Ref(key) => key,
+        };
 
         // If we've visited this key before, then try to get it from the cache.
         if self.visited.borrow().contains(&typed_key) {
@@ -1150,16 +1204,6 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             io::ErrorKind::NotFound,
             "IR not found in `all` map",
         ))?;
-        if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
-        let loader = IrLoader {
-            arena: self.arena,
-            all: self.all,
-            recursion_depth: self.recursion_depth + 1,
-            visited: self.visited.clone(),
-            key_to_child_repr: self.key_to_child_repr.clone(),
-        };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
             &mut ir.children.clone().into_iter().map(|k| {

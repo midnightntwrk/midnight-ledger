@@ -1,5 +1,12 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- security: in-lined (`ArenaKey::Direct`) children now count towards the
+  recursion limit when deserializing a storage graph, so a deeply nested graph
+  of small nodes can no longer overflow the stack. In-lined values are also
+  memoized for the lifetime of the loader.
+
 ## Version `1.2.2`
 
 Skips `1.2.1`, published from the `ledger-8` line.
