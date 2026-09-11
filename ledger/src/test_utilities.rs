@@ -697,11 +697,8 @@ pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> Cont
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
-    let test_dir =
-        "/nix/store/w08850rhh1ijis509fh7qwbcqyx1s7nm-midnight-ledger-test-artifacts-1.0.0"
-            .to_string();
-    // env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
-    // .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
+    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
+        .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
 
     Resolver::new(
         PUBLIC_PARAMS.clone(),
