@@ -506,16 +506,28 @@ impl Transaction {
                     .dyn_into::<Uint8Array>()
                     .map_err(|_| anyhow::anyhow!("'prove' did not return Uint8Array"))?
                     .to_vec();
-                Ok(tagged_deserialize(&mut &result[..]).or_else(|_| {
-                    let ppiv = tagged_deserialize::<ProofVersioned>(&mut &result[..])?;
-                    match ppiv {
-                        ProofVersioned::V4(proof) => Ok::<_, std::io::Error>(proof),
-                        _ => Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "expected proof[v4], got a different version",
-                        )),
-                    }
-                })?)
+                Ok(tagged_deserialize(&mut &result[..])
+                    .or_else(|_| {
+                        // A prover running the v1 pipeline, as zkir-wasm does for a
+                        // `verifier-key[v6]` key, still answers with a bare `proof[v5]`.
+                        tagged_deserialize::<transient_crypto_old::proofs::Proof>(&mut &result[..])
+                            .map(|proof| transient_crypto::proofs::Proof::from_bytes(proof.0))
+                    })
+                    .or_else(|_| {
+                        let ppiv = tagged_deserialize::<ProofVersioned>(&mut &result[..])?;
+                        match ppiv {
+                            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
+                                Ok::<_, std::io::Error>(
+                                    transient_crypto::proofs::Proof::from_bytes(proof.0),
+                                )
+                            }
+                            ProofVersioned::V4(proof) => Ok(proof),
+                            _ => Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "unknown proof version",
+                            )),
+                        }
+                    })?)
             }
             fn split(&mut self) -> Self {
                 self.clone()
