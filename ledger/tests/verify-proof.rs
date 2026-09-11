@@ -24,6 +24,7 @@
 //! artifacts. The proof it verifies comes from
 //! [`zkir_v3::testing`], which holds the only prover here that writes the
 //! transcript the in-circuit verifier reads.
+#![cfg(feature = "proving")]
 
 use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use base_crypto::fab::AlignedValue;
