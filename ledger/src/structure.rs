@@ -49,7 +49,8 @@ use onchain_runtime::transcript::Transcript;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use serialize::{
-    self, Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_serialize,
+    self, Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_deserialize,
+    tagged_serialize,
 };
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -419,6 +420,15 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
+    /// Verifies a dust spend's proof against the built-in dust spend key.
+    ///
+    /// Dust spends stay out of the contract-call version dispatch above: their
+    /// circuit is pinned to one built-in key, so there is no version to pick.
+    fn dust_spend_verify(
+        proof: &Self::LatestProof,
+        pis: Vec<Fr>,
+        mode: ProofVerificationMode,
+    ) -> anyhow::Result<()>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -429,6 +439,20 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     ) -> usize;
     /// Extracts which contract operation version a proof should be verified against, if known.
     fn proof_version_to_operation_version(p: &Self::Proof) -> Option<ContractOperationVersion>;
+}
+
+impl ProofVersioned {
+    /// Labels a freshly-produced proof with the version that verifies it, taken
+    /// from the tag of the key it was proven against. `None` if the tag names
+    /// no version this ledger knows.
+    pub fn of_verifier_key_tag(tag: &str, proof: Proof) -> Option<Self> {
+        match ContractOperationVersion::of_verifier_key_tag(tag)? {
+            ContractOperationVersion::V3 => {
+                Some(Self::V2(transient_crypto_old::proofs::Proof(proof.bytes)))
+            }
+            ContractOperationVersion::V4 => Some(Self::V4(proof)),
+        }
+    }
 }
 
 impl From<Proof> for ProofVersioned {
@@ -540,6 +564,22 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         }
     }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn dust_spend_verify(
+        _proof: &Self::LatestProof,
+        _pis: Vec<Fr>,
+        _mode: ProofVerificationMode,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    #[cfg(feature = "proof-verifying")]
+    fn dust_spend_verify(
+        proof: &Self::LatestProof,
+        pis: Vec<Fr>,
+        mode: ProofVerificationMode,
+    ) -> anyhow::Result<()> {
+        crate::dust::verify_spend_proof(proof, pis, mode)
+    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -586,6 +626,13 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
+    fn dust_spend_verify(
+        _proof: &Self::LatestProof,
+        _pis: Vec<Fr>,
+        _mode: ProofVerificationMode,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -621,6 +668,13 @@ impl<D: DB> ProofKind<D> for () {
         _: &ContractCall<Self, D>,
         _: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn dust_spend_verify(
+        _proof: &Self::LatestProof,
+        _pis: Vec<Fr>,
+        _mode: ProofVerificationMode,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
     fn estimated_tx_size<
@@ -2824,6 +2878,21 @@ pub enum ContractOperationVersion {
     V4,
 }
 
+impl ContractOperationVersion {
+    /// The operation version that verifies proofs made against a verifier key
+    /// with this tag. Taken from the key types themselves, so a tag bump in
+    /// either proof system carries over rather than going stale here.
+    pub fn of_verifier_key_tag(tag: &str) -> Option<Self> {
+        if tag == transient_crypto_old::proofs::VerifierKey::tag() {
+            Some(Self::V3)
+        } else if tag == transient_crypto::proofs::VerifierKey::tag() {
+            Some(Self::V4)
+        } else {
+            None
+        }
+    }
+}
+
 impl Serializable for ContractOperationVersion {
     fn serialize(&self, writer: &mut impl Write) -> Result<(), std::io::Error> {
         use ContractOperationVersion as V;
@@ -2904,6 +2973,21 @@ impl ContractOperationVersionedVerifierKey {
         match self {
             VK::V3(_) => V::V3,
             VK::V4(_) => V::V4,
+        }
+    }
+
+    /// Reads a verifier key as a zkir tool writes one: a bare tagged key,
+    /// rather than this enum's own encoding, with the version to read it at
+    /// coming from the key's own tag.
+    pub fn from_tagged_key(mut raw: &[u8]) -> std::io::Result<Self> {
+        let tag = peek_tag(&mut std::io::Cursor::new(raw))?;
+        match ContractOperationVersion::of_verifier_key_tag(&tag) {
+            Some(ContractOperationVersion::V3) => Ok(Self::V3(tagged_deserialize(&mut raw)?)),
+            Some(ContractOperationVersion::V4) => Ok(Self::V4(tagged_deserialize(&mut raw)?)),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown verifier key version {tag}"),
+            )),
         }
     }
 

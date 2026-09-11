@@ -16,12 +16,16 @@ use crate::error::{
 };
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
+#[cfg(feature = "proof-verifying")]
+use crate::structure::ContractOperationVersionedVerifierKey;
 use crate::structure::{
     ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker,
     SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol,
     TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::utils::VecEnvelope;
+#[cfg(feature = "proof-verifying")]
+use crate::verify::ProofVerificationMode;
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::envelope::Envelope;
 use base_crypto::{
@@ -63,6 +67,8 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
+#[cfg(feature = "proof-verifying")]
+use transient_crypto::proofs::Proof;
 use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
@@ -80,9 +86,57 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
-        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+    /// The built-in dust spend key, in whichever proof system the shipped
+    /// artifact was compiled against. Its own tag decides how a dust spend
+    /// proof is verified, as a contract operation's key does for a call.
+    pub static ref SPEND_VK: ContractOperationVersionedVerifierKey =
+        ContractOperationVersionedVerifierKey::from_tagged_key(SPEND_VK_RAW)
             .expect("Dust Spend VK should be valid");
+}
+
+/// Verifies a dust spend proof against the built-in dust spend key.
+///
+/// The key's version picks the proof system, the way
+/// [`ContractCall`](crate::structure::ContractCall) verification picks one from
+/// the operation's key. A v1 key takes the proof's bytes and nothing else: that
+/// proof system has no `verify_proof`, so it cannot have earned the
+/// accumulators a latest-format [`Proof`] has room for, and accumulators
+/// arriving with one are junk no pairing check downstream would look at.
+#[cfg(feature = "proof-verifying")]
+pub(crate) fn verify_spend_proof(
+    proof: &Proof,
+    pis: Vec<Fr>,
+    mode: ProofVerificationMode,
+) -> anyhow::Result<()> {
+    match &*SPEND_VK {
+        ContractOperationVersionedVerifierKey::V3(vk) => {
+            if !proof.accumulators.is_empty() {
+                anyhow::bail!("v1 dust spend proof carries deferred accumulators");
+            }
+            let pis = pis.into_iter().map(|f| {
+                transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    .expect("Fr round-trip")
+            });
+            match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => vk.mock_verify(pis),
+                _ => vk.verify(
+                    &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                    &transient_crypto_old::proofs::Proof(proof.bytes.clone()),
+                    pis,
+                ),
+            }
+        }
+        ContractOperationVersionedVerifierKey::V4(vk) => match mode {
+            #[cfg(feature = "mock-verify")]
+            ProofVerificationMode::CalibratedMock => vk.mock_verify(proof, pis.into_iter()),
+            _ => vk.verify(
+                &transient_crypto::proofs::PARAMS_VERIFIER,
+                proof,
+                pis.into_iter(),
+            ),
+        },
+    }
 }
 
 pub struct DustResolver(pub MidnightDataProvider);
@@ -635,27 +689,12 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
-                dust_op.v2 = Some(SPEND_VK.clone());
-                let dust_call = crate::structure::ContractCall {
-                    address: coin_structure::contract::ContractAddress::default(),
-                    entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
-                    guaranteed_transcript: None,
-                    fallible_transcript: None,
-                    communication_commitment: Fr::default(),
-                    proof: self.proof.clone().into(),
-                };
-                P::proof_verify(
-                    &dust_op,
-                    &self.proof.clone().into(),
-                    pis,
-                    &dust_call,
-                    strictness.proof_verification_mode,
+                P::dust_spend_verify(&self.proof, pis, strictness.proof_verification_mode).map_err(
+                    |_| MalformedTransaction::InvalidDustSpendProof {
+                        declared_time: ctime,
+                        dust_spend: Box::new(self.erase_proofs()),
+                    },
                 )
-                .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
-                    declared_time: ctime,
-                    dust_spend: Box::new(self.erase_proofs()),
-                })
             })
         } else {
             Ok(())
