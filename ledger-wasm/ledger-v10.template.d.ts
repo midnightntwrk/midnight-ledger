@@ -1,4 +1,4 @@
-<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v4.d.ts', 'utf8')); %>
+<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v5.d.ts', 'utf8')); %>
 
 /**
  * A zero-knowledge proof.
@@ -870,7 +870,8 @@ export class PrePartitionContractCall {
     input: AlignedValue,
     output: AlignedValue,
     communication_commitment_rand: CommunicationCommitmentRand,
-    key_location: string
+    key_location: string,
+    inner_proofs?: Uint8Array[]
   );
   toString(compact?: boolean): string;
 }
@@ -895,6 +896,10 @@ export class ContractCallPrototype {
    * for this call
    * @param key_location - An identifier for how the key for this call may be
    * looked up
+   * @param inner_proofs - The proofs this call's circuit verifies in-circuit,
+   * one per `inner_proof` instruction in instruction order, each the raw proof
+   * bytes. An instruction whose guard is false still takes an entry, which may
+   * be empty.
    */
   constructor(
     address: ContractAddress,
@@ -906,7 +911,8 @@ export class ContractCallPrototype {
     input: AlignedValue,
     output: AlignedValue,
     communication_commitment_rand: CommunicationCommitmentRand,
-    key_location: string
+    key_location: string,
+    inner_proofs?: Uint8Array[]
   );
 
   toString(compact?: boolean): string;

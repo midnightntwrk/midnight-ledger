@@ -565,6 +565,7 @@ fn preimage_from_v1(
         transient_crypto::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
     };
     transient_crypto::proofs::ProofPreimage {
+        inner_proofs: vec![],
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
         private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
         public_transcript_inputs: p
@@ -687,13 +688,23 @@ impl transient_crypto_old::proofs::Zkir for IrSource {
 // --- Adapters for bridging current types to the v1 pipeline ---
 
 /// Converts a current `ProofPreimage` into a v1 `ProofPreimage`.
+///
+/// Fails on a preimage carrying inner proofs: the v1 pipeline has no
+/// `verify_proof`, so there is nowhere for them to go and dropping them would
+/// silently prove a weaker statement.
 pub fn preimage_to_v1(
     p: &transient_crypto::proofs::ProofPreimage,
-) -> transient_crypto_old::proofs::ProofPreimage {
+) -> std::io::Result<transient_crypto_old::proofs::ProofPreimage> {
+    if !p.inner_proofs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "a preimage with inner proofs cannot be proven by the v1 pipeline",
+        ));
+    }
     let cvt_fr = |f: transient_crypto::curve::Fr| -> transient_crypto_old::curve::Fr {
         transient_crypto_old::curve::Fr(cvt(f.0))
     };
-    transient_crypto_old::proofs::ProofPreimage {
+    Ok(transient_crypto_old::proofs::ProofPreimage {
         inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
         private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
         public_transcript_inputs: p
@@ -715,7 +726,7 @@ pub fn preimage_to_v1(
         key_location: transient_crypto_old::proofs::KeyLocation(std::borrow::Cow::Owned(
             p.key_location.0.to_string(),
         )),
-    }
+    })
 }
 
 /// Adapter: current `ParamsProverProvider` → v1 `ParamsProverProvider`.

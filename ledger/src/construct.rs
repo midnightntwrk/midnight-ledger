@@ -51,7 +51,7 @@ use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::{FR_BYTES, Fr};
 use transient_crypto::fab::{AlignedValueExt, ValueReprAlignedValue};
 use transient_crypto::hash::transient_commit;
-use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+use transient_crypto::proofs::{InnerProofWitness, KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
 use zswap::{
     Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput, Transient as ZswapTransient,
@@ -148,6 +148,7 @@ impl<S: SignatureKind<D>, D: DB>
                 output: call.output.clone(),
                 communication_commitment_rand: call.communication_commitment_rand,
                 key_location: call.key_location.clone(),
+                inner_proofs: call.inner_proofs.clone(),
             })
             .collect::<Vec<_>>();
         let zswap_input_is_fallible = zswap_inputs
@@ -479,6 +480,7 @@ pub struct PrePartitionContractCall<D: DB> {
     pub output: AlignedValue,
     pub communication_commitment_rand: Fr,
     pub key_location: KeyLocation,
+    pub inner_proofs: Vec<InnerProofWitness>,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -502,6 +504,7 @@ pub struct ContractCallPrototype<D: DB> {
     pub output: AlignedValue,
     pub communication_commitment_rand: Fr,
     pub key_location: KeyLocation,
+    pub inner_proofs: Vec<InnerProofWitness>,
 }
 
 pub trait ContractCallExt<D: DB> {
@@ -563,6 +566,7 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
             private_transcript,
             public_transcript_inputs,
             public_transcript_outputs,
+            inner_proofs: call.inner_proofs.clone(),
             binding_input,
             communications_commitment: Some((
                 communication_commitment,

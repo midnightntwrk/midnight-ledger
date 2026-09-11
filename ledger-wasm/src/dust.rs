@@ -43,6 +43,9 @@ use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone)]
+// The unproven variant carries a `ProofPreimage`, which is inherently larger
+// than a `Proof`.
+#[allow(clippy::large_enum_variant)]
 pub enum DustSpendTypes {
     ProvenDustSpend(LedgerDustSpend<ProofMarker, InMemoryDB>),
     UnprovenDustSpend(LedgerDustSpend<ProofPreimageMarker, InMemoryDB>),

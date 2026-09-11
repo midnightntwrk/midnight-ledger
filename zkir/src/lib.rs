@@ -97,7 +97,7 @@ impl<
                 serialize::Serializable::serialize(&current_pk, &mut pk_buf)?;
                 let pk: transient_crypto_old::proofs::ProverKey<IrSource> =
                     serialize::Deserializable::deserialize(&mut &pk_buf[..], 0)?;
-                let old_preimage = ir_v1::preimage_to_v1(&preimage);
+                let old_preimage = ir_v1::preimage_to_v1(&preimage)?;
                 let v1_params = ir_v1::V1Params(self.params);
                 let (proof, _, _) = transient_crypto_old::proofs::Zkir::prove(
                     &ir,
@@ -107,7 +107,7 @@ impl<
                     &old_preimage,
                 )
                 .await?;
-                Ok(Proof(proof.0))
+                Ok(Proof::from_bytes(proof.0))
             }
             _ => {
                 // V2+: use the current pipeline.
