@@ -200,7 +200,7 @@ async fn contract_call_verifying_an_inner_proof() {
         let transcripts = partition_transcripts(
             &[PreTranscript {
                 context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                program: vec![Op::Noop { n: 1 }].into(),
+                program: vec![Op::Noop { n: 1 }],
                 comm_comm: None,
             }],
             &INITIAL_PARAMETERS,
