@@ -22,6 +22,7 @@ binary = [
   "dep:console",
   "dep:futures-executor",
 ]
+test-utilities = []
 proptest = [
   "dep:pastey",
   "dep:proptest",
