@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: VM `lt` compares as `u128` so `unshieldedBalance*` checks work for the
+  full balance range (previously values above `u64::MAX` failed at decode).
+
 ## Ledger 8.2.0-rc.1
 
 - note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly

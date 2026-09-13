@@ -151,9 +151,11 @@ require specifying if the data is expected to reside in-cache or not.
 In the description above, the following short-hand notations were used. Where
 not specified, result values are placed in a `Cell`, and encoded as FAB values.
 
-* `a + b`, `a - b`, or `a < b` (collectively `a op b`), for applying `op` on
-  the contents of `Cell`s `a` and `b`, interpreted as 64-bit unsigned integers,
-  with alignment `b8`.
+* `a + b` or `a - b`, for applying the op on the contents of `Cell`s `a` and
+  `b`, interpreted as 64-bit unsigned integers, with alignment `b8`.
+* `a < b`, for comparing the contents of `Cell`s `a` and `b`, interpreted as
+  128-bit unsigned integers, with alignment `b16`. Values that fit in fewer
+  than 16 bytes (including former `u64` operands) compare identically.
 * `a ++ b` is the FAB `AlignedValue` of the concatenation of `a` and `b`.
 * `a == b` for checking two `Cell`s for equality, at least one of which must
   contain at most 64 bytes of data (sum of all FAB atoms).
