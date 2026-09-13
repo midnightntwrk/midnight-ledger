@@ -294,6 +294,11 @@ pub struct StorageBackend<D: DB> {
     /// Intermediate garbage collection state
     #[cfg(all(feature = "layout-v2", feature = "gc-v1"))]
     gc_state: GcState<D>,
+    /// Pending GC-root metadata writes, applied on flush in the same
+    /// `batch_update` as the corresponding root-count changes.
+    /// `Some(bytes)` is a set; `None` is a delete.
+    #[cfg(feature = "gc-v1")]
+    pending_root_metadata: HashMap<ArenaHash<D::Hasher>, Option<Vec<u8>>>,
 }
 
 /// Run-time stats to help with performance tuning.
@@ -337,6 +342,8 @@ impl<D: DB> StorageBackend<D> {
             }),
             #[cfg(feature = "gc-v1")]
             gc_state: Default::default(),
+            #[cfg(feature = "gc-v1")]
+            pending_root_metadata: HashMap::new(),
         }
     }
 
@@ -628,6 +635,10 @@ impl<D: DB> StorageBackend<D> {
     }
 
     /// Un-mark `key` as GC root. See [`Self::persist`].
+    ///
+    /// If this drops the effective root count of `key` to zero, any metadata
+    /// associated with `key` via [`Self::persist_with_metadata`] is deleted
+    /// on the next flush, in the same `batch_update` as the zero root count.
     pub fn unpersist(&mut self, key: &ArenaHash<D::Hasher>) {
         self.update_counts(&[ArenaKey::Ref(key.clone())], Delta::new_root_delta(-1));
     }
@@ -641,6 +652,117 @@ impl<D: DB> StorageBackend<D> {
     /// int, not a bool.
     pub fn persist(&mut self, key: &ArenaHash<D::Hasher>) {
         self.update_counts(&[ArenaKey::Ref(key.clone())], Delta::new_root_delta(1));
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Like [`Self::persist`], but additionally associates opaque `metadata`
+    /// with the GC root `key`, overwriting any existing metadata for `key`.
+    ///
+    /// The metadata (e.g. a block hash) later serves as the only handle needed
+    /// to release the root again, via [`Self::unpersist_by_metadata`] -- no
+    /// caller-side index from metadata back to root hashes is required.
+    ///
+    /// Like [`Self::persist`], this is not durable until flush. On flush the
+    /// persist count and tag are committed in a single `batch_update`, so a
+    /// crash cannot persist one without the other. Until then both are visible
+    /// only through the in-memory overlay. The tag is deleted, also in that
+    /// same batch, when `unpersist` drops the root count of `key` to zero.
+    ///
+    /// Note that a root has a single metadata value, even if it has been
+    /// `persist`ed multiple times: the last write wins.
+    pub fn persist_with_metadata(&mut self, key: &ArenaHash<D::Hasher>, metadata: Vec<u8>) {
+        self.persist(key);
+        self.set_root_metadata(key, metadata);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Associate opaque `metadata` with the GC root `key` without changing its
+    /// persist count.
+    ///
+    /// Use this when the tag is not known at persist time and should be
+    /// attached later. Staged until flush, then committed in one `batch_update`
+    /// together with this key's persist count (rewritten even if unchanged).
+    /// Last write wins. See [`Self::persist_with_metadata`].
+    pub fn set_root_metadata(&mut self, key: &ArenaHash<D::Hasher>, metadata: Vec<u8>) {
+        self.pending_root_metadata
+            .insert(key.clone(), Some(metadata));
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Metadata associated with `key` as a GC root, if any.
+    ///
+    /// Incorporates pending in-memory writes that have not yet been flushed,
+    /// and returns `None` when the effective root count is zero.
+    pub fn get_root_metadata(&self, key: &ArenaHash<D::Hasher>) -> Option<Vec<u8>> {
+        if self.get_root_count(key) == 0 {
+            return None;
+        }
+        match self.pending_root_metadata.get(key) {
+            Some(pending) => pending.clone(),
+            None => self.database.get_root_metadata(key),
+        }
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Mapping from key to metadata for GC roots with a positive persist
+    /// count. Incorporates pending in-memory writes that have not yet been
+    /// flushed.
+    pub fn get_all_root_metadata(&self) -> HashMap<ArenaHash<D::Hasher>, Vec<u8>> {
+        let mut map = self.database.get_all_root_metadata();
+        for (key, pending) in &self.pending_root_metadata {
+            match pending {
+                Some(metadata) => {
+                    map.insert(key.clone(), metadata.clone());
+                }
+                None => {
+                    map.remove(key);
+                }
+            }
+        }
+        map.retain(|key, _| self.get_root_count(key) > 0);
+        map
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Unpersist every GC root whose metadata equals one of the values in
+    /// `metadata`, decrementing each matching root's count once. Roots whose
+    /// count is already zero are skipped rather than underflowing, so
+    /// replaying values that exceed the actually held counts is safe. Returns
+    /// the number of roots decremented.
+    ///
+    /// This is the counterpart of [`Self::persist_with_metadata`]: the
+    /// metadata value is the only handle needed. When a decrement drops a
+    /// root's count to zero, its metadata is deleted on the next flush, in
+    /// the same `batch_update` as the zero root count, so a crash before
+    /// that flush leaves the tag on disk and a later call can retry.
+    /// Re-submitting after a successful flush is a safe no-op.
+    ///
+    /// The entire batch runs under the single backend borrow of this call:
+    /// one scan of the root-metadata table (expected to stay small, e.g. one
+    /// entry per block in a pruning window) serves all values, and no other
+    /// backend operation can interleave with the decrements.
+    ///
+    /// Note that a root persisted multiple times holds only its most recent
+    /// metadata, so a match decrements it once per call, not down to zero.
+    pub fn unpersist_by_metadata<M: AsRef<[u8]>>(&mut self, metadata: &[M]) -> usize {
+        if metadata.is_empty() {
+            return 0;
+        }
+        let wanted: HashSet<&[u8]> = metadata.iter().map(|m| m.as_ref()).collect();
+        let matching: std::vec::Vec<_> = self
+            .get_all_root_metadata()
+            .into_iter()
+            .filter(|(_, m)| wanted.contains(m.as_slice()))
+            .map(|(root, _)| root)
+            .collect();
+        let mut decremented = 0;
+        for root in matching {
+            if self.get_root_count(&root) > 0 {
+                self.unpersist(&root);
+                decremented += 1;
+            }
+        }
+        decremented
     }
 
     /// Load DAG rooted at `key` into the cache from the DB.
@@ -703,8 +825,15 @@ impl<D: DB> StorageBackend<D> {
         I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
         let mut updates = vec![];
+        #[cfg(feature = "gc-v1")]
+        let mut flushed_keys = Vec::new();
+        #[cfg(feature = "gc-v1")]
+        let mut flushed_root_counts = HashMap::new();
         #[allow(unused_mut, reason = "feature flags complicate this")]
+        #[allow(unused_variables, reason = "feature flags complicate this")]
         for (k, mut v) in writes {
+            #[cfg(feature = "gc-v1")]
+            flushed_keys.push(k.clone());
             // Check for reads first, to give better error messages.
             if matches!(v, CacheValue::Read { .. }) {
                 panic!("BUG: unexpected CacheValue::Read!")
@@ -764,6 +893,8 @@ impl<D: DB> StorageBackend<D> {
                         );
                         #[cfg(feature = "gc-v1")]
                         self.gc_state.force_rescan();
+                        #[cfg(feature = "gc-v1")]
+                        flushed_root_counts.insert(k.clone(), root_count as u32);
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -792,6 +923,8 @@ impl<D: DB> StorageBackend<D> {
                         };
                         #[cfg(feature = "gc-v1")]
                         self.gc_state.force_rescan();
+                        #[cfg(feature = "gc-v1")]
+                        flushed_root_counts.insert(k.clone(), root_count);
                         updates.push((k, Update::SetRootCount(root_count)));
                     }
                 }
@@ -809,13 +942,86 @@ impl<D: DB> StorageBackend<D> {
                         );
                         #[cfg(feature = "gc-v1")]
                         self.gc_state.force_rescan();
+                        #[cfg(feature = "gc-v1")]
+                        flushed_root_counts.insert(k.clone(), root_count as u32);
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
                 CacheValue::Dummy => {}
             }
         }
+        #[cfg(feature = "gc-v1")]
+        self.flush_pending_root_metadata(flushed_keys, &flushed_root_counts, &mut updates);
         self.database.batch_update(updates.into_iter());
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Commit pending root metadata into `updates` for every key whose persist
+    /// count is durable in this batch.
+    ///
+    /// A count is durable here if this batch writes it (`flushed_keys`), or it
+    /// is already on disk (key not in the write cache). Each metadata write is
+    /// paired with that key's `SetRootCount` in the same `updates` vec, so
+    /// [`DB::batch_update`] cannot commit a tag without its count.
+    fn flush_pending_root_metadata(
+        &mut self,
+        flushed_keys: Vec<ArenaHash<D::Hasher>>,
+        flushed_root_counts: &HashMap<ArenaHash<D::Hasher>, u32>,
+        updates: &mut Vec<(ArenaHash<D::Hasher>, Update<D::Hasher>)>,
+    ) {
+        self.append_pending_metadata_updates(flushed_keys, flushed_root_counts, updates);
+        let already_durable: std::vec::Vec<_> = self
+            .pending_root_metadata
+            .keys()
+            .filter(|k| self.write_cache.peek(k).is_none())
+            .cloned()
+            .collect();
+        self.append_pending_metadata_updates(already_durable, flushed_root_counts, updates);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Pair each metadata op with its persist count in `updates`.
+    fn append_pending_metadata_updates(
+        &mut self,
+        keys: impl IntoIterator<Item = ArenaHash<D::Hasher>>,
+        flushed_root_counts: &HashMap<ArenaHash<D::Hasher>, u32>,
+        updates: &mut Vec<(ArenaHash<D::Hasher>, Update<D::Hasher>)>,
+    ) {
+        for k in keys {
+            debug_assert!(
+                self.write_cache.peek(&k).is_none(),
+                "cannot commit root metadata for {k:?} while its persist count is still cached"
+            );
+            let pending = self.pending_root_metadata.remove(&k);
+            let count = flushed_root_counts
+                .get(&k)
+                .copied()
+                .unwrap_or_else(|| self.get_root_count(&k));
+            let metadata_update = if count == 0 {
+                // Drop any pending set (do not commit a tag on a non-root)
+                // and delete on-disk metadata with the zero count.
+                if pending.is_some() || flushed_root_counts.contains_key(&k) {
+                    Some(Update::DeleteRootMetadata)
+                } else {
+                    None
+                }
+            } else if let Some(Some(metadata)) = pending {
+                Some(Update::SetRootMetadata(metadata))
+            } else if let Some(None) = pending {
+                Some(Update::DeleteRootMetadata)
+            } else {
+                None
+            };
+            let Some(metadata_update) = metadata_update else {
+                continue;
+            };
+            // Same batch as the count: either this flush already queued
+            // `SetRootCount`, or we rewrite the durable count next to the tag.
+            if !flushed_root_counts.contains_key(&k) {
+                updates.push((k.clone(), Update::SetRootCount(count)));
+            }
+            updates.push((k, metadata_update));
+        }
     }
 
     /// Push pending writes to shrink the write cache to `self.cache_size`.
@@ -1466,6 +1672,50 @@ mod tests {
         assert!(backend.write_cache.peek(&k2).is_some());
         assert_eq!(backend.get(&k3).unwrap().data, d3);
         assert!(backend.write_cache.peek(&k3).is_some());
+    }
+
+    /// Evicting unrelated write-cache entries must not write a tag whose persist
+    /// count is still cached. `set_root_metadata` on an already-durable persist
+    /// can flush with those evictions, because its count is already on disk.
+    #[cfg(feature = "gc-v1")]
+    #[test]
+    fn eviction_flushes_metadata_only_when_count_is_durable() {
+        use crate::db::DB;
+        let mut backend = StorageBackend::new(2, InMemoryDB::<crate::DefaultHasher>::default());
+        let (k1, d1) = (childless_hash::<InMemoryDB, u8>(&0), vec![0]);
+        let (k2, d2) = (childless_hash::<InMemoryDB, u8>(&1), vec![1]);
+        let (k3, d3) = (childless_hash::<InMemoryDB, u8>(&2), vec![2]);
+        let k_tag = childless_hash::<InMemoryDB, u8>(&3);
+        let tag = vec![9u8];
+
+        backend.cache(k1.clone(), d1, vec![]);
+        backend.cache(k2.clone(), d2, vec![]);
+        backend.cache(k3.clone(), d3, vec![]);
+        backend.persist_with_metadata(&k_tag, tag.clone());
+        assert!(backend.write_cache.peek(&k_tag).is_some());
+        backend.flush_cache_evictions_to_db();
+        assert!(backend.write_cache.peek(&k_tag).is_some());
+        assert_eq!(backend.get_root_metadata(&k_tag), Some(tag.clone()));
+        assert_eq!(backend.database.get_root_metadata(&k_tag), None);
+
+        backend.flush_all_changes_to_db();
+        assert_eq!(
+            backend.database.get_root_metadata(&k_tag),
+            Some(tag.clone())
+        );
+
+        let k_late = childless_hash::<InMemoryDB, u8>(&4);
+        let (k4, d4) = (childless_hash::<InMemoryDB, u8>(&5), vec![5]);
+        let (k5, d5) = (childless_hash::<InMemoryDB, u8>(&6), vec![6]);
+        let (k6, d6) = (childless_hash::<InMemoryDB, u8>(&7), vec![7]);
+        backend.persist(&k_late);
+        backend.flush_all_changes_to_db();
+        backend.set_root_metadata(&k_late, tag.clone());
+        backend.cache(k4, d4, vec![]);
+        backend.cache(k5, d5, vec![]);
+        backend.cache(k6, d6, vec![]);
+        backend.flush_cache_evictions_to_db();
+        assert_eq!(backend.database.get_root_metadata(&k_late), Some(tag));
     }
 
     fn in_database_repr<D: DB, T: Storable<D>>(

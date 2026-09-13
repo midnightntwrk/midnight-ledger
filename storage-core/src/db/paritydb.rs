@@ -30,16 +30,33 @@ use super::{DB, DummyArbitrary, Update};
 
 // Different value to Substrate: polkadot-sdk/substrate/client/db/src/utils.rs
 // This means the `storage` database must be stored in a different file
-// NOTE: We stay at 3 columns even with layout v2, to reserve a column for future GC purposes
+// NOTE: We stay at 3 columns even with layout v2. Column 2 was originally
+// reserved for future GC purposes when layout v2 removed ref-count tracking;
+// it is now used for GC-root metadata under the `gc-v1` feature (see
+// `ROOT_METADATA_COLUMN`).
 /// Number of columns used for ParityDb instance
 pub const NUM_COLUMNS: u8 = 3;
 /// Column index for storing storage nodes
 pub const NODE_COLUMN: u8 = 0;
 /// Column index for storing reference counts
 pub const GC_ROOT_COLUMN: u8 = 1;
+/// Third column. Always allocated (`NUM_COLUMNS` is 3). Meaning depends on
+/// features: zero-refcount tracking without `layout-v2`, GC-root metadata
+/// with `gc-v1`, otherwise unused.
+pub const THIRD_COLUMN: u8 = 2;
 #[cfg(not(feature = "layout-v2"))]
 /// Column to track which nodes have a ref count of zero
-pub const REF_COUNT_ZERO: u8 = 2;
+pub const REF_COUNT_ZERO: u8 = THIRD_COLUMN;
+#[cfg(feature = "gc-v1")]
+/// Column for storing opaque GC-root metadata, to support pruning decisions.
+/// This uses the column reserved when layout v2 removed ref-count tracking
+/// (see NOTE on `NUM_COLUMNS`); `gc-v1` implies `layout-v2`, so it can't
+/// conflict with `REF_COUNT_ZERO`.
+///
+/// WARNING: a pre-layout-v2 database opened with `gc-v1` may contain stale
+/// `REF_COUNT_ZERO` entries in this column, which would be misread as root
+/// metadata; such databases need their column 2 cleared as part of migration.
+pub const ROOT_METADATA_COLUMN: u8 = THIRD_COLUMN;
 
 /// A wrapper around `Arc<parity_db::Db>` that owns a database instance.
 pub struct OwnedDb(pub Arc<parity_db::Db>);
@@ -96,10 +113,9 @@ pub fn set_init_options(
     use_compression: bool,
 ) {
     // Add indexes to all columns - we need this to be able to iterate over them
-    options.columns[(column_offset + GC_ROOT_COLUMN) as usize].btree_index = true;
-    // NOTE: Hardcoded because the constant is behind a feature flag.
-    options.columns[(column_offset + 2) as usize].btree_index = true;
     options.columns[(column_offset + NODE_COLUMN) as usize].btree_index = true;
+    options.columns[(column_offset + GC_ROOT_COLUMN) as usize].btree_index = true;
+    options.columns[(column_offset + THIRD_COLUMN) as usize].btree_index = true;
     if use_compression {
         options.columns[(column_offset + NODE_COLUMN) as usize].compression =
             parity_db::CompressionType::Lz4;
@@ -151,16 +167,21 @@ fn serialize_node<H: WellBehavedHasher>(node: &OnDiskObject<H>) -> Vec<u8> {
 }
 
 fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaHash<H> {
-    if key_bytes.len() != <H as OutputSizeUser>::output_size() {
+    try_bytes_to_arena_key(key_bytes).unwrap_or_else(|len| {
         panic!(
-            "incorrect length for gc_root key: found {}, expected {}",
-            key_bytes.len(),
+            "incorrect length for gc_root key: found {len}, expected {}",
             <H as OutputSizeUser>::output_size()
-        );
+        )
+    })
+}
+
+fn try_bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> Result<ArenaHash<H>, usize> {
+    if key_bytes.len() != <H as OutputSizeUser>::output_size() {
+        return Err(key_bytes.len());
     }
 
     #[allow(deprecated)]
-    ArenaHash(Array::from_iter(key_bytes))
+    Ok(ArenaHash(Array::from_iter(key_bytes)))
 }
 
 impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> ParityDb<H, OwnedDb, COLUMN_OFFSET> {
@@ -326,6 +347,20 @@ impl<
                         },
                     ));
                 }
+                #[cfg(feature = "gc-v1")]
+                Update::SetRootMetadata(metadata) => {
+                    ops.push((
+                        COLUMN_OFFSET + ROOT_METADATA_COLUMN,
+                        parity_db::Operation::Set(key.0.to_vec(), metadata),
+                    ));
+                }
+                #[cfg(feature = "gc-v1")]
+                Update::DeleteRootMetadata => {
+                    ops.push((
+                        COLUMN_OFFSET + ROOT_METADATA_COLUMN,
+                        parity_db::Operation::Dereference(key.0.to_vec()),
+                    ));
+                }
                 Update::DeleteNode => {
                     ops.push((
                         COLUMN_OFFSET + NODE_COLUMN,
@@ -339,6 +374,7 @@ impl<
                 }
             }
         }
+        // Single ParityDb commit: persist counts and root metadata apply together.
         self.db.commit_changes(ops).expect("Failed to commit to db");
     }
 
@@ -385,6 +421,49 @@ impl<
             let k = bytes_to_arena_key(key);
             let v = u32::from_le_bytes(value.try_into().expect("gc root count should be 4 bytes"));
             map.insert(k, v);
+        }
+        map
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_root_metadata(&self, key: &ArenaHash<Self::Hasher>) -> Option<Vec<u8>> {
+        self.db
+            .get(COLUMN_OFFSET + ROOT_METADATA_COLUMN, &key.0)
+            .expect("failed to get from db")
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn set_root_metadata(&mut self, key: ArenaHash<Self::Hasher>, metadata: Vec<u8>) {
+        let ops = vec![(
+            COLUMN_OFFSET + ROOT_METADATA_COLUMN,
+            parity_db::Operation::Set(key.0.to_vec(), metadata),
+        )];
+        self.db.commit_changes(ops).expect("Failed to commit to db");
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn delete_root_metadata(&mut self, key: &ArenaHash<Self::Hasher>) {
+        let ops = vec![(
+            COLUMN_OFFSET + ROOT_METADATA_COLUMN,
+            parity_db::Operation::Dereference(key.0.to_vec()),
+        )];
+        self.db.commit_changes(ops).expect("Failed to commit to db");
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_all_root_metadata(&self) -> HashMap<ArenaHash<Self::Hasher>, Vec<u8>> {
+        let mut it = self
+            .db
+            .iter(COLUMN_OFFSET + ROOT_METADATA_COLUMN)
+            .expect("Failed to iterate over db");
+
+        let mut map = HashMap::new();
+        while let Some((key, value)) = it.next().expect("Failed to get next from iterator") {
+            // Skip leftover `REF_COUNT_ZERO` keys from a pre-layout-v2 database
+            // opened with `gc-v1` (wrong key length) rather than panicking.
+            if let Ok(k) = try_bytes_to_arena_key(key) {
+                map.insert(k, value);
+            }
         }
         map
     }

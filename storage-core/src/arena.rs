@@ -475,6 +475,10 @@ type MetaData<D> = HashMap<ArenaHash<<D as DB>::Hasher>, Node>;
 /// need to include the type in the key to avoid collisions in some cases.
 type DynTypedArenaHash<H> = (ArenaHash<H>, TypeId);
 
+/// Map from content hash to the child-key representation used while
+/// deserializing `Sp`s from an [`IntermediateRepr`] graph.
+type KeyToChildRepr<D> = HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<<D as DB>::Hasher>>;
+
 /// Keys are `hash x type_id` because the hash alone is ambiguous for
 /// determining the typed value with this hash: the hash is determined only by
 /// the binary serialization, which need not be disjoint across types.
@@ -872,8 +876,7 @@ impl<D: DB> Arena<D> {
             result = Ok(root);
         }
 
-        let mut key_to_child_repr: HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<D::Hasher>> =
-            std::collections::HashMap::new();
+        let mut key_to_child_repr: KeyToChildRepr<D> = HashMap::new();
         for node in nodes.nodes.iter() {
             let children = node
                 .child_indices
@@ -1081,7 +1084,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
-    key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
+    key_to_child_repr: Rc<KeyToChildRepr<D>>,
 }
 
 #[cfg(test)]
@@ -1089,7 +1092,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
     pub(crate) fn new(
         arena: &'a Arena<D>,
         all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
-        key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
+        key_to_child_repr: KeyToChildRepr<D>,
     ) -> IrLoader<'a, D> {
         IrLoader {
             arena,
@@ -1543,6 +1546,36 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 .into_iter()
                 .for_each(|ref_| backend.persist(ref_))
         });
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Like [`Self::persist`], but additionally associates opaque `metadata`
+    /// (e.g. a block hash) with the persisted GC root, overwriting any
+    /// existing metadata for it. The root can later be unpersisted by
+    /// providing only that metadata value, via
+    /// `Arena::with_backend(|b| b.unpersist_by_metadata(values))`. The
+    /// metadata is deleted when the root's persist count drops back to zero.
+    ///
+    /// See [`StorageBackend::persist_with_metadata`].
+    pub fn persist_with_metadata(&mut self, metadata: std::vec::Vec<u8>) {
+        // Promote self to Ref if not already, mirroring `persist`.
+        if let ArenaKey::Direct(..) = self.child_repr {
+            *self = self.into_tracked();
+        }
+        self.arena.with_backend(|backend| {
+            self.child_repr
+                .refs()
+                .into_iter()
+                .for_each(|ref_| backend.persist_with_metadata(ref_, metadata.clone()))
+        });
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Associate opaque `metadata` with this object as a GC root, without
+    /// changing its persist count. See [`StorageBackend::set_root_metadata`].
+    pub fn set_root_metadata(&self, metadata: std::vec::Vec<u8>) {
+        self.arena
+            .with_backend(|backend| backend.set_root_metadata(&self.root, metadata))
     }
 
     /// Notify the storage back-end to decrement the persist count on this

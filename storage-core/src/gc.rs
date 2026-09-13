@@ -255,6 +255,204 @@ impl<D: DB> GcState<D> {
 
 #[cfg(test)]
 mod tests {
+    /// Test the metadata-handle pruning workflow: persist roots tagged with a
+    /// "block hash", then unpersist by providing only those hashes -- no
+    /// caller-side mapping from hash back to roots -- and let the GC collect
+    /// the released roots.
+    #[test]
+    fn test_unpersist_by_metadata() {
+        use crate::db::DB;
+        use std::time::Duration;
+        let arena = crate::arena::Arena::new_from_backend(crate::backend::StorageBackend::new(
+            1,
+            crate::db::InMemoryDB::<crate::DefaultHasher>::default(),
+        ));
+        let size = || arena.with_backend(|b| b.database.size());
+        let block_1 = vec![1u8; 32];
+        let block_2 = vec![2u8; 32];
+        let block_3 = vec![3u8; 32];
+
+        // Two roots tagged with block 1, one each with blocks 2 and 3.
+        let sps = [
+            (1u64, &block_1),
+            (2, &block_1),
+            (3, &block_2),
+            (4, &block_3),
+        ]
+        .map(|(value, block)| {
+            let mut sp = arena.alloc(value);
+            sp.persist_with_metadata(block.clone());
+            sp
+        });
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(size(), 4);
+
+        // Nothing is collected while the roots are persisted.
+        drop(sps);
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 0);
+        assert_eq!(size(), 4);
+
+        // One lock, one call: release blocks 1 and 2 by metadata alone. Both
+        // block-1 roots and the block-2 root are decremented.
+        let pruned = [block_1.clone(), block_2.clone()];
+        assert_eq!(arena.with_backend(|b| b.unpersist_by_metadata(&pruned)), 3);
+        // Count is already zero, so a repeat is a no-op even before flush.
+        // On-disk tags remain until flush, so a crash could retry.
+        assert_eq!(arena.with_backend(|b| b.unpersist_by_metadata(&pruned)), 0);
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_all_root_metadata().len()),
+            4
+        );
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_all_root_metadata().len()),
+            1
+        );
+
+        // GC collects exactly the released roots; block 3 stays.
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 3);
+        assert_eq!(size(), 1);
+    }
+
+    /// Test metadata lifecycle against multiple persists of the same root:
+    /// each `unpersist_by_metadata` call decrements a matching root once, and
+    /// the metadata survives until the root count drops to zero.
+    #[test]
+    fn test_root_metadata_multi_persist() {
+        let arena = crate::arena::Arena::new_from_backend(crate::backend::StorageBackend::new(
+            1,
+            crate::db::InMemoryDB::<crate::DefaultHasher>::default(),
+        ));
+        let mut sp = arena.alloc(100u64);
+        sp.persist_with_metadata(vec![1]);
+        let hash = sp.hash();
+        let meta = || arena.with_backend(|b| b.get_root_metadata(&hash));
+        sp.persist();
+        // Overwriting metadata doesn't change the root count.
+        sp.persist_with_metadata(vec![2]);
+        assert_eq!(meta(), Some(vec![2]));
+        // Root count is 3: each call decrements once, keeping the metadata
+        // until the count reaches zero.
+        assert_eq!(
+            arena.with_backend(|b| b.unpersist_by_metadata(&[vec![2]])),
+            1
+        );
+        assert_eq!(
+            arena.with_backend(|b| b.unpersist_by_metadata(&[vec![2]])),
+            1
+        );
+        assert_eq!(meta(), Some(vec![2]));
+        assert_eq!(
+            arena.with_backend(|b| b.unpersist_by_metadata(&[vec![2]])),
+            1
+        );
+        // Count dropped to zero: metadata is hidden, further calls are no-ops.
+        assert_eq!(meta(), None);
+        assert_eq!(
+            arena.with_backend(|b| b.unpersist_by_metadata(&[vec![2]])),
+            0
+        );
+    }
+
+    /// Persist-count and metadata commit in the same flush. Unpersist-by-metadata
+    /// before flush leaves the on-disk tag in place so a crash can retry.
+    #[test]
+    fn test_root_metadata_flush_atomicity() {
+        use crate::db::DB;
+        let arena = crate::arena::Arena::new_from_backend(crate::backend::StorageBackend::new(
+            1,
+            crate::db::InMemoryDB::<crate::DefaultHasher>::default(),
+        ));
+        let mut sp = arena.alloc(7u64);
+        let hash = sp.hash();
+        let tag = vec![9u8; 32];
+        sp.persist_with_metadata(tag.clone());
+        drop(sp);
+
+        // Staged, not durable: overlay sees the tag, the DB does not.
+        assert_eq!(
+            arena.with_backend(|b| b.get_root_metadata(&hash)),
+            Some(tag.clone())
+        );
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            None
+        );
+        assert_eq!(arena.with_backend(|b| b.get_root_count(&hash)), 1);
+
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            Some(tag.clone())
+        );
+        assert_eq!(arena.with_backend(|b| b.database.get_root_count(&hash)), 1);
+
+        assert_eq!(arena.with_backend(|b| b.unpersist_by_metadata(&[&tag])), 1);
+        // Logical view is already unpersisted; on-disk tag and count stay
+        // until flush — the retry handle survives a crash here.
+        assert_eq!(arena.with_backend(|b| b.get_root_metadata(&hash)), None);
+        assert_eq!(arena.with_backend(|b| b.get_root_count(&hash)), 0);
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            Some(tag.clone())
+        );
+        assert_eq!(arena.with_backend(|b| b.database.get_root_count(&hash)), 1);
+
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            None
+        );
+        assert_eq!(arena.with_backend(|b| b.database.get_root_count(&hash)), 0);
+        assert_eq!(arena.with_backend(|b| b.unpersist_by_metadata(&[&tag])), 0);
+    }
+
+    /// Tag-timing: persist first (tag unknown), then `set_root_metadata` once
+    /// the handle exists, without bumping the persist count.
+    #[test]
+    fn test_set_root_metadata_after_persist() {
+        use crate::db::DB;
+        let arena = crate::arena::Arena::new_from_backend(crate::backend::StorageBackend::new(
+            1,
+            crate::db::InMemoryDB::<crate::DefaultHasher>::default(),
+        ));
+        let mut sp = arena.alloc(11u64);
+        let hash = sp.hash();
+        let tag = vec![8u8; 32];
+        sp.persist();
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(arena.with_backend(|b| b.get_root_count(&hash)), 1);
+        assert_eq!(arena.with_backend(|b| b.get_root_metadata(&hash)), None);
+
+        arena.with_backend(|b| b.set_root_metadata(&hash, tag.clone()));
+        // Overlay sees the tag; persist count is unchanged; DB waits for flush.
+        assert_eq!(
+            arena.with_backend(|b| b.get_root_metadata(&hash)),
+            Some(tag.clone())
+        );
+        assert_eq!(arena.with_backend(|b| b.get_root_count(&hash)), 1);
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            None
+        );
+
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            Some(tag.clone())
+        );
+        assert_eq!(arena.with_backend(|b| b.database.get_root_count(&hash)), 1);
+
+        drop(sp);
+        assert_eq!(arena.with_backend(|b| b.unpersist_by_metadata(&[&tag])), 1);
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(arena.with_backend(|b| b.database.get_root_count(&hash)), 0);
+        assert_eq!(
+            arena.with_backend(|b| b.database.get_root_metadata(&hash)),
+            None
+        );
+    }
+
     #[test]
     fn test_gc() {
         use crate::db::DB;

@@ -281,6 +281,19 @@ impl<H: WellBehavedHasher> SqlDB<H> {
             tx.execute(sql, ()).unwrap();
             let sql = "CREATE INDEX IF NOT EXISTS ix_root_count ON root (count)";
             tx.execute(sql, ()).unwrap();
+            // Opaque metadata associated with GC roots, to support pruning
+            // decisions (e.g. recording a block height when persisting a
+            // root). As with `root`, the `key` is logically a foreign key
+            // referencing `node.key`, but we don't enforce that, for the same
+            // reasons as for `root`.
+            #[cfg(feature = "gc-v1")]
+            {
+                let sql = "CREATE TABLE IF NOT EXISTS root_metadata (
+                         key BLOB NOT NULL PRIMARY KEY,
+                         metadata BLOB NOT NULL
+                       )";
+                tx.execute(sql, ()).unwrap();
+            }
         })
     }
 
@@ -617,8 +630,9 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         I: Iterator<Item = (ArenaHash<H>, Update<H>)>,
     {
         use Update::*;
-        // For batching at the SQL level, this approach is supposed to be faster
-        // (and easier!) than building up large INSERTs:
+        // One Immediate transaction: persist counts and root metadata in this
+        // iterator commit together. For batching at the SQL level this is also
+        // faster than building large INSERTs:
         // https://stackoverflow.com/a/5209093/470844
         self.with_tx(Immediate, |tx| {
             #[cfg(not(feature = "layout-v2"))]
@@ -635,6 +649,17 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             let mut set_root_count = tx.prepare(sql).unwrap();
             let sql = "DELETE FROM root WHERE key = (?1)";
             let mut delete_root_count = tx.prepare(sql).unwrap();
+            #[cfg(feature = "gc-v1")]
+            let mut set_root_metadata = tx
+                .prepare(
+                    "INSERT OR REPLACE INTO root_metadata (key, metadata) \
+                     VALUES (?1, ?2)",
+                )
+                .unwrap();
+            #[cfg(feature = "gc-v1")]
+            let mut delete_root_metadata = tx
+                .prepare("DELETE FROM root_metadata WHERE key = (?1)")
+                .unwrap();
             for (key, update) in iter {
                 match update {
                     DeleteNode => delete_node.execute(params![key]).unwrap(),
@@ -658,12 +683,23 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                             delete_root_count.execute(params![key]).unwrap()
                         }
                     }
+                    #[cfg(feature = "gc-v1")]
+                    SetRootMetadata(metadata) => {
+                        set_root_metadata.execute(params![key, metadata]).unwrap()
+                    }
+                    #[cfg(feature = "gc-v1")]
+                    DeleteRootMetadata => delete_root_metadata.execute(params![key]).unwrap(),
                 };
             }
             insert_node.finalize().unwrap();
             delete_node.finalize().unwrap();
             set_root_count.finalize().unwrap();
             delete_root_count.finalize().unwrap();
+            #[cfg(feature = "gc-v1")]
+            {
+                set_root_metadata.finalize().unwrap();
+                delete_root_metadata.finalize().unwrap();
+            }
         })
     }
 
@@ -718,6 +754,62 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let key: ArenaHash<H> = row.get(0)?;
                     let count: u32 = row.get(1)?;
                     Ok((key, count))
+                })
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            stmt.finalize().unwrap();
+            result
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_root_metadata(&self, key: &ArenaHash<Self::Hasher>) -> Option<Vec<u8>> {
+        let key = key.clone();
+        self.with_tx(Deferred, |tx| {
+            let sql = "SELECT metadata FROM root_metadata WHERE key = (?1)";
+            let mut stmt = tx.prepare(sql).unwrap();
+            let result = stmt
+                .query_row(params![key], |row| row.get(0))
+                .optional()
+                .unwrap();
+            stmt.finalize().unwrap();
+            result
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn set_root_metadata(&mut self, key: ArenaHash<Self::Hasher>, metadata: Vec<u8>) {
+        self.with_tx(Immediate, |tx| {
+            let sql = "INSERT OR REPLACE INTO root_metadata (key, metadata) \
+                       VALUES (?1, ?2)";
+            let mut stmt = tx.prepare(sql).unwrap();
+            stmt.execute(params![key, metadata]).unwrap();
+            stmt.finalize().unwrap();
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn delete_root_metadata(&mut self, key: &ArenaHash<Self::Hasher>) {
+        let key = key.clone();
+        self.with_tx(Immediate, |tx| {
+            let sql = "DELETE FROM root_metadata WHERE key = (?1)";
+            let mut stmt = tx.prepare(sql).unwrap();
+            stmt.execute(params![key]).unwrap();
+            stmt.finalize().unwrap();
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn get_all_root_metadata(&self) -> HashMap<ArenaHash<Self::Hasher>, Vec<u8>> {
+        self.with_tx(Deferred, |tx| {
+            let sql = "SELECT key, metadata FROM root_metadata";
+            let mut stmt = tx.prepare(sql).unwrap();
+            let result = stmt
+                .query_map([], |row| {
+                    let key: ArenaHash<H> = row.get(0)?;
+                    let metadata: Vec<u8> = row.get(1)?;
+                    Ok((key, metadata))
                 })
                 .unwrap()
                 .map(|r| r.unwrap())
