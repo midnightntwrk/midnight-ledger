@@ -288,17 +288,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1766405728,
-        "narHash": "sha256-p5RbIrl+LBYTmIFhfPyFOObpeNZLVQGTw+BDO+rz2e4=",
+        "lastModified": 1789048223,
+        "narHash": "sha256-M/Boo1YT96Yo+rP6/fC6xR0dieaBW54IZAI1klOba0Q=",
         "owner": "midnightntwrk",
         "repo": "midnight-ledger",
-        "rev": "48b80c5d6d21412a0a531cf5336389656b9ad2d1",
+        "rev": "ac65d01dee84a36eaccd9b7f4631941239721e14",
         "type": "github"
       },
       "original": {
         "owner": "midnightntwrk",
         "repo": "midnight-ledger",
-        "rev": "48b80c5d6d21412a0a531cf5336389656b9ad2d1",
+        "rev": "ac65d01dee84a36eaccd9b7f4631941239721e14",
         "type": "github"
       }
     }
