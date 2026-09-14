@@ -64,7 +64,9 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
         IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
 
-        IrValue::Secp256r1Point(p) => AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p),
+        IrValue::Secp256r1Point(p) => {
+            AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p)
+        }
         IrValue::Secp256r1Base(s) => AssignedField::<F, p256::Fp, MEP>::as_public_input(s),
         IrValue::Secp256r1Scalar(s) => AssignedField::<F, p256::Fq, MEP>::as_public_input(s),
 

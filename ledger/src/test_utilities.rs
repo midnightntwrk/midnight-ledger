@@ -50,7 +50,7 @@ use rand::{CryptoRng, Rng, seq::SliceRandom};
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
-use serialize::{tagged_deserialize, tagged_serialize, peek_tag};
+use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::io;
@@ -988,7 +988,10 @@ impl ProvingProvider for ProofServerProvider<'_> {
             println!("    Proving response: {} bytes", bytes.len());
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
-                ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => Ok(proof),
+                ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
+                    Ok(transient_crypto::proofs::Proof::from_bytes(proof.0))
+                }
+                ProofVersioned::V4(proof) => Ok(proof),
             }
         } else {
             anyhow::bail!(

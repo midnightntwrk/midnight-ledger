@@ -170,7 +170,13 @@ mod tests {
         assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256r1Point(p)).unwrap());
         assert!(test_eq_offcircuit(&Secp256r1Base(s), &Secp256r1Base(s)).unwrap());
         assert!(test_eq_offcircuit(&Secp256r1Scalar(r), &Secp256r1Scalar(r)).unwrap());
-        assert!(test_eq_offcircuit(&Secp256r1Point(p), &Secp256k1Point(k256::K256::random(OsRng))).is_err());
+        assert!(
+            test_eq_offcircuit(
+                &Secp256r1Point(p),
+                &Secp256k1Point(k256::K256::random(OsRng))
+            )
+            .is_err()
+        );
 
         let p = curve25519::Curve25519Subgroup::random(OsRng);
         let s = curve25519::Fp::random(OsRng);
@@ -178,6 +184,12 @@ mod tests {
         assert!(test_eq_offcircuit(&Curve25519Point(p), &Curve25519Point(p)).unwrap());
         assert!(test_eq_offcircuit(&Curve25519Base(s), &Curve25519Base(s)).unwrap());
         assert!(test_eq_offcircuit(&Curve25519Scalar(r), &Curve25519Scalar(r)).unwrap());
-        assert!(test_eq_offcircuit(&Curve25519Point(p), &JubjubPoint(JubjubSubgroup::random(OsRng))).is_err());
+        assert!(
+            test_eq_offcircuit(
+                &Curve25519Point(p),
+                &JubjubPoint(JubjubSubgroup::random(OsRng))
+            )
+            .is_err()
+        );
     }
 }
