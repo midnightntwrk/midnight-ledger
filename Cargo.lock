@@ -194,6 +194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "addchain"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5665045de74fda906c0abfaec40cf2551f88c34dccea869f3fe950dde7209764"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -575,7 +586,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba44fa3e70871c2bc00d44f08c95be68145ae28a60de8182e649eee2f17a872b"
 dependencies = [
- "ff",
+ "ff 0.13.1",
  "hex",
  "midnight-curves",
  "midnight-proofs",
@@ -1554,7 +1565,7 @@ dependencies = [
  "base16ct",
  "crypto-bigint",
  "digest 0.10.7",
- "ff",
+ "ff 0.13.1",
  "generic-array",
  "group",
  "pkcs8",
@@ -1720,6 +1731,33 @@ dependencies = [
  "bitvec",
  "rand_core 0.6.4",
  "subtle",
+]
+
+[[package]]
+name = "ff"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1f686ab92a9fb0eaf188f6c6c87b89490baa6fdb0db4544ba4dc47f7942489f"
+dependencies = [
+ "bitvec",
+ "ff_derive",
+ "rand_core 0.10.1",
+ "subtle",
+]
+
+[[package]]
+name = "ff_derive"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "241afe8c15ffa21933eaefe8a563af36fd9fc98a3e8a044e8f7db52eb1fae3d8"
+dependencies = [
+ "addchain",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1997,7 +2035,7 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
- "ff",
+ "ff 0.13.1",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "rand_xorshift",
@@ -2560,7 +2598,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2857,7 +2895,7 @@ dependencies = [
  "const-hex",
  "ethnum",
  "fake",
- "ff",
+ "ff 0.14.0",
  "flate2",
  "futures",
  "group",
@@ -2900,7 +2938,7 @@ checksum = "704fd24d6cd9f348945dded9bf6c8ebc3d302be605b93a4ce80893a85cd17de2"
 dependencies = [
  "base64 0.13.1",
  "blake2b_halo2",
- "ff",
+ "ff 0.13.1",
  "group",
  "lazy_static",
  "midnight-curves",
@@ -2944,7 +2982,7 @@ dependencies = [
  "blst",
  "byte-slice-cast",
  "digest 0.10.7",
- "ff",
+ "ff 0.13.1",
  "getrandom 0.2.17",
  "group",
  "halo2derive",
@@ -3187,7 +3225,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b48f199fa4707df5dc443238cd260344f2ad369897fbdc559dacce19b43d2119"
 dependencies = [
  "blake2b_simd",
- "ff",
+ "ff 0.13.1",
  "getrandom 0.2.17",
  "group",
  "midnight-curves",
@@ -3319,7 +3357,7 @@ dependencies = [
  "criterion",
  "derive-where",
  "fake",
- "ff",
+ "ff 0.14.0",
  "flate2",
  "futures",
  "group",
@@ -3361,7 +3399,7 @@ dependencies = [
  "bincode 2.0.1",
  "blake2b_halo2",
  "blake2b_simd",
- "ff",
+ "ff 0.13.1",
  "group",
  "midnight-circuits",
  "midnight-curves",
@@ -5015,7 +5053,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be83e5373c70fbe71d6aa678da6d139029a497faccd1c693f393526fe0195101"
 dependencies = [
  "blake2b_simd",
- "ff",
+ "ff 0.13.1",
  "midnight-curves",
  "midnight-proofs",
  "num-bigint",
