@@ -27,6 +27,12 @@ use midnight_proofs::{
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
 
+/// A proof with the expensive half of batch verification already done.
+///
+/// Produced by [`VerifierKey::prepare_batch`] and consumed by
+/// [`VerifierKey::verify_prepared_batch`].
+pub use midnight_zk_stdlib::PreparedProof;
+
 /// Error returned by [`VerifierKey::batch_verify_with_failures`].
 #[derive(Debug)]
 pub enum BatchVerifyError {
@@ -644,8 +650,25 @@ impl VerifierKey {
         parts: V,
         identify_failures: bool,
     ) -> Result<(), BatchVerifyError> {
-        use midnight_zk_stdlib::batch_verify;
+        let prepared = Self::prepare_batch(parts)?;
+        Self::verify_prepared_batch(params, &prepared, identify_failures)
+    }
 
+    /// Runs the expensive, per-proof half of batch verification, returning one [`PreparedProof`]
+    /// per input.
+    ///
+    /// Preparation does not depend on which proofs end up sharing a batch — the batching challenge
+    /// is derived from the prepared guards only when they are folded — so a caller may prepare
+    /// proofs as they arrive and concatenate the results, then finish with
+    /// [`Self::verify_prepared_batch`]. That is what lets the per-proof cost, which is what grows
+    /// with batch size, be overlapped with whatever the caller is waiting on.
+    pub fn prepare_batch<
+        'a,
+        F: Iterator<Item = Fr>,
+        V: Iterator<Item = (&'a VerifierKey, &'a Proof, F)>,
+    >(
+        parts: V,
+    ) -> Result<Vec<PreparedProof>, BatchVerifyError> {
         let mut vks = vec![];
         let mut pis = vec![];
         let mut proofs = vec![];
@@ -662,18 +685,40 @@ impl VerifierKey {
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs, identify_failures).map_err(
-            |e| match e {
-                midnight_proofs::plonk::Error::BatchOpening(indices) => {
-                    BatchVerifyError::InvalidProofs(indices)
-                }
-                e => BatchVerifyError::Unlocalized(anyhow::anyhow!(
-                    "invalid proof batch: {e} (batch size: {}, public inputs: {:?})",
-                    vks.len(),
-                    pis.iter().map(|pi| pi.len()).collect::<Vec<_>>(),
-                )),
-            },
+        midnight_zk_stdlib::prepare_proofs::<TranscriptHash>(&vks, &pis, &proofs).map_err(|e| {
+            BatchVerifyError::Unlocalized(anyhow::anyhow!(
+                "proof batch preparation: {e} (batch size: {}, public inputs: {:?})",
+                vks.len(),
+                pis.iter().map(|pi| pi.len()).collect::<Vec<_>>(),
+            ))
+        })
+    }
+
+    /// Finishes a batch prepared by [`Self::prepare_batch`]: folds the prepared proofs into one
+    /// random linear combination and runs a single pairing check. Its cost is essentially
+    /// independent of the number of proofs.
+    ///
+    /// `identify_failures` behaves as in [`Self::batch_verify_with_failures`]. Indices reported on
+    /// failure are positions within `prepared`.
+    pub fn verify_prepared_batch(
+        params: &ParamsVerifier,
+        prepared: &[PreparedProof],
+        identify_failures: bool,
+    ) -> Result<(), BatchVerifyError> {
+        midnight_zk_stdlib::verify_prepared::<TranscriptHash>(
+            &params.0,
+            prepared,
+            identify_failures,
         )
+        .map_err(|e| match e {
+            midnight_proofs::plonk::Error::BatchOpening(indices) => {
+                BatchVerifyError::InvalidProofs(indices)
+            }
+            e => BatchVerifyError::Unlocalized(anyhow::anyhow!(
+                "invalid proof batch: {e} (batch size: {})",
+                prepared.len(),
+            )),
+        })
     }
 
     /// Mocks the checking of a sequence of proofs against a statement

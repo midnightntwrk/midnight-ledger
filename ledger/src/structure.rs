@@ -446,6 +446,42 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         mode: ProofVerificationMode,
         linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>>;
+    /// Proof evidence with the expensive, per-proof half of batch verification already done.
+    ///
+    /// See [`ProofKind::prepare_proof_evidence`].
+    type PreparedEvidence: Default;
+    /// Runs the per-proof half of [`ProofKind::batch_proof_verify`]: everything whose cost grows
+    /// with the number of proofs, and nothing that depends on which proofs share a batch.
+    ///
+    /// Because preparation is independent of batch membership, a caller may prepare evidence as it
+    /// arrives, accumulate the results with [`ProofKind::merge_prepared_evidence`], and only then
+    /// decide the batch with [`ProofKind::verify_prepared_evidence`]. That lets the per-proof work
+    /// be overlapped with whatever the caller is waiting on — a queue filling, the previous block
+    /// executing — leaving only a fold and a single pairing check to pay at the decision point.
+    ///
+    /// Evidence with no such split — the legacy v2 proof batch, and every proof under mock
+    /// verification — is cloned into the result and verified during
+    /// [`ProofKind::verify_prepared_evidence`]. The v3 proofs that dominate real traffic are only
+    /// borrowed.
+    #[allow(clippy::result_large_err)]
+    fn prepare_proof_evidence(
+        evidence: &[Self::ProofEvidence],
+        mode: ProofVerificationMode,
+    ) -> Result<Self::PreparedEvidence, MalformedTransaction<D>>;
+    /// Appends `more` to `acc`, preserving evidence order so that indices reported by
+    /// [`ProofKind::verify_prepared_evidence`] stay relative to the whole accumulated batch.
+    fn merge_prepared_evidence(acc: &mut Self::PreparedEvidence, more: Self::PreparedEvidence);
+    /// Finishes a batch prepared by [`ProofKind::prepare_proof_evidence`]. Its cost is essentially
+    /// independent of the number of proofs.
+    ///
+    /// `linear_revalidation` behaves as in [`ProofKind::batch_proof_verify`], and the indices it
+    /// reports are positions within the accumulated evidence sequence.
+    #[allow(clippy::result_large_err)]
+    fn verify_prepared_evidence(
+        prepared: &Self::PreparedEvidence,
+        mode: ProofVerificationMode,
+        linear_revalidation: bool,
+    ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -483,6 +519,50 @@ pub enum ContractProofEvidence {
 
 #[cfg(not(feature = "proof-verifying"))]
 pub struct ContractProofEvidence;
+
+/// Clones one piece of evidence. Only needed for evidence that cannot be prepared ahead of the
+/// fold and so must outlive the borrow it was prepared from.
+#[cfg(feature = "proof-verifying")]
+fn clone_evidence(e: &ContractProofEvidence) -> ContractProofEvidence {
+    match e {
+        ContractProofEvidence::V2 { vk, proof, pis } => ContractProofEvidence::V2 {
+            vk: vk.clone(),
+            proof: proof.clone(),
+            pis: pis.clone(),
+        },
+        ContractProofEvidence::V3 { vk, proof, pis } => ContractProofEvidence::V3 {
+            vk: vk.clone(),
+            proof: proof.clone(),
+            pis: pis.clone(),
+        },
+    }
+}
+
+/// Contract proof evidence with the expensive, per-proof half of batch verification already done.
+///
+/// Produced by [`ProofKind::prepare_proof_evidence`], accumulated with
+/// [`ProofKind::merge_prepared_evidence`] and consumed by
+/// [`ProofKind::verify_prepared_evidence`].
+#[cfg(feature = "proof-verifying")]
+#[derive(Default)]
+pub struct PreparedContractProofs {
+    /// V3 proofs whose per-proof preparation is complete.
+    v3: Vec<transient_crypto::proofs::PreparedProof>,
+    /// Position of each `v3` entry within the accumulated evidence sequence, so batch indices
+    /// reported against `v3` can be translated back to evidence indices.
+    v3_positions: Vec<usize>,
+    /// Evidence with no prepare/verify split, verified during
+    /// [`ProofKind::verify_prepared_evidence`]: the legacy v2 proof batch, and — under mock
+    /// verification — everything, since the mock path has no preparation to do.
+    deferred: Vec<ContractProofEvidence>,
+    /// Evidence items absorbed so far, so `v3_positions` stays correct across merges.
+    len: usize,
+}
+
+/// Placeholder mirroring [`ContractProofEvidence`] when proof verification is compiled out.
+#[cfg(not(feature = "proof-verifying"))]
+#[derive(Default)]
+pub struct PreparedContractProofs;
 
 impl<D: DB> ProofKind<D> for ProofMarker {
     type Pedersen = PureGeneratorPedersen;
@@ -681,6 +761,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         }
     }
+    type PreparedEvidence = PreparedContractProofs;
+
     #[cfg(not(feature = "proof-verifying"))]
     fn batch_proof_verify(
         _evidence: &[ContractProofEvidence],
@@ -689,26 +771,130 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn prepare_proof_evidence(
+        _evidence: &[ContractProofEvidence],
+        _mode: ProofVerificationMode,
+    ) -> Result<PreparedContractProofs, MalformedTransaction<D>> {
+        Ok(PreparedContractProofs)
+    }
+    #[cfg(not(feature = "proof-verifying"))]
+    fn merge_prepared_evidence(_acc: &mut PreparedContractProofs, _more: PreparedContractProofs) {}
+    #[cfg(not(feature = "proof-verifying"))]
+    fn verify_prepared_evidence(
+        _prepared: &PreparedContractProofs,
+        _mode: ProofVerificationMode,
+        _linear_revalidation: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+
     #[cfg(feature = "proof-verifying")]
     fn batch_proof_verify(
         evidence: &[ContractProofEvidence],
         mode: ProofVerificationMode,
         linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>> {
+        let prepared = Self::prepare_proof_evidence(evidence, mode)?;
+        Self::verify_prepared_evidence(&prepared, mode, linear_revalidation)
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    fn prepare_proof_evidence(
+        evidence: &[ContractProofEvidence],
+        mode: ProofVerificationMode,
+    ) -> Result<PreparedContractProofs, MalformedTransaction<D>> {
+        let len = evidence.len();
+
+        // The mock path has no preparation step, so defer everything and let
+        // `verify_prepared_evidence` run it unchanged.
+        #[cfg(feature = "mock-verify")]
+        if matches!(mode, ProofVerificationMode::CalibratedMock) {
+            return Ok(PreparedContractProofs {
+                v3: Vec::new(),
+                v3_positions: Vec::new(),
+                deferred: evidence.iter().map(clone_evidence).collect(),
+                len,
+            });
+        }
+        let _ = mode;
+
+        // Split: v3 is prepared now, borrowed straight from `evidence`; the legacy v2 batch has
+        // no preparation step, so those (rare) items are cloned to be verified at fold time.
+        let mut v3_parts = Vec::new();
+        let mut v3_positions = Vec::new();
+        let mut deferred = Vec::new();
+        for (i, e) in evidence.iter().enumerate() {
+            match e {
+                ContractProofEvidence::V3 { vk, proof, pis } => {
+                    v3_positions.push(i);
+                    v3_parts.push((vk, proof, pis));
+                }
+                v2 @ ContractProofEvidence::V2 { .. } => deferred.push(clone_evidence(v2)),
+            }
+        }
+
+        let v3 = transient_crypto::proofs::VerifierKey::prepare_batch(
+            v3_parts
+                .iter()
+                .map(|(vk, proof, pis)| (*vk, *proof, pis.iter().copied())),
+        )
+        .map_err(|e| match e {
+            transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
+                MalformedTransaction::<D>::InvalidProofBatch {
+                    failed_indices: batch_indices.into_iter().map(|i| v3_positions[i]).collect(),
+                }
+            }
+            transient_crypto::proofs::BatchVerifyError::Unlocalized(e) => {
+                MalformedTransaction::<D>::InvalidProof(e)
+            }
+        })?;
+
+        Ok(PreparedContractProofs {
+            v3,
+            v3_positions,
+            deferred,
+            len,
+        })
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    fn merge_prepared_evidence(acc: &mut PreparedContractProofs, more: PreparedContractProofs) {
+        // Every prepared v3 proof must carry exactly one evidence position, or failure indices
+        // would be misattributed to the wrong transaction.
+        debug_assert_eq!(acc.v3.len(), acc.v3_positions.len());
+        debug_assert_eq!(more.v3.len(), more.v3_positions.len());
+        // Shift the incoming positions past everything already accumulated, so reported indices
+        // remain relative to the whole batch rather than to the chunk they were prepared in.
+        acc.v3_positions
+            .extend(more.v3_positions.into_iter().map(|p| p + acc.len));
+        acc.v3.extend(more.v3);
+        acc.deferred.extend(more.deferred);
+        acc.len += more.len;
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    fn verify_prepared_evidence(
+        prepared: &PreparedContractProofs,
+        mode: ProofVerificationMode,
+        linear_revalidation: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let v2 = evidence.iter().filter_map(|e| match e {
+        let v2 = prepared.deferred.iter().filter_map(|e| match e {
             ContractProofEvidence::V2 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
-            _ => None,
-        });
-        let v3 = evidence.iter().filter_map(|e| match e {
-            ContractProofEvidence::V3 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),
             _ => None,
         });
 
         match mode {
             #[cfg(feature = "mock-verify")]
             ProofVerificationMode::CalibratedMock => {
+                let v3 = prepared.deferred.iter().filter_map(|e| match e {
+                    ContractProofEvidence::V3 { vk, proof, pis } => {
+                        Some((vk, proof, pis.iter().copied()))
+                    }
+                    _ => None,
+                });
                 transient_crypto_old::proofs::VerifierKey::mock_batch_verify(v2)
                     .map_err(|e| anyhow::anyhow!("v1 mock batch verification: {e}"))
                     .map_err(MalformedTransaction::<D>::InvalidProof)?;
@@ -722,23 +908,18 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 )
                 .map_err(|e| anyhow::anyhow!("v1 batch verification: {e}"))
                 .map_err(MalformedTransaction::<D>::InvalidProof)?;
-                // Positions of the V3 items within `evidence`, so failing batch
-                // indices (which are relative to the filtered V3 subsequence) can
-                // be reported relative to the full proof-evidence sequence.
-                let v3_positions: Vec<usize> = evidence
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, e)| matches!(e, ContractProofEvidence::V3 { .. }).then_some(i))
-                    .collect();
-                transient_crypto::proofs::VerifierKey::batch_verify_with_failures(
+
+                transient_crypto::proofs::VerifierKey::verify_prepared_batch(
                     &PARAMS_VERIFIER,
-                    v3,
+                    &prepared.v3,
                     linear_revalidation,
                 )
                 .map_err(|e| match e {
                     transient_crypto::proofs::BatchVerifyError::InvalidProofs(batch_indices) => {
-                        let failed_indices =
-                            batch_indices.into_iter().map(|i| v3_positions[i]).collect();
+                        let failed_indices = batch_indices
+                            .into_iter()
+                            .map(|i| prepared.v3_positions[i])
+                            .collect();
                         MalformedTransaction::<D>::InvalidProofBatch { failed_indices }
                     }
                     transient_crypto::proofs::BatchVerifyError::Unlocalized(e) => {
@@ -823,6 +1004,22 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
+    // Nothing is proven for this kind, so there is nothing to prepare and nothing to check.
+    type PreparedEvidence = ();
+    fn prepare_proof_evidence(
+        _: &[()],
+        _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn merge_prepared_evidence(_: &mut (), _: ()) {}
+    fn verify_prepared_evidence(
+        _: &(),
+        _: ProofVerificationMode,
+        _: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -883,6 +1080,22 @@ impl<D: DB> ProofKind<D> for () {
     }
     fn batch_proof_verify(
         _: &[()],
+        _: ProofVerificationMode,
+        _: bool,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    // Nothing is proven for this kind, so there is nothing to prepare and nothing to check.
+    type PreparedEvidence = ();
+    fn prepare_proof_evidence(
+        _: &[()],
+        _: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    fn merge_prepared_evidence(_: &mut (), _: ()) {}
+    fn verify_prepared_evidence(
+        _: &(),
         _: ProofVerificationMode,
         _: bool,
     ) -> Result<(), MalformedTransaction<D>> {
