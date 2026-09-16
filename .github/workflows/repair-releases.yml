@@ -4,8 +4,13 @@ name: Repair Ledger Releases (one-off)
 # their original runs left behind, and adds the multi-arch proof-server tags
 # docker-push.yml only creates on ghcr.io. Then this branch is closed unmerged.
 # Nothing is rebuilt or re-signed.
+# workflow_dispatch resolves the workflow by name only once some run has
+# registered it, and this file is not on the default branch. The push trigger
+# registers it with a run in which every job is skipped.
 on:
   workflow_dispatch:
+  push:
+    branches: [ tkerber/repair-releases-oneoff ]
 
 permissions:
   contents: write
@@ -14,6 +19,7 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +136,7 @@ jobs:
 
   dockerhub-manifest:
     runs-on: ubuntu-24.04
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
