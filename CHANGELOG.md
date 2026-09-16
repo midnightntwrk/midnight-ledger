@@ -6,6 +6,17 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Ledger 9.1.0.0-rc.3
 
+- feat: `StateReference::adjust_strictness`, letting a reference state decide how the
+  transaction's proofs are treated. Applied once at the top of `Transaction::well_formed`;
+  defaults to the identity, so `LedgerState` is unaffected. `RevalidationReference` overrides it
+  to skip proof cryptography, so revalidation no longer depends on the caller passing the right
+  strictness — previously it silently re-ran the full proof verification.
+- feat: `ProofVerificationMode::AssumeVerified` and `WellFormedStrictness::assume_proofs_verified`,
+  the mechanism behind the above: every check except the cryptographic proof verification itself,
+  including the evidence collection through which `op_check` and `dust_spend_check` run, and the
+  verifier-key resolution. Distinct from `defer_proofs`, which clears the proof flags and so skips
+  those state-dependent checks too — which is why it must not be used for revalidation.
+
 - feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
 - breaking: unify the construction of signing envelopes
 - fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly

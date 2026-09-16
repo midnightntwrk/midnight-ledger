@@ -104,6 +104,23 @@ pub trait StateReference<D: DB> {
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
+
+    /// Lets the reference decide how the transaction's proofs are treated, applied once at the
+    /// top of [`Transaction::well_formed`].
+    ///
+    /// Proof verification is the one check with no hook of its own on this trait — unlike
+    /// `stateless_check`, `op_check` and the rest, it is reached only through
+    /// [`WellFormedStrictness`]. That is why a reference alone could not stand it down, and why
+    /// the obvious workaround (clearing the strictness flags with
+    /// [`WellFormedStrictness::defer_proofs`]) is wrong: those flags also gate `op_check` and
+    /// `dust_spend_check`, so clearing them skips the state-dependent checks a reference exists
+    /// to perform. This hook closes that gap: a reference states its own policy, and the caller
+    /// cannot forget to apply it or apply it to the wrong reference.
+    ///
+    /// The default is the identity — verify exactly what the caller asked for.
+    fn adjust_strictness(&self, strictness: WellFormedStrictness) -> WellFormedStrictness {
+        strictness
+    }
 }
 
 fn get_op<D: DB>(
@@ -224,8 +241,39 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     }
 }
 
+/// Re-checks a transaction that was already validated against one state, against a newer one.
+///
+/// Its `stateless_check` is a no-op — the signature, binding-commitment and zswap structural
+/// checks are functions of the transaction bytes alone, so a byte-identical transaction cannot
+/// newly fail them — while the state-dependent checks compare the two states and re-run the real
+/// check only where they actually differ.
+///
+/// # Proof verification
+///
+/// Using this reference skips the cryptographic verification of the transaction's proofs, and
+/// only that: it applies [`WellFormedStrictness::assume_proofs_verified`] itself, through
+/// [`StateReference::adjust_strictness`], whatever strictness the caller passes. Evidence
+/// collection still runs, so `op_check` and `dust_spend_check` still decide whether the
+/// contract's registered operation, its verifier key, or the Dust roots at the transaction's
+/// ctime have moved; the verifier key is still resolved; and every non-proof check is unchanged.
+///
+/// This is deliberately not left to the caller. Proof verification is the only check with no hook
+/// on [`StateReference`] — it is reached solely through [`WellFormedStrictness`] — so a caller
+/// pairing this reference with a default strictness would silently re-run the entire proof
+/// cryptography and save nothing but the stateless checks, while one reaching for
+/// [`WellFormedStrictness::defer_proofs`] to avoid that would skip `op_check` and
+/// `dust_spend_check` along with it and stop noticing state that moved underneath the
+/// transaction. Neither mistake is available now.
+///
+/// # Correctness
+///
+/// Constructing this reference asserts that the transaction being re-checked is byte-identical to
+/// one whose proofs were verified against `previously_validated_state`. Nothing here checks that
+/// claim — see [`ProofVerificationMode::AssumeVerified`].
 pub struct RevalidationReference<D: DB> {
+    /// The state the transaction's proofs were verified against.
     pub previously_validated_state: LedgerState<D>,
+    /// The state it is being re-checked against now.
     pub new_state: LedgerState<D>,
 }
 
@@ -374,6 +422,13 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.new_state.state_hash()
     }
+    /// Revalidating means the proofs have already been verified, so the cryptography is skipped
+    /// while every state-dependent check above still runs. See
+    /// [`ProofVerificationMode::AssumeVerified`] for the condition this relies on, and the type's
+    /// own documentation for why the caller does not get to choose.
+    fn adjust_strictness(&self, strictness: WellFormedStrictness) -> WellFormedStrictness {
+        strictness.assume_proofs_verified()
+    }
 }
 
 pub(crate) enum MetadataSizeError {
@@ -442,9 +497,47 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ProofVerificationMode {
+    /// Verify every proof cryptographically.
     Real,
     #[cfg(feature = "mock-verify")]
     CalibratedMock,
+    /// Run every check *except* the cryptographic verification of the proofs themselves.
+    ///
+    /// Intended for re-checking a transaction whose proofs the caller has **already verified**,
+    /// against a state that has since moved — see [`RevalidationReference`]. Proof validity is a
+    /// function of the proof bytes and the public inputs; for a transaction that is byte-identical
+    /// to one already verified, only the state-derived public inputs can have changed, and those
+    /// are re-checked here. Under this mode the traversal still:
+    ///
+    /// - collects proof evidence, and so still runs [`StateReference::op_check`] and
+    ///   [`StateReference::dust_spend_check`] — the state-dependent checks that decide whether the
+    ///   contract's registered operation, its verifier key, or the Dust roots at the transaction's
+    ///   ctime have moved since the proofs were verified;
+    /// - resolves the verifier key for each proof, failing with `VerifierKeyNotPresent` if the
+    ///   operation is gone or has no key of the proof's version;
+    /// - performs every non-proof check: signatures, binding commitments, balancing, limits,
+    ///   parameters, network id, maintenance authority, and the zswap structural checks.
+    ///
+    /// Only the final `verify` / `batch_verify` call is skipped.
+    ///
+    /// When using the prepare/decide split ([`ProofKind::prepare_proof_evidence`] and
+    /// [`ProofKind::verify_prepared_evidence`]), pass the same mode to both: the mode is the
+    /// caller's assertion, and mixing them would either skip proofs that were never verified or
+    /// decide an empty batch.
+    ///
+    /// # Correctness
+    ///
+    /// This mode is sound **only** when the caller has independently established that these exact
+    /// proofs verified. It does not check that claim and cannot: a caller that passes it for a
+    /// transaction whose proofs were never verified will accept invalid proofs. Callers are
+    /// expected to key their record of "already verified" on a cryptographic hash of the
+    /// transaction, not on a non-cryptographic one, so that a hit really is the same transaction.
+    ///
+    /// Distinct from [`WellFormedStrictness::defer_proofs`], which turns proof *checking* off
+    /// wholesale: because the state-dependent checks above are reached only through proof
+    /// verification, deferring also skips them, which is what makes it unsuitable for
+    /// revalidation. This mode keeps them and drops only the cryptography.
+    AssumeVerified,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -481,6 +574,22 @@ impl WellFormedStrictness {
         Self {
             verify_contract_proofs: false,
             verify_native_proofs: false,
+            ..self
+        }
+    }
+
+    /// Returns a copy of this strictness that runs every check except the cryptographic
+    /// verification of the proofs, for re-checking a transaction whose proofs are already known
+    /// to verify. See [`ProofVerificationMode::AssumeVerified`] for the correctness condition.
+    ///
+    /// Note that this *keeps* `verify_contract_proofs` and `verify_native_proofs` set: they gate
+    /// the evidence collection through which the state-dependent checks run, so clearing them —
+    /// as [`Self::defer_proofs`] does — would skip the very checks that make revalidation safe.
+    pub fn assume_proofs_verified(self) -> Self {
+        Self {
+            verify_contract_proofs: true,
+            verify_native_proofs: true,
+            proof_verification_mode: ProofVerificationMode::AssumeVerified,
             ..self
         }
     }
@@ -732,6 +841,11 @@ where
         strictness: WellFormedStrictness,
         tblock: Timestamp,
     ) -> Result<VerifiedTransaction<D>, MalformedTransaction<D>> {
+        // Applied once, here, and deliberately not in `Intent::well_formed`: the traversal below
+        // hands intents a strictness with the proof flags cleared so that everything can be
+        // batch-verified in one pass, and re-adjusting per intent would undo that.
+        let strictness = ref_state.adjust_strictness(strictness);
+
         ref_state.param_check(false, |params| {
             if strictness.enforce_limits
                 && Transaction::serialized_size(self) as u64 > params.limits.transaction_byte_limit
@@ -2794,6 +2908,262 @@ mod tests {
         assert_eq!(deferred.enforce_balancing, strictness.enforce_balancing);
         assert_eq!(deferred.verify_signatures, strictness.verify_signatures);
         assert_eq!(deferred.enforce_limits, strictness.enforce_limits);
+    }
+
+    /// The point of `assume_proofs_verified` is that it is *not* `defer_proofs`: the proof flags
+    /// stay set, because they gate the evidence collection through which `op_check` and
+    /// `dust_spend_check` run. Clearing them would skip the state-dependent re-checks that make
+    /// reusing an earlier verification safe, which is exactly the bug this mode exists to avoid.
+    #[test]
+    fn assume_proofs_verified_keeps_the_proof_flags_set() {
+        let strictness = WellFormedStrictness::default();
+        let assumed = strictness.assume_proofs_verified();
+        assert!(assumed.verify_contract_proofs);
+        assert!(assumed.verify_native_proofs);
+        assert_eq!(
+            assumed.proof_verification_mode,
+            ProofVerificationMode::AssumeVerified
+        );
+        // Everything else is untouched.
+        assert_eq!(assumed.enforce_balancing, strictness.enforce_balancing);
+        assert_eq!(assumed.verify_signatures, strictness.verify_signatures);
+        assert_eq!(assumed.enforce_limits, strictness.enforce_limits);
+    }
+
+    /// Guards the distinction at the point a caller would confuse the two.
+    #[test]
+    fn assume_proofs_verified_differs_from_defer_proofs() {
+        let strictness = WellFormedStrictness::default();
+        let deferred = strictness.defer_proofs();
+        let assumed = strictness.assume_proofs_verified();
+        assert_ne!(
+            (
+                deferred.verify_contract_proofs,
+                deferred.verify_native_proofs
+            ),
+            (assumed.verify_contract_proofs, assumed.verify_native_proofs),
+        );
+        assert_eq!(
+            deferred.proof_verification_mode,
+            ProofVerificationMode::Real,
+            "defer_proofs must not change the mode; it turns the checks off entirely"
+        );
+    }
+
+    /// A `StateReference` that delegates everything to a real one, but records whether the
+    /// strictness hook was consulted. Exists to pin the *wiring*: the other tests here check what
+    /// `adjust_strictness` returns, this one checks that `well_formed` actually asks.
+    struct RecordingReference<D: DB> {
+        inner: LedgerState<D>,
+        asked: std::cell::Cell<bool>,
+    }
+
+    impl<D: DB> StateReference<D> for RecordingReference<D> {
+        fn stateless_check(
+            &self,
+            check: impl FnOnce() -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.stateless_check(check)
+        }
+        fn param_check(
+            &self,
+            always: bool,
+            check: impl FnOnce(&LedgerParameters) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.param_check(always, check)
+        }
+        fn op_check(
+            &self,
+            contract: ContractAddress,
+            entry_point: &EntryPointBuf,
+            check: impl FnOnce(&ContractOperation) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.op_check(contract, entry_point, check)
+        }
+        fn maintenance_check(
+            &self,
+            contract: ContractAddress,
+            check: impl FnOnce(&ContractMaintenanceAuthority) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.maintenance_check(contract, check)
+        }
+        fn generationless_fee_availability_check(
+            &self,
+            parent_intent: &ErasedIntent<D>,
+            night_key: &SignatureVerifyingKey,
+            check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner
+                .generationless_fee_availability_check(parent_intent, night_key, check)
+        }
+        fn dust_spend_check(
+            &self,
+            ctime: Timestamp,
+            check: impl FnOnce(
+                DustParameters,
+                MerkleTreeDigest,
+                MerkleTreeDigest,
+            ) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.dust_spend_check(ctime, check)
+        }
+        fn fees_check(
+            &self,
+            check: impl FnOnce(
+                &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+            ) -> Result<(), MalformedTransaction<D>>,
+        ) -> Result<(), MalformedTransaction<D>> {
+            self.inner.fees_check(check)
+        }
+        fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
+            self.inner.network_check(network)
+        }
+        fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+            self.inner.ref_state_hash()
+        }
+        fn adjust_strictness(&self, strictness: WellFormedStrictness) -> WellFormedStrictness {
+            self.asked.set(true);
+            strictness
+        }
+    }
+
+    /// `Transaction::well_formed` must consult the reference's strictness policy. Without this,
+    /// `RevalidationReference` would silently go back to re-running the full proof cryptography
+    /// and only an integration test needing the proving stack would notice.
+    #[test]
+    fn well_formed_consults_the_reference_strictness_policy() {
+        use crate::structure::ProofPreimageMarker;
+        use transient_crypto::commitment::PedersenRandomness;
+
+        let reference = RecordingReference {
+            inner: LedgerState::<InMemoryDB>::new("test"),
+            asked: std::cell::Cell::new(false),
+        };
+        let stx = StandardTransaction::<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        >::new(
+            "test",
+            storage::storage::HashMap::new(),
+            None,
+            storage::storage::HashMap::new(),
+        );
+        let tx = Transaction::Standard(stx);
+
+        let mut strictness = WellFormedStrictness::default();
+        strictness.enforce_balancing = false;
+        // The verdict is irrelevant — only that the hook was consulted on the way.
+        let _ = tx.well_formed(&reference, strictness, Timestamp::from_secs(0));
+        assert!(
+            reference.asked.get(),
+            "well_formed must apply StateReference::adjust_strictness"
+        );
+    }
+
+    /// A plain `LedgerState` reference must not alter what the caller asked for: the default
+    /// `adjust_strictness` is the identity, so ordinary verification is untouched.
+    #[test]
+    fn ledger_state_reference_does_not_adjust_strictness() {
+        let ledger = LedgerState::<InMemoryDB>::new("test");
+        let strictness = WellFormedStrictness::default();
+        assert_eq!(ledger.adjust_strictness(strictness), strictness);
+        let deferred = strictness.defer_proofs();
+        assert_eq!(ledger.adjust_strictness(deferred), deferred);
+    }
+
+    /// A `RevalidationReference` applies its own policy, so a caller cannot forget to — and
+    /// cannot reach for `defer_proofs` and lose `op_check` / `dust_spend_check` with it.
+    #[test]
+    fn revalidation_reference_skips_only_the_cryptography() {
+        let reference = RevalidationReference::<InMemoryDB> {
+            previously_validated_state: LedgerState::new("test"),
+            new_state: LedgerState::new("test"),
+        };
+        let adjusted = reference.adjust_strictness(WellFormedStrictness::default());
+        assert_eq!(
+            adjusted.proof_verification_mode,
+            ProofVerificationMode::AssumeVerified
+        );
+        // The flags that gate evidence collection — and so `op_check` and `dust_spend_check` —
+        // stay set. This is the property that makes the reference safe to use.
+        assert!(adjusted.verify_contract_proofs);
+        assert!(adjusted.verify_native_proofs);
+        // Everything unrelated to proofs is left exactly as the caller asked.
+        let caller = WellFormedStrictness::default();
+        assert_eq!(adjusted.enforce_balancing, caller.enforce_balancing);
+        assert_eq!(adjusted.verify_signatures, caller.verify_signatures);
+        assert_eq!(adjusted.enforce_limits, caller.enforce_limits);
+    }
+
+    /// Adjusting is idempotent, so applying it more than once — or to an already-adjusted
+    /// strictness — cannot drift.
+    #[test]
+    fn revalidation_adjust_strictness_is_idempotent() {
+        let reference = RevalidationReference::<InMemoryDB> {
+            previously_validated_state: LedgerState::new("test"),
+            new_state: LedgerState::new("test"),
+        };
+        let once = reference.adjust_strictness(WellFormedStrictness::default());
+        let twice = reference.adjust_strictness(once);
+        assert_eq!(once, twice);
+    }
+
+    /// `AssumeVerified` skips the cryptography, not the state-dependent checks around it.
+    ///
+    /// The clearest observable case is the verifier key: it is resolved from the contract
+    /// operation *before* the mode is consulted, so an operation that no longer carries a key of
+    /// the proof's version is still rejected. That is what stops a revalidation from accepting a
+    /// transaction whose contract changed underneath it — and it is precisely what
+    /// `defer_proofs` would skip, since it never enters this code at all.
+    #[test]
+    fn assume_verified_still_requires_the_verifier_key() {
+        use crate::structure::{ContractCall, ProofMarker, ProofVersioned};
+        use onchain_runtime::state::ContractOperation;
+        use transient_crypto::proofs::Proof;
+
+        let mut rng = StdRng::seed_from_u64(0x5150);
+        // An operation carrying no verifier key at all: the state no longer has what the proof
+        // needs. `new(None, None)` leaves both the v2 and v3 keys unset.
+        let op = ContractOperation::new(None, None);
+        let call: ContractCall<ProofMarker, InMemoryDB> = ContractCall {
+            address: ContractAddress(rng.r#gen()),
+            entry_point: rng.r#gen(),
+            guaranteed_transcript: None,
+            fallible_transcript: None,
+            communication_commitment: Default::default(),
+            proof: ProofVersioned::V3(Proof(Vec::new())),
+        };
+
+        let err = <ProofMarker as ProofKind<InMemoryDB>>::proof_verify(
+            &op,
+            &call.proof,
+            Vec::new(),
+            &call,
+            ProofVerificationMode::AssumeVerified,
+        )
+        .expect_err("a missing verifier key must still be rejected under AssumeVerified");
+        assert!(
+            matches!(err, MalformedTransaction::VerifierKeyNotPresent { .. }),
+            "expected VerifierKeyNotPresent, got {err:?}"
+        );
+    }
+
+    /// `AssumeVerified` must skip the cryptography at every entry point, including the
+    /// prepare/finalize split, so that a caller using the incremental API gets the same answer as
+    /// one calling `batch_proof_verify` directly.
+    #[test]
+    fn assume_verified_skips_verification_on_every_entry_point() {
+        use crate::structure::ProofMarker;
+
+        let mode = ProofVerificationMode::AssumeVerified;
+        <ProofMarker as ProofKind<InMemoryDB>>::batch_proof_verify(&[], mode, false)
+            .expect("batch_proof_verify");
+        let prepared = <ProofMarker as ProofKind<InMemoryDB>>::prepare_proof_evidence(&[], mode)
+            .expect("prepare_proof_evidence");
+        <ProofMarker as ProofKind<InMemoryDB>>::verify_prepared_evidence(&prepared, mode, false)
+            .expect("verify_prepared_evidence");
     }
 
     #[test]
