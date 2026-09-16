@@ -1,0 +1,128 @@
+name: Repair Ledger Releases (one-off)
+
+# Disposable. Completes the releases listed in the matrix from the artifacts
+# their original runs left behind, then this branch is closed unmerged.
+# Nothing is rebuilt or re-signed.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # publish-npm timed out waiting on approval; tag and npm exist, release does not.
+          - tag: ledger-9.1.0.0-rc.5
+            run_id: "34220541435"
+          # This run re-pushed proof-server 9.0.0-rc.7 over the rc.4 run's images,
+          # so its manifest is the one that matches the live tag.
+          - tag: ledger-9.1.0.0-rc.4
+            run_id: "34220541435"
+          - tag: ledger-8.1.2
+            run_id: "33745652745"
+          - tag: ledger-10.1.0.0-alpha.1
+            run_id: "34628737009"
+    env:
+      TAG_NAME: ${{ matrix.tag }}
+      RUN_ID: ${{ matrix.run_id }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Docker login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ntwrk-bot
+          password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+
+      - name: Create GitHub release if missing
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${TAG_NAME} exists - only the proof-server manifest will be attached."
+            exit 0
+          fi
+
+          # A retagged release can sit a few commits behind the run that
+          # published it, but the run must at least descend from the tag.
+          RUN_SHA=$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)
+          STATUS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TAG_NAME}...${RUN_SHA}" --jq .status)
+          case "$STATUS" in
+            identical|ahead) ;;
+            *)
+              echo "::error::run ${RUN_ID} built ${RUN_SHA}, which is '${STATUS}' relative to ${TAG_NAME}"
+              exit 1 ;;
+          esac
+
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --dir downloaded-artifacts
+
+          # Mirrors the release job in prerelease.yml.
+          STAGING="release-assets"
+          mkdir -p "$STAGING"
+          shopt -s nullglob
+          for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
+          for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-*/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-*/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
+          if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then
+            for f in downloaded-artifacts/"Lcov Coverage Report"/*; do cp "$f" "$STAGING/coverage.lcov"; done
+          fi
+          if [ -d downloaded-artifacts/"Coverage Report" ]; then
+            ( cd downloaded-artifacts/"Coverage Report" && zip -qr "${GITHUB_WORKSPACE}/${STAGING}/coverage-html-report.zip" . )
+          fi
+          ( cd "$STAGING" && sha256sum -- * > SHA256SUMS )
+          ls -lah "$STAGING"
+
+          VERSION="${TAG_NAME#ledger-}"
+          PRERELEASE_FLAG=""
+          case "${VERSION}" in
+            *-rc*|*-alpha*|*-beta*|*-performance*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          NOTES_FILE="${GITHUB_WORKSPACE}/.github/release-notes/${TAG_NAME}.md"
+          if [ -z "$PRERELEASE_FLAG" ] && [ -f "$NOTES_FILE" ]; then
+            gh release create "$TAG_NAME" --title "Ledger ${VERSION}" --notes-file "$NOTES_FILE" "$STAGING"/*
+          else
+            gh release create "$TAG_NAME" --title "Ledger ${VERSION}" --generate-notes $PRERELEASE_FLAG "$STAGING"/*
+          fi
+
+      - name: Attach signed proof-server manifest
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'proof-server-build-manifest-*' \
+            --dir proof-server-release-assets
+
+          # Older artifacts nested the public key or omitted it; always use the
+          # checked-in one.
+          PUBLIC_KEY="proof-server/midnight-proof-server-public.asc"
+          MANIFEST=$(find proof-server-release-assets -type f -name build-manifest.json)
+          SIGNATURE="${MANIFEST}.asc"
+
+          # A later run may have re-pushed the same proof-server version, so the
+          # manifest must describe the image the tag serves now.
+          IMAGE=$(jq -r .image "$MANIFEST")
+          SIGNED_DIGEST=$(jq -r .image_digest "$MANIFEST")
+          # The digest is the hash of the raw manifest list; --format output varies across buildx versions.
+          LIVE_DIGEST="sha256:$(docker buildx imagetools inspect "$IMAGE" --raw | sha256sum | cut -d' ' -f1)"
+          if [ "$SIGNED_DIGEST" != "$LIVE_DIGEST" ]; then
+            echo "::error::manifest signs ${SIGNED_DIGEST} but ${IMAGE} now resolves to ${LIVE_DIGEST}"
+            exit 1
+          fi
+
+          export GNUPGHOME
+          GNUPGHOME=$(mktemp -d)
+          gpg --batch --import "$PUBLIC_KEY"
+          gpg --batch --verify "$SIGNATURE" "$MANIFEST"
+
+          cat "$MANIFEST"
+          gh release upload "$TAG_NAME" "$MANIFEST" "$SIGNATURE" "$PUBLIC_KEY" \
+            --repo "$GITHUB_REPOSITORY" --clobber
