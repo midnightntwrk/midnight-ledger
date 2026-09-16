@@ -33,10 +33,12 @@ jobs:
       - name: Configure git rewrite
         run: |
           mkdir -p "$HOME/.config/git"
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+          {
+            echo '[url "https://github.com/"]'
+            echo '  insteadOf = "git@github.com:"'
+            echo '  insteadOf = "git@github.com/"'
+            echo '  insteadOf = "ssh://git@github.com/"'
+          } >> "$HOME/.config/git/config"
 
       - name: Get the rust toolchain
         uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
@@ -69,9 +71,9 @@ jobs:
       - name: Patch the sources
         run: |
           "$HOME/tools/hardfork_version_patch" --tags standard-transaction
-          sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
+          sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' ./*/Cargo.toml
           # Remove version constraints from path dependencies so they work with patched prerelease versions
-          sed -i -e '/path\s*=\s*"/ s/version\s*=\s*"[^"]*",\s*//' */Cargo.toml
+          sed -i -e '/path\s*=\s*"/ s/version\s*=\s*"[^"]*",\s*//' ./*/Cargo.toml
 
       - name: Update Cargo.lock
         run: |
@@ -84,9 +86,32 @@ jobs:
 
       - name: Sanitize branch name
         id: name-sanitizer
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          name="hard-fork-test-${{ inputs.tag }}"
-          sname="${name// /-}"
+          set -euo pipefail
+          # `tag` is free text from workflow_dispatch. As a template expansion it was
+          # pasted into this script *before* bash parsed it, so the fold below
+          # sanitized nothing an attacker cared about; as an env var it is only ever
+          # data. The allowlist additionally stops a newline forging extra step
+          # outputs through $GITHUB_OUTPUT, and `required: true` does not exclude "".
+          # (Do not name the template syntax in a run block - Actions evaluates it
+          # here too, comment or not, and an empty one is a workflow syntax error.)
+          tag="${TAG// /-}"
+          if [[ ! "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::tag must be a release tag usable as a git ref, e.g." \
+                 "'ledger-9.1.0.0-rc.5' - letters, digits, '.', '_' and '-' only," \
+                 "at least one character (spaces are folded to '-'). Got: '$TAG'"
+            exit 1
+          fi
+          sname="hard-fork-test-${tag}"
+          # Let git itself rule on the residue the allowlist permits: '..', trailing
+          # '.lock', a lone '@'. Cheaper than restating git's ref grammar here.
+          if ! git check-ref-format "refs/tags/$sname"; then
+            echo "::error::'$sname' is not a valid git ref name (see git-check-ref-format);" \
+                 "avoid '..', a trailing '.lock', and a bare '@'. Derived from tag '$TAG'"
+            exit 1
+          fi
           echo "tag_name=$sname" >> "$GITHUB_OUTPUT"
           echo "Sanitized branch name: $sname"
 
