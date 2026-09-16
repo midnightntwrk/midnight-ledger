@@ -1,7 +1,8 @@
 name: Repair Ledger Releases (one-off)
 
 # Disposable. Completes the releases listed in the matrix from the artifacts
-# their original runs left behind, then this branch is closed unmerged.
+# their original runs left behind, and adds the multi-arch proof-server tags
+# docker-push.yml only creates on ghcr.io. Then this branch is closed unmerged.
 # Nothing is rebuilt or re-signed.
 on:
   workflow_dispatch:
@@ -126,3 +127,47 @@ jobs:
           cat "$MANIFEST"
           gh release upload "$TAG_NAME" "$MANIFEST" "$SIGNATURE" "$PUBLIC_KEY" \
             --repo "$GITHUB_REPOSITORY" --clobber
+
+  dockerhub-manifest:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [ "9.0.0-rc.7", "10.0.0-alpha.1" ]
+    env:
+      VERSION: ${{ matrix.version }}
+    steps:
+      - name: Docker login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
+
+      - name: Docker login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: ntwrk-bot
+          password: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+
+      - name: Create multi-arch tag on Docker Hub
+        run: |
+          set -euo pipefail
+          HUB="docker.io/midnightntwrk/proof-server"
+          GHCR="ghcr.io/midnight-ntwrk/proof-server"
+          digest() { docker buildx imagetools inspect "$1" --raw | sha256sum | cut -d' ' -f1; }
+
+          if docker buildx imagetools inspect "$HUB:$VERSION" >/dev/null 2>&1; then
+            echo "$HUB:$VERSION already exists - skipping."
+            exit 0
+          fi
+          docker manifest create "$HUB:$VERSION" "$HUB:$VERSION-amd64" "$HUB:$VERSION-arm64"
+          docker manifest push "$HUB:$VERSION"
+
+          # The per-arch images are byte-identical on both registries, so the
+          # list digest should match the one the signed manifest records.
+          HUB_DIGEST=$(digest "$HUB:$VERSION")
+          GHCR_DIGEST=$(digest "$GHCR:$VERSION")
+          if [ "$HUB_DIGEST" != "$GHCR_DIGEST" ]; then
+            echo "::warning::$HUB:$VERSION digest $HUB_DIGEST differs from $GHCR:$VERSION digest $GHCR_DIGEST"
+          fi
