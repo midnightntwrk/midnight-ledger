@@ -2,7 +2,16 @@ name: Docker Build multiplatform image and push to registry
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild and re-push images and re-sign the manifest even when this proof-server version is already published."
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      force:
+        type: boolean
+        default: false
     secrets:
       DOCKERHUB_MIDNIGHTNTWRK_USER:
         required: true
@@ -67,15 +76,24 @@ jobs:
           purge-created: 0
 
       - name: Create proof-server images
+        env:
+          FORCE: ${{ inputs.force }}
         run: |
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          GHCR_IMAGE="ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64"
+          HUB_IMAGE="docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64"
+          # A published version is immutable: re-pushing would change the digest
+          # under an already signed manifest.
+          if [ "${FORCE:-false}" != "true" ] && docker manifest inspect "$GHCR_IMAGE" >/dev/null 2>&1; then
+            echo "$GHCR_IMAGE already exists - skipping build and push."
+            exit 0
+          fi
           nix build -L .#proof-server-oci
           docker load -i result
-          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
+          docker push "$GHCR_IMAGE"
 
-          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
-            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
-          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
+          docker tag "$GHCR_IMAGE" "$HUB_IMAGE"
+          docker push "$HUB_IMAGE"
 
       # Disabled as we currently have no experimental features
       #- name: Create experimental proof-server images
@@ -127,15 +145,22 @@ jobs:
           purge-created: 0
 
       - name: Build and push arm64 image
+        env:
+          FORCE: ${{ inputs.force }}
         run: |
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
+          GHCR_IMAGE="ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64"
+          HUB_IMAGE="docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64"
+          if [ "${FORCE:-false}" != "true" ] && docker manifest inspect "$GHCR_IMAGE" >/dev/null 2>&1; then
+            echo "$GHCR_IMAGE already exists - skipping build and push."
+            exit 0
+          fi
           nix build -L .#proof-server-oci-arm64
           docker load -i result
-          docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+          docker push "$GHCR_IMAGE"
 
-          docker tag ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64 \
-            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-          docker push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
+          docker tag "$GHCR_IMAGE" "$HUB_IMAGE"
+          docker push "$HUB_IMAGE"
 
       # Disabled as we currently have no experimental features
       #- name: Create experimental proof-server images
@@ -153,7 +178,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [docker-amd64, docker-arm64]
     permissions:
-      contents: read
+      contents: write
       id-token: write
 
     steps:
@@ -191,52 +216,59 @@ jobs:
           purge-created: 0
 
       - name: Create and push manifest
+        env:
+          FORCE: ${{ inputs.force }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           PROOF_SERVER_VERSION=$(nix eval --raw .#proof-server-version)
           echo "PROOF_SERVER_VERSION=$PROOF_SERVER_VERSION" >> $GITHUB_ENV
+          GHCR="ghcr.io/midnight-ntwrk/proof-server"
+          HUB="docker.io/midnightntwrk/proof-server"
+          V="$PROOF_SERVER_VERSION"
 
-          # GHCR multi-arch manifest
-          docker manifest create ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
-            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
-            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-          docker manifest push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION
-
-          # Docker Hub multi-arch manifest. Not gated on the `latest` guard
-          # below: every release, pre-release included, needs a version tag that
-          # resolves per-architecture, or Docker Hub users are forced to pin
-          # `-amd64`/`-arm64` by hand and lose arch dispatch.
-          docker manifest create docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION \
-            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
-            docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-          docker manifest push docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION
-
-          # Only a final release moves `latest`; a pre-release version contains a
-          # '-' (e.g. 8.2.0-rc.1). ($VERSION was undefined here, so `latest` was
-          # always pushed - guard on the actual proof-server version instead.)
-          if [[ "$PROOF_SERVER_VERSION" != *"-"* ]]; then
-            docker manifest create ghcr.io/midnight-ntwrk/proof-server:latest \
-              ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
-              ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-            docker manifest push ghcr.io/midnight-ntwrk/proof-server:latest
-
-            docker manifest create docker.io/midnightntwrk/proof-server:latest \
-              docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-amd64 \
-              docker.io/midnightntwrk/proof-server:$PROOF_SERVER_VERSION-arm64
-            docker manifest push docker.io/midnightntwrk/proof-server:latest
+          # The proof-server release is complete once its GitHub release carries
+          # the signed manifest; the signing steps are skipped then unless forced.
+          PUBLISH_MANIFEST=true
+          if [ "${FORCE:-false}" != "true" ] \
+             && gh release view "proof-server-${V}" --json assets --jq '.assets[].name' 2>/dev/null \
+                | grep -qx 'build-manifest.json.asc'; then
+            echo "proof-server-${V} is already released with a signed manifest - nothing to do."
+            PUBLISH_MANIFEST=false
           fi
+          echo "PUBLISH_MANIFEST=$PUBLISH_MANIFEST" >> $GITHUB_ENV
 
-          IMAGE_DIGEST=$(docker buildx imagetools inspect \
-            ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION \
-            --format '{{.Manifest.Digest}}')
+          for REPO in "$GHCR" "$HUB"; do
+            # Skipping an existing version also keeps a re-run of an old release
+            # from moving `latest` backwards.
+            if [ "${FORCE:-false}" != "true" ] && docker manifest inspect "$REPO:$V" >/dev/null 2>&1; then
+              echo "$REPO:$V already exists - keeping the published manifest list."
+              continue
+            fi
+            # Every release, pre-release included, needs a version tag that
+            # resolves per-architecture, or users must pin -amd64/-arm64 by hand.
+            docker manifest create "$REPO:$V" "$REPO:$V-amd64" "$REPO:$V-arm64"
+            docker manifest push "$REPO:$V"
+
+            # Only a final release moves `latest`; a pre-release version contains a '-'.
+            if [[ "$V" != *"-"* ]]; then
+              docker manifest create "$REPO:latest" "$REPO:$V-amd64" "$REPO:$V-arm64"
+              docker manifest push "$REPO:latest"
+            fi
+          done
+
+          IMAGE_DIGEST=$(docker buildx imagetools inspect "$GHCR:$V" --format '{{.Manifest.Digest}}')
           echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> $GITHUB_ENV
 
       - name: Authenticate to GCP (Workload Identity Federation)
+        if: env.PUBLISH_MANIFEST == 'true'
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SIGNING_SERVICE_ACCOUNT }}
 
       - name: Fetch signing key from Secret Manager
+        if: env.PUBLISH_MANIFEST == 'true'
         id: fetch-key
         uses: google-github-actions/get-secretmanager-secrets@bc9c54b29fdffb8a47776820a7d26e77b379d262 # v3.0.0
         with:
@@ -244,6 +276,7 @@ jobs:
             SIGNING_KEY:projects/mnf-federated-node-operator/secrets/midnight-proof-server-signing-key/versions/latest
 
       - name: Sign proof-server build manifest
+        if: env.PUBLISH_MANIFEST == 'true'
         env:
           SIGNING_KEY: ${{ steps.fetch-key.outputs.SIGNING_KEY }}
           SIGNING_KEY_PASSPHRASE: ${{ secrets.PROOF_SERVER_SIGNING_KEY_PASSPHRASE }}
@@ -306,6 +339,7 @@ jobs:
           gpg --verify build-manifest.json.asc build-manifest.json
 
       - name: Upload signed build manifest
+        if: env.PUBLISH_MANIFEST == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: proof-server-build-manifest-${{ env.PROOF_SERVER_VERSION }}
@@ -314,3 +348,25 @@ jobs:
             build-manifest.json.asc
             midnight-proof-server-public.asc
           if-no-files-found: error
+
+      # The proof server is released on its own tag so its signed manifest does
+      # not depend on a Ledger release existing.
+      - name: Publish proof-server GitHub release
+        if: env.PUBLISH_MANIFEST == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="proof-server-${PROOF_SERVER_VERSION}"
+          ASSETS="build-manifest.json build-manifest.json.asc midnight-proof-server-public.asc"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists - refreshing manifest assets."
+            gh release upload "$TAG" $ASSETS --clobber
+            exit 0
+          fi
+          PRERELEASE_FLAG=""
+          if [[ "$PROOF_SERVER_VERSION" == *"-"* ]]; then PRERELEASE_FLAG="--prerelease"; fi
+          NOTES=$(printf 'Image: `ghcr.io/midnight-ntwrk/proof-server:%s` (also `docker.io/midnightntwrk/proof-server:%s`)\nDigest: `%s`\n\nVerify the build manifest with the attached public key:\n\n```\ngpg --import midnight-proof-server-public.asc\ngpg --verify build-manifest.json.asc build-manifest.json\n```\n' \
+            "$PROOF_SERVER_VERSION" "$PROOF_SERVER_VERSION" "$IMAGE_DIGEST")
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "Proof Server ${PROOF_SERVER_VERSION}" \
+            --notes "$NOTES" $PRERELEASE_FLAG $ASSETS
