@@ -139,11 +139,7 @@ impl AuthorizedClaim<Proof> {
             op.field_repr(&mut statement);
         }
         SIGN_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
@@ -192,11 +188,7 @@ impl<D: DB> Input<Proof, D> {
             op.field_repr(&mut statement);
         }
         SPEND_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
@@ -210,10 +202,7 @@ impl<D: DB> Input<(), D> {
 
 #[cfg(feature = "proof-verifying")]
 impl<D: DB> Input<Proof, D> {
-    pub fn collect_proof_evidence(
-        &self,
-        segment: u16,
-    ) -> (VerifierKey, Proof, Vec<Fr>) {
+    pub fn collect_proof_evidence(&self, segment: u16) -> (VerifierKey, Proof, Vec<Fr>) {
         let mut prog = Vec::new();
         prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
             [Key::Value(0u8.into())],
@@ -308,11 +297,7 @@ impl<D: DB> Output<Proof, D> {
             op.field_repr(&mut statement);
         }
         OUTPUT_VK
-            .verify(
-                &*PARAMS_VERIFIER,
-                &self.proof,
-                statement.into_iter(),
-            )
+            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
             .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
@@ -471,8 +456,7 @@ impl<D: DB> Offer<Proof, D> {
         }
         for transient in self.transient.iter() {
             let output = transient.as_output();
-            if let (Some(address), Some(ciphertext)) =
-                (output.contract_address, &output.ciphertext)
+            if let (Some(address), Some(ciphertext)) = (output.contract_address, &output.ciphertext)
             {
                 return Err(MalformedOffer::ContractSentCiphertext {
                     address: *address.deref(),
@@ -549,7 +533,10 @@ mod tests {
         };
         let structural = offer.well_formed_structural(1).expect("structural check");
         let full = offer.well_formed(1).expect("well_formed");
-        assert_eq!(structural, full, "structural and well_formed should agree on empty offer");
+        assert_eq!(
+            structural, full,
+            "structural and well_formed should agree on empty offer"
+        );
     }
 
     #[cfg(feature = "proof-verifying")]

@@ -18,7 +18,7 @@ use storage::db::InMemoryDB;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProvingError, Resolver,
 };
-use zkir_v2::LocalProvingProvider;
+use zkir_v3::LocalProvingProvider;
 
 fn sync_prove(
     offer: &Offer<ProofPreimage, InMemoryDB>,

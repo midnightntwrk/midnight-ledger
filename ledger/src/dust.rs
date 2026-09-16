@@ -2266,7 +2266,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 2_912;
+pub const DUST_SPEND_PROOF_SIZE: usize = 2_640;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]
@@ -2284,7 +2284,7 @@ mod tests {
         use rand::{Rng, SeedableRng, rngs::StdRng};
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-        use zkir_v2::LocalProvingProvider;
+        use zkir_v3::LocalProvingProvider;
 
         use crate::{
             dust::DUST_SPEND_PROOF_SIZE,
