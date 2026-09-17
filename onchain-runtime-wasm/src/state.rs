@@ -86,8 +86,14 @@ pub struct StateBoundedMerkleTree(pub(crate) MerkleTree<()>);
 #[wasm_bindgen]
 impl StateBoundedMerkleTree {
     #[wasm_bindgen(constructor)]
-    pub fn blank(height: u8) -> Self {
-        StateBoundedMerkleTree(MerkleTree::blank(height))
+    pub fn blank(height: f64) -> Result<StateBoundedMerkleTree, JsError> {
+        if !height.is_finite() || height.fract() != 0.0 || height < 0.0 || height > u8::MAX as f64 {
+            return Err(JsError::new(
+                "StateBoundedMerkleTree height must be an integer in 0..=255",
+            ));
+        }
+
+        Ok(StateBoundedMerkleTree(MerkleTree::blank(height as u8)))
     }
 
     #[wasm_bindgen(getter)]
