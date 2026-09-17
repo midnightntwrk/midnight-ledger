@@ -1,3231 +1,551 @@
 {
-  "version": {
-    "major": 3,
-    "minor": 0
-  },
+  "version": { "major": 3, "minor": 0 },
   "do_communications_commitment": false,
   "inputs": [
-    {
-      "name": "%dust.0",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%dust.1",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%dust.2",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%dust.3",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%dust.4",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%sk.5",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%gen.6",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%gen.7",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%gen.8",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%gen.9",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%gen.10",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.11",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.12",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.13",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.14",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.15",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.16",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.17",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.18",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.19",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.20",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.21",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.22",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.23",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.24",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.25",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.26",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.27",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.28",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.29",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.30",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.31",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.32",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.33",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.34",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.35",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.36",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.37",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.38",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.39",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.40",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.41",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.42",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.43",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.44",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.45",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.46",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.47",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.48",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.49",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.50",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.51",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.52",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.53",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.54",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.55",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.56",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.57",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.58",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.59",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.60",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.61",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.62",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.63",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.64",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.65",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.66",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.67",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.68",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.69",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.70",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.71",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.72",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.73",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.74",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.75",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%commitment_path.76",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.77",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.78",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.79",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.80",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.81",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.82",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.83",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.84",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.85",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.86",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.87",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.88",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.89",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.90",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.91",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.92",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.93",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.94",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.95",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.96",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.97",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.98",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.99",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.100",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.101",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.102",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.103",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.104",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.105",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.106",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.107",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.108",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.109",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.110",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.111",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.112",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.113",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.114",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.115",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.116",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.117",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.118",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.119",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.120",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.121",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.122",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.123",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.124",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.125",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.126",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.127",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.128",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.129",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.130",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.131",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.132",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.133",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.134",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.135",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.136",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.137",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.138",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.139",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.140",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.141",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%generation_path.142",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%initial_nonce.143",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%initial_nonce.144",
-      "type": "Scalar<BLS12-381>"
-    },
-    {
-      "name": "%seq_no.145",
-      "type": "Scalar<BLS12-381>"
-    }
+    { "name": "%dust.0", "type": "Scalar<BLS12-381>" },
+    { "name": "%dust.1", "type": "Scalar<BLS12-381>" },
+    { "name": "%dust.2", "type": "Scalar<BLS12-381>" },
+    { "name": "%dust.3", "type": "Scalar<BLS12-381>" },
+    { "name": "%dust.4", "type": "Scalar<BLS12-381>" },
+    { "name": "%sk.5", "type": "Scalar<BLS12-381>" },
+    { "name": "%gen.6", "type": "Scalar<BLS12-381>" },
+    { "name": "%gen.7", "type": "Scalar<BLS12-381>" },
+    { "name": "%gen.8", "type": "Scalar<BLS12-381>" },
+    { "name": "%gen.9", "type": "Scalar<BLS12-381>" },
+    { "name": "%gen.10", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.11", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.12", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.13", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.14", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.15", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.16", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.17", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.18", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.19", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.20", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.21", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.22", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.23", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.24", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.25", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.26", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.27", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.28", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.29", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.30", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.31", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.32", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.33", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.34", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.35", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.36", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.37", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.38", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.39", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.40", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.41", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.42", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.43", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.44", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.45", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.46", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.47", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.48", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.49", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.50", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.51", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.52", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.53", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.54", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.55", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.56", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.57", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.58", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.59", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.60", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.61", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.62", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.63", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.64", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.65", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.66", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.67", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.68", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.69", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.70", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.71", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.72", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.73", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.74", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.75", "type": "Scalar<BLS12-381>" },
+    { "name": "%commitment_path.76", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.77", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.78", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.79", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.80", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.81", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.82", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.83", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.84", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.85", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.86", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.87", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.88", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.89", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.90", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.91", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.92", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.93", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.94", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.95", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.96", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.97", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.98", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.99", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.100", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.101", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.102", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.103", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.104", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.105", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.106", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.107", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.108", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.109", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.110", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.111", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.112", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.113", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.114", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.115", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.116", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.117", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.118", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.119", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.120", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.121", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.122", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.123", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.124", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.125", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.126", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.127", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.128", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.129", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.130", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.131", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.132", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.133", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.134", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.135", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.136", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.137", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.138", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.139", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.140", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.141", "type": "Scalar<BLS12-381>" },
+    { "name": "%generation_path.142", "type": "Scalar<BLS12-381>" },
+    { "name": "%initial_nonce.143", "type": "Scalar<BLS12-381>" },
+    { "name": "%initial_nonce.144", "type": "Scalar<BLS12-381>" },
+    { "name": "%seq_no.145", "type": "Scalar<BLS12-381>" }
   ],
   "outputs": [
   ],
   "instructions": [
-    {
-      "op": "constrain_bits",
-      "val": "%dust.0",
-      "bits": 128
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%dust.3",
-      "bits": 32
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%dust.4",
-      "bits": 64
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%gen.6",
-      "bits": 128
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%gen.8",
-      "bits": 8
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%gen.9",
-      "bits": 248
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%gen.10",
-      "bits": 64
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%commitment_path.11",
-      "bits": 8
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%commitment_path.12",
-      "bits": 248
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.14"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.16"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.18"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.20"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.22"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.24"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.26"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.28"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.30"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.32"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.34"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.36"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.38"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.40"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.42"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.44"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.46"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.48"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.50"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.52"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.54"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.56"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.58"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.60"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.62"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.64"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.66"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.68"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.70"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.72"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.74"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%commitment_path.76"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%generation_path.77",
-      "bits": 8
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%generation_path.78",
-      "bits": 248
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.80"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.82"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.84"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.86"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.88"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.90"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.92"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.94"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.96"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.98"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.100"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.102"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.104"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.106"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.108"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.110"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.112"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.114"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.116"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.118"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.120"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.122"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.124"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.126"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.128"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.130"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.132"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.134"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.136"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.138"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.140"
-    },
-    {
-      "op": "constrain_to_boolean",
-      "val": "%generation_path.142"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%initial_nonce.143",
-      "bits": 8
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%initial_nonce.144",
-      "bits": 248
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%seq_no.145",
-      "bits": 32
-    },
-    {
-      "op": "transient_hash",
-      "output": "%pk.146",
-      "inputs": [
-        "0x6d646e3a647573743a706b",
-        "%sk.5"
-      ]
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.147",
-      "a": "%pk.146",
-      "b": "%dust.1"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.147"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%commitment.148",
-      "inputs": [
-        "0x6d646e3a647573743a636d",
-        "%dust.0",
-        "%dust.1",
-        "%dust.2",
-        "%dust.4"
-      ]
-    },
-    {
-      "op": "copy",
-      "output": "%t.149",
-      "val": "0x00"
-    },
-    {
-      "op": "div_mod_power_of_two",
-      "outputs": [
-        "%tmp.150",
-        "%t.151"
-      ],
-      "val": "%commitment.148",
-      "bits": 248
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.152",
-      "a": "%t.149",
-      "b": "%commitment_path.11"
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.153",
-      "a": "%t.151",
-      "b": "%commitment_path.12"
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.154",
-      "bit": "%t.152",
-      "a": "%t.153",
-      "b": "0x00"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.154"
-    },
-    {
-      "op": "copy",
-      "output": "%t.155",
-      "val": "%commitment_path.12"
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.156",
-      "bit": "%commitment_path.14",
-      "a": "%t.155",
-      "b": "%commitment_path.13"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.157",
-      "bit": "%commitment_path.14",
-      "a": "%commitment_path.13",
-      "b": "%t.155"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.158",
-      "inputs": [
-        "%left.156",
-        "%right.157"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.159",
-      "bit": "%commitment_path.16",
-      "a": "%recursiveDigest.158",
-      "b": "%commitment_path.15"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.160",
-      "bit": "%commitment_path.16",
-      "a": "%commitment_path.15",
-      "b": "%recursiveDigest.158"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.161",
-      "inputs": [
-        "%left.159",
-        "%right.160"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.162",
-      "bit": "%commitment_path.18",
-      "a": "%recursiveDigest.161",
-      "b": "%commitment_path.17"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.163",
-      "bit": "%commitment_path.18",
-      "a": "%commitment_path.17",
-      "b": "%recursiveDigest.161"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.164",
-      "inputs": [
-        "%left.162",
-        "%right.163"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.165",
-      "bit": "%commitment_path.20",
-      "a": "%recursiveDigest.164",
-      "b": "%commitment_path.19"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.166",
-      "bit": "%commitment_path.20",
-      "a": "%commitment_path.19",
-      "b": "%recursiveDigest.164"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.167",
-      "inputs": [
-        "%left.165",
-        "%right.166"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.168",
-      "bit": "%commitment_path.22",
-      "a": "%recursiveDigest.167",
-      "b": "%commitment_path.21"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.169",
-      "bit": "%commitment_path.22",
-      "a": "%commitment_path.21",
-      "b": "%recursiveDigest.167"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.170",
-      "inputs": [
-        "%left.168",
-        "%right.169"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.171",
-      "bit": "%commitment_path.24",
-      "a": "%recursiveDigest.170",
-      "b": "%commitment_path.23"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.172",
-      "bit": "%commitment_path.24",
-      "a": "%commitment_path.23",
-      "b": "%recursiveDigest.170"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.173",
-      "inputs": [
-        "%left.171",
-        "%right.172"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.174",
-      "bit": "%commitment_path.26",
-      "a": "%recursiveDigest.173",
-      "b": "%commitment_path.25"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.175",
-      "bit": "%commitment_path.26",
-      "a": "%commitment_path.25",
-      "b": "%recursiveDigest.173"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.176",
-      "inputs": [
-        "%left.174",
-        "%right.175"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.177",
-      "bit": "%commitment_path.28",
-      "a": "%recursiveDigest.176",
-      "b": "%commitment_path.27"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.178",
-      "bit": "%commitment_path.28",
-      "a": "%commitment_path.27",
-      "b": "%recursiveDigest.176"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.179",
-      "inputs": [
-        "%left.177",
-        "%right.178"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.180",
-      "bit": "%commitment_path.30",
-      "a": "%recursiveDigest.179",
-      "b": "%commitment_path.29"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.181",
-      "bit": "%commitment_path.30",
-      "a": "%commitment_path.29",
-      "b": "%recursiveDigest.179"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.182",
-      "inputs": [
-        "%left.180",
-        "%right.181"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.183",
-      "bit": "%commitment_path.32",
-      "a": "%recursiveDigest.182",
-      "b": "%commitment_path.31"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.184",
-      "bit": "%commitment_path.32",
-      "a": "%commitment_path.31",
-      "b": "%recursiveDigest.182"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.185",
-      "inputs": [
-        "%left.183",
-        "%right.184"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.186",
-      "bit": "%commitment_path.34",
-      "a": "%recursiveDigest.185",
-      "b": "%commitment_path.33"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.187",
-      "bit": "%commitment_path.34",
-      "a": "%commitment_path.33",
-      "b": "%recursiveDigest.185"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.188",
-      "inputs": [
-        "%left.186",
-        "%right.187"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.189",
-      "bit": "%commitment_path.36",
-      "a": "%recursiveDigest.188",
-      "b": "%commitment_path.35"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.190",
-      "bit": "%commitment_path.36",
-      "a": "%commitment_path.35",
-      "b": "%recursiveDigest.188"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.191",
-      "inputs": [
-        "%left.189",
-        "%right.190"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.192",
-      "bit": "%commitment_path.38",
-      "a": "%recursiveDigest.191",
-      "b": "%commitment_path.37"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.193",
-      "bit": "%commitment_path.38",
-      "a": "%commitment_path.37",
-      "b": "%recursiveDigest.191"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.194",
-      "inputs": [
-        "%left.192",
-        "%right.193"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.195",
-      "bit": "%commitment_path.40",
-      "a": "%recursiveDigest.194",
-      "b": "%commitment_path.39"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.196",
-      "bit": "%commitment_path.40",
-      "a": "%commitment_path.39",
-      "b": "%recursiveDigest.194"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.197",
-      "inputs": [
-        "%left.195",
-        "%right.196"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.198",
-      "bit": "%commitment_path.42",
-      "a": "%recursiveDigest.197",
-      "b": "%commitment_path.41"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.199",
-      "bit": "%commitment_path.42",
-      "a": "%commitment_path.41",
-      "b": "%recursiveDigest.197"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.200",
-      "inputs": [
-        "%left.198",
-        "%right.199"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.201",
-      "bit": "%commitment_path.44",
-      "a": "%recursiveDigest.200",
-      "b": "%commitment_path.43"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.202",
-      "bit": "%commitment_path.44",
-      "a": "%commitment_path.43",
-      "b": "%recursiveDigest.200"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.203",
-      "inputs": [
-        "%left.201",
-        "%right.202"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.204",
-      "bit": "%commitment_path.46",
-      "a": "%recursiveDigest.203",
-      "b": "%commitment_path.45"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.205",
-      "bit": "%commitment_path.46",
-      "a": "%commitment_path.45",
-      "b": "%recursiveDigest.203"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.206",
-      "inputs": [
-        "%left.204",
-        "%right.205"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.207",
-      "bit": "%commitment_path.48",
-      "a": "%recursiveDigest.206",
-      "b": "%commitment_path.47"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.208",
-      "bit": "%commitment_path.48",
-      "a": "%commitment_path.47",
-      "b": "%recursiveDigest.206"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.209",
-      "inputs": [
-        "%left.207",
-        "%right.208"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.210",
-      "bit": "%commitment_path.50",
-      "a": "%recursiveDigest.209",
-      "b": "%commitment_path.49"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.211",
-      "bit": "%commitment_path.50",
-      "a": "%commitment_path.49",
-      "b": "%recursiveDigest.209"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.212",
-      "inputs": [
-        "%left.210",
-        "%right.211"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.213",
-      "bit": "%commitment_path.52",
-      "a": "%recursiveDigest.212",
-      "b": "%commitment_path.51"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.214",
-      "bit": "%commitment_path.52",
-      "a": "%commitment_path.51",
-      "b": "%recursiveDigest.212"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.215",
-      "inputs": [
-        "%left.213",
-        "%right.214"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.216",
-      "bit": "%commitment_path.54",
-      "a": "%recursiveDigest.215",
-      "b": "%commitment_path.53"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.217",
-      "bit": "%commitment_path.54",
-      "a": "%commitment_path.53",
-      "b": "%recursiveDigest.215"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.218",
-      "inputs": [
-        "%left.216",
-        "%right.217"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.219",
-      "bit": "%commitment_path.56",
-      "a": "%recursiveDigest.218",
-      "b": "%commitment_path.55"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.220",
-      "bit": "%commitment_path.56",
-      "a": "%commitment_path.55",
-      "b": "%recursiveDigest.218"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.221",
-      "inputs": [
-        "%left.219",
-        "%right.220"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.222",
-      "bit": "%commitment_path.58",
-      "a": "%recursiveDigest.221",
-      "b": "%commitment_path.57"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.223",
-      "bit": "%commitment_path.58",
-      "a": "%commitment_path.57",
-      "b": "%recursiveDigest.221"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.224",
-      "inputs": [
-        "%left.222",
-        "%right.223"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.225",
-      "bit": "%commitment_path.60",
-      "a": "%recursiveDigest.224",
-      "b": "%commitment_path.59"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.226",
-      "bit": "%commitment_path.60",
-      "a": "%commitment_path.59",
-      "b": "%recursiveDigest.224"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.227",
-      "inputs": [
-        "%left.225",
-        "%right.226"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.228",
-      "bit": "%commitment_path.62",
-      "a": "%recursiveDigest.227",
-      "b": "%commitment_path.61"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.229",
-      "bit": "%commitment_path.62",
-      "a": "%commitment_path.61",
-      "b": "%recursiveDigest.227"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.230",
-      "inputs": [
-        "%left.228",
-        "%right.229"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.231",
-      "bit": "%commitment_path.64",
-      "a": "%recursiveDigest.230",
-      "b": "%commitment_path.63"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.232",
-      "bit": "%commitment_path.64",
-      "a": "%commitment_path.63",
-      "b": "%recursiveDigest.230"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.233",
-      "inputs": [
-        "%left.231",
-        "%right.232"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.234",
-      "bit": "%commitment_path.66",
-      "a": "%recursiveDigest.233",
-      "b": "%commitment_path.65"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.235",
-      "bit": "%commitment_path.66",
-      "a": "%commitment_path.65",
-      "b": "%recursiveDigest.233"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.236",
-      "inputs": [
-        "%left.234",
-        "%right.235"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.237",
-      "bit": "%commitment_path.68",
-      "a": "%recursiveDigest.236",
-      "b": "%commitment_path.67"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.238",
-      "bit": "%commitment_path.68",
-      "a": "%commitment_path.67",
-      "b": "%recursiveDigest.236"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.239",
-      "inputs": [
-        "%left.237",
-        "%right.238"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.240",
-      "bit": "%commitment_path.70",
-      "a": "%recursiveDigest.239",
-      "b": "%commitment_path.69"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.241",
-      "bit": "%commitment_path.70",
-      "a": "%commitment_path.69",
-      "b": "%recursiveDigest.239"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.242",
-      "inputs": [
-        "%left.240",
-        "%right.241"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.243",
-      "bit": "%commitment_path.72",
-      "a": "%recursiveDigest.242",
-      "b": "%commitment_path.71"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.244",
-      "bit": "%commitment_path.72",
-      "a": "%commitment_path.71",
-      "b": "%recursiveDigest.242"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.245",
-      "inputs": [
-        "%left.243",
-        "%right.244"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.246",
-      "bit": "%commitment_path.74",
-      "a": "%recursiveDigest.245",
-      "b": "%commitment_path.73"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.247",
-      "bit": "%commitment_path.74",
-      "a": "%commitment_path.73",
-      "b": "%recursiveDigest.245"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.248",
-      "inputs": [
-        "%left.246",
-        "%right.247"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.249",
-      "bit": "%commitment_path.76",
-      "a": "%recursiveDigest.248",
-      "b": "%commitment_path.75"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.250",
-      "bit": "%commitment_path.76",
-      "a": "%commitment_path.75",
-      "b": "%recursiveDigest.248"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%t.251",
-      "inputs": [
-        "%left.249",
-        "%right.250"
-      ]
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%t.252",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x02"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x10",
-        "0x01",
-        "0x01",
-        "-0x02",
-        "%t.251"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x18"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0d",
-        "0x01",
-        "0x01",
-        "%t.252"
-      ]
-    },
-    {
-      "op": "transient_hash",
-      "output": "%gen_hash.253",
-      "inputs": [
-        "%gen.6",
-        "%gen.7",
-        "%gen.8",
-        "%gen.9",
-        "%gen.10"
-      ]
-    },
-    {
-      "op": "copy",
-      "output": "%t.254",
-      "val": "0x00"
-    },
-    {
-      "op": "div_mod_power_of_two",
-      "outputs": [
-        "%tmp.255",
-        "%t.256"
-      ],
-      "val": "%gen_hash.253",
-      "bits": 248
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.257",
-      "a": "%t.254",
-      "b": "%generation_path.77"
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.258",
-      "a": "%t.256",
-      "b": "%generation_path.78"
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.259",
-      "bit": "%t.257",
-      "a": "%t.258",
-      "b": "0x00"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.259"
-    },
-    {
-      "op": "copy",
-      "output": "%t.260",
-      "val": "%generation_path.78"
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.261",
-      "bit": "%generation_path.80",
-      "a": "%t.260",
-      "b": "%generation_path.79"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.262",
-      "bit": "%generation_path.80",
-      "a": "%generation_path.79",
-      "b": "%t.260"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.263",
-      "inputs": [
-        "%left.261",
-        "%right.262"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.264",
-      "bit": "%generation_path.82",
-      "a": "%recursiveDigest.263",
-      "b": "%generation_path.81"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.265",
-      "bit": "%generation_path.82",
-      "a": "%generation_path.81",
-      "b": "%recursiveDigest.263"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.266",
-      "inputs": [
-        "%left.264",
-        "%right.265"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.267",
-      "bit": "%generation_path.84",
-      "a": "%recursiveDigest.266",
-      "b": "%generation_path.83"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.268",
-      "bit": "%generation_path.84",
-      "a": "%generation_path.83",
-      "b": "%recursiveDigest.266"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.269",
-      "inputs": [
-        "%left.267",
-        "%right.268"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.270",
-      "bit": "%generation_path.86",
-      "a": "%recursiveDigest.269",
-      "b": "%generation_path.85"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.271",
-      "bit": "%generation_path.86",
-      "a": "%generation_path.85",
-      "b": "%recursiveDigest.269"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.272",
-      "inputs": [
-        "%left.270",
-        "%right.271"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.273",
-      "bit": "%generation_path.88",
-      "a": "%recursiveDigest.272",
-      "b": "%generation_path.87"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.274",
-      "bit": "%generation_path.88",
-      "a": "%generation_path.87",
-      "b": "%recursiveDigest.272"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.275",
-      "inputs": [
-        "%left.273",
-        "%right.274"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.276",
-      "bit": "%generation_path.90",
-      "a": "%recursiveDigest.275",
-      "b": "%generation_path.89"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.277",
-      "bit": "%generation_path.90",
-      "a": "%generation_path.89",
-      "b": "%recursiveDigest.275"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.278",
-      "inputs": [
-        "%left.276",
-        "%right.277"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.279",
-      "bit": "%generation_path.92",
-      "a": "%recursiveDigest.278",
-      "b": "%generation_path.91"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.280",
-      "bit": "%generation_path.92",
-      "a": "%generation_path.91",
-      "b": "%recursiveDigest.278"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.281",
-      "inputs": [
-        "%left.279",
-        "%right.280"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.282",
-      "bit": "%generation_path.94",
-      "a": "%recursiveDigest.281",
-      "b": "%generation_path.93"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.283",
-      "bit": "%generation_path.94",
-      "a": "%generation_path.93",
-      "b": "%recursiveDigest.281"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.284",
-      "inputs": [
-        "%left.282",
-        "%right.283"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.285",
-      "bit": "%generation_path.96",
-      "a": "%recursiveDigest.284",
-      "b": "%generation_path.95"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.286",
-      "bit": "%generation_path.96",
-      "a": "%generation_path.95",
-      "b": "%recursiveDigest.284"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.287",
-      "inputs": [
-        "%left.285",
-        "%right.286"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.288",
-      "bit": "%generation_path.98",
-      "a": "%recursiveDigest.287",
-      "b": "%generation_path.97"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.289",
-      "bit": "%generation_path.98",
-      "a": "%generation_path.97",
-      "b": "%recursiveDigest.287"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.290",
-      "inputs": [
-        "%left.288",
-        "%right.289"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.291",
-      "bit": "%generation_path.100",
-      "a": "%recursiveDigest.290",
-      "b": "%generation_path.99"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.292",
-      "bit": "%generation_path.100",
-      "a": "%generation_path.99",
-      "b": "%recursiveDigest.290"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.293",
-      "inputs": [
-        "%left.291",
-        "%right.292"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.294",
-      "bit": "%generation_path.102",
-      "a": "%recursiveDigest.293",
-      "b": "%generation_path.101"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.295",
-      "bit": "%generation_path.102",
-      "a": "%generation_path.101",
-      "b": "%recursiveDigest.293"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.296",
-      "inputs": [
-        "%left.294",
-        "%right.295"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.297",
-      "bit": "%generation_path.104",
-      "a": "%recursiveDigest.296",
-      "b": "%generation_path.103"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.298",
-      "bit": "%generation_path.104",
-      "a": "%generation_path.103",
-      "b": "%recursiveDigest.296"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.299",
-      "inputs": [
-        "%left.297",
-        "%right.298"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.300",
-      "bit": "%generation_path.106",
-      "a": "%recursiveDigest.299",
-      "b": "%generation_path.105"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.301",
-      "bit": "%generation_path.106",
-      "a": "%generation_path.105",
-      "b": "%recursiveDigest.299"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.302",
-      "inputs": [
-        "%left.300",
-        "%right.301"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.303",
-      "bit": "%generation_path.108",
-      "a": "%recursiveDigest.302",
-      "b": "%generation_path.107"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.304",
-      "bit": "%generation_path.108",
-      "a": "%generation_path.107",
-      "b": "%recursiveDigest.302"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.305",
-      "inputs": [
-        "%left.303",
-        "%right.304"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.306",
-      "bit": "%generation_path.110",
-      "a": "%recursiveDigest.305",
-      "b": "%generation_path.109"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.307",
-      "bit": "%generation_path.110",
-      "a": "%generation_path.109",
-      "b": "%recursiveDigest.305"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.308",
-      "inputs": [
-        "%left.306",
-        "%right.307"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.309",
-      "bit": "%generation_path.112",
-      "a": "%recursiveDigest.308",
-      "b": "%generation_path.111"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.310",
-      "bit": "%generation_path.112",
-      "a": "%generation_path.111",
-      "b": "%recursiveDigest.308"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.311",
-      "inputs": [
-        "%left.309",
-        "%right.310"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.312",
-      "bit": "%generation_path.114",
-      "a": "%recursiveDigest.311",
-      "b": "%generation_path.113"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.313",
-      "bit": "%generation_path.114",
-      "a": "%generation_path.113",
-      "b": "%recursiveDigest.311"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.314",
-      "inputs": [
-        "%left.312",
-        "%right.313"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.315",
-      "bit": "%generation_path.116",
-      "a": "%recursiveDigest.314",
-      "b": "%generation_path.115"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.316",
-      "bit": "%generation_path.116",
-      "a": "%generation_path.115",
-      "b": "%recursiveDigest.314"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.317",
-      "inputs": [
-        "%left.315",
-        "%right.316"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.318",
-      "bit": "%generation_path.118",
-      "a": "%recursiveDigest.317",
-      "b": "%generation_path.117"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.319",
-      "bit": "%generation_path.118",
-      "a": "%generation_path.117",
-      "b": "%recursiveDigest.317"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.320",
-      "inputs": [
-        "%left.318",
-        "%right.319"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.321",
-      "bit": "%generation_path.120",
-      "a": "%recursiveDigest.320",
-      "b": "%generation_path.119"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.322",
-      "bit": "%generation_path.120",
-      "a": "%generation_path.119",
-      "b": "%recursiveDigest.320"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.323",
-      "inputs": [
-        "%left.321",
-        "%right.322"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.324",
-      "bit": "%generation_path.122",
-      "a": "%recursiveDigest.323",
-      "b": "%generation_path.121"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.325",
-      "bit": "%generation_path.122",
-      "a": "%generation_path.121",
-      "b": "%recursiveDigest.323"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.326",
-      "inputs": [
-        "%left.324",
-        "%right.325"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.327",
-      "bit": "%generation_path.124",
-      "a": "%recursiveDigest.326",
-      "b": "%generation_path.123"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.328",
-      "bit": "%generation_path.124",
-      "a": "%generation_path.123",
-      "b": "%recursiveDigest.326"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.329",
-      "inputs": [
-        "%left.327",
-        "%right.328"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.330",
-      "bit": "%generation_path.126",
-      "a": "%recursiveDigest.329",
-      "b": "%generation_path.125"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.331",
-      "bit": "%generation_path.126",
-      "a": "%generation_path.125",
-      "b": "%recursiveDigest.329"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.332",
-      "inputs": [
-        "%left.330",
-        "%right.331"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.333",
-      "bit": "%generation_path.128",
-      "a": "%recursiveDigest.332",
-      "b": "%generation_path.127"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.334",
-      "bit": "%generation_path.128",
-      "a": "%generation_path.127",
-      "b": "%recursiveDigest.332"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.335",
-      "inputs": [
-        "%left.333",
-        "%right.334"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.336",
-      "bit": "%generation_path.130",
-      "a": "%recursiveDigest.335",
-      "b": "%generation_path.129"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.337",
-      "bit": "%generation_path.130",
-      "a": "%generation_path.129",
-      "b": "%recursiveDigest.335"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.338",
-      "inputs": [
-        "%left.336",
-        "%right.337"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.339",
-      "bit": "%generation_path.132",
-      "a": "%recursiveDigest.338",
-      "b": "%generation_path.131"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.340",
-      "bit": "%generation_path.132",
-      "a": "%generation_path.131",
-      "b": "%recursiveDigest.338"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.341",
-      "inputs": [
-        "%left.339",
-        "%right.340"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.342",
-      "bit": "%generation_path.134",
-      "a": "%recursiveDigest.341",
-      "b": "%generation_path.133"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.343",
-      "bit": "%generation_path.134",
-      "a": "%generation_path.133",
-      "b": "%recursiveDigest.341"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.344",
-      "inputs": [
-        "%left.342",
-        "%right.343"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.345",
-      "bit": "%generation_path.136",
-      "a": "%recursiveDigest.344",
-      "b": "%generation_path.135"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.346",
-      "bit": "%generation_path.136",
-      "a": "%generation_path.135",
-      "b": "%recursiveDigest.344"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.347",
-      "inputs": [
-        "%left.345",
-        "%right.346"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.348",
-      "bit": "%generation_path.138",
-      "a": "%recursiveDigest.347",
-      "b": "%generation_path.137"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.349",
-      "bit": "%generation_path.138",
-      "a": "%generation_path.137",
-      "b": "%recursiveDigest.347"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.350",
-      "inputs": [
-        "%left.348",
-        "%right.349"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.351",
-      "bit": "%generation_path.140",
-      "a": "%recursiveDigest.350",
-      "b": "%generation_path.139"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.352",
-      "bit": "%generation_path.140",
-      "a": "%generation_path.139",
-      "b": "%recursiveDigest.350"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%recursiveDigest.353",
-      "inputs": [
-        "%left.351",
-        "%right.352"
-      ]
-    },
-    {
-      "op": "cond_select",
-      "output": "%left.354",
-      "bit": "%generation_path.142",
-      "a": "%recursiveDigest.353",
-      "b": "%generation_path.141"
-    },
-    {
-      "op": "cond_select",
-      "output": "%right.355",
-      "bit": "%generation_path.142",
-      "a": "%generation_path.141",
-      "b": "%recursiveDigest.353"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%t.356",
-      "inputs": [
-        "%left.354",
-        "%right.355"
-      ]
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%t.357",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x01"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x02"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x10",
-        "0x01",
-        "0x01",
-        "-0x02",
-        "%t.356"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x18"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0d",
-        "0x01",
-        "0x01",
-        "%t.357"
-      ]
-    },
-    {
-      "op": "transient_hash",
-      "output": "%nul.358",
-      "inputs": [
-        "0x6d646e3a647573743a6e756c",
-        "%dust.0",
-        "%sk.5",
-        "%dust.2",
-        "%dust.4"
-      ]
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%_spend.359",
-      "guard": null
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%_spend.360",
-      "guard": null
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%_spend.361",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x05"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0c",
-        "0x03",
-        "0x10",
-        "-0x02",
-        "-0x02",
-        "%_spend.359",
-        "%_spend.360",
-        "%_spend.361"
-      ]
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.362",
-      "a": "%_spend.360",
-      "b": "%nul.358"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.362"
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%spend_ctime.363",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x04"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0c",
-        "0x01",
-        "0x08",
-        "%spend_ctime.363"
-      ]
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%params.364",
-      "guard": null
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%params.365",
-      "guard": null
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%params.366",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x03"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0c",
-        "0x03",
-        "0x08",
-        "0x04",
-        "0x04",
-        "%params.364",
-        "%params.365",
-        "%params.366"
-      ]
-    },
-    {
-      "op": "mul",
-      "output": "%t.367",
-      "a": "%gen.6",
-      "b": "%params.364"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%t.367",
-      "bits": 128
-    },
-    {
-      "op": "copy",
-      "output": "%vfull.368",
-      "val": "%t.367"
-    },
-    {
-      "op": "mul",
-      "output": "%t.369",
-      "a": "%gen.6",
-      "b": "%params.365"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%t.369",
-      "bits": 128
-    },
-    {
-      "op": "copy",
-      "output": "%rate.370",
-      "val": "%t.369"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.371",
-      "a": "%gen.10",
-      "b": "%spend_ctime.363",
-      "bits": 64
-    },
-    {
-      "op": "cond_select",
-      "output": "%tend_phase_12.372",
-      "bit": "%t.371",
-      "a": "%gen.10",
-      "b": "%spend_ctime.363"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.373",
-      "a": "%tend_phase_12.372",
-      "b": "%dust.4",
-      "bits": 64
-    },
-    {
-      "op": "neg",
-      "output": "%neg.374",
-      "a": "%dust.4"
-    },
-    {
-      "op": "add",
-      "output": "%t.375",
-      "a": "%tend_phase_12.372",
-      "b": "%neg.374"
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.376",
-      "bit": "%t.373",
-      "a": "0x00",
-      "b": "%t.375"
-    },
-    {
-      "op": "mul",
-      "output": "%t.377",
-      "a": "%t.376",
-      "b": "%rate.370"
-    },
-    {
-      "op": "add",
-      "output": "%t.378",
-      "a": "%t.377",
-      "b": "%dust.0"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%t.378",
-      "bits": 128
-    },
-    {
-      "op": "copy",
-      "output": "%value_phase_1_unchecked.379",
-      "val": "%t.378"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.380",
-      "a": "%value_phase_1_unchecked.379",
-      "b": "%vfull.368",
-      "bits": 128
-    },
-    {
-      "op": "cond_select",
-      "output": "%value_phase_12.381",
-      "bit": "%t.380",
-      "a": "%value_phase_1_unchecked.379",
-      "b": "%vfull.368"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.382",
-      "a": "%spend_ctime.363",
-      "b": "%gen.10",
-      "bits": 64
-    },
-    {
-      "op": "neg",
-      "output": "%neg.383",
-      "a": "%gen.10"
-    },
-    {
-      "op": "add",
-      "output": "%t.384",
-      "a": "%spend_ctime.363",
-      "b": "%neg.383"
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.385",
-      "bit": "%t.382",
-      "a": "0x00",
-      "b": "%t.384"
-    },
-    {
-      "op": "mul",
-      "output": "%t.386",
-      "a": "%t.385",
-      "b": "%rate.370"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.387",
-      "a": "%value_phase_12.381",
-      "b": "%t.386",
-      "bits": 192
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.388",
-      "bit": "%t.387",
-      "a": "0x00",
-      "b": "0x01"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.388"
-    },
-    {
-      "op": "neg",
-      "output": "%neg.389",
-      "a": "%t.386"
-    },
-    {
-      "op": "add",
-      "output": "%value_phase_3.390",
-      "a": "%value_phase_12.381",
-      "b": "%neg.389"
-    },
-    {
-      "op": "less_than",
-      "output": "%t.391",
-      "a": "%value_phase_3.390",
-      "b": "%_spend.359",
-      "bits": 128
-    },
-    {
-      "op": "cond_select",
-      "output": "%t.392",
-      "bit": "%t.391",
-      "a": "0x00",
-      "b": "0x01"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.392"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.392"
-    },
-    {
-      "op": "neg",
-      "output": "%neg.393",
-      "a": "%_spend.359"
-    },
-    {
-      "op": "add",
-      "output": "%v.394",
-      "a": "%value_phase_3.390",
-      "b": "%neg.393"
-    },
-    {
-      "op": "private_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%t.395",
-      "guard": null
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%t.395",
-      "bits": 128
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.396",
-      "a": "%v.394",
-      "b": "%t.395"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.396"
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x70",
-        "0x01",
-        "0x01",
-        "0x02"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x10",
-        "0x01",
-        "0x01",
-        "-0x02",
-        "%nul.358"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x11",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x91"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0xa1"
-      ]
-    },
-    {
-      "op": "add",
-      "output": "%t.397",
-      "a": "%dust.3",
-      "b": "0x01"
-    },
-    {
-      "op": "constrain_bits",
-      "val": "%t.397",
-      "bits": 32
-    },
-    {
-      "op": "copy",
-      "output": "%t.398",
-      "val": "%t.397"
-    },
-    {
-      "op": "transient_hash",
-      "output": "%new_nonce.399",
-      "inputs": [
-        "%initial_nonce.143",
-        "%initial_nonce.144",
-        "%t.398",
-        "%sk.5"
-      ]
-    },
-    {
-      "op": "public_input",
-      "type": "Scalar<BLS12-381>",
-      "output": "%t.400",
-      "guard": null
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x30"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x04"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0c",
-        "0x01",
-        "0x08",
-        "%t.400"
-      ]
-    },
-    {
-      "op": "transient_hash",
-      "output": "%new_com.401",
-      "inputs": [
-        "0x6d646e3a647573743a636d",
-        "%v.394",
-        "%dust.1",
-        "%new_nonce.399",
-        "%t.400"
-      ]
-    },
-    {
-      "op": "test_eq",
-      "output": "%t.402",
-      "a": "%_spend.361",
-      "b": "%new_com.401"
-    },
-    {
-      "op": "assert",
-      "cond": "%t.402"
-    },
-    {
-      "op": "copy",
-      "output": "%tmp.403",
-      "val": "0x00"
-    },
-    {
-      "op": "div_mod_power_of_two",
-      "outputs": [
-        "%tmp.404",
-        "%tmp.405"
-      ],
-      "val": "%new_com.401",
-      "bits": 248
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x70",
-        "0x01",
-        "0x01",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x70",
-        "0x01",
-        "0x01",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x32"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x01"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x11",
-        "0x01",
-        "0x01",
-        "0x20",
-        "%tmp.403",
-        "%tmp.405"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x91"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0xa1"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x70",
-        "0x01",
-        "0x01",
-        "0x01"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0e",
-        "0x01"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0xa1"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x70",
-        "0x01",
-        "0x01",
-        "0x02"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x32"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x50",
-        "0x01",
-        "0x01",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x0a"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x11",
-        "0x00"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0x91"
-      ]
-    },
-    {
-      "op": "impact",
-      "guard": "0x01",
-      "inputs": [
-        "0xa2"
-      ]
-    }
+    { "op": "constrain_bits", "val": "%dust.0", "bits": 128 },
+    { "op": "constrain_bits", "val": "%dust.3", "bits": 32 },
+    { "op": "constrain_bits", "val": "%dust.4", "bits": 64 },
+    { "op": "constrain_bits", "val": "%gen.6", "bits": 128 },
+    { "op": "constrain_bits", "val": "%gen.8", "bits": 8 },
+    { "op": "constrain_bits", "val": "%gen.9", "bits": 248 },
+    { "op": "constrain_bits", "val": "%gen.10", "bits": 64 },
+    { "op": "constrain_bits", "val": "%commitment_path.11", "bits": 8 },
+    { "op": "constrain_bits", "val": "%commitment_path.12", "bits": 248 },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.14" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.16" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.18" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.20" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.22" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.24" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.26" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.28" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.30" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.32" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.34" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.36" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.38" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.40" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.42" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.44" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.46" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.48" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.50" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.52" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.54" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.56" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.58" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.60" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.62" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.64" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.66" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.68" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.70" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.72" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.74" },
+    { "op": "constrain_to_boolean", "val": "%commitment_path.76" },
+    { "op": "constrain_bits", "val": "%generation_path.77", "bits": 8 },
+    { "op": "constrain_bits", "val": "%generation_path.78", "bits": 248 },
+    { "op": "constrain_to_boolean", "val": "%generation_path.80" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.82" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.84" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.86" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.88" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.90" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.92" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.94" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.96" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.98" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.100" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.102" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.104" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.106" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.108" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.110" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.112" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.114" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.116" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.118" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.120" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.122" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.124" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.126" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.128" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.130" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.132" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.134" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.136" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.138" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.140" },
+    { "op": "constrain_to_boolean", "val": "%generation_path.142" },
+    { "op": "constrain_bits", "val": "%initial_nonce.143", "bits": 8 },
+    { "op": "constrain_bits", "val": "%initial_nonce.144", "bits": 248 },
+    { "op": "constrain_bits", "val": "%seq_no.145", "bits": 32 },
+    { "op": "transient_hash", "output": "%pk.146", "inputs": ["0x6d646e3a647573743a706b", "%sk.5"] },
+    { "op": "test_eq", "output": "%t.147", "a": "%pk.146", "b": "%dust.1" },
+    { "op": "assert", "cond": "%t.147" },
+    { "op": "transient_hash", "output": "%commitment.148", "inputs": ["0x6d646e3a647573743a636d", "%dust.0", "%dust.1", "%dust.2", "%dust.4"] },
+    { "op": "copy", "output": "%t.149", "val": "0x00" },
+    { "op": "div_mod_power_of_two", "outputs": ["%tmp.150", "%t.151"], "val": "%commitment.148", "bits": 248 },
+    { "op": "test_eq", "output": "%t.152", "a": "%t.149", "b": "%commitment_path.11" },
+    { "op": "test_eq", "output": "%t.153", "a": "%t.151", "b": "%commitment_path.12" },
+    { "op": "cond_select", "output": "%t.154", "bit": "%t.152", "a": "%t.153", "b": "0x00" },
+    { "op": "assert", "cond": "%t.154" },
+    { "op": "copy", "output": "%t.155", "val": "%commitment_path.12" },
+    { "op": "cond_select", "output": "%left.156", "bit": "%commitment_path.14", "a": "%t.155", "b": "%commitment_path.13" },
+    { "op": "cond_select", "output": "%right.157", "bit": "%commitment_path.14", "a": "%commitment_path.13", "b": "%t.155" },
+    { "op": "transient_hash", "output": "%recursiveDigest.158", "inputs": ["%left.156", "%right.157"] },
+    { "op": "cond_select", "output": "%left.159", "bit": "%commitment_path.16", "a": "%recursiveDigest.158", "b": "%commitment_path.15" },
+    { "op": "cond_select", "output": "%right.160", "bit": "%commitment_path.16", "a": "%commitment_path.15", "b": "%recursiveDigest.158" },
+    { "op": "transient_hash", "output": "%recursiveDigest.161", "inputs": ["%left.159", "%right.160"] },
+    { "op": "cond_select", "output": "%left.162", "bit": "%commitment_path.18", "a": "%recursiveDigest.161", "b": "%commitment_path.17" },
+    { "op": "cond_select", "output": "%right.163", "bit": "%commitment_path.18", "a": "%commitment_path.17", "b": "%recursiveDigest.161" },
+    { "op": "transient_hash", "output": "%recursiveDigest.164", "inputs": ["%left.162", "%right.163"] },
+    { "op": "cond_select", "output": "%left.165", "bit": "%commitment_path.20", "a": "%recursiveDigest.164", "b": "%commitment_path.19" },
+    { "op": "cond_select", "output": "%right.166", "bit": "%commitment_path.20", "a": "%commitment_path.19", "b": "%recursiveDigest.164" },
+    { "op": "transient_hash", "output": "%recursiveDigest.167", "inputs": ["%left.165", "%right.166"] },
+    { "op": "cond_select", "output": "%left.168", "bit": "%commitment_path.22", "a": "%recursiveDigest.167", "b": "%commitment_path.21" },
+    { "op": "cond_select", "output": "%right.169", "bit": "%commitment_path.22", "a": "%commitment_path.21", "b": "%recursiveDigest.167" },
+    { "op": "transient_hash", "output": "%recursiveDigest.170", "inputs": ["%left.168", "%right.169"] },
+    { "op": "cond_select", "output": "%left.171", "bit": "%commitment_path.24", "a": "%recursiveDigest.170", "b": "%commitment_path.23" },
+    { "op": "cond_select", "output": "%right.172", "bit": "%commitment_path.24", "a": "%commitment_path.23", "b": "%recursiveDigest.170" },
+    { "op": "transient_hash", "output": "%recursiveDigest.173", "inputs": ["%left.171", "%right.172"] },
+    { "op": "cond_select", "output": "%left.174", "bit": "%commitment_path.26", "a": "%recursiveDigest.173", "b": "%commitment_path.25" },
+    { "op": "cond_select", "output": "%right.175", "bit": "%commitment_path.26", "a": "%commitment_path.25", "b": "%recursiveDigest.173" },
+    { "op": "transient_hash", "output": "%recursiveDigest.176", "inputs": ["%left.174", "%right.175"] },
+    { "op": "cond_select", "output": "%left.177", "bit": "%commitment_path.28", "a": "%recursiveDigest.176", "b": "%commitment_path.27" },
+    { "op": "cond_select", "output": "%right.178", "bit": "%commitment_path.28", "a": "%commitment_path.27", "b": "%recursiveDigest.176" },
+    { "op": "transient_hash", "output": "%recursiveDigest.179", "inputs": ["%left.177", "%right.178"] },
+    { "op": "cond_select", "output": "%left.180", "bit": "%commitment_path.30", "a": "%recursiveDigest.179", "b": "%commitment_path.29" },
+    { "op": "cond_select", "output": "%right.181", "bit": "%commitment_path.30", "a": "%commitment_path.29", "b": "%recursiveDigest.179" },
+    { "op": "transient_hash", "output": "%recursiveDigest.182", "inputs": ["%left.180", "%right.181"] },
+    { "op": "cond_select", "output": "%left.183", "bit": "%commitment_path.32", "a": "%recursiveDigest.182", "b": "%commitment_path.31" },
+    { "op": "cond_select", "output": "%right.184", "bit": "%commitment_path.32", "a": "%commitment_path.31", "b": "%recursiveDigest.182" },
+    { "op": "transient_hash", "output": "%recursiveDigest.185", "inputs": ["%left.183", "%right.184"] },
+    { "op": "cond_select", "output": "%left.186", "bit": "%commitment_path.34", "a": "%recursiveDigest.185", "b": "%commitment_path.33" },
+    { "op": "cond_select", "output": "%right.187", "bit": "%commitment_path.34", "a": "%commitment_path.33", "b": "%recursiveDigest.185" },
+    { "op": "transient_hash", "output": "%recursiveDigest.188", "inputs": ["%left.186", "%right.187"] },
+    { "op": "cond_select", "output": "%left.189", "bit": "%commitment_path.36", "a": "%recursiveDigest.188", "b": "%commitment_path.35" },
+    { "op": "cond_select", "output": "%right.190", "bit": "%commitment_path.36", "a": "%commitment_path.35", "b": "%recursiveDigest.188" },
+    { "op": "transient_hash", "output": "%recursiveDigest.191", "inputs": ["%left.189", "%right.190"] },
+    { "op": "cond_select", "output": "%left.192", "bit": "%commitment_path.38", "a": "%recursiveDigest.191", "b": "%commitment_path.37" },
+    { "op": "cond_select", "output": "%right.193", "bit": "%commitment_path.38", "a": "%commitment_path.37", "b": "%recursiveDigest.191" },
+    { "op": "transient_hash", "output": "%recursiveDigest.194", "inputs": ["%left.192", "%right.193"] },
+    { "op": "cond_select", "output": "%left.195", "bit": "%commitment_path.40", "a": "%recursiveDigest.194", "b": "%commitment_path.39" },
+    { "op": "cond_select", "output": "%right.196", "bit": "%commitment_path.40", "a": "%commitment_path.39", "b": "%recursiveDigest.194" },
+    { "op": "transient_hash", "output": "%recursiveDigest.197", "inputs": ["%left.195", "%right.196"] },
+    { "op": "cond_select", "output": "%left.198", "bit": "%commitment_path.42", "a": "%recursiveDigest.197", "b": "%commitment_path.41" },
+    { "op": "cond_select", "output": "%right.199", "bit": "%commitment_path.42", "a": "%commitment_path.41", "b": "%recursiveDigest.197" },
+    { "op": "transient_hash", "output": "%recursiveDigest.200", "inputs": ["%left.198", "%right.199"] },
+    { "op": "cond_select", "output": "%left.201", "bit": "%commitment_path.44", "a": "%recursiveDigest.200", "b": "%commitment_path.43" },
+    { "op": "cond_select", "output": "%right.202", "bit": "%commitment_path.44", "a": "%commitment_path.43", "b": "%recursiveDigest.200" },
+    { "op": "transient_hash", "output": "%recursiveDigest.203", "inputs": ["%left.201", "%right.202"] },
+    { "op": "cond_select", "output": "%left.204", "bit": "%commitment_path.46", "a": "%recursiveDigest.203", "b": "%commitment_path.45" },
+    { "op": "cond_select", "output": "%right.205", "bit": "%commitment_path.46", "a": "%commitment_path.45", "b": "%recursiveDigest.203" },
+    { "op": "transient_hash", "output": "%recursiveDigest.206", "inputs": ["%left.204", "%right.205"] },
+    { "op": "cond_select", "output": "%left.207", "bit": "%commitment_path.48", "a": "%recursiveDigest.206", "b": "%commitment_path.47" },
+    { "op": "cond_select", "output": "%right.208", "bit": "%commitment_path.48", "a": "%commitment_path.47", "b": "%recursiveDigest.206" },
+    { "op": "transient_hash", "output": "%recursiveDigest.209", "inputs": ["%left.207", "%right.208"] },
+    { "op": "cond_select", "output": "%left.210", "bit": "%commitment_path.50", "a": "%recursiveDigest.209", "b": "%commitment_path.49" },
+    { "op": "cond_select", "output": "%right.211", "bit": "%commitment_path.50", "a": "%commitment_path.49", "b": "%recursiveDigest.209" },
+    { "op": "transient_hash", "output": "%recursiveDigest.212", "inputs": ["%left.210", "%right.211"] },
+    { "op": "cond_select", "output": "%left.213", "bit": "%commitment_path.52", "a": "%recursiveDigest.212", "b": "%commitment_path.51" },
+    { "op": "cond_select", "output": "%right.214", "bit": "%commitment_path.52", "a": "%commitment_path.51", "b": "%recursiveDigest.212" },
+    { "op": "transient_hash", "output": "%recursiveDigest.215", "inputs": ["%left.213", "%right.214"] },
+    { "op": "cond_select", "output": "%left.216", "bit": "%commitment_path.54", "a": "%recursiveDigest.215", "b": "%commitment_path.53" },
+    { "op": "cond_select", "output": "%right.217", "bit": "%commitment_path.54", "a": "%commitment_path.53", "b": "%recursiveDigest.215" },
+    { "op": "transient_hash", "output": "%recursiveDigest.218", "inputs": ["%left.216", "%right.217"] },
+    { "op": "cond_select", "output": "%left.219", "bit": "%commitment_path.56", "a": "%recursiveDigest.218", "b": "%commitment_path.55" },
+    { "op": "cond_select", "output": "%right.220", "bit": "%commitment_path.56", "a": "%commitment_path.55", "b": "%recursiveDigest.218" },
+    { "op": "transient_hash", "output": "%recursiveDigest.221", "inputs": ["%left.219", "%right.220"] },
+    { "op": "cond_select", "output": "%left.222", "bit": "%commitment_path.58", "a": "%recursiveDigest.221", "b": "%commitment_path.57" },
+    { "op": "cond_select", "output": "%right.223", "bit": "%commitment_path.58", "a": "%commitment_path.57", "b": "%recursiveDigest.221" },
+    { "op": "transient_hash", "output": "%recursiveDigest.224", "inputs": ["%left.222", "%right.223"] },
+    { "op": "cond_select", "output": "%left.225", "bit": "%commitment_path.60", "a": "%recursiveDigest.224", "b": "%commitment_path.59" },
+    { "op": "cond_select", "output": "%right.226", "bit": "%commitment_path.60", "a": "%commitment_path.59", "b": "%recursiveDigest.224" },
+    { "op": "transient_hash", "output": "%recursiveDigest.227", "inputs": ["%left.225", "%right.226"] },
+    { "op": "cond_select", "output": "%left.228", "bit": "%commitment_path.62", "a": "%recursiveDigest.227", "b": "%commitment_path.61" },
+    { "op": "cond_select", "output": "%right.229", "bit": "%commitment_path.62", "a": "%commitment_path.61", "b": "%recursiveDigest.227" },
+    { "op": "transient_hash", "output": "%recursiveDigest.230", "inputs": ["%left.228", "%right.229"] },
+    { "op": "cond_select", "output": "%left.231", "bit": "%commitment_path.64", "a": "%recursiveDigest.230", "b": "%commitment_path.63" },
+    { "op": "cond_select", "output": "%right.232", "bit": "%commitment_path.64", "a": "%commitment_path.63", "b": "%recursiveDigest.230" },
+    { "op": "transient_hash", "output": "%recursiveDigest.233", "inputs": ["%left.231", "%right.232"] },
+    { "op": "cond_select", "output": "%left.234", "bit": "%commitment_path.66", "a": "%recursiveDigest.233", "b": "%commitment_path.65" },
+    { "op": "cond_select", "output": "%right.235", "bit": "%commitment_path.66", "a": "%commitment_path.65", "b": "%recursiveDigest.233" },
+    { "op": "transient_hash", "output": "%recursiveDigest.236", "inputs": ["%left.234", "%right.235"] },
+    { "op": "cond_select", "output": "%left.237", "bit": "%commitment_path.68", "a": "%recursiveDigest.236", "b": "%commitment_path.67" },
+    { "op": "cond_select", "output": "%right.238", "bit": "%commitment_path.68", "a": "%commitment_path.67", "b": "%recursiveDigest.236" },
+    { "op": "transient_hash", "output": "%recursiveDigest.239", "inputs": ["%left.237", "%right.238"] },
+    { "op": "cond_select", "output": "%left.240", "bit": "%commitment_path.70", "a": "%recursiveDigest.239", "b": "%commitment_path.69" },
+    { "op": "cond_select", "output": "%right.241", "bit": "%commitment_path.70", "a": "%commitment_path.69", "b": "%recursiveDigest.239" },
+    { "op": "transient_hash", "output": "%recursiveDigest.242", "inputs": ["%left.240", "%right.241"] },
+    { "op": "cond_select", "output": "%left.243", "bit": "%commitment_path.72", "a": "%recursiveDigest.242", "b": "%commitment_path.71" },
+    { "op": "cond_select", "output": "%right.244", "bit": "%commitment_path.72", "a": "%commitment_path.71", "b": "%recursiveDigest.242" },
+    { "op": "transient_hash", "output": "%recursiveDigest.245", "inputs": ["%left.243", "%right.244"] },
+    { "op": "cond_select", "output": "%left.246", "bit": "%commitment_path.74", "a": "%recursiveDigest.245", "b": "%commitment_path.73" },
+    { "op": "cond_select", "output": "%right.247", "bit": "%commitment_path.74", "a": "%commitment_path.73", "b": "%recursiveDigest.245" },
+    { "op": "transient_hash", "output": "%recursiveDigest.248", "inputs": ["%left.246", "%right.247"] },
+    { "op": "cond_select", "output": "%left.249", "bit": "%commitment_path.76", "a": "%recursiveDigest.248", "b": "%commitment_path.75" },
+    { "op": "cond_select", "output": "%right.250", "bit": "%commitment_path.76", "a": "%commitment_path.75", "b": "%recursiveDigest.248" },
+    { "op": "transient_hash", "output": "%t.251", "inputs": ["%left.249", "%right.250"] },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%t.252", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x02"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x10", "0x01", "0x01", "-0x02", "%t.251"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x18"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0d", "0x01", "0x01", "%t.252"] },
+    { "op": "transient_hash", "output": "%gen_hash.253", "inputs": ["%gen.6", "%gen.7", "%gen.8", "%gen.9", "%gen.10"] },
+    { "op": "copy", "output": "%t.254", "val": "0x00" },
+    { "op": "div_mod_power_of_two", "outputs": ["%tmp.255", "%t.256"], "val": "%gen_hash.253", "bits": 248 },
+    { "op": "test_eq", "output": "%t.257", "a": "%t.254", "b": "%generation_path.77" },
+    { "op": "test_eq", "output": "%t.258", "a": "%t.256", "b": "%generation_path.78" },
+    { "op": "cond_select", "output": "%t.259", "bit": "%t.257", "a": "%t.258", "b": "0x00" },
+    { "op": "assert", "cond": "%t.259" },
+    { "op": "copy", "output": "%t.260", "val": "%generation_path.78" },
+    { "op": "cond_select", "output": "%left.261", "bit": "%generation_path.80", "a": "%t.260", "b": "%generation_path.79" },
+    { "op": "cond_select", "output": "%right.262", "bit": "%generation_path.80", "a": "%generation_path.79", "b": "%t.260" },
+    { "op": "transient_hash", "output": "%recursiveDigest.263", "inputs": ["%left.261", "%right.262"] },
+    { "op": "cond_select", "output": "%left.264", "bit": "%generation_path.82", "a": "%recursiveDigest.263", "b": "%generation_path.81" },
+    { "op": "cond_select", "output": "%right.265", "bit": "%generation_path.82", "a": "%generation_path.81", "b": "%recursiveDigest.263" },
+    { "op": "transient_hash", "output": "%recursiveDigest.266", "inputs": ["%left.264", "%right.265"] },
+    { "op": "cond_select", "output": "%left.267", "bit": "%generation_path.84", "a": "%recursiveDigest.266", "b": "%generation_path.83" },
+    { "op": "cond_select", "output": "%right.268", "bit": "%generation_path.84", "a": "%generation_path.83", "b": "%recursiveDigest.266" },
+    { "op": "transient_hash", "output": "%recursiveDigest.269", "inputs": ["%left.267", "%right.268"] },
+    { "op": "cond_select", "output": "%left.270", "bit": "%generation_path.86", "a": "%recursiveDigest.269", "b": "%generation_path.85" },
+    { "op": "cond_select", "output": "%right.271", "bit": "%generation_path.86", "a": "%generation_path.85", "b": "%recursiveDigest.269" },
+    { "op": "transient_hash", "output": "%recursiveDigest.272", "inputs": ["%left.270", "%right.271"] },
+    { "op": "cond_select", "output": "%left.273", "bit": "%generation_path.88", "a": "%recursiveDigest.272", "b": "%generation_path.87" },
+    { "op": "cond_select", "output": "%right.274", "bit": "%generation_path.88", "a": "%generation_path.87", "b": "%recursiveDigest.272" },
+    { "op": "transient_hash", "output": "%recursiveDigest.275", "inputs": ["%left.273", "%right.274"] },
+    { "op": "cond_select", "output": "%left.276", "bit": "%generation_path.90", "a": "%recursiveDigest.275", "b": "%generation_path.89" },
+    { "op": "cond_select", "output": "%right.277", "bit": "%generation_path.90", "a": "%generation_path.89", "b": "%recursiveDigest.275" },
+    { "op": "transient_hash", "output": "%recursiveDigest.278", "inputs": ["%left.276", "%right.277"] },
+    { "op": "cond_select", "output": "%left.279", "bit": "%generation_path.92", "a": "%recursiveDigest.278", "b": "%generation_path.91" },
+    { "op": "cond_select", "output": "%right.280", "bit": "%generation_path.92", "a": "%generation_path.91", "b": "%recursiveDigest.278" },
+    { "op": "transient_hash", "output": "%recursiveDigest.281", "inputs": ["%left.279", "%right.280"] },
+    { "op": "cond_select", "output": "%left.282", "bit": "%generation_path.94", "a": "%recursiveDigest.281", "b": "%generation_path.93" },
+    { "op": "cond_select", "output": "%right.283", "bit": "%generation_path.94", "a": "%generation_path.93", "b": "%recursiveDigest.281" },
+    { "op": "transient_hash", "output": "%recursiveDigest.284", "inputs": ["%left.282", "%right.283"] },
+    { "op": "cond_select", "output": "%left.285", "bit": "%generation_path.96", "a": "%recursiveDigest.284", "b": "%generation_path.95" },
+    { "op": "cond_select", "output": "%right.286", "bit": "%generation_path.96", "a": "%generation_path.95", "b": "%recursiveDigest.284" },
+    { "op": "transient_hash", "output": "%recursiveDigest.287", "inputs": ["%left.285", "%right.286"] },
+    { "op": "cond_select", "output": "%left.288", "bit": "%generation_path.98", "a": "%recursiveDigest.287", "b": "%generation_path.97" },
+    { "op": "cond_select", "output": "%right.289", "bit": "%generation_path.98", "a": "%generation_path.97", "b": "%recursiveDigest.287" },
+    { "op": "transient_hash", "output": "%recursiveDigest.290", "inputs": ["%left.288", "%right.289"] },
+    { "op": "cond_select", "output": "%left.291", "bit": "%generation_path.100", "a": "%recursiveDigest.290", "b": "%generation_path.99" },
+    { "op": "cond_select", "output": "%right.292", "bit": "%generation_path.100", "a": "%generation_path.99", "b": "%recursiveDigest.290" },
+    { "op": "transient_hash", "output": "%recursiveDigest.293", "inputs": ["%left.291", "%right.292"] },
+    { "op": "cond_select", "output": "%left.294", "bit": "%generation_path.102", "a": "%recursiveDigest.293", "b": "%generation_path.101" },
+    { "op": "cond_select", "output": "%right.295", "bit": "%generation_path.102", "a": "%generation_path.101", "b": "%recursiveDigest.293" },
+    { "op": "transient_hash", "output": "%recursiveDigest.296", "inputs": ["%left.294", "%right.295"] },
+    { "op": "cond_select", "output": "%left.297", "bit": "%generation_path.104", "a": "%recursiveDigest.296", "b": "%generation_path.103" },
+    { "op": "cond_select", "output": "%right.298", "bit": "%generation_path.104", "a": "%generation_path.103", "b": "%recursiveDigest.296" },
+    { "op": "transient_hash", "output": "%recursiveDigest.299", "inputs": ["%left.297", "%right.298"] },
+    { "op": "cond_select", "output": "%left.300", "bit": "%generation_path.106", "a": "%recursiveDigest.299", "b": "%generation_path.105" },
+    { "op": "cond_select", "output": "%right.301", "bit": "%generation_path.106", "a": "%generation_path.105", "b": "%recursiveDigest.299" },
+    { "op": "transient_hash", "output": "%recursiveDigest.302", "inputs": ["%left.300", "%right.301"] },
+    { "op": "cond_select", "output": "%left.303", "bit": "%generation_path.108", "a": "%recursiveDigest.302", "b": "%generation_path.107" },
+    { "op": "cond_select", "output": "%right.304", "bit": "%generation_path.108", "a": "%generation_path.107", "b": "%recursiveDigest.302" },
+    { "op": "transient_hash", "output": "%recursiveDigest.305", "inputs": ["%left.303", "%right.304"] },
+    { "op": "cond_select", "output": "%left.306", "bit": "%generation_path.110", "a": "%recursiveDigest.305", "b": "%generation_path.109" },
+    { "op": "cond_select", "output": "%right.307", "bit": "%generation_path.110", "a": "%generation_path.109", "b": "%recursiveDigest.305" },
+    { "op": "transient_hash", "output": "%recursiveDigest.308", "inputs": ["%left.306", "%right.307"] },
+    { "op": "cond_select", "output": "%left.309", "bit": "%generation_path.112", "a": "%recursiveDigest.308", "b": "%generation_path.111" },
+    { "op": "cond_select", "output": "%right.310", "bit": "%generation_path.112", "a": "%generation_path.111", "b": "%recursiveDigest.308" },
+    { "op": "transient_hash", "output": "%recursiveDigest.311", "inputs": ["%left.309", "%right.310"] },
+    { "op": "cond_select", "output": "%left.312", "bit": "%generation_path.114", "a": "%recursiveDigest.311", "b": "%generation_path.113" },
+    { "op": "cond_select", "output": "%right.313", "bit": "%generation_path.114", "a": "%generation_path.113", "b": "%recursiveDigest.311" },
+    { "op": "transient_hash", "output": "%recursiveDigest.314", "inputs": ["%left.312", "%right.313"] },
+    { "op": "cond_select", "output": "%left.315", "bit": "%generation_path.116", "a": "%recursiveDigest.314", "b": "%generation_path.115" },
+    { "op": "cond_select", "output": "%right.316", "bit": "%generation_path.116", "a": "%generation_path.115", "b": "%recursiveDigest.314" },
+    { "op": "transient_hash", "output": "%recursiveDigest.317", "inputs": ["%left.315", "%right.316"] },
+    { "op": "cond_select", "output": "%left.318", "bit": "%generation_path.118", "a": "%recursiveDigest.317", "b": "%generation_path.117" },
+    { "op": "cond_select", "output": "%right.319", "bit": "%generation_path.118", "a": "%generation_path.117", "b": "%recursiveDigest.317" },
+    { "op": "transient_hash", "output": "%recursiveDigest.320", "inputs": ["%left.318", "%right.319"] },
+    { "op": "cond_select", "output": "%left.321", "bit": "%generation_path.120", "a": "%recursiveDigest.320", "b": "%generation_path.119" },
+    { "op": "cond_select", "output": "%right.322", "bit": "%generation_path.120", "a": "%generation_path.119", "b": "%recursiveDigest.320" },
+    { "op": "transient_hash", "output": "%recursiveDigest.323", "inputs": ["%left.321", "%right.322"] },
+    { "op": "cond_select", "output": "%left.324", "bit": "%generation_path.122", "a": "%recursiveDigest.323", "b": "%generation_path.121" },
+    { "op": "cond_select", "output": "%right.325", "bit": "%generation_path.122", "a": "%generation_path.121", "b": "%recursiveDigest.323" },
+    { "op": "transient_hash", "output": "%recursiveDigest.326", "inputs": ["%left.324", "%right.325"] },
+    { "op": "cond_select", "output": "%left.327", "bit": "%generation_path.124", "a": "%recursiveDigest.326", "b": "%generation_path.123" },
+    { "op": "cond_select", "output": "%right.328", "bit": "%generation_path.124", "a": "%generation_path.123", "b": "%recursiveDigest.326" },
+    { "op": "transient_hash", "output": "%recursiveDigest.329", "inputs": ["%left.327", "%right.328"] },
+    { "op": "cond_select", "output": "%left.330", "bit": "%generation_path.126", "a": "%recursiveDigest.329", "b": "%generation_path.125" },
+    { "op": "cond_select", "output": "%right.331", "bit": "%generation_path.126", "a": "%generation_path.125", "b": "%recursiveDigest.329" },
+    { "op": "transient_hash", "output": "%recursiveDigest.332", "inputs": ["%left.330", "%right.331"] },
+    { "op": "cond_select", "output": "%left.333", "bit": "%generation_path.128", "a": "%recursiveDigest.332", "b": "%generation_path.127" },
+    { "op": "cond_select", "output": "%right.334", "bit": "%generation_path.128", "a": "%generation_path.127", "b": "%recursiveDigest.332" },
+    { "op": "transient_hash", "output": "%recursiveDigest.335", "inputs": ["%left.333", "%right.334"] },
+    { "op": "cond_select", "output": "%left.336", "bit": "%generation_path.130", "a": "%recursiveDigest.335", "b": "%generation_path.129" },
+    { "op": "cond_select", "output": "%right.337", "bit": "%generation_path.130", "a": "%generation_path.129", "b": "%recursiveDigest.335" },
+    { "op": "transient_hash", "output": "%recursiveDigest.338", "inputs": ["%left.336", "%right.337"] },
+    { "op": "cond_select", "output": "%left.339", "bit": "%generation_path.132", "a": "%recursiveDigest.338", "b": "%generation_path.131" },
+    { "op": "cond_select", "output": "%right.340", "bit": "%generation_path.132", "a": "%generation_path.131", "b": "%recursiveDigest.338" },
+    { "op": "transient_hash", "output": "%recursiveDigest.341", "inputs": ["%left.339", "%right.340"] },
+    { "op": "cond_select", "output": "%left.342", "bit": "%generation_path.134", "a": "%recursiveDigest.341", "b": "%generation_path.133" },
+    { "op": "cond_select", "output": "%right.343", "bit": "%generation_path.134", "a": "%generation_path.133", "b": "%recursiveDigest.341" },
+    { "op": "transient_hash", "output": "%recursiveDigest.344", "inputs": ["%left.342", "%right.343"] },
+    { "op": "cond_select", "output": "%left.345", "bit": "%generation_path.136", "a": "%recursiveDigest.344", "b": "%generation_path.135" },
+    { "op": "cond_select", "output": "%right.346", "bit": "%generation_path.136", "a": "%generation_path.135", "b": "%recursiveDigest.344" },
+    { "op": "transient_hash", "output": "%recursiveDigest.347", "inputs": ["%left.345", "%right.346"] },
+    { "op": "cond_select", "output": "%left.348", "bit": "%generation_path.138", "a": "%recursiveDigest.347", "b": "%generation_path.137" },
+    { "op": "cond_select", "output": "%right.349", "bit": "%generation_path.138", "a": "%generation_path.137", "b": "%recursiveDigest.347" },
+    { "op": "transient_hash", "output": "%recursiveDigest.350", "inputs": ["%left.348", "%right.349"] },
+    { "op": "cond_select", "output": "%left.351", "bit": "%generation_path.140", "a": "%recursiveDigest.350", "b": "%generation_path.139" },
+    { "op": "cond_select", "output": "%right.352", "bit": "%generation_path.140", "a": "%generation_path.139", "b": "%recursiveDigest.350" },
+    { "op": "transient_hash", "output": "%recursiveDigest.353", "inputs": ["%left.351", "%right.352"] },
+    { "op": "cond_select", "output": "%left.354", "bit": "%generation_path.142", "a": "%recursiveDigest.353", "b": "%generation_path.141" },
+    { "op": "cond_select", "output": "%right.355", "bit": "%generation_path.142", "a": "%generation_path.141", "b": "%recursiveDigest.353" },
+    { "op": "transient_hash", "output": "%t.356", "inputs": ["%left.354", "%right.355"] },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%t.357", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x01"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x02"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x10", "0x01", "0x01", "-0x02", "%t.356"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x18"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0d", "0x01", "0x01", "%t.357"] },
+    { "op": "transient_hash", "output": "%nul.358", "inputs": ["0x6d646e3a647573743a6e756c", "%dust.0", "%sk.5", "%dust.2", "%dust.4"] },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%_spend.359", "guard": null },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%_spend.360", "guard": null },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%_spend.361", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x05"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0c", "0x03", "0x10", "-0x02", "-0x02", "%_spend.359", "%_spend.360", "%_spend.361"] },
+    { "op": "test_eq", "output": "%t.362", "a": "%_spend.360", "b": "%nul.358" },
+    { "op": "assert", "cond": "%t.362" },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%spend_ctime.363", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x04"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0c", "0x01", "0x08", "%spend_ctime.363"] },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%params.364", "guard": null },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%params.365", "guard": null },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%params.366", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x03"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0c", "0x03", "0x08", "0x04", "0x04", "%params.364", "%params.365", "%params.366"] },
+    { "op": "mul", "output": "%t.367", "a": "%gen.6", "b": "%params.364" },
+    { "op": "constrain_bits", "val": "%t.367", "bits": 128 },
+    { "op": "copy", "output": "%vfull.368", "val": "%t.367" },
+    { "op": "mul", "output": "%t.369", "a": "%gen.6", "b": "%params.365" },
+    { "op": "constrain_bits", "val": "%t.369", "bits": 128 },
+    { "op": "copy", "output": "%rate.370", "val": "%t.369" },
+    { "op": "less_than", "output": "%t.371", "a": "%gen.10", "b": "%spend_ctime.363", "bits": 64 },
+    { "op": "cond_select", "output": "%tend_phase_12.372", "bit": "%t.371", "a": "%gen.10", "b": "%spend_ctime.363" },
+    { "op": "less_than", "output": "%t.373", "a": "%tend_phase_12.372", "b": "%dust.4", "bits": 64 },
+    { "op": "neg", "output": "%neg.374", "a": "%dust.4" },
+    { "op": "add", "output": "%t.375", "a": "%tend_phase_12.372", "b": "%neg.374" },
+    { "op": "cond_select", "output": "%t.376", "bit": "%t.373", "a": "0x00", "b": "%t.375" },
+    { "op": "mul", "output": "%t.377", "a": "%t.376", "b": "%rate.370" },
+    { "op": "add", "output": "%t.378", "a": "%t.377", "b": "%dust.0" },
+    { "op": "constrain_bits", "val": "%t.378", "bits": 128 },
+    { "op": "copy", "output": "%value_phase_1_unchecked.379", "val": "%t.378" },
+    { "op": "less_than", "output": "%t.380", "a": "%value_phase_1_unchecked.379", "b": "%vfull.368", "bits": 128 },
+    { "op": "cond_select", "output": "%value_phase_12.381", "bit": "%t.380", "a": "%value_phase_1_unchecked.379", "b": "%vfull.368" },
+    { "op": "less_than", "output": "%t.382", "a": "%spend_ctime.363", "b": "%gen.10", "bits": 64 },
+    { "op": "neg", "output": "%neg.383", "a": "%gen.10" },
+    { "op": "add", "output": "%t.384", "a": "%spend_ctime.363", "b": "%neg.383" },
+    { "op": "cond_select", "output": "%t.385", "bit": "%t.382", "a": "0x00", "b": "%t.384" },
+    { "op": "mul", "output": "%t.386", "a": "%t.385", "b": "%rate.370" },
+    { "op": "less_than", "output": "%t.387", "a": "%value_phase_12.381", "b": "%t.386", "bits": 192 },
+    { "op": "cond_select", "output": "%t.388", "bit": "%t.387", "a": "0x00", "b": "0x01" },
+    { "op": "assert", "cond": "%t.388" },
+    { "op": "neg", "output": "%neg.389", "a": "%t.386" },
+    { "op": "add", "output": "%value_phase_3.390", "a": "%value_phase_12.381", "b": "%neg.389" },
+    { "op": "less_than", "output": "%t.391", "a": "%value_phase_3.390", "b": "%_spend.359", "bits": 128 },
+    { "op": "cond_select", "output": "%t.392", "bit": "%t.391", "a": "0x00", "b": "0x01" },
+    { "op": "assert", "cond": "%t.392" },
+    { "op": "assert", "cond": "%t.392" },
+    { "op": "neg", "output": "%neg.393", "a": "%_spend.359" },
+    { "op": "add", "output": "%v.394", "a": "%value_phase_3.390", "b": "%neg.393" },
+    { "op": "private_input", "type": "Scalar<BLS12-381>", "output": "%t.395", "guard": null },
+    { "op": "constrain_bits", "val": "%t.395", "bits": 128 },
+    { "op": "test_eq", "output": "%t.396", "a": "%v.394", "b": "%t.395" },
+    { "op": "assert", "cond": "%t.396" },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x70", "0x01", "0x01", "0x02"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x10", "0x01", "0x01", "-0x02", "%nul.358"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x11", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x91"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0xa1"] },
+    { "op": "add", "output": "%t.397", "a": "%dust.3", "b": "0x01" },
+    { "op": "constrain_bits", "val": "%t.397", "bits": 32 },
+    { "op": "copy", "output": "%t.398", "val": "%t.397" },
+    { "op": "transient_hash", "output": "%new_nonce.399", "inputs": ["%initial_nonce.143", "%initial_nonce.144", "%t.398", "%sk.5"] },
+    { "op": "public_input", "type": "Scalar<BLS12-381>", "output": "%t.400", "guard": null },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x30"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x04"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0c", "0x01", "0x08", "%t.400"] },
+    { "op": "transient_hash", "output": "%new_com.401", "inputs": ["0x6d646e3a647573743a636d", "%v.394", "%dust.1", "%new_nonce.399", "%t.400"] },
+    { "op": "test_eq", "output": "%t.402", "a": "%_spend.361", "b": "%new_com.401" },
+    { "op": "assert", "cond": "%t.402" },
+    { "op": "copy", "output": "%tmp.403", "val": "0x00" },
+    { "op": "div_mod_power_of_two", "outputs": ["%tmp.404", "%tmp.405"], "val": "%new_com.401", "bits": 248 },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x70", "0x01", "0x01", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x70", "0x01", "0x01", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x32"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x01"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x11", "0x01", "0x01", "0x20", "%tmp.403", "%tmp.405"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x91"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0xa1"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x70", "0x01", "0x01", "0x01"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0e", "0x01"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0xa1"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x70", "0x01", "0x01", "0x02"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x32"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x50", "0x01", "0x01", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x0a"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x11", "0x00"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0x91"] },
+    { "op": "impact", "guard": "0x01", "inputs": ["0xa2"] }
   ]
 }
