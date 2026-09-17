@@ -87,3 +87,28 @@ fn deeply_nested_inline_chain_is_rejected() {
         .join()
         .unwrap();
 }
+
+/// The boundary itself, expressed relative to the limit so it holds for both
+/// the debug (50) and release (250) values.
+///
+/// The root is entered at depth 0 and each level increments, so a chain of
+/// `RECURSION_LIMIT + 1` nodes has its deepest node at exactly the limit and is
+/// accepted; one more node is rejected.
+#[test]
+fn recursion_limit_boundary_is_exact() {
+    let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+    let limit = serialize::RECURSION_LIMIT as usize;
+
+    let decode = |depth: usize| {
+        let mut bytes = Vec::new();
+        chain(depth).serialize(&mut bytes).unwrap();
+        arena
+            .deserialize_sp::<Inline, _>(&mut &bytes[..], 0)
+            .is_ok()
+    };
+
+    assert!(decode(limit - 1), "one below the limit must decode");
+    assert!(decode(limit), "the deepest accepted chain must decode");
+    assert!(!decode(limit + 1), "one past the limit must be rejected");
+    assert!(!decode(limit + 2), "two past the limit must be rejected");
+}
