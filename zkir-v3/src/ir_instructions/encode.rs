@@ -19,7 +19,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, secp256k1};
+use midnight_curves::{curve25519, secp256k1, Fr as JubjubFr, JubjubExtended};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
@@ -63,6 +63,12 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         }
         IrValue::Secp256k1Base(s) => AssignedField::<F, secp256k1::Fp, MEP>::as_public_input(s),
         IrValue::Secp256k1Scalar(s) => AssignedField::<F, secp256k1::Fq, MEP>::as_public_input(s),
+
+        IrValue::Curve25519Point(p) => {
+            AssignedForeignPoint::<F, curve25519::Curve25519, MEP>::as_public_input(p)
+        }
+        IrValue::Curve25519Base(s) => AssignedField::<F, curve25519::Fp, MEP>::as_public_input(s),
+        IrValue::Curve25519Scalar(s) => AssignedField::<F, curve25519::Fq, MEP>::as_public_input(s),
     };
     encoded
         .into_iter()
@@ -102,6 +108,14 @@ pub fn encode_incircuit(
         }
         CircuitValue::Secp256k1Scalar(s) => {
             (std_lib.secp256k1_curve().scalar_field_chip()).as_public_input(layouter, s)
+        }
+        
+        CircuitValue::Curve25519Point(p) => std_lib.curve25519_curve().as_public_input(layouter, p),
+        CircuitValue::Curve25519Base(s) => {
+            (std_lib.curve25519_curve().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Curve25519Scalar(s) => {
+            (std_lib.curve25519_curve().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
@@ -157,6 +171,19 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
         IrType::Secp256k1Scalar => {
             AssignedField::<F, secp256k1::Fq, MEP>::from_public_input(&encoded)
                 .map(IrValue::Secp256k1Scalar)
+        }
+        
+        IrType::Curve25519Point => {
+            AssignedForeignPoint::<F, curve25519::Curve25519, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Point)
+        }
+        IrType::Curve25519Base => {
+            AssignedField::<F, curve25519::Fp, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Base)
+        }
+        IrType::Curve25519Scalar => {
+            AssignedField::<F, curve25519::Fq, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Scalar)
         }
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
