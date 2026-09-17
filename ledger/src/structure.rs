@@ -674,9 +674,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     ProofVerificationMode::CalibratedMock => vk
                         .mock_verify(old_pis)
                         .map_err(|e| describe("mock verification", anyhow::anyhow!("{e:#}"))),
-                    // The verifier key above was still resolved, so a missing or
-                    // wrong-version operation is still caught; only the cryptography is skipped.
-                    ProofVerificationMode::AssumeVerified => Ok(()),
                     _ => vk
                         .verify(
                             &transient_crypto_old::proofs::PARAMS_VERIFIER,
@@ -699,8 +696,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     ProofVerificationMode::CalibratedMock => vk
                         .mock_verify(pis.into_iter())
                         .map_err(|e| describe("mock verification", e)),
-                    // As above: the verifier key is resolved, the cryptography is skipped.
-                    ProofVerificationMode::AssumeVerified => Ok(()),
                     _ => vk
                         .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
                         .map_err(|e| describe("verification", e)),
@@ -800,11 +795,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         mode: ProofVerificationMode,
         linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>> {
-        // The caller has already verified these proofs; collecting the evidence was the point of
-        // getting here (it is what runs the state-dependent checks), and nothing remains to do.
-        if matches!(mode, ProofVerificationMode::AssumeVerified) {
-            return Ok(());
-        }
         let prepared = Self::prepare_proof_evidence(evidence, mode)?;
         Self::verify_prepared_evidence(&prepared, mode, linear_revalidation)
     }
@@ -815,17 +805,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         mode: ProofVerificationMode,
     ) -> Result<PreparedContractProofs, MalformedTransaction<D>> {
         let len = evidence.len();
-
-        // Nothing to prepare when the proofs are taken as already verified. `len` is still
-        // reported so that `merge_prepared_evidence` keeps later evidence positions aligned.
-        if matches!(mode, ProofVerificationMode::AssumeVerified) {
-            return Ok(PreparedContractProofs {
-                v3: Vec::new(),
-                v3_positions: Vec::new(),
-                deferred: Vec::new(),
-                len,
-            });
-        }
 
         // The mock path has no preparation step, so defer everything and let
         // `verify_prepared_evidence` run it unchanged.
@@ -901,14 +880,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         linear_revalidation: bool,
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
-
-        // Taken as already verified: `prepare_proof_evidence` produced nothing to check under
-        // this mode. The mode is the caller's assertion and must be the same one it prepared
-        // with — preparing under `Real` and deciding under `AssumeVerified` would skip proofs
-        // that were never verified, and the reverse would check an empty batch and pass.
-        if matches!(mode, ProofVerificationMode::AssumeVerified) {
-            return Ok(());
-        }
 
         let v2 = prepared.deferred.iter().filter_map(|e| match e {
             ContractProofEvidence::V2 { vk, proof, pis } => Some((vk, proof, pis.iter().copied())),

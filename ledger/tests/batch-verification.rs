@@ -231,27 +231,6 @@ async fn batch_verification_inner(mode: TestMode) {
     .unwrap();
     tx.well_formed(&state.ledger, deferred_balanced_strictness, state.time)
         .unwrap();
-
-    // Re-checking a transaction whose proofs are already verified: the whole traversal runs,
-    // including the evidence collection that carries `op_check` and `dust_spend_check`, and only
-    // the cryptography is skipped. A transaction well-formed under the real mode must therefore
-    // still be well-formed this way — both when the mode is asked for explicitly...
-    tx.well_formed(
-        &state.ledger,
-        balanced_strictness.assume_proofs_verified(),
-        state.time,
-    )
-    .expect("a verified transaction must re-check under AssumeVerified");
-
-    // ...and when it comes from the reference itself. Note the plain `balanced_strictness` here:
-    // `RevalidationReference` applies its own proof policy, so the caller cannot forget to.
-    let revalidation = midnight_ledger::verify::RevalidationReference {
-        previously_validated_state: state.ledger.clone(),
-        new_state: state.ledger.clone(),
-    };
-    tx.well_formed(&revalidation, balanced_strictness, state.time)
-        .expect("a verified transaction must re-check against a revalidation reference");
-
     state.assert_apply(&tx, deferred_balanced_strictness);
 
     println!(":: Part 2: Setting topic");
