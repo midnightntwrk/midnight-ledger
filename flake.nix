@@ -324,10 +324,43 @@
             ];
           };
 
-          # The zkir precompiles (and the zkir compiler itself) moved to the
-          # zkir repository; its test-artifacts output has the same layout
-          # this flake used to build.
-          packages.test-artifacts = zkir.packages.${system}.test-artifacts;
+          # The precompiled zkir sources are ledger-owned (zswap, dust, and
+          # the test contracts); only the zkir compiler itself moved to the
+          # zkir repository, so we build the keys here with its binaries.
+          packages.test-artifacts = pkgs.stdenvNoCC.mkDerivation {
+            pname = "midnight-ledger-test-artifacts";
+            version = ledger-version;
+            src = inclusive.lib.inclusive ./zkir-precompiles [./zkir-precompiles];
+            MIDNIGHT_PP = "${packages.public-params}";
+            nativeBuildInputs = [
+              pkgs.jq
+              packages.public-params
+              zkir.packages.${system}.zkir
+              zkir.packages.${system}.zkir-v3
+            ];
+            buildPhase = ''
+              for contract in *; do
+                mv "$contract" "$contract-tmp"
+                mkdir -p "$contract/keys"
+                mv $contract-tmp "$contract/zkir"
+                VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
+                if [[ "$VERSION" == "2" ]]; then
+                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                elif [[ "$VERSION" == "3" ]]; then
+                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                else
+                  echo "error: contract '$contract' declares unsupported zkir major version '$VERSION'" >&2
+                  exit 1
+                fi
+              done
+            '';
+            installPhase = ''
+              mkdir $out
+              for contract in *; do
+                cp -a "$contract" "$out/$contract"
+              done
+            '';
+          };
 
           # The zkir-v2 wasm bindings also come from the zkir repository; the
           # integration tests use them for local proving.
@@ -338,7 +371,7 @@
             version = builtins.readFile static/version;
             dontUnpack = true;
             MIDNIGHT_PP = "${packages.public-params}";
-            ZKIR_ARTIFACTS = "${zkir.packages.${system}.test-artifacts}";
+            ZKIR_ARTIFACTS = "${packages.test-artifacts}";
             nativeBuildInputs = [
               packages.public-params
               pkgs.coreutils
