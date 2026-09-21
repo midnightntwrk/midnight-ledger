@@ -117,6 +117,7 @@
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
+        contractSrc = inclusive.lib.inclusive ./. [./zswap/zswap.compact ./ledger/dust.compact ./zkir-precompiles];
         rust-build = self.packages.${system}.rust-build-toolchain;
         ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
@@ -370,22 +371,27 @@
           packages.local-params = pkgs.stdenvNoCC.mkDerivation rec {
             pname = "midnight-local-params";
             version = builtins.readFile static/version;
-            dontUnpack = true;
+            src = contractSrc;
             MIDNIGHT_PP = "${packages.public-params}";
-            ZKIR_ARTIFACTS = "${packages.test-artifacts}";
             nativeBuildInputs = [
               packages.public-params
+              zkir.packages.${system}.zkir
               pkgs.coreutils
             ];
             buildPhase = ''
-              for contract in zswap dust; do
-                mkdir -p $contract/zkir $contract/keys
-                cp $ZKIR_ARTIFACTS/$contract/zkir/* $contract/zkir
-                cp $ZKIR_ARTIFACTS/$contract/keys/* $contract/keys
-                chmod -R u+w $contract
-                for file in $contract/keys/* $contract/zkir/*; do
-                  sha256sum "$file" > "$file.sha256"
-                done
+              mkdir -p zswap/zkir
+              mkdir -p zswap/keys
+              cp zkir-precompiles/zswap/* zswap/zkir
+              zkir compile-many zswap/zkir zswap/keys
+              for file in zswap/keys/* zswap/zkir/*; do
+                sha256sum "$file" > "$file.sha256"
+              done
+              mkdir -p dust/zkir
+              mkdir -p dust/keys
+              cp zkir-precompiles/dust/* dust/zkir
+              zkir compile-many dust/zkir dust/keys
+              for file in dust/keys/* dust/zkir/*; do
+                sha256sum "$file" > "$file.sha256"
               done
             '';
             installPhase = ''
