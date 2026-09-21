@@ -22,10 +22,11 @@
     # TODO: point back at the default branch (or a release tag) once
     # alexshielded/nix-wasm-packaging is merged into midnight-zkir.
     # This pin is nix-wasm-packaging plus the ledger-10 dust spend precompile
-    # update (branch alexshielded/nix-wasm-packaging-dust-fix); without it the
-    # generated dust keys fail the ledger's committed sha256 checks, and later
-    # zkir commits drop the v2 toolchain that still generates the zswap keys.
-    zkir.url = "github:midnightntwrk/midnight-zkir/5663f47e42e9680dfb21762a5bdfb0adff1d9c72";
+    # update plus the ledger-8 verify_proof / inner_proof port (branch
+    # alexshielded/port-verify-proof); without it the generated dust keys fail
+    # the ledger's committed sha256 checks, and later zkir commits drop the v2
+    # toolchain that still generates the zswap keys.
+    zkir.url = "github:midnightntwrk/midnight-zkir/bc46db70a30cacf58b943da0047acebc12f9a1a0";
     # Share our nixpkgs and rust toolchain with the zkir flake; without this
     # the CI runners build two full toolchain stacks, which OOMs the smaller
     # runners (the nix daemon gets killed mid-build).
@@ -400,7 +401,7 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v5"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
 
@@ -441,6 +442,8 @@
               (pkgs.fetchurl { url = param-for 15; hash = "sha256-ckx8PXeRSLsRPH7pwDSy8n2xbmvfMV/ekBBam60Asd4="; })
               (pkgs.fetchurl { url = param-for 16; hash = "sha256-Cch3IW1libNwJj4Yr0CgMKkBtBp6fDfvWMmQHbQfBcY="; })
               (pkgs.fetchurl { url = param-for 17; hash = "sha256-Sp72x8Bhmqt07t5EsT51PjulRQigLdO3EGqUmqu3O3Q="; })
+              # A circuit holding a `verify_proof` lands at k=18.
+              (pkgs.fetchurl { url = param-for 18; hash = "sha256-6ENtxdi1mPFpwSfHRRNdiJdEAH5tOE/xJt+NEzJSL4Y="; })
             ];
 
             dontUnpack = true;

@@ -282,11 +282,8 @@ pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Anno
 #[derive_where(Ord; T: Ord, A: Ord)]
 #[allow(clippy::type_complexity)]
 #[cfg(not(feature = "public-internal-structure"))]
-pub enum Node<
-    T: Storable<D> + 'static,
-    D: DB = DefaultDB,
-    A: Storable<D> + Annotation<T> = SizeAnn,
-> {
+pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Annotation<T> = SizeAnn>
+{
     #[default]
     Empty,
     Leaf {
@@ -1499,7 +1496,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                     std::io::ErrorKind::InvalidData,
                     "Unrecognised discriminant",
                 ));
-            },
+            }
         };
 
         // Enforce structural node invariants when loading from an untrusted

@@ -67,9 +67,11 @@ midnight-serialize = { path = "serialize" }
 midnight-transient-crypto = { path = "transient-crypto" }
 # The zkir crates now live in their own repository. Once they are published
 # to crates.io, these patches can be dropped.
-midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.0.0-rc.1" }
-midnight-zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.0.0-rc.1" }
-midnight-zkir-wasm = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.0.0-rc.1" }
+# Pinned to the branch carrying the ledger-8 verify_proof / inner_proof port
+# (alexshielded/port-verify-proof); retag once it lands on the zkir mainline.
+midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "bc46db70a30cacf58b943da0047acebc12f9a1a0" }
+midnight-zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "bc46db70a30cacf58b943da0047acebc12f9a1a0" }
+midnight-zkir-wasm = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "bc46db70a30cacf58b943da0047acebc12f9a1a0" }
 # Because we rely on additions in 2.2
 midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto" }
 

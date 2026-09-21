@@ -613,6 +613,7 @@ export function proofDataIntoSerializedPreimage(
   public_transcript: Op<AlignedValue>[],
   private_transcript_outputs: AlignedValue[],
   key_location?: string,
+  inner_proofs?: Uint8Array[],
 ): Uint8Array;
 
 /**
