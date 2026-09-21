@@ -258,9 +258,11 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.dry_run != 'true' }}
     permissions:
-      contents: read
+      contents: write
       id-token: write
     uses: ./.github/workflows/docker-push.yml
+    with:
+      force: ${{ github.event.inputs.force == 'true' }}
     secrets:
       DOCKERHUB_MIDNIGHTNTWRK_USER: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
       DOCKERHUB_MIDNIGHTNTWRK_TOKEN: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
@@ -352,30 +354,56 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BUILD_SHA: ${{ github.sha }}
         run: |
-          MARK=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          set -euo pipefail
           # Correlation marker: publish.yml echoes it into its run-name, so we
           # find OUR run exactly. A timestamp filter alone races with concurrent
           # dispatches (manual or another release) and could watch a stranger's
-          # run while ours is still queued or later fails.
-          CORR="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
-            -f "ref=$BUILD_SHA" -f packages=all -f "correlation=$CORR"
-          # The dispatch API returns no run id; poll for the run it created.
-          RUN_ID=""
-          for _ in $(seq 1 30); do
-            sleep 5
-            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow publish.yml \
-              --event workflow_dispatch --created ">=$MARK" --limit 50 \
+          # run while ours is still queued or later fails. Keyed on the run, not
+          # the attempt, so re-running this job resumes the publish it already
+          # dispatched instead of dispatching (and approving) another.
+          CORR="${GITHUB_RUN_ID}"
+          find_run() {
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow publish.yml \
+              --event workflow_dispatch --limit 50 \
               --json databaseId,displayTitle \
               --jq ".[] | select(.displayTitle | contains(\"[$CORR]\")) | .databaseId" \
-              | head -n 1)
-            [ -n "$RUN_ID" ] && break
-          done
-          if [ -z "$RUN_ID" ]; then
-            echo "::error::dispatched publish.yml run did not appear"; exit 1
+              | head -n 1
+          }
+          RUN_ID=$(find_run)
+          if [ -n "$RUN_ID" ]; then
+            echo "Resuming publish.yml run ${RUN_ID} dispatched by an earlier attempt."
+          else
+            gh workflow run publish.yml --repo "$GITHUB_REPOSITORY" \
+              -f "ref=$BUILD_SHA" -f packages=all -f "correlation=$CORR"
+            # The dispatch API returns no run id; poll for the run it created.
+            for _ in $(seq 1 30); do
+              sleep 5
+              RUN_ID=$(find_run)
+              [ -n "$RUN_ID" ] && break
+            done
+            if [ -z "$RUN_ID" ]; then
+              echo "::error::dispatched publish.yml run did not appear"; exit 1
+            fi
           fi
-          echo "Waiting on publish.yml run ${RUN_ID} (may pause for its release-environment approval)"
-          gh run watch "$RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
+          URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}"
+          echo "Waiting on publish.yml run ${URL} (pauses for its release-environment approval)"
+          # Jobs are killed at six hours; give up earlier with a way forward, so
+          # the release finishes by re-running this run's failed jobs once the
+          # publish is approved.
+          DEADLINE=$(( $(date +%s) + 300 * 60 ))
+          while :; do
+            read -r STATUS CONCLUSION < <(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --json status,conclusion --jq '"\(.status) \(.conclusion)"')
+            if [ "$STATUS" = "completed" ]; then
+              [ "$CONCLUSION" = "success" ] && exit 0
+              echo "::error::publish.yml run ${URL} finished with '${CONCLUSION}'"; exit 1
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::publish.yml run ${URL} is still '${STATUS}' after 5h. Approve it, then re-run the failed jobs of this run to resume the release."
+              exit 1
+            fi
+            sleep 30
+          done
 
   crates-io:
     needs: [ build, coverage, integration, unit-tests ]
@@ -535,31 +563,3 @@ jobs:
           TEXT=":rocket: Ledger ${KIND} *${VERSION}* is out. <${RELEASE_URL}|Release notes & artifacts>"
           payload=$(jq -n --arg t "$TEXT" '{text: $t}')
           curl -fsS -X POST -H 'Content-type: application/json' --data "$payload" "$SLACK_WEBHOOK_URL"
-
-  attach-proof-server-manifest:
-    needs: [ build, release, docker-push ]
-    if: ${{ github.event.inputs.dry_run != 'true' }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    env:
-      TAG_NAME: ${{ needs.build.outputs.tag_name }}
-    steps:
-      - name: Download signed proof-server build manifest
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          pattern: proof-server-build-manifest-*
-          path: ./proof-server-release-assets
-          merge-multiple: true
-
-      - name: Attach signed manifest to Ledger release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          gh release upload "${TAG_NAME}" \
-            ./proof-server-release-assets/build-manifest.json \
-            ./proof-server-release-assets/build-manifest.json.asc \
-            ./proof-server-release-assets/midnight-proof-server-public.asc \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
