@@ -19,6 +19,21 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
+    # TODO: point back at the default branch (or a release tag) once
+    # alexshielded/nix-wasm-packaging is merged into midnight-zkir.
+    # This pin is nix-wasm-packaging plus the ledger-10 dust spend precompile
+    # update plus the ledger-8 verify_proof / inner_proof port (branch
+    # alexshielded/port-verify-proof); without it the generated dust keys fail
+    # the ledger's committed sha256 checks, and later zkir commits drop the v2
+    # toolchain that still generates the zswap keys.
+    zkir.url = "github:midnightntwrk/midnight-zkir/bc46db70a30cacf58b943da0047acebc12f9a1a0";
+    # Share our nixpkgs and rust toolchain with the zkir flake; without this
+    # the CI runners build two full toolchain stacks, which OOMs the smaller
+    # runners (the nix daemon gets killed mid-build).
+    zkir.inputs.nixpkgs.follows = "nixpkgs";
+    zkir.inputs.fenix.follows = "fenix";
+    zkir.inputs.utils.follows = "utils";
+    zkir.inputs.inclusive.follows = "inclusive";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -32,6 +47,7 @@
     utils,
     fenix,
     inclusive,
+    zkir,
     #compactc,
     ...
   }:
@@ -54,7 +70,6 @@
           })
         ];
         pkgs = import nixpkgs {inherit system overlays;};
-        pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
         };
@@ -68,8 +83,6 @@
           ./ledger-wasm
           ./proof-server
           ./storage
-          ./zkir
-          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -128,7 +141,6 @@
             extraBuildInputs = (if require-artifacts then
               [
                 self.packages.${system}.local-params
-                self.packages.${system}.zkir
               ] else []);
           };
         mkLedger = {
@@ -171,7 +183,6 @@
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
-                  self.packages.${system}.zkir
                   rust-build
                   pkgs.chez
                 ];
@@ -312,70 +323,59 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
-              packages.zkir-v3-wasm
             ];
           };
 
+          # The precompiled zkir sources are ledger-owned (zswap, dust, and
+          # the test contracts); only the zkir compiler itself moved to the
+          # zkir repository, so we build the keys here with its binaries.
           packages.test-artifacts = pkgs.stdenvNoCC.mkDerivation {
             pname = "midnight-ledger-test-artifacts";
             version = ledger-version;
             src = inclusive.lib.inclusive ./zkir-precompiles [./zkir-precompiles];
-            #src = inclusive.lib.inclusive ./ledger/tests
-            #   [ledger/tests/fallible.compact ledger/tests/micro-dao.compact
-            #    ledger/tests/simple-merkle-tree.compact
-            #    ledger/tests/composable-inner.compact
-            #    ledger/tests/composable-outer.compact
-            #    ledger/tests/composable-relay.compact
-            #    ledger/tests/composable-burn.compact];
             MIDNIGHT_PP = "${packages.public-params}";
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               pkgs.jq
               packages.public-params
-              self.packages.${system}.zkir
-              self.packages.${system}.zkir-v3
-              #compactc.packages.${system}.compactc-no-runtime
+              zkir.packages.${system}.zkir
+              zkir.packages.${system}.zkir-v3
             ];
             buildPhase = ''
-              #for file in *.compact; do
-              #  fname="$(basename -s .compact "$file")"
-              #  compactc "$file" "$fname"
-              #done
               for contract in *; do
                 mv "$contract" "$contract-tmp"
                 mkdir -p "$contract/keys"
                 mv $contract-tmp "$contract/zkir"
                 VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
                 if [[ "$VERSION" == "2" ]]; then
-                  ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${zkir.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${zkir.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                else
+                  echo "error: contract '$contract' declares unsupported zkir major version '$VERSION'" >&2
+                  exit 1
                 fi
               done
             '';
             installPhase = ''
               mkdir $out
-              #for file in *.compact; do
-              #  file=$(basename -s .compact "$file")
-              #  cp -a "$file" "$out/$file"
-              #done
               for contract in *; do
                 cp -a "$contract" "$out/$contract"
               done
             '';
           };
 
+          # The zkir-v2 wasm bindings also come from the zkir repository; the
+          # integration tests use them for local proving.
+          packages.zkir-wasm = zkir.packages.${system}.zkir-wasm;
+
           packages.local-params = pkgs.stdenvNoCC.mkDerivation rec {
             pname = "midnight-local-params";
             version = builtins.readFile static/version;
             src = contractSrc;
             MIDNIGHT_PP = "${packages.public-params}";
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              self.packages.${system}.zkir
-              #compactc.packages.${system}.compactc-no-runtime
+              zkir.packages.${system}.zkir
               pkgs.coreutils
             ];
             buildPhase = ''
@@ -383,7 +383,6 @@
               mkdir -p zswap/keys
               cp zkir-precompiles/zswap/* zswap/zkir
               zkir compile-many zswap/zkir zswap/keys
-              #compactc --no-communications-commitment zswap/zswap.compact zswap
               for file in zswap/keys/* zswap/zkir/*; do
                 sha256sum "$file" > "$file.sha256"
               done
@@ -391,7 +390,6 @@
               mkdir -p dust/keys
               cp zkir-precompiles/dust/* dust/zkir
               zkir compile-many dust/zkir dust/keys
-              #compactc --no-communications-commitment ledger/dust.compact dust
               for file in dust/keys/* dust/zkir/*; do
                 sha256sum "$file" > "$file.sha256"
               done
@@ -412,8 +410,6 @@
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v5"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
-          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
-          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -427,58 +423,6 @@
 
           packages.proof-server-oci-arm64-experimental = mkDocker { isCrossArm = true; experimental = true; };
 
-          packages.zkir = ({
-              "x86_64-linux" = pkgsStatic;
-              "x86_64-darwin" = pkgs;
-              "aarch64-linux" = pkgsStatic;
-              "aarch64-darwin" = pkgs;
-          }.${system}.makeRustPlatform {
-            rustc = packages.rust-build-toolchain;
-            cargo = packages.rust-build-toolchain;
-          }).buildRustPackage rec {
-              pname = "zkir";
-              version = (builtins.fromTOML (builtins.readFile ./zkir/Cargo.toml)).package.version;
-              src = rustWorkspaceSrc;
-              cargoLock.lockFile = ./Cargo.lock;
-              cargoLock.allowBuiltinFetchGit = true;
-
-              MIDNIGHT_PP = "${packages.public-params}";
-
-              buildInputs = [
-                packages.public-params
-              ];
-              cargoBuildFlags = "--package midnight-zkir --features binary";
-              nativeBuildInputs = [
-                packages.rust-build-toolchain
-              ];
-              doCheck = false;
-            };
-          packages.zkir-v3 = ({
-              "x86_64-linux" = pkgsStatic;
-              "x86_64-darwin" = pkgs;
-              "aarch64-linux" = pkgsStatic;
-              "aarch64-darwin" = pkgs;
-          }.${system}.makeRustPlatform {
-            rustc = packages.rust-build-toolchain;
-            cargo = packages.rust-build-toolchain;
-          }).buildRustPackage rec {
-              pname = "zkir-v3";
-              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
-              src = rustWorkspaceSrc;
-              cargoLock.lockFile = ./Cargo.lock;
-              cargoLock.allowBuiltinFetchGit = true;
-
-              MIDNIGHT_PP = "${packages.public-params}";
-
-              buildInputs = [
-                packages.public-params
-              ];
-              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
-              nativeBuildInputs = [
-                packages.rust-build-toolchain
-              ];
-              doCheck = false;
-            };
           packages.public-params = let
               param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {
