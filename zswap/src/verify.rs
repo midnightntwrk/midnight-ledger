@@ -13,6 +13,8 @@
 
 #[cfg(feature = "proof-verifying")]
 use crate::ciphertext_to_field;
+#[cfg(any(feature = "proof-verifying", test))]
+use crate::compact_slots::*;
 use crate::error::MalformedOffer;
 #[cfg(any(feature = "proof-verifying", test))]
 use crate::filter_invalid;
@@ -92,6 +94,10 @@ pub fn with_outputs<
     })
 }
 
+/// Field-repr length of a `Cell_write` of a [`ContractAddress`] to
+/// [`ZSWAP_IDX_CONTRACT_ADDR`], used as `Op::Noop` padding when an input or output
+/// is not contract-owned. Depends on the encoding of that slot index, so it is
+/// pinned by `test_caddr_op` below.
 #[cfg(any(test, feature = "proof-verifying"))]
 const CADDR_OP_LEN: u32 = 12;
 
@@ -105,7 +111,7 @@ fn test_caddr_op() {
         InMemoryDB,
     >(
         Cell_write!(
-            [Key::Value(3u8.into())],
+            [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
             false,
             ContractAddress,
             ContractAddress::default()
@@ -128,7 +134,7 @@ impl AuthorizedClaim<Proof> {
         use storage::db::InMemoryDB;
 
         let prog: [Op<ResultModeVerify, InMemoryDB>; 5] = Cell_write!(
-            [Key::Value(4u8.into())],
+            [Key::Value(ZSWAP_IDX_PUBLIC_KEY.into())],
             false,
             CoinPublicKey,
             self.recipient
@@ -154,30 +160,34 @@ impl<D: DB> Input<Proof, D> {
     pub fn well_formed(&self, segment: u16) -> Result<(), MalformedOffer> {
         let mut prog = Vec::new();
         prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
-            [Key::Value(0u8.into())],
+            [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
             false,
             32,
             [u8; 32],
             self.merkle_tree_root
         ));
         prog.extend(Set_insert!(
-            [Key::Value(1u8.into())],
+            [Key::Value(ZSWAP_IDX_NULLIFIERS.into())],
             false,
             [u8; 32],
             self.nullifier
         ));
         match &self.contract_address {
             Some(addr) => prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 *addr.deref()
             )),
             None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
         }
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_read!(
+            [Key::Value(ZSWAP_IDX_SEGMENT.into())],
+            false,
+            u16
+        ));
         prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             self.value_commitment.0
@@ -224,7 +234,7 @@ impl<D: DB> Output<Proof, D> {
         }
         let mut prog = Vec::new();
         prog.extend::<[Op<_, InMemoryDB>; 17]>(HistoricMerkleTree_insert_hash!(
-            [Key::Value(0u8.into())],
+            [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
             false,
             32,
             [u8; 32],
@@ -232,16 +242,20 @@ impl<D: DB> Output<Proof, D> {
         ));
         match &self.contract_address {
             Some(addr) => prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 addr.deref()
             )),
             None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
         }
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_read!(
+            [Key::Value(ZSWAP_IDX_SEGMENT.into())],
+            false,
+            u16
+        ));
         prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             self.value_commitment.0
