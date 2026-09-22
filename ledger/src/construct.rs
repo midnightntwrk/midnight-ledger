@@ -129,7 +129,9 @@ impl<S: SignatureKind<D>, D: DB>
             {
                 return Err(PartitionFailure::GuaranteedOnlyUnsatisfied);
             }
-            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => rng.r#gen(),
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => {
+                rng.gen_range(1..=u16::MAX)
+            }
             SegmentSpecifier::Specific(GUARANTEED_SEGMENT) => {
                 return Err(PartitionFailure::IllegalSegmentZero);
             }

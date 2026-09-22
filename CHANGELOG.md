@@ -58,6 +58,8 @@ resolve past the fix.
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
+- fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
+  segment specifiers in `addCalls`
 
 ## 8.0.2
 
