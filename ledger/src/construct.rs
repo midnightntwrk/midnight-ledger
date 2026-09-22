@@ -71,6 +71,30 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
+/// Flags whether any of `items` are claimed by some call's *fallible* transcript, and so belong
+/// in the fallible Zswap offer rather than the guaranteed one. `claims` says what counts as
+/// a claim for the item type at hand.
+fn has_claims_in_fallible<T, D: DB>(
+    items: &[T],
+    fallible_effects: &[&Effects<D>],
+    claims: impl Fn(&Effects<D>, &T) -> bool,
+) -> Vec<bool> {
+    items
+        .iter()
+        .map(|item| fallible_effects.iter().any(|effects| claims(effects, item)))
+        .collect()
+}
+
+/// Return items whose fallibility flag matches `fallible`.
+fn with_fallibility<T: Clone>(items: &[T], is_fallible: &[bool], fallible: bool) -> Vec<T> {
+    items
+        .iter()
+        .zip(is_fallible)
+        .filter(|(_, f)| **f == fallible)
+        .map(|(item, _)| item.clone())
+        .collect()
+}
+
 impl<S: SignatureKind<D>, D: DB>
     StandardTransaction<S, ProofPreimageMarker, PedersenRandomness, D>
 {
@@ -153,43 +177,30 @@ impl<S: SignatureKind<D>, D: DB>
                 key_location: call.key_location.clone(),
             })
             .collect::<Vec<_>>();
-        let zswap_input_is_fallible = zswap_inputs
+        let fallible_effects = prototypes
             .iter()
-            .map(|inp| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript
-                        .as_ref()
-                        .is_some_and(|pt| pt.effects.claimed_nullifiers.member(&inp.nullifier))
-                })
-            })
+            .filter_map(|proto| proto.fallible_public_transcript.as_ref())
+            .map(|transcript| &transcript.effects)
             .collect::<Vec<_>>();
-        let zswap_output_is_fallible = zswap_outputs
-            .iter()
-            .map(|out| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
-                        pt.effects
-                            .claimed_shielded_spends
-                            .union(&pt.effects.claimed_shielded_receives)
-                            .member(&out.coin_com)
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-        let zswap_transient_is_fallible = zswap_transients
-            .iter()
-            .map(|trans| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
-                        pt.effects
-                            .claimed_shielded_spends
-                            .union(&pt.effects.claimed_shielded_receives)
-                            .member(&trans.coin_com)
-                            || pt.effects.claimed_nullifiers.member(&trans.nullifier)
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
+        let zswap_input_is_fallible =
+            has_claims_in_fallible(zswap_inputs, &fallible_effects, |effects, inp| {
+                effects.claimed_nullifiers.member(&inp.nullifier)
+            });
+        let zswap_output_is_fallible =
+            has_claims_in_fallible(zswap_outputs, &fallible_effects, |effects, out| {
+                effects
+                    .claimed_shielded_spends
+                    .union(&effects.claimed_shielded_receives)
+                    .member(&out.coin_com)
+            });
+        let zswap_transient_is_fallible =
+            has_claims_in_fallible(zswap_transients, &fallible_effects, |effects, trans| {
+                effects
+                    .claimed_shielded_spends
+                    .union(&effects.claimed_shielded_receives)
+                    .member(&trans.coin_com)
+                    || effects.claimed_nullifiers.member(&trans.nullifier)
+            });
         let intent_before = self
             .intents
             .get(&segment)
@@ -199,62 +210,30 @@ impl<S: SignatureKind<D>, D: DB>
             .into_iter()
             .fold(intent_before, |i, proto| i.add_call::<P>(proto));
         let mut res = self.set_intent(segment, intent);
-        let guaranteed_coins = ZswapOffer::new(
-            zswap_inputs
-                .iter()
-                .zip(zswap_input_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(i, _)| i.clone())
-                .collect(),
-            zswap_outputs
-                .iter()
-                .zip(zswap_output_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(o, _)| o.clone())
-                .collect(),
-            zswap_transients
-                .iter()
-                .zip(zswap_transient_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(t, _)| t.clone())
-                .collect(),
-        )
-        .map(|o| o.retarget_segment(GUARANTEED_SEGMENT));
-        let fallible_coins = ZswapOffer::new(
-            zswap_inputs
-                .iter()
-                .zip(zswap_input_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(i, _)| i.clone())
-                .collect(),
-            zswap_outputs
-                .iter()
-                .zip(zswap_output_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(o, _)| o.clone())
-                .collect(),
-            zswap_transients
-                .iter()
-                .zip(zswap_transient_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(t, _)| t.clone())
-                .collect(),
-        )
-        .map(|o| o.retarget_segment(segment));
+        let offer_with_fallibility = |fallible: bool| {
+            ZswapOffer::new(
+                with_fallibility(zswap_inputs, &zswap_input_is_fallible, fallible),
+                with_fallibility(zswap_outputs, &zswap_output_is_fallible, fallible),
+                with_fallibility(zswap_transients, &zswap_transient_is_fallible, fallible),
+            )
+        };
+        let guaranteed_coins =
+            offer_with_fallibility(false).map(|o| o.retarget_segment(GUARANTEED_SEGMENT));
+        let fallible_coins = offer_with_fallibility(true).map(|o| o.retarget_segment(segment));
+        let merge_into = |old: Option<&ZswapOffer<ProofPreimage, D>>,
+                          new: ZswapOffer<ProofPreimage, D>| {
+            match old {
+                Some(old) => old.merge(&new).map_err(PartitionFailure::Merge),
+                None => Ok(new),
+            }
+        };
         if let Some(offer) = guaranteed_coins {
-            res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
-                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
-            } else {
-                offer
-            }));
+            let merged = merge_into(res.guaranteed_coins.as_deref(), offer)?;
+            res.guaranteed_coins = Some(Sp::new(merged));
         }
         if let Some(offer) = fallible_coins {
-            let new_offer = if let Some(old_offer) = res.fallible_coins.get(&segment) {
-                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
-            } else {
-                offer
-            };
-            res.fallible_coins = res.fallible_coins.insert(segment, new_offer);
+            let merged = merge_into(res.fallible_coins.get(&segment).as_deref(), offer)?;
+            res.fallible_coins = res.fallible_coins.insert(segment, merged);
         }
         res.recompute_binding_randomness();
         Ok(res)
@@ -1179,4 +1158,76 @@ pub fn partition_transcripts<D: DB>(
         .enumerate()
         .map(|(i, sections)| calls[i].split_at(sections, params))
         .collect::<Result<Vec<_>, _>>()?)
+}
+
+#[cfg(test)]
+mod partition_tests {
+    use super::{has_claims_in_fallible, with_fallibility};
+    use base_crypto::hash::HashOutput;
+    use coin_structure::coin::{Commitment as CoinCommitment, Nullifier};
+    use onchain_runtime::context::Effects;
+    use storage::db::InMemoryDB;
+
+    fn nul(b: u8) -> Nullifier {
+        Nullifier(HashOutput([b; 32]))
+    }
+
+    fn com(b: u8) -> CoinCommitment {
+        CoinCommitment(HashOutput([b; 32]))
+    }
+
+    /// Effects claiming one nullifier and one shielded spend.
+    fn effects(n: u8, c: u8) -> Effects<InMemoryDB> {
+        let mut e = Effects::<InMemoryDB>::default();
+        e.claimed_nullifiers = e.claimed_nullifiers.insert(nul(n));
+        e.claimed_shielded_spends = e.claimed_shielded_spends.insert(com(c));
+        e
+    }
+
+    #[test]
+    fn has_claims_in_fallible_matches_any_claiming_transcript() {
+        let a = effects(1, 10);
+        let b = effects(2, 20);
+        let all = [&a, &b];
+
+        // Claimed by the first, the second, and by neither.
+        let items = [nul(1), nul(2), nul(3)];
+        let flags = has_claims_in_fallible(&items, &all, |e, n| e.claimed_nullifiers.member(n));
+        assert_eq!(flags, vec![true, true, false]);
+
+        // No fallible transcripts at all => nothing is fallible.
+        let none: [&Effects<InMemoryDB>; 0] = [];
+        let flags = has_claims_in_fallible(&items, &none, |e, n| e.claimed_nullifiers.member(n));
+        assert_eq!(flags, vec![false, false, false]);
+    }
+
+    /// A nullifier claim must not make an output fallible, nor vice versa: the flags are
+    /// per-item-kind, and crossing them would move coins into the wrong offer.
+    #[test]
+    fn has_claims_in_fallible_does_not_cross_item_kinds() {
+        let a = effects(1, 10);
+        let all = [&a];
+
+        let commitments = [com(10), com(1)];
+        let flags = has_claims_in_fallible(&commitments, &all, |e, c| {
+            e.claimed_shielded_spends
+                .union(&e.claimed_shielded_receives)
+                .member(c)
+        });
+        // com(1) shares its bytes with the claimed *nullifier*, but is not a claimed spend.
+        assert_eq!(flags, vec![true, false]);
+    }
+
+    #[test]
+    fn with_fallibility_partitions_and_preserves_order() {
+        let items = ['a', 'b', 'c', 'd'];
+        let flags = [false, true, false, true];
+        assert_eq!(with_fallibility(&items, &flags, false), vec!['a', 'c']);
+        assert_eq!(with_fallibility(&items, &flags, true), vec!['b', 'd']);
+
+        // Every item lands in exactly one of the two offers.
+        let guaranteed = with_fallibility(&items, &flags, false);
+        let fallible = with_fallibility(&items, &flags, true);
+        assert_eq!(guaranteed.len() + fallible.len(), items.len());
+    }
 }
