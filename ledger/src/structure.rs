@@ -908,12 +908,7 @@ impl<
         Intent {
             guaranteed_unshielded_offer: self.guaranteed_unshielded_offer.clone(),
             fallible_unshielded_offer: self.fallible_unshielded_offer.clone(),
-            actions: self
-                .actions
-                .clone()
-                .iter()
-                .map(|x| x.erase_proof())
-                .collect(),
+            actions: self.actions.iter().map(|x| x.erase_proof()).collect(),
             dust_actions: self
                 .dust_actions
                 .as_ref()
