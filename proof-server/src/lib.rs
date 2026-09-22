@@ -25,15 +25,23 @@ use crate::endpoints::{
 };
 use crate::worker_pool::WorkerPool;
 
+pub mod artifacts;
 pub mod endpoints;
 pub mod versioned_ir;
 pub mod worker_pool;
 
-pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Result<(Server, u16)> {
+pub fn server(
+    port: u16,
+    fetch_params: bool,
+    pool: WorkerPool,
+    registry: artifacts::ArtifactRegistry,
+) -> std::io::Result<(Server, u16)> {
+    let registry = Data::new(registry);
     let pool = Arc::new(pool);
     let http_server = HttpServer::new(move || {
         let app = App::new()
             .app_data(Data::new(pool.clone()))
+            .app_data(registry.clone())
             .service(prove_transaction)
             .service(prove)
             .service(check)

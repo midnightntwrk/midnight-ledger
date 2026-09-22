@@ -20,7 +20,8 @@ use futures::future::join;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
 use midnight_proof_server::endpoints::PUBLIC_PARAMS;
-use midnight_proof_server::{server, worker_pool::WorkerPool};
+use midnight_proof_server::{artifacts::ArtifactRegistry, server, worker_pool::WorkerPool};
+use std::path::PathBuf;
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
@@ -30,6 +31,12 @@ use transient_crypto::proofs::{KeyLocation, Resolver as ResolverT};
 
 #[derive(Parser, Debug)]
 struct Args {
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Compact artifact directory; repeat for multiple contracts"
+    )]
+    artifact_dir: Vec<PathBuf>,
     #[arg(
         short,
         long,
@@ -61,6 +68,7 @@ struct Args {
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
     init_logging(args.verbose);
+    let artifacts = ArtifactRegistry::load(&args.artifact_dir)?;
     if !args.no_fetch_params {
         info!("Ensuring zswap key material is available...");
         let resolver = Resolver::new(
@@ -91,7 +99,7 @@ async fn main() -> std::io::Result<()> {
         keys.into_iter().collect::<Result<Vec<_>, _>>()?;
     }
     let pool = WorkerPool::new(args.num_workers, args.job_capacity, args.job_timeout);
-    server(args.port, !args.no_fetch_params, pool)
+    server(args.port, !args.no_fetch_params, pool, artifacts)
         .unwrap()
         .0
         .await

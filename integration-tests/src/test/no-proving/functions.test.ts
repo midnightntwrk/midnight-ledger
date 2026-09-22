@@ -89,6 +89,7 @@ import { expect } from 'vitest';
 import { RuntimeCoinCommitmentUtils } from '@/test/utils/RuntimeCoinCommitmentUtils';
 import { LogEventTypeMarker, SignatureKindMarker } from '@/test/utils/Markers';
 import { arrayCell, intCell } from '@/test/utils/value-alignment';
+import { evolveFrom } from '@/test/utils/zswap';
 
 describe('Ledger API - functions', () => {
   /**
@@ -467,6 +468,18 @@ describe('Ledger API - functions', () => {
     expect(persistent).toBeInstanceOf(Array);
     expect(persistent[0]).toBeInstanceOf(Uint8Array);
     expect(persistent[0]).not.toEqual(transient[0]);
+  });
+
+  test('should evolve a nonce with multiple trailing zero bytes', () => {
+    const coin = evolveFrom(
+      Static.encodeFromText('midnight:kernel:nonce_evolve'),
+      300_000n,
+      '00'.repeat(PERSISTENT_HASH_BYTES),
+      '580811fa95269f3ecd4f22d176e079d36093573680b6ef66fa341e687a15b5da'
+    );
+
+    expect(coin.nonce).toHaveLength(PERSISTENT_HASH_BYTES * 2);
+    expect(decodeShieldedCoinInfo(encodeShieldedCoinInfo(coin))).toEqual(coin);
   });
 
   /**
