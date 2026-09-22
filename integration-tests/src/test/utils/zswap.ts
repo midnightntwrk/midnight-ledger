@@ -27,7 +27,7 @@ import {
   type Value,
   type ZswapOffer
 } from '@midnightntwrk/ledger';
-import { Static } from '@/test-objects';
+import { PERSISTENT_HASH_BYTES, Static } from '@/test-objects';
 import { ATOM_FIELD } from '@/test/utils/value-alignment';
 
 /**
@@ -71,9 +71,8 @@ export function evolveFrom(domainSep: Uint8Array, value: bigint, type: RawTokenT
   const thAlignment: Alignment = [ATOM_FIELD, ATOM_FIELD];
   const thValue: Value = transientHash(thAlignment, [domainSep, degrade]);
   const evolvedNonce = upgradeFromTransient(thValue)[0];
-  const updatedEvolvedNonce = new Uint8Array(evolvedNonce.length + 1);
+  const updatedEvolvedNonce = new Uint8Array(PERSISTENT_HASH_BYTES);
   updatedEvolvedNonce.set(evolvedNonce, 0);
-  updatedEvolvedNonce[updatedEvolvedNonce.length] = 0;
   const evolvedNonceAsNonce: Nonce = Buffer.from(updatedEvolvedNonce).toString('hex');
   return {
     nonce: evolvedNonceAsNonce,

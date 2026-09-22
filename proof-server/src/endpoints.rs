@@ -42,6 +42,7 @@ use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as Reso
 use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
 
+use crate::artifacts::ArtifactRegistry;
 use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
 
@@ -168,9 +169,54 @@ pub(crate) async fn get_k(payload: Payload) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok().body(format!("{k}")))
 }
 
+fn key_resolver(artifacts: Data<ArtifactRegistry>, data: Option<ProvingKeyMaterial>) -> Resolver {
+    Resolver::new(
+        PUBLIC_PARAMS.clone(),
+        DustResolver(
+            MidnightDataProvider::new(
+                FetchMode::OnDemand,
+                OutputMode::Log,
+                ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+            )
+            .expect("data provider initialization failed"),
+        ),
+        Box::new(move |location: KeyLocation| {
+            let result = match &data {
+                Some(data) => Ok(Some(data.clone())),
+                None => artifacts.resolve(&location),
+            };
+            Box::pin(std::future::ready(result))
+        }),
+    )
+}
+
+async fn resolve_ir(
+    location: &KeyLocation,
+    inline_ir: Option<Vec<u8>>,
+    artifacts: &ArtifactRegistry,
+    resolver: &Resolver,
+) -> Result<Vec<u8>, WorkError> {
+    if let Some(ir) = inline_ir {
+        return Ok(ir);
+    }
+    if let Some(ir) = artifacts
+        .resolve_ir(location)
+        .map_err(|error| WorkError::BadInput(error.to_string()))?
+    {
+        return Ok(ir);
+    }
+    let material = resolver
+        .resolve_key(location.clone())
+        .await
+        .map_err(|error| WorkError::BadInput(error.to_string()))?
+        .ok_or_else(|| WorkError::BadInput(format!("couldn't find key {}", location.0)))?;
+    Ok(material.ir_source)
+}
+
 #[post("/check")]
 pub(crate) async fn check(
     pool: Data<Arc<WorkerPool>>,
+    artifacts: Data<ArtifactRegistry>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /check...");
@@ -184,37 +230,15 @@ pub(crate) async fn check(
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {
                 let ir = match ir {
                     Some(ir) => ir.0,
                     None => {
-                        let resolver = Resolver::new(
-                            PUBLIC_PARAMS.clone(),
-                            DustResolver(
-                                MidnightDataProvider::new(
-                                    FetchMode::OnDemand,
-                                    OutputMode::Log,
-                                    ledger::dust::DUST_EXPECTED_FILES.to_owned(),
-                                )
-                                .expect("data provider initialization failed"),
-                            ),
-                            Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
-                        );
-                        let proof_data = resolver
-                            .resolve_key(ppi.key_location().clone())
-                            .await
-                            .map_err(|e| WorkError::BadInput(e.to_string()))?;
-
-                        proof_data
-                            .ok_or_else(|| {
-                                WorkError::BadInput(format!(
-                                    "couldn't find built-in key {}",
-                                    ppi.key_location().0
-                                ))
-                            })?
-                            .ir_source
+                        let resolver = key_resolver(artifacts.clone(), None);
+                        resolve_ir(ppi.key_location(), None, &artifacts, &resolver).await?
                     }
                 };
                 let result = match ppi {
@@ -244,6 +268,7 @@ pub(crate) async fn check(
 #[post("/prove")]
 pub(crate) async fn prove(
     pool: Data<Arc<WorkerPool>>,
+    artifacts: Data<ArtifactRegistry>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove...");
@@ -258,7 +283,6 @@ pub(crate) async fn prove(
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
 
-    let data_resolver = data.clone();
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -266,20 +290,8 @@ pub(crate) async fn prove(
                 .build()
                 .unwrap();
             rt.block_on(async move {
-                let resolver = Resolver::new(
-                    PUBLIC_PARAMS.clone(),
-                    DustResolver(
-                        MidnightDataProvider::new(
-                            FetchMode::OnDemand,
-                            OutputMode::Log,
-                            ledger::dust::DUST_EXPECTED_FILES.to_owned(),
-                        )
-                        .expect("data provider initialization failed"),
-                    ),
-                    Box::new(move |_: KeyLocation| {
-                        Box::pin(std::future::ready(Ok(data_resolver.clone())))
-                    }),
-                );
+                let inline_ir = data.as_ref().map(|data| data.ir_source.clone());
+                let resolver = key_resolver(artifacts.clone(), data);
                 let proof = match ppi {
                     ProofPreimageVersioned::V2(mut ppi) => {
                         if let Some(binding_input) = binding_input {
@@ -287,21 +299,10 @@ pub(crate) async fn prove(
                             inner.binding_input = binding_input;
                             ppi = Arc::new(inner);
                         }
-                        let proving_data = match data {
-                            Some(pkm) => pkm,
-                            None => resolver
-                                .resolve_key(ppi.key_location.clone())
-                                .await
-                                .map_err(|e| WorkError::BadInput(e.to_string()))?
-                                .ok_or_else(|| {
-                                    WorkError::BadInput(format!(
-                                        "couldn't find key {}",
-                                        ppi.key_location.0
-                                    ))
-                                })?,
-                        };
+                        let ir_source =
+                            resolve_ir(&ppi.key_location, inline_ir, &artifacts, &resolver).await?;
 
-                        let proof = versioned_ir::prove(ppi, &proving_data.ir_source, &resolver)
+                        let proof = versioned_ir::prove(ppi, &ir_source, &resolver)
                             .await
                             .map_err(WorkError::BadInput)?
                             .0;
