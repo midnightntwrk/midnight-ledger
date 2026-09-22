@@ -1901,8 +1901,7 @@ where
                         match &*action {
                             ContractAction::Call(call) => {
                                 cost.compute_time += model.runtime_cost_model.verifier_key_load;
-                                cost += model
-                                    .proof_verify(call.public_inputs_len());
+                                cost += model.proof_verify(call.public_inputs_len());
                             }
                             ContractAction::Maintain(upd) => {
                                 cost.compute_time +=
