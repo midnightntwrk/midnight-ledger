@@ -10,7 +10,7 @@ description = "Provides data structures and storage primitives for Midnight's le
 proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "base-crypto/proptest"]
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
-stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
+stress-test = ["dep:serde_json", "dep:os_pipe", "dep:sysinfo", "dep:tempfile", "storage-core/test-utilities"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion", "dep:serde_json"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
@@ -29,16 +29,17 @@ serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }
 proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
-tempfile = "3.20"
+tempfile = { version = "3.20", optional = true }
 hashbrown = { version = "^0.17.0", optional = true }
 pprof = { version = "0.15", optional = true, features = ["criterion", "flamegraph"] }
 os_pipe = { version = "1.2.2", optional = true }
 criterion = { version = "^0.5.1", optional = true }
-sysinfo = "0.39.1"
+sysinfo = { version = "0.39.1", optional = true }
 
 [dev-dependencies]
 pastey = "0.2.1"
 rayon = "^1.10.0"
+tempfile = "3.20"
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }
 onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 

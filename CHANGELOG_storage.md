@@ -1,5 +1,11 @@
 # `storage` Changelog
 
+## Unreleased
+
+- fix: `sysinfo` and `tempfile` are only pulled in by the `stress-test` feature
+  (they were unconditional dependencies used solely by stress tests and unit
+  tests), keeping process inspection and temporary files out of library builds
+
 ## Version `2.0.2`
 
 - fix: clear clippy::useless_borrows_in_formatting across workspace

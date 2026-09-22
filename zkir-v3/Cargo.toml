@@ -21,6 +21,8 @@ binary = [
   "dep:indicatif",
   "dep:console",
   "dep:futures-executor",
+  "base-crypto/cli",
+  "base-crypto/fetch",
 ]
 proptest = [
   "dep:pastey",
@@ -34,9 +36,7 @@ proptest = [
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = [
-  "cli",
-] }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 midnight-curves = { version = "^0.3.1" }
 midnight-proofs = { version = "^0.8.1" }

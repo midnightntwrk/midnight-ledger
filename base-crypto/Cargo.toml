@@ -10,6 +10,12 @@ description = "Provides foundational cryptographic primitives for Midnight's led
 default = []
 proptest = ["dep:proptest", "dep:proptest-derive", "serialize/proptest"]
 cli = ["dep:indicatif"]
+# Enables downloading missing public parameters and keys over HTTPS in
+# `data_provider`. Off by default so that verification-only builds (wasm, VM
+# targets) do not link an HTTP client, a TLS stack or OS randomness for
+# temporary files. Without it, `MidnightDataProvider` still serves files that
+# are already present on disk and reports a clear `io::Error` otherwise.
+fetch = ["dep:reqwest", "dep:atomic-write-file", "dep:futures"]
 fixed-point-custom-serde = []
 
 [dependencies]
@@ -29,9 +35,10 @@ sha2 = "^0.11.0"
 flate2 = "^1.1.2"
 k256 = { version = "^0.13.4", features = ["serde"] }
 signature = "^2.2.0"
-reqwest = { version = "^0.13.4", default-features = false, features = ["rustls", "stream"] }
-atomic-write-file = { version = "^0.3.0" }
-futures = { version = "^0.3.31" }
+url = "^2.5"
+reqwest = { version = "^0.13.4", default-features = false, features = ["rustls", "stream"], optional = true }
+atomic-write-file = { version = "^0.3.0", optional = true }
+futures = { version = "^0.3.31", optional = true }
 indicatif = { version = "^0.18.4", optional = true }
 tracing = { version = "^0.1.41" }
 ethnum = "^1.5.2"
@@ -48,6 +55,6 @@ proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
 
 [dev-dependencies]
-midnight-base-crypto = { path = ".", features = ["proptest"] }
+midnight-base-crypto = { path = ".", features = ["proptest", "fetch"] }
 actix-rt = "^2.10.0"
 rand_chacha = "^0.3.1"

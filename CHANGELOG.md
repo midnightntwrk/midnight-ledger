@@ -6,6 +6,17 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: build hygiene for VM targets (wasm32, PolkaVM). `tokio` is now only a
+  dependency of the `proving` feature, the `init_logger`/`LogLevel` API moved
+  behind a new `logging` feature (`tracing-subscriber`), and the unused `rayon`
+  dependency was dropped, so a default (verification-only) build has no async
+  runtime, thread pool, HTTP client or TLS stack. `proving` and
+  `test-utilities` enable `midnight-base-crypto/fetch` for parameter downloads.
+  Consumers calling `init_logger` must enable `midnight-ledger-v9/logging`.
+- ci: `scripts/check-vm-target.sh` (alias `cargo build-vm`) builds the ledger
+  for `wasm32-unknown-unknown` and fails if a network, database, C/asm or OS
+  randomness crate re-enters the verification dependency graph.
+
 ## Ledger 9.1.0.0-rc.4
 
 - fix: dust registration accounting moved to block time, rather than declared

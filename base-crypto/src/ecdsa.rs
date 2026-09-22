@@ -13,11 +13,11 @@
 
 //! ECDSA signature scheme over secp256k1.
 use crate::BinaryHashRepr;
+use crate::rng::derive_crypto_rng;
 use k256::ecdsa;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 use rand::distributions::{Distribution, Standard};
-use rand::rngs::OsRng;
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged, VecExt, tag_enforcement_test};
@@ -109,8 +109,8 @@ simple_arbitrary!(VerifyingKey);
 serialize::randomised_serialization_test!(VerifyingKey);
 
 impl Distribution<VerifyingKey> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, _rng: &mut R) -> VerifyingKey {
-        SigningKey::sample(OsRng).verifying_key()
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> VerifyingKey {
+        SigningKey::sample(derive_crypto_rng(rng)).verifying_key()
     }
 }
 
@@ -263,7 +263,7 @@ serialize::randomised_serialization_test!(Signature);
 
 impl Distribution<Signature> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Signature {
-        let signing_key = SigningKey::sample(OsRng);
+        let signing_key = SigningKey::sample(derive_crypto_rng(rng));
         let mut message = Vec::with_bounded_capacity(32);
         rng.fill_bytes(&mut message);
         signing_key.sign(&message)

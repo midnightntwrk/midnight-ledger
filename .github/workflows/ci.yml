@@ -131,6 +131,33 @@ jobs:
       - name: Build zkir-wasm
         run: nix build .#zkir-wasm
 
+  # The ledger must stay buildable, with default (verification-only) features,
+  # for a `std` target without an operating system, so it can be embedded in a
+  # Substrate runtime. scripts/check-vm-target.sh also fails if a network, TLS,
+  # database, async-runtime or terminal crate re-enters that dependency graph.
+  build-vm-target:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Install Rust with the wasm32 target
+        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b # stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+
+      - name: Check verification-only dependency graph and build for wasm32-unknown-unknown
+        run: scripts/check-vm-target.sh
+
   # Inline matrix job (not a reusable-workflow call) so the check name stays
   # `integration-tests (ubuntu-latest)`. The steps live in a composite action
   # shared with the release flow (prerelease.yml), so there is no duplication.

@@ -136,11 +136,13 @@ Some of these rust crates use feature flags. For the most part, using default fe
 | --- | --- |
 | `binary` | Enables the ZKIR binary target, to avoid polluting downstream dependencies with CLI dependencies. |
 | `cli` | Enables CLI features in `base-crypto`, mainly used to provide the `zkir` binary |
+| `fetch` | Enables downloading missing public parameters in `base-crypto`'s `data_provider` (`reqwest` + TLS). Off by default so verification-only builds for wasm/VM targets carry no HTTP stack; enabled by `proving`, `test-utilities` and the `zkir` binary. |
+| `logging` | Enables `init_logger`/`LogLevel` in the `ledger` crate (`tracing-subscriber`). |
 | `mock-verify` | Enables a mock  verification mode to allow testing large quantities of transactions without the expensive proving step. Replaces proof verification with one that has comparable performance characteristics, but never fails. |
 | `parity-db` | Enables the [parity-db](https://github.com/paritytech/parity-db) storage backend. |
 | `proof-verifying` | Enables proof verifications. Enabled by default, except in the wasm targets, as this embeds verifier keys into binary artifacts and artifact size is a concern there. |
 | `proptest` | Enables property testing implementations. Enabled by default for crate tests. |
-| `proving` | Enables proofs in tests and benchmarks. Note that the library *will* have proving capability, even when not enabled. |
+| `proving` | Enables proofs in tests and benchmarks, and pulls in `tokio` and `fetch` for the proving path. Note that the library *will* have proving capability (given a `ProvingProvider`), even when not enabled. |
 | `stress-test` | Enables expensive storage tests. |
 | `sqlite` | Enables the [SQLite](https://sqlite.org) storage backend. |
 | `test-utilities` | Enables testing helpers in the `ledger` crate. |
@@ -154,7 +156,7 @@ In addition to the rust crates, there are some notable directories and files cap
 | `.tag-decompositions/` | Provides breakdowns of data types used to ensure data formats are not accidentally modified |
 | `docs/` | Contains generated TypeScript documentation from wasm/TS outputs |
 | `integration-tests/` | Contains TypeScript-side integration tests |
-| `scripts/` | Contains disparate scripts that have no other home |
+| `scripts/` | Contains disparate scripts that have no other home; `scripts/check-vm-target.sh` keeps the ledger buildable for OS-less `std` targets, see `docs/vm-targets.md` |
 | `spec/` | Contains documents specifying the intended behaviour of the ledger |
 | `static/` | Contains zero-knowledge key material that is included in build artifacts to simplify the build process of the ledger as a library |
 | `wasm-proving-demos/` | Contains proof-of-concept work demonstrating in-browser proving |

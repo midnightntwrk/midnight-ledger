@@ -1,5 +1,23 @@
 # `base-crypto` Changelog
 
+## Unreleased
+
+- feat: add the `fetch` feature (off by default). Downloading missing public
+  parameters in `data_provider` now requires it; without it
+  `MidnightDataProvider` still serves files already present on disk and
+  returns an `io::Error` of kind `Unsupported` when a download would be
+  needed. `reqwest`, `atomic-write-file` and `futures` became optional
+  dependencies, so verification-only builds (wasm, VM targets) no longer link
+  an HTTP client or TLS stack. Consumers that fetch parameters (proof server,
+  toolkit, tests) must enable `midnight-base-crypto/fetch`.
+- breaking: `MidnightDataProvider::base_url` is now a `url::Url` (previously
+  the identical type re-exported through `reqwest`).
+- feat: add `rng::derive_crypto_rng`, deriving a `StdRng` from any `Rng`.
+- fix: the `Distribution<Standard>` samplers for `schnorr::{VerifyingKey,
+  Signature}` and `ecdsa::{VerifyingKey, Signature}` derive their keys from
+  the RNG they are given instead of `OsRng`, so seeded sampling is
+  deterministic and no library code path reaches operating-system randomness.
+
 ## Version `1.1.0`
 
 - feat: add `within_bounds` on `RunningCost`

@@ -24,6 +24,7 @@ pub mod construct;
 pub mod dust;
 pub mod error;
 pub mod events;
+#[cfg(feature = "logging")]
 #[path = "tracing.rs"]
 mod ledger_tracing;
 mod primitive;
@@ -35,6 +36,7 @@ mod utils;
 pub mod verify;
 pub mod zswap;
 
+#[cfg(feature = "logging")]
 pub use ledger_tracing::{LogLevel, init_logger};
 
 #[cfg(feature = "test-utilities")]

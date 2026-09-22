@@ -31,6 +31,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use storage::arena::Sp;
 use storage::db::DB;
+#[cfg(feature = "proving")]
 use tokio::runtime::Handle;
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::commitment::{Pedersen, PureGeneratorPedersen};
@@ -128,7 +129,12 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
         &self,
     ) -> Result<Transaction<S, ProofMarker, PureGeneratorPedersen, D>, TransactionProvingError<D>>
     {
+        // `MockProver` never awaits anything that needs a runtime, but when a
+        // real proving stack is compiled in, keep the ambient tokio runtime
+        // (if any) entered while we block, so resolvers can use it.
+        #[cfg(feature = "proving")]
         let tokio_handle = Handle::try_current();
+        #[cfg(feature = "proving")]
         let _guard = tokio_handle.as_ref().map(Handle::enter);
         let mut proven = futures::executor::block_on(self.prove(MockProver, &INITIAL_COST_MODEL))?
             .seal(StdRng::seed_from_u64(0x00));

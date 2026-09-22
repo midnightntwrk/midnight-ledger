@@ -69,6 +69,10 @@ panic = "abort"
 [patch.crates-io]
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
+# The pinned `transient-crypto-old` (below) depends on `midnight-storage-core`
+# from crates.io; use the workspace copy so a single, VM-target-clean
+# `storage-core` is in the graph.
+midnight-storage-core = { path = "storage-core" }
 # Because we rely on additions in 2.2
 midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto" }
 

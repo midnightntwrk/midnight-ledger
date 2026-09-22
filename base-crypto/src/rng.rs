@@ -16,6 +16,17 @@
 use rand::rngs::{OsRng, StdRng};
 use rand::{Rng, RngCore, SeedableRng};
 
+/// Derives a cryptographically secure RNG (`StdRng`) seeded from `rng`.
+///
+/// This bridges the gap between [`rand::distributions::Distribution`]
+/// implementations, which are handed an arbitrary `R: Rng + ?Sized`, and key
+/// sampling, which requires a [`rand::CryptoRng`]. The result is exactly as
+/// unpredictable as `rng` itself: with a seeded `rng` the output is
+/// deterministic, and no operating-system randomness is consulted.
+pub fn derive_crypto_rng<R: Rng + ?Sized>(rng: &mut R) -> StdRng {
+    StdRng::from_rng(rng).expect("seeding from an infallible RNG must not fail")
+}
+
 /// A [`Rng`] that can be split. This is *not* the same as [Clone], as the
 /// resulting instance is guaranteed to produce independent random values from
 /// `self`.

@@ -1,5 +1,12 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: remove the unused `sysinfo` dependency; `tempfile` is now only pulled in
+  by the `sqlite` and `parity-db` backends (whose `Default` constructors create
+  temporary databases) and by tests, so the in-memory backend used for
+  verification builds does not touch the filesystem
+
 ## Version `1.2.0`
 
 - feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.

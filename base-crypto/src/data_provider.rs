@@ -13,11 +13,13 @@
 
 //! Provides mechanisms to fetch Midnight proof-related parameters and keys.
 
+#[cfg(feature = "fetch")]
 use futures::StreamExt;
 #[cfg(feature = "cli")]
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
+#[cfg(all(feature = "cli", feature = "fetch"))]
+use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
-use reqwest::Url;
 use sha2::Digest;
 use sha2::Sha256;
 use std::env;
@@ -26,11 +28,16 @@ use std::io;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
+#[cfg(feature = "fetch")]
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+#[cfg(feature = "fetch")]
 use std::time::Duration;
+#[cfg(feature = "fetch")]
 use std::time::Instant;
+#[cfg(feature = "fetch")]
 use tracing::{info, warn};
+use url::Url;
 
 /// Retrieves various static cryptographic artifacts from a data server.
 /// This keeps a local file system cache of the parameters, prover keys, verifier keys, and IR, that
@@ -315,19 +322,7 @@ impl MidnightDataProvider {
         };
         let expected_hash = self.expected_hash(name)?;
         let path = self.dir.join(name);
-        let parent = path.parent().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("parent of path file {name} should exist."),
-            )
-        })?;
-        std::fs::create_dir_all(parent)?;
-        let mut file = atomic_write_file::OpenOptions::new()
-            .read(true)
-            .open(&path)?;
-        self.fetch_data_to(name, expected_hash, &mut file).await?;
-        let mut rfile = file.as_file().try_clone()?;
-        file.commit()?;
+        let mut rfile = self.fetch_data_to(name, expected_hash, &path).await?;
         rfile.seek(io::SeekFrom::Start(0))?;
         Ok(BufReader::new(rfile))
     }
@@ -348,16 +343,32 @@ impl MidnightDataProvider {
         self.fetch(&Self::name_k(k)).await
     }
 
+    /// Downloads `name` into `path`, verifying it against `expected_hash`, and
+    /// returns a readable handle to the committed file.
+    ///
+    /// The download is written through an atomic temporary file, so a partial
+    /// or corrupt download never becomes visible at `path`.
+    #[cfg(feature = "fetch")]
     // Only arise due to feature gates.
     #[allow(irrefutable_let_patterns)]
     async fn fetch_data_to(
         &self,
         name: &str,
         expected_hash: [u8; 32],
-        f: &mut File,
-    ) -> io::Result<()> {
+        path: &Path,
+    ) -> io::Result<File> {
         const RETRIES: usize = 3;
         let desc = self.description(name)?;
+        let parent = path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("parent of path file {name} should exist."),
+            )
+        })?;
+        std::fs::create_dir_all(parent)?;
+        let mut file = atomic_write_file::OpenOptions::new()
+            .read(true)
+            .open(path)?;
         if let OutputMode::Log = &self.output_mode {
             info!(
                 "Missing {desc}. Attempting to download from the host {} - this is not a trusted service, the data will be verified.",
@@ -380,8 +391,8 @@ impl MidnightDataProvider {
             } else {
                 "Retrying..."
             };
-            f.seek(io::SeekFrom::Start(0))?;
-            f.set_len(0)?;
+            file.seek(io::SeekFrom::Start(0))?;
+            file.set_len(0)?;
             let mut hasher = Sha256::new();
             let cli = reqwest::ClientBuilder::new()
                 .user_agent("Midnight Data Provider")
@@ -441,7 +452,7 @@ impl MidnightDataProvider {
                         continue;
                     }
                 };
-                f.write_all(&data)?;
+                file.write_all(&data)?;
                 hasher.update(&data);
                 downloaded += data.len() as u64;
                 #[cfg(feature = "cli")]
@@ -469,7 +480,9 @@ impl MidnightDataProvider {
                 if let OutputMode::Log = self.output_mode {
                     info!("Fetching {desc} - verified correct.");
                 }
-                return Ok(());
+                let rfile = file.as_file().try_clone()?;
+                file.commit()?;
+                return Ok(rfile);
             }
             warn!(
                 ?hash,
@@ -480,6 +493,26 @@ impl MidnightDataProvider {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("Failed to fetch data from {url} after {RETRIES} attempts. Giving up."),
+        ))
+    }
+
+    /// Without the `fetch` feature, nothing can be downloaded: report where the
+    /// file was expected and how to obtain it.
+    #[cfg(not(feature = "fetch"))]
+    async fn fetch_data_to(
+        &self,
+        name: &str,
+        _expected_hash: [u8; 32],
+        path: &Path,
+    ) -> io::Result<File> {
+        let desc = self.description(name)?;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "Missing {desc} at {}. This build of `midnight-base-crypto` was compiled without the `fetch` feature, so it cannot be downloaded from {}. Either place the file there manually, or enable the `fetch` feature.",
+                path.display(),
+                self.base_url
+            ),
         ))
     }
 

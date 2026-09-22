@@ -2,6 +2,9 @@
 
 ## Version `2.3.0`
 
+- fix: the library no longer enables `midnight-transient-crypto/cli` (and with it
+  `indicatif`/`console` terminal I/O) for every dependent; the `zkir` binary
+  enables `midnight-base-crypto/{cli,fetch}` itself through its `binary` feature
 - breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)
 - breaking: default `IrMinorVersion` changed from `V1` to `V2`
 - feat: `LocalProvingProvider` dynamically dispatches V0/V1 circuits through

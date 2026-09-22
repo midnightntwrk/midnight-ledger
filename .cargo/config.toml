@@ -4,3 +4,8 @@
 # server sidesteps this by proving on a `spawn_blocking` thread; local tests
 # (`#[tokio::test]`) run proving on the test-harness thread, so raise its stack.
 RUST_MIN_STACK = "67108864"
+
+[alias]
+# Verification-only ledger build for an OS-less `std` target; the full check
+# (dependency deny list + build) is `scripts/check-vm-target.sh`.
+build-vm = "build --target wasm32-unknown-unknown -p midnight-ledger-v9"
