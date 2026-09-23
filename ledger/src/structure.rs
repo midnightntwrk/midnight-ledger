@@ -908,12 +908,7 @@ impl<
         Intent {
             guaranteed_unshielded_offer: self.guaranteed_unshielded_offer.clone(),
             fallible_unshielded_offer: self.fallible_unshielded_offer.clone(),
-            actions: self
-                .actions
-                .clone()
-                .iter()
-                .map(|x| x.erase_proof())
-                .collect(),
+            actions: self.actions.iter().map(|x| x.erase_proof()).collect(),
             dust_actions: self
                 .dust_actions
                 .as_ref()
@@ -1901,8 +1896,7 @@ where
                         match &*action {
                             ContractAction::Call(call) => {
                                 cost.compute_time += model.runtime_cost_model.verifier_key_load;
-                                cost += model
-                                    .proof_verify(call.public_inputs_len());
+                                cost += model.proof_verify(call.public_inputs_len());
                             }
                             ContractAction::Maintain(upd) => {
                                 cost.compute_time +=
