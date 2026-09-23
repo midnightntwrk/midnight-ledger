@@ -17,7 +17,7 @@
 //! `wellFormed` rejects such a transaction with
 //! `MalformedTransaction::IllegallyDeclaredGuaranteed`. The `Random` and
 //! `GuaranteedOnly` specifiers pick their segment from `rng`, so that draw must
-//! be constrained to the documented `1..=u16::MAX` range.
+//! be constrained to the documented `2..u16::MAX` range.
 
 use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
