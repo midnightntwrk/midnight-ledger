@@ -204,7 +204,19 @@ describe('Ledger API - Transaction.addCalls Zswap partitioning', () => {
 
     const contract = new ContractState();
     contract.setOperation(STORE, op);
-    contract.data = new ChargedState(StateValue.newArray());
+
+    // One slot per cell the call transcripts write, in the layout `buildCallAndOutput`
+    // uses: commitment, coin payload, flag — once for `baseKey` 0 and once for 3.
+    const slots = [0, 3].flatMap(() => [
+      StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_32] }),
+      StateValue.newCell({
+        value: [EMPTY_VALUE, EMPTY_VALUE, EMPTY_VALUE],
+        alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+      }),
+      StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] })
+    ]);
+    contract.data = new ChargedState(slots.reduce((arr, cell) => arr.arrayPush(cell), StateValue.newArray()));
+
     contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
 
     const deploy = new ContractDeploy(contract);
