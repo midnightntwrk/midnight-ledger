@@ -6,10 +6,15 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
+  segment specifiers in `addCalls`
+
 ## Ledger 8.2.0-rc.1
 
-- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
-- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update
+  package.json dependencies accordingly
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred
+  event generation.
 - feat: proof-server support for ZKIR 2.1
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
 - fix: fix potential panic in bridge fee processing
@@ -43,7 +48,8 @@ resolve past the fix.
 
 ## Ledger 8.1.1
 
-- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update
+  package.json dependencies accordingly
 - add array tests
 
 ## 8.1.0
@@ -54,12 +60,10 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
-- fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
-  segment specifiers in `addCalls`
 
 ## 8.0.2
 
@@ -73,10 +77,12 @@ resolve past the fix.
 - fix: log non-proof-erased tx hashes
 - fix: resolve non-determinism and not-to-spec iteration order in sequencing
   check.
-- feat: add `with_genesis_settings` ledger state constructor, that allows providing initial parameters, and initial pool value allocations
+- feat: add `with_genesis_settings` ledger state constructor, that allows providing
+  initial parameters, and initial pool value allocations
 - bugfix: remove accidental structured logging of the full ledger state in some places
 - feat: pull in `storage-core` fix, lazy loading of embedded small nodes
-- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction` that applies every offer in a transaction as failed.
+- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction`
+  that applies every offer in a transaction as failed.
 - feat: proof server built natively on Arm
 - fix: Change divide-by-zero in `dust.rs` from panic to error
 
@@ -97,8 +103,14 @@ resolve past the fix.
 
 - Remove special-casing of validation behaviour depending on the
   `test-utilities` feature being present.
-- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
-- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to now hold its data value on the heap (to reduce Enum size), i.e. this variant is now defined as: `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
+- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`,
+  `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to hold their
+  data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as
+  `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`,
+  `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
+- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to hold its
+  data value on the heap (to reduce Enum size), i.e. this variant is now defined as:
+  `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
 - fix: correctly rehash generation Merkle tree on cNgD processing.
 - Pulled in updates to `midnight-zk`
 - bugfix: various fixes for `ClaimRewardsTransaction`
@@ -143,8 +155,8 @@ resolve past the fix.
 - breaking: feat: remove `inputFeeOverhead` and `outputFeeOverhead`. The use of
   these has dwindled with shielded tokens no longer being the fee payment means,
   and they were never fully accurate. As a more flexible replacement,
-  `Transaction.mockProve` produces a 'proven' transaction that is accurate
-  (modulo a slight overestimation in rare cases) for fee payments. This can be
+  `Transaction.mockProve` produces a 'proven' transaction that is accurate (modulo a slight overestimation in rare
+  cases) for fee payments. This can be
   used to estimate the fees of any modification without the expensive proving
   step accurately.
 - breaking: pull in breaking serialization changes
@@ -348,8 +360,7 @@ resolve past the fix.
 - Add to `LedgerState`:
   - A treasury balance, a map from token types to an amount of tokens
     controlled by privileged transactions
-  - Unclaimed mints, a map from public keys and token types to issued mints
-    (block rewards), that are claimable
+  - Unclaimed mints, a map from public keys and token types to issued mints (block rewards), that are claimable
   - A counter for the unminted native token supply, initialized to 24
     quadrillion atomic units. (Assumed 24 Billion denominated tokens)
 - For Zswap:
