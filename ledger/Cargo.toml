@@ -30,7 +30,7 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
-zkir_v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "890b9241883eccf975887a2e4eb0d86e98e6680d", package = "midnight-zkir", optional = true }
+zkir_v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.1.0-rc.1", package = "midnight-zkir", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
