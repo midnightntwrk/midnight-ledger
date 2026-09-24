@@ -1,0 +1,46 @@
+// This file is part of midnight-ledger.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! `batch_verify` accepts a batch mixing proofs with zero, one and two
+//! accumulators.
+
+use midnight_curves::Fq;
+
+use midnight_transient_crypto::proofs::{PARAMS_VERIFIER, VerifierKey};
+
+use crate::harness::{passing_accumulator, proof_carrying, test_rng};
+
+#[test]
+fn batch_verify_accepts_proofs_with_and_without_accumulators() {
+    let mut rng = test_rng();
+
+    // None.
+    let plain_pis: Vec<Fq> = (0..2).map(|i| Fq::from(i as u64 + 1)).collect();
+    let (plain_vk, plain_proof, plain_stmt) = proof_carrying(&[], &plain_pis, &mut rng);
+
+    // One, and two.
+    let one = passing_accumulator();
+    let (one_vk, one_proof, one_stmt) = proof_carrying(std::slice::from_ref(&one), &[], &mut rng);
+    let (two_vk, two_proof, two_stmt) = proof_carrying(&[one.clone(), one], &[], &mut rng);
+
+    VerifierKey::batch_verify(
+        &PARAMS_VERIFIER,
+        [
+            (&plain_vk, &plain_proof, plain_stmt.into_iter()),
+            (&one_vk, &one_proof, one_stmt.into_iter()),
+            (&two_vk, &two_proof, two_stmt.into_iter()),
+        ]
+        .into_iter(),
+    )
+    .expect("a batch of valid proofs must verify");
+}

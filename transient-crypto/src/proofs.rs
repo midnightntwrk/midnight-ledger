@@ -1194,6 +1194,43 @@ mod accumulator_discharge_tests {
         );
     }
 
+    /// Accumulators are positional, one per `verify_proof`, so their order must
+    /// survive raw and tagged round-trips.
+    #[test]
+    fn a_proof_round_trips_its_accumulators_in_order() {
+        let a = DeferredAccumulator::from_accumulator(&Accumulator::trivial(&[])).unwrap();
+        let b = DeferredAccumulator::from_accumulator(&non_pairing_accumulator()).unwrap();
+        assert_ne!(
+            a, b,
+            "the two fixtures must differ for order to be testable"
+        );
+
+        let proof = |accumulators| Proof {
+            bytes: b"not a real plonk proof, but it must survive too".to_vec(),
+            accumulators,
+        };
+        for original in [
+            proof(vec![]),
+            proof(vec![a]),
+            proof(vec![a, b]),
+            proof(vec![b, a]),
+        ] {
+            let mut bytes = Vec::new();
+            original.serialize(&mut bytes).unwrap();
+            assert_eq!(bytes.len(), original.serialized_size());
+            assert_eq!(Proof::deserialize(&mut &bytes[..], 0).unwrap(), original);
+
+            let mut tagged = Vec::new();
+            serialize::tagged_serialize(&original, &mut tagged).unwrap();
+            assert_eq!(tagged_deserialize::<Proof>(&tagged[..]).unwrap(), original);
+        }
+        assert_ne!(
+            proof(vec![a, b]),
+            proof(vec![b, a]),
+            "equality must distinguish order, or the round-trips above prove little"
+        );
+    }
+
     /// Derived from midnight-circuits' foreign-field encoding, and it fixes the
     /// public-input layout of every proof carrying an accumulator. A change to
     /// it is a wire-format change, so pin the value rather than discover it.
@@ -1210,6 +1247,22 @@ mod accumulator_discharge_tests {
         // A point off the curve must not deserialize.
         let bytes = [0xffu8; 2 * outer::POINT_BYTES];
         assert!(DeferredAccumulator::deserialize(&mut &bytes[..], 0).is_err());
+
+        // Each point is checked: corrupting just one must still be refused.
+        let valid = DeferredAccumulator::from_accumulator(&non_pairing_accumulator())
+            .unwrap()
+            .to_bytes();
+        for (label, range) in [
+            ("lhs", 0..outer::POINT_BYTES),
+            ("rhs", outer::POINT_BYTES..2 * outer::POINT_BYTES),
+        ] {
+            let mut bytes = valid;
+            bytes[range].fill(0xff);
+            assert!(
+                DeferredAccumulator::deserialize(&mut &bytes[..], 0).is_err(),
+                "a corrupt {label} must be refused"
+            );
+        }
     }
 
     /// One point, one encoding. A second encoding of the same accumulator would
@@ -1266,5 +1319,61 @@ mod accumulator_discharge_tests {
             Msm::new(&[C::generator()], &[outer::Scalar::ONE], &fixed),
         );
         assert!(DeferredAccumulator::from_accumulator(&unresolved).is_none());
+    }
+}
+
+#[cfg(test)]
+mod proof_preimage_tests {
+    use super::*;
+
+    fn preimage(inner_proofs: Vec<InnerProofWitness>) -> ProofPreimage {
+        ProofPreimage {
+            inputs: vec![Fr::from(1u64), Fr::from(2u64)],
+            private_transcript: vec![Fr::from(3u64)],
+            public_transcript_inputs: vec![Fr::from(4u64)],
+            public_transcript_outputs: vec![Fr::from(5u64)],
+            inner_proofs,
+            binding_input: Fr::from(6u64),
+            communications_commitment: Some((Fr::from(7u64), Fr::from(8u64))),
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        }
+    }
+
+    /// `inner_proofs` sits mid-struct, so a wrong length prefix would shift
+    /// every later field; whole-struct equality catches that. Witnesses are
+    /// positional, so their order must survive too.
+    #[test]
+    fn a_preimage_round_trips_its_inner_proofs_in_order() {
+        let a = InnerProofWitness::Direct(vec![0xaa; 32]);
+        let b = InnerProofWitness::Direct(vec![0xbb; 96]);
+        let empty = InnerProofWitness::Direct(Vec::new());
+
+        for original in [
+            preimage(vec![]),
+            preimage(vec![a.clone()]),
+            preimage(vec![a.clone(), b.clone()]),
+            preimage(vec![b.clone(), a.clone()]),
+            preimage(vec![empty]),
+        ] {
+            let mut bytes = Vec::new();
+            original.serialize(&mut bytes).unwrap();
+            assert_eq!(bytes.len(), original.serialized_size());
+            assert_eq!(
+                ProofPreimage::deserialize(&mut &bytes[..], 0).unwrap(),
+                original
+            );
+
+            let mut tagged = Vec::new();
+            serialize::tagged_serialize(&original, &mut tagged).unwrap();
+            assert_eq!(
+                tagged_deserialize::<ProofPreimage>(&tagged[..]).unwrap(),
+                original
+            );
+        }
+        assert_ne!(
+            preimage(vec![a.clone(), b.clone()]),
+            preimage(vec![b, a]),
+            "equality must distinguish order, or the round-trips above prove little"
+        );
     }
 }
