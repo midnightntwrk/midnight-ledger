@@ -148,7 +148,7 @@ pub fn proof_carrying(
 }
 
 /// An encoded accumulator as a [`DeferredAccumulator`].
-fn deferred(fields: &[Fq]) -> DeferredAccumulator {
+pub fn deferred(fields: &[Fq]) -> DeferredAccumulator {
     DeferredAccumulator::from_public_input(fields)
         .expect("test accumulator must be collapsed and fixed-base-resolved")
 }

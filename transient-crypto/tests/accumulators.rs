@@ -25,6 +25,9 @@ mod batch_verify_accepts_proofs_with_and_without_accumulators;
 #[path = "accumulators/batch_verify_rejects_bad_accumulator.rs"]
 mod batch_verify_rejects_bad_accumulator;
 
+#[path = "accumulators/carried_accumulators_are_bound_by_the_proof.rs"]
+mod carried_accumulators_are_bound_by_the_proof;
+
 #[path = "accumulators/each_accumulator_block_is_paired.rs"]
 mod each_accumulator_block_is_paired;
 
