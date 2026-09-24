@@ -17,7 +17,9 @@
 //! outer proof verifying. This one carries it the rest of the way: through a
 //! deployed contract operation, a proven transaction, and the ledger's
 //! well-formedness check, which is where the accumulator the instruction
-//! defers meets the pairing check that discharges it.
+//! defers meets the pairing check that discharges it. The same call is then
+//! tampered with, to show a proof cannot drop its accumulator, and costed, to
+//! show the accumulator's verification is charged for.
 //!
 //! Compact cannot emit `verify_proof` yet, so the contract's circuit is
 //! hand-rolled ZKIR, keyed at run time rather than loaded from the test
@@ -32,8 +34,13 @@ use base_crypto::rng::SplittableRng;
 use base_crypto::time::Timestamp;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::dust::{DUST_EXPECTED_FILES, DustResolver};
-use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, ProofVersioned, Transaction};
-use midnight_ledger::test_utilities::{PUBLIC_PARAMS, Resolver, TestState, test_intents, tx_prove};
+use midnight_ledger::error::MalformedTransaction;
+use midnight_ledger::structure::{
+    ContractAction, ContractDeploy, INITIAL_PARAMETERS, ProofVersioned, Signature, Transaction,
+};
+use midnight_ledger::test_utilities::{
+    PUBLIC_PARAMS, Resolver, TestState, Tx, test_intents, tx_prove,
+};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
@@ -45,6 +52,7 @@ use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use std::borrow::Cow;
 use std::collections::HashMap as StdHashMap;
+use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::curve::Fr;
@@ -139,8 +147,39 @@ fn resolver(materials: StdHashMap<String, ProvingKeyMaterial>) -> Resolver {
     )
 }
 
-#[tokio::test]
-async fn contract_call_verifying_an_inner_proof() {
+/// A deployed contract whose one operation verifies an inner proof, and a
+/// proven transaction calling it.
+struct ProvenCall {
+    state: TestState<InMemoryDB>,
+    strictness: WellFormedStrictness,
+    tx: Tx<Signature, InMemoryDB>,
+}
+
+impl ProvenCall {
+    fn well_formed(
+        &self,
+        tx: &Tx<Signature, InMemoryDB>,
+    ) -> Result<(), MalformedTransaction<InMemoryDB>> {
+        tx.well_formed(&self.state.ledger, self.strictness, Timestamp::from_secs(0))
+            .map(|_| ())
+    }
+
+    /// Asserts the call is refused as an invalid proof once `edit` is applied to
+    /// its proof. An unedited rebuild is checked first, so the refusal comes from
+    /// the edit.
+    fn assert_refused(&self, label: &str, edit: impl Fn(&mut ProofVersioned)) {
+        self.well_formed(&with_proof(&self.tx, |_| {}))
+            .expect("rebuilding the transaction must not change it");
+        match self.well_formed(&with_proof(&self.tx, edit)) {
+            Err(MalformedTransaction::InvalidProof(_)) => {}
+            other => panic!("{label}: expected an invalid proof, got {other:?}"),
+        }
+    }
+}
+
+/// Deploys the contract and proves a call to it. This is most of each test's
+/// run time.
+async fn proven_call() -> ProvenCall {
     let mut rng = StdRng::seed_from_u64(0x42);
 
     // The proof the contract will verify. It cannot come from ZKIR: a ZKIR
@@ -234,6 +273,62 @@ async fn contract_call_verifying_an_inner_proof() {
             .await
             .expect("call proving")
     };
+    ProvenCall {
+        state,
+        strictness,
+        tx,
+    }
+}
+
+/// Removes every accumulator a latest-format proof carries.
+fn strip_accumulators(proof: &mut ProofVersioned) {
+    let ProofVersioned::V4(proof) = proof else {
+        panic!("expected a latest-format proof");
+    };
+    proof.accumulators.clear();
+}
+
+/// Rebuilds `tx` with `edit` applied to the proof of its one contract call.
+/// Nothing signs or binds a proof, so only verification can object.
+fn with_proof(
+    tx: &Tx<Signature, InMemoryDB>,
+    edit: impl Fn(&mut ProofVersioned),
+) -> Tx<Signature, InMemoryDB> {
+    let mut tx = tx.clone();
+    let Transaction::Standard(stx) = &mut tx else {
+        panic!("expected a standard transaction");
+    };
+    let mut edited = 0;
+    for (segment, mut intent) in stx.intents.clone() {
+        let actions: Vec<_> = intent
+            .actions
+            .iter_deref()
+            .cloned()
+            .map(|action| match action {
+                ContractAction::Call(call) => {
+                    edited += 1;
+                    let mut call = (*call).clone();
+                    edit(&mut call.proof);
+                    ContractAction::Call(Sp::new(call))
+                }
+                other => other,
+            })
+            .collect();
+        intent.actions = actions.into();
+        stx.intents = stx.intents.insert(segment, intent);
+    }
+    assert_eq!(edited, 1, "the fixture must hold exactly one contract call");
+    tx
+}
+
+#[tokio::test]
+async fn contract_call_verifying_an_inner_proof() {
+    let ProvenCall {
+        mut state,
+        strictness,
+        tx,
+    } = proven_call().await;
+
     // Nothing here is vacuous only if the proof really carries what
     // `verify_proof` deferred, and well-formedness really discharges it.
     let (_, call) = tx.calls().next().expect("the transaction has one call");
@@ -249,4 +344,43 @@ async fn contract_call_verifying_an_inner_proof() {
     tx.well_formed(&state.ledger, strictness, Timestamp::from_secs(0))
         .expect("a call carrying a verified inner proof is well-formed");
     state.assert_apply(&tx, strictness);
+}
+
+/// Stripping the accumulator would skip its pairing. The ledger computes the
+/// statement itself, so the proof no longer verifies.
+#[tokio::test]
+async fn a_call_stripped_of_its_accumulator_is_rejected() {
+    proven_call()
+        .await
+        .assert_refused("stripped", strip_accumulators);
+}
+
+/// Re-wrapping the same PLONK bytes as legacy `V3`, which carries no
+/// accumulators, would also skip the pairing, so it must be refused too.
+#[tokio::test]
+async fn a_call_re_wrapped_as_v3_is_rejected() {
+    proven_call()
+        .await
+        .assert_refused("re-wrapped as V3", |proof| {
+            let ProofVersioned::V4(latest) = proof else {
+                panic!("expected a latest-format proof");
+            };
+            *proof = ProofVersioned::V3(transient_crypto_old::proofs::Proof(latest.bytes.clone()));
+        });
+}
+
+/// Each accumulator adds 12 public inputs and a pairing check, so a call
+/// carrying one must cost more to verify than the same call without it.
+#[tokio::test]
+async fn a_call_pays_for_verifying_its_accumulator() {
+    let call = proven_call().await;
+    let model = &INITIAL_PARAMETERS.cost_model;
+    let stripped = with_proof(&call.tx, strip_accumulators);
+
+    let with = call.tx.validation_cost(model).compute_time;
+    let without = stripped.validation_cost(model).compute_time;
+    assert!(
+        with > without,
+        "verifying one accumulator must cost compute time: {with:?} with, {without:?} without"
+    );
 }
