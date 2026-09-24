@@ -3632,4 +3632,127 @@ mod tests {
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
     }
+
+    /// The proof bytes used by every `ProofVersioned::V4` fixture.
+    const V4_PROOF_BYTES: [u8; 2] = [0xab, 0xcd];
+
+    fn identity_point() -> Vec<u8> {
+        let mut p = vec![0u8; transient_crypto::curve::outer::POINT_BYTES];
+        p[0] = 0xc0;
+        p
+    }
+
+    /// The compressed BLS12-381 G1 generator.
+    fn generator_point() -> Vec<u8> {
+        hex::decode(
+            "97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac58\
+             6c55e83ff97a1aeffb3af00adb22c6bb",
+        )
+        .expect("valid hex")
+    }
+
+    /// The fixture accumulators' wire form: `0` is two identity points, `1` the
+    /// generator then the identity. They differ, so reordering is caught.
+    fn accumulator_bytes(i: usize) -> Vec<u8> {
+        match i {
+            0 => [identity_point(), identity_point()].concat(),
+            1 => [generator_point(), identity_point()].concat(),
+            _ => unreachable!("only two fixture accumulators"),
+        }
+    }
+
+    fn accumulator(i: usize) -> transient_crypto::proofs::DeferredAccumulator {
+        Deserializable::deserialize(&mut &accumulator_bytes(i)[..], 0)
+            .expect("fixture accumulators are well-formed")
+    }
+
+    fn old_proof(bytes: &[u8]) -> transient_crypto_old::proofs::Proof {
+        transient_crypto_old::proofs::Proof(bytes.to_vec())
+    }
+
+    /// The expected encoding of `V4` carrying the fixture accumulators `accs`,
+    /// in order: the variant (`3`), the proof-bytes length (`len << 2`), the
+    /// proof bytes, the accumulator count (`len << 2`), then each accumulator.
+    fn v4_bytes(accs: &[usize]) -> Vec<u8> {
+        let mut out = vec![3, (V4_PROOF_BYTES.len() << 2) as u8];
+        out.extend(V4_PROOF_BYTES);
+        out.push((accs.len() << 2) as u8);
+        for &i in accs {
+            out.extend(accumulator_bytes(i));
+        }
+        out
+    }
+
+    fn v4(accs: &[usize]) -> ProofVersioned {
+        ProofVersioned::V4(Proof {
+            bytes: V4_PROOF_BYTES.to_vec(),
+            accumulators: accs.iter().map(|&i| accumulator(i)).collect(),
+        })
+    }
+
+    /// Pins each variant's discriminant and both directions of its encoding.
+    /// `V4` carries accumulators; `V2` and `V3` keep the legacy proof format.
+    #[test]
+    fn proof_versioned_encodes_every_variant_to_fixed_bytes() {
+        let cases: Vec<(&str, ProofVersioned, Vec<u8>)> = vec![
+            (
+                "V2",
+                ProofVersioned::V2(old_proof(&[0xde, 0xad, 0xbe, 0xef])),
+                vec![1, 16, 0xde, 0xad, 0xbe, 0xef],
+            ),
+            (
+                "V3",
+                ProofVersioned::V3(old_proof(&[0xc0, 0xff, 0xee])),
+                vec![2, 12, 0xc0, 0xff, 0xee],
+            ),
+            ("V4, no accumulators", v4(&[]), v4_bytes(&[])),
+            ("V4, one accumulator", v4(&[0]), v4_bytes(&[0])),
+            ("V4, two accumulators", v4(&[0, 1]), v4_bytes(&[0, 1])),
+            (
+                "V4, two accumulators reversed",
+                v4(&[1, 0]),
+                v4_bytes(&[1, 0]),
+            ),
+        ];
+        assert_ne!(
+            v4(&[0, 1]),
+            v4(&[1, 0]),
+            "the fixture accumulators must differ for order to be pinned"
+        );
+
+        for (label, value, expected) in cases {
+            let mut written = Vec::new();
+            Serializable::serialize(&value, &mut written).expect("serialize");
+            assert_eq!(written, expected, "{label}: encoding must be exact");
+            assert_eq!(
+                written.len(),
+                value.serialized_size(),
+                "{label}: serialized_size must match what serialize wrote"
+            );
+
+            // Decoding is checked separately: a decoder that normalized a field
+            // would pass the check above and fail this one.
+            let read: ProofVersioned = Deserializable::deserialize(&mut &expected[..], 0)
+                .unwrap_or_else(|e| panic!("{label}: expected bytes must decode: {e}"));
+            assert_eq!(read, value, "{label}: decoding must reproduce the value");
+
+            let mut tagged = Vec::new();
+            serialize::tagged_serialize(&value, &mut tagged).expect("tagged serialize");
+            let back: ProofVersioned =
+                serialize::tagged_deserialize(&tagged[..]).expect("tagged deserialize");
+            assert_eq!(back, value, "{label}: tagged round-trip");
+        }
+    }
+
+    #[test]
+    fn proof_versioned_refuses_unknown_discriminants() {
+        // `0` is retired and has its own error path; `4` and `255` were never
+        // used.
+        for byte in [0u8, 4, 255] {
+            assert!(
+                <ProofVersioned as Deserializable>::deserialize(&mut &[byte][..], 0).is_err(),
+                "discriminant {byte} must be refused"
+            );
+        }
+    }
 }
