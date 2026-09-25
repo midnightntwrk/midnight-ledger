@@ -83,20 +83,17 @@ describe('Security Boundary Validation Tests', () => {
     });
 
     /**
-     * Limits merkle tree height to prevent denial-of-service attacks
+     * Rejects invalid merkle tree heights to prevent denial-of-service attacks
      * @given different merkle tree height values including extreme cases
      * @when creating bounded merkle trees with various heights
      * @then height should be capped at maximum safe value of 255
      */
-    test('should limit merkle tree height to prevent DoS', () => {
+    test('should reject invalid merkle tree height to prevent DoS', () => {
       const validTree = new StateBoundedMerkleTree(255);
       expect(validTree.height).toEqual(255);
 
-      const invalidTree = new StateBoundedMerkleTree(256);
-      expect(invalidTree.height).toEqual(0);
-
-      const extremeTree = new StateBoundedMerkleTree(Number.MAX_SAFE_INTEGER);
-      expect(extremeTree.height).toEqual(255);
+      expect(() => new StateBoundedMerkleTree(256)).toThrow();
+      expect(() => new StateBoundedMerkleTree(Number.MAX_SAFE_INTEGER)).toThrow();
     });
   });
 
