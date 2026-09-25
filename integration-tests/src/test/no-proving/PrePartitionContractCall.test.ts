@@ -16,30 +16,31 @@ import {
   ChargedState,
   communicationCommitmentRandomness,
   type ContractAddress,
-  ContractDeploy,
-  ContractMaintenanceAuthority,
   ContractOperation,
-  ContractState,
   encodeContractAddress,
   PrePartitionContractCall,
   PreTranscript,
-  QueryContext,
-  Transaction,
-  WellFormedStrictness
+  QueryContext
 } from '@midnightntwrk/ledger';
-import {
-  INITIAL_NIGHT_AMOUNT,
-  LOCAL_TEST_NETWORK_ID,
-  type ShieldedTokenType,
-  Static,
-  TestResource
-} from '@/test-objects';
+import { TestResource } from '@/test-objects';
 import { kernelSelf, programWithResults } from '@/test/utils/onchain-runtime-program-fragments';
-import { testIntents } from '@/test-utils';
+import { deployOperation, firstCall, noopCallTx } from '@/test/utils/contracts';
 import { ATOM_BYTES_32 } from '@/test/utils/value-alignment';
 import { expect } from 'vitest';
 
 describe('Ledger API - PrePartitionContractCall', () => {
+  const STORE = 'store';
+  let state: TestState;
+  let op: ContractOperation;
+  let addr: ContractAddress;
+
+  beforeEach(() => {
+    state = TestState.new();
+    op = new ContractOperation();
+    op.verifierKey = TestResource.operationVerifierKey();
+    addr = deployOperation(state, STORE, op);
+  });
+
   /**
    * Test string representation of PrePartitionContractCall.
    *
@@ -48,33 +49,18 @@ describe('Ledger API - PrePartitionContractCall', () => {
    * @then Should return formatted string with default values
    */
   test('should print out information as string', () => {
-    const STORE = 'store';
-    const state = TestState.new();
-    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
-
-    state.rewardsShielded(token, 5_000_000_000n);
-    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
-
-    const op = new ContractOperation();
-    op.verifierKey = TestResource.operationVerifierKey();
-
-    const { addr, encodedAddr } = deployContract({
-      state,
-      op,
-      store: STORE
-    });
-
-    const program = programWithResults([...kernelSelf()], [{ value: [encodedAddr], alignment: [ATOM_BYTES_32] }]);
+    const program = programWithResults(
+      [...kernelSelf()],
+      [{ value: [encodeContractAddress(addr)], alignment: [ATOM_BYTES_32] }]
+    );
     const context = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
-    const preTranscript = new PreTranscript(context, program);
-
     const emptyAligned = { value: [], alignment: [] };
 
     const preCall = new PrePartitionContractCall(
       addr,
       STORE,
       op,
-      preTranscript,
+      new PreTranscript(context, program),
       [],
       emptyAligned,
       emptyAligned,
@@ -85,31 +71,25 @@ describe('Ledger API - PrePartitionContractCall', () => {
     expect(preCall.toString()).toMatch(/PrePartitionContractCall.*/);
   });
 
-  function deployContract({ state, op, store }: { state: TestState; op: ContractOperation; store: string }): {
-    addr: ContractAddress;
-    encodedAddr: Uint8Array;
-  } {
-    const unbalancedStrictness = new WellFormedStrictness();
-    unbalancedStrictness.enforceBalancing = false;
+  /**
+   * @given A pre-partition call given two inner proofs, one of them empty
+   * @when Adding it to a transaction
+   * @then Should list both in the call preimage in the given order
+   */
+  test('should carry the inner proofs through partitioning into the call preimage', () => {
+    const tx = noopCallTx(state, addr, STORE, op, STORE, [new Uint8Array([1, 2, 3]), new Uint8Array()]);
 
-    const contract = new ContractState();
-    contract.setOperation(store, op);
-    contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
+    expect(firstCall(tx).proof.toString(true)).toContain('inner_proofs: [Direct([1, 2, 3]), Direct([])]');
+  });
 
-    const deploy = new ContractDeploy(contract);
-    const tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      undefined,
-      undefined,
-      testIntents([], [], [deploy], state.time)
-    );
-    const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
-    const encodedAddr = encodeContractAddress(addr);
+  /**
+   * @given A pre-partition call given no inner proofs
+   * @when Adding it to a transaction
+   * @then Should have an empty inner proof list in the call preimage
+   */
+  test('should carry no inner proofs when none are given', () => {
+    const tx = noopCallTx(state, addr, STORE, op, STORE);
 
-    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
-    const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness());
-
-    return { addr, encodedAddr };
-  }
+    expect(firstCall(tx).proof.toString(true)).toContain('inner_proofs: []');
+  });
 });

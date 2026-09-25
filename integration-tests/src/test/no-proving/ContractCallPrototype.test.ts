@@ -17,14 +17,14 @@ import {
   ContractCall,
   ContractCallPrototype,
   ContractOperation,
-  type PreBinding,
-  type Transcript,
-  Intent,
-  Transaction,
-  rawTokenType as createRawTokenType,
-  nativeToken,
   dummyContractAddress,
-  type ShieldedTokenType
+  Intent,
+  nativeToken,
+  type PreBinding,
+  rawTokenType as createRawTokenType,
+  type ShieldedTokenType,
+  Transaction,
+  type Transcript
 } from '@midnightntwrk/ledger';
 
 import { LOCAL_TEST_NETWORK_ID, Random } from '@/test-objects';
@@ -279,5 +279,45 @@ describe('Ledger API - ContractCallPrototype', () => {
     // tx.imbalances(0) returns combined values with the data coming from the effects.shieldedMints
     expect((tx.imbalances(0).keys().next()?.value as ShieldedTokenType).raw).toEqual(token);
     expect(tx.imbalances(0).values().next()?.value).toEqual(1n);
+  });
+
+  describe('inner proofs', () => {
+    const preimageOf = (innerProofs?: Uint8Array[]): string =>
+      new ContractCallPrototype(
+        Random.contractAddress(),
+        'entry',
+        new ContractOperation(),
+        transcript,
+        transcript,
+        [alignedValue],
+        alignedValue,
+        alignedValue,
+        communicationCommitmentRandomness(),
+        'location',
+        innerProofs
+      )
+        .intoCall({ instance: 'pre-binding', type_: 'pre-binding' } as unknown as PreBinding)
+        .proof.toString(true);
+
+    /**
+     * @given A prototype given two inner proofs, one of them empty
+     * @when Converting it into a call
+     * @then Should list both in the proof preimage in the given order
+     */
+    test('should carry the inner proofs into the preimage in order, empty ones included', () => {
+      expect(preimageOf([new Uint8Array([1, 2, 3]), new Uint8Array()])).toContain(
+        'inner_proofs: [Direct([1, 2, 3]), Direct([])]'
+      );
+    });
+
+    /**
+     * @given A prototype given no inner proofs, or an empty list
+     * @when Converting it into a call
+     * @then Should have an empty inner proof list in the preimage
+     */
+    test('should carry no inner proofs when none are given', () => {
+      expect(preimageOf()).toContain('inner_proofs: []');
+      expect(preimageOf([])).toContain('inner_proofs: []');
+    });
   });
 });
