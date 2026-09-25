@@ -31,4 +31,37 @@ describe('Ledger API - ContractOperationVersionedVerifierKey', () => {
     expect(contractOperationVersionedVerifierKey.version).toEqual('v3');
     expect(contractOperationVersionedVerifierKey.toString(true)).toMatch(/V3\(VerifierKey\(.*/);
   });
+
+  /**
+   * @given A version string 'v4' and a verifier-key[v8]
+   * @when Creating a ContractOperationVersionedVerifierKey
+   * @then Should store the version and format as V4
+   */
+  test('should construct v4 from a verifier-key[v8]', () => {
+    const v8Key = TestResource.circuit('noop')!.verifierKey;
+    const versionedKey = new ContractOperationVersionedVerifierKey('v4', v8Key);
+
+    expect(versionedKey.version).toEqual('v4');
+    expect(versionedKey.toString(true)).toMatch(/^V4\(VerifierKey\(.*/);
+  });
+
+  /**
+   * @given A version string 'v4' and a verifier-key[v6]
+   * @when Creating a ContractOperationVersionedVerifierKey
+   * @then Should throw about the expected verifier-key[v8] tag
+   */
+  test('should reject a verifier-key[v6] as v4', () => {
+    expect(() => new ContractOperationVersionedVerifierKey('v4', TestResource.operationVerifierKey())).toThrow(
+      /expected header tag 'midnight:verifier-key\[v8\]:'/
+    );
+  });
+
+  /**
+   * @given A version string 'v3' and a verifier-key[v8]
+   * @when Creating a ContractOperationVersionedVerifierKey
+   * @then Should throw
+   */
+  test('should reject a verifier-key[v8] as v3', () => {
+    expect(() => new ContractOperationVersionedVerifierKey('v3', TestResource.circuit('noop')!.verifierKey)).toThrow();
+  });
 });

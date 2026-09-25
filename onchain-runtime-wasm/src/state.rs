@@ -516,7 +516,7 @@ impl ContractOperation {
         match tag.as_str() {
             "verifier-key[v6]" => self.0.v2 = Some(tagged_deserialize(&mut &data[..])?),
             "verifier-key[v8]" => self.0.v3 = Some(tagged_deserialize(&mut &data[..])?),
-            _ => return Err(JsError::new("unknown verifier key tag: '{tag}'")),
+            _ => return Err(JsError::new(&format!("unknown verifier key tag: '{tag}'"))),
         }
         Ok(())
     }
