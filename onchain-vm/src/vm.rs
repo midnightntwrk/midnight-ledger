@@ -634,7 +634,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     },
                 )?;
                 stack.push((
-                    vnew(if *storage { Strong } else { Weak }, value.clone()),
+                    vnew(if *storage { Strong } else { Weak }, value.clone().into()),
                     CacheKey(None),
                 ))
             }
@@ -788,7 +788,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         i += 1;
                         stack_keys.next().unwrap()
                     }
-                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone()))),
+                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone().into()))),
                 });
                 let mut curr = stack.pop().unwrap();
                 for key in refined_path {
