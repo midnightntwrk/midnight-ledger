@@ -151,6 +151,8 @@ pub struct Proof {
     pub accumulators: Vec<DeferredAccumulator>,
 }
 tag_enforcement_test!(Proof);
+#[cfg(feature = "proptest")]
+serialize::randomised_tagged_serialization_test!(Proof);
 
 impl Proof {
     /// Builds a proof from just the PLONK bytes, with no accumulators. Use for
@@ -517,6 +519,8 @@ impl Tagged for DeferredAccumulator {
     }
 }
 tag_enforcement_test!(DeferredAccumulator);
+#[cfg(feature = "proptest")]
+serialize::randomised_tagged_serialization_test!(DeferredAccumulator);
 
 impl Serializable for DeferredAccumulator {
     fn serialize(&self, writer: &mut impl Write) -> Result<(), io::Error> {
@@ -1017,6 +1021,8 @@ pub struct ProofPreimage {
     pub key_location: KeyLocation,
 }
 tag_enforcement_test!(ProofPreimage);
+#[cfg(feature = "proptest")]
+serialize::randomised_tagged_serialization_test!(ProofPreimage);
 
 impl ProofPreimage {
     /// Runs witness generation and checks for correctness without generating a
@@ -1210,6 +1216,22 @@ mod accumulator_discharge_tests {
         // A point off the curve must not deserialize.
         let bytes = [0xffu8; 2 * outer::POINT_BYTES];
         assert!(DeferredAccumulator::deserialize(&mut &bytes[..], 0).is_err());
+
+        // Each point is checked: corrupting just one must still be refused.
+        let valid = DeferredAccumulator::from_accumulator(&non_pairing_accumulator())
+            .unwrap()
+            .to_bytes();
+        for (label, range) in [
+            ("lhs", 0..outer::POINT_BYTES),
+            ("rhs", outer::POINT_BYTES..2 * outer::POINT_BYTES),
+        ] {
+            let mut bytes = valid;
+            bytes[range].fill(0xff);
+            assert!(
+                DeferredAccumulator::deserialize(&mut &bytes[..], 0).is_err(),
+                "a corrupt {label} must be refused"
+            );
+        }
     }
 
     /// One point, one encoding. A second encoding of the same accumulator would
