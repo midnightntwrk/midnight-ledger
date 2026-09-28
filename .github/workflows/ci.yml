@@ -33,6 +33,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
+      # Cheap, dependency-free guard placed before the Nix install.
+      # `zkir-precompiles` feeds the `local-params` derivation, but the
+      # crates embed a committed copy of that derivation's output from
+      # `*/static` via `include_bytes!`. Cargo never regenerates it, so a
+      # circuit change without a rebuild goes unnoticed until the data provider
+      # rejects the published artifacts.
+      - name: Check zkir-precompiles and committed static artifacts are in sync
+        run: ./scripts/check-zkir-precompiles-sync.sh
+
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:

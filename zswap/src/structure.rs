@@ -187,6 +187,53 @@ impl From<CoinCiphertext> for encryption::Ciphertext {
     }
 }
 
+// The accessors below decode the `ProofPreimage`s built in `construct.rs`. Inputs and
+// outputs share the same trailing preimage layout -- the spent/created `CoinInfo`
+// followed by the binding randomness `rc` as the final element -- so the decoding lives
+// here once rather than being repeated per type.
+//
+// NOTE: These are tied to the implementation in construct.rs.
+
+/// The coin encoded in the preimage's inputs, immediately before the binding randomness.
+fn preimage_coin(proof: &ProofPreimage) -> CoinInfo {
+    let inputs = &proof.inputs;
+    CoinInfo::from_field_repr(&inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1])
+        .expect("coin info must be correct encoded in input preimage")
+}
+
+/// The value the preimage moves, as a positive delta. Callers spending value negate it.
+fn preimage_delta(proof: &ProofPreimage) -> Delta {
+    let coin = preimage_coin(proof);
+    Delta {
+        token_type: coin.type_,
+        value: coin.value.try_into().unwrap_or(i128::MAX),
+    }
+}
+
+/// The binding randomness `rc`, the last preimage input and a single Fr element.
+///
+/// If retrieval fails, we return default – this is incorrect, but this should not happen
+/// during honest usage, and the alternative is largely to panic.
+fn preimage_binding_randomness(proof: &ProofPreimage) -> PedersenRandomness {
+    proof
+        .inputs
+        .last()
+        .and_then(|inp| (*inp).try_into().ok())
+        .unwrap_or_default()
+}
+
+/// The segment the preimage is bound to, written last to the public transcript.
+fn preimage_segment(proof: &ProofPreimage) -> Option<u16> {
+    proof
+        .public_transcript_outputs
+        .iter()
+        .copied()
+        .last()
+        .map(TryInto::<u16>::try_into)
+        .transpose()
+        .unwrap_or(None)
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serializable, Serialize)]
 #[tag = "zswap-authorized-claim[v3]"]
 /// A claim to a specific public key, authorized by the user's private key.
@@ -244,31 +291,11 @@ impl<P: Storable<D>, D: DB> Input<P, D> {
 
 impl<D: DB> Input<ProofPreimage, D> {
     pub fn delta(&self) -> Delta {
-        // NOTE: This is tied to the implementation in construct.rs
-        // Input before last is CoinInfo
-        let inputs = &self.proof.inputs;
-        let coin = CoinInfo::from_field_repr(
-            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
-        )
-        .expect("coin info must be correct encoded in input preimage");
-        Delta {
-            token_type: coin.type_,
-            value: coin.value.try_into().unwrap_or(i128::MAX),
-        }
+        preimage_delta(&self.proof)
     }
 
     pub fn binding_randomness(&self) -> PedersenRandomness {
-        // NOTE: This is tied to the implementation in construct.rs
-        // rc is the last input, and should be a single Fr element.
-        //
-        // If retrieval fails, we return default – this is incorrect, but this should not happen
-        // during honest usage, and the alternative is largely to panic.
-        self
-            .proof
-            .inputs
-            .last()
-            .and_then(|inp| (*inp).try_into().ok())
-            .unwrap_or_default()
+        preimage_binding_randomness(&self.proof)
     }
 }
 
@@ -287,14 +314,7 @@ impl<P: Storable<D>, D: DB> Debug for Input<P, D> {
 
 impl<D: DB> Input<ProofPreimage, D> {
     pub fn segment(&self) -> Option<u16> {
-        self.proof
-            .public_transcript_outputs
-            .iter()
-            .copied()
-            .last()
-            .map(TryInto::<u16>::try_into)
-            .transpose()
-            .unwrap_or(None)
+        preimage_segment(&self.proof)
     }
 }
 
@@ -325,42 +345,20 @@ impl<P: Storable<D>, D: DB> Output<P, D> {
 
 impl<D: DB> Output<ProofPreimage, D> {
     pub fn delta(&self) -> Delta {
-        // NOTE: This is tied to the implementation in construct.rs.
-        // Input before last is CoinInfo
-        let inputs = &self.proof.inputs;
-        let coin = CoinInfo::from_field_repr(
-            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
-        )
-        .expect("coin info must be correct encoded in input preimage");
+        // NOTE: negated because outputs remove value from the offer.
+        let delta = preimage_delta(&self.proof);
         Delta {
-            token_type: coin.type_,
-            value: coin.value.try_into().unwrap_or(i128::MAX).saturating_neg(),
+            value: delta.value.saturating_neg(),
+            ..delta
         }
     }
 
     pub fn binding_randomness(&self) -> PedersenRandomness {
-        // NOTE: This is tied to the implementation in construct.rs.
-        // rc is the last input, and should be a single Fr element.
         // NOTE: rc negated because output commitments are subtracted
-        //
-        // If retrieval fails, we return default – this is incorrect, but this should not happen
-        // during honest usage, and the alternative is largely to panic.
-        -self
-            .proof
-            .inputs
-            .last()
-            .and_then(|inp| PedersenRandomness::try_from(*inp).ok())
-            .unwrap_or_default()
+        -preimage_binding_randomness(&self.proof)
     }
     pub fn segment(&self) -> Option<u16> {
-        self.proof
-            .public_transcript_outputs
-            .iter()
-            .copied()
-            .last()
-            .map(TryInto::<u16>::try_into)
-            .transpose()
-            .unwrap_or(None)
+        preimage_segment(&self.proof)
     }
 }
 
@@ -418,6 +416,32 @@ impl<D: DB> Transient<ProofPreimage, D> {
 }
 
 impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
+    /// Recombines an input and an output into a transient: the inverse of
+    /// [`Transient::as_input`] and [`Transient::as_output`], and kept beside them so that a
+    /// change to the field set has to be made in one place.
+    ///
+    /// The coin commitment, contract address and ciphertext come from the output and the
+    /// nullifier from the input; each side keeps its own value commitment and proof.
+    ///
+    /// Only the transient's storage-independent fields are taken from the input, so the
+    /// input may be backed by a different database than the output — callers that build one
+    /// against a scratch tree do exactly that.
+    pub fn from_parts<DIn: DB>(input: Input<P, DIn>, output: Output<P, D>) -> Self
+    where
+        P: Storable<DIn>,
+    {
+        Transient {
+            nullifier: input.nullifier,
+            coin_com: output.coin_com,
+            value_commitment_input: input.value_commitment,
+            value_commitment_output: output.value_commitment,
+            contract_address: output.contract_address,
+            ciphertext: output.ciphertext,
+            proof_input: input.proof,
+            proof_output: output.proof,
+        }
+    }
+
     pub fn as_input(&self) -> Input<P, D> {
         Input {
             nullifier: self.nullifier,

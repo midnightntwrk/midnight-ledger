@@ -1892,7 +1892,14 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     }
 
     pub fn public_inputs_len(&self) -> usize {
-        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
+        2usize.saturating_add(
+            self.guaranteed_transcript
+                .iter()
+                .chain(self.fallible_transcript.iter())
+                .flat_map(|t| t.program.iter())
+                .map(|op| op.field_size())
+                .fold(0, |a, b| a.saturating_add(b)),
+        )
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
