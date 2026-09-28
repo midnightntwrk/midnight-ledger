@@ -28,6 +28,7 @@ import {
   type RawTokenType,
   type SignatureEnabled,
   type Signaturish,
+  type Signature,
   type ZswapInput,
   ZswapLocalState,
   ZswapOffer,
@@ -103,15 +104,15 @@ export const sortBigIntArray = (arr: bigint[]): bigint[] => {
   return arr.sort((a, b) => Number(a - b));
 };
 
-export const corruptSignature = (signature: string): string => {
-  const bytes = Buffer.from(signature, 'hex');
+export const corruptSignature = (signature: Signature): Signature => {
+  const bytes = Buffer.from(signature.value, 'hex');
   const randomIndex = Math.floor(Math.random() * (bytes.length - 4));
   const randomBit = Math.floor(Math.random() * 8);
 
   const bitMask = 2 ** randomBit;
   // eslint-disable-next-line no-bitwise
   bytes[4 + randomIndex] ^= bitMask;
-  return bytes.toString('hex');
+  return { tag: signature.tag, value: bytes.toString('hex') };
 };
 
 export const generateHex = (len: number) =>

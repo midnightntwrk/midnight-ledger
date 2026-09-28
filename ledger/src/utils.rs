@@ -13,7 +13,8 @@
 
 use std::io::Read;
 
-use serialize::Serializable;
+use base_crypto::envelope::Envelope;
+use serialize::{Deserializable, Serializable, Tagged};
 use storage::{Storable, arena::Sp, db::DB, storage::HashMap};
 
 #[allow(unused)]
@@ -78,5 +79,35 @@ impl<K: Ord + Serializable + Storable<D>, V: Storable<D>, D: DB> KeySortedIter
         let mut items = self.iter().map(|sp| (*sp).clone()).collect::<Vec<_>>();
         items.sort_by_key(|a| a.0.clone());
         items.into_iter().map(|(_, v)| v)
+    }
+}
+
+// Technical means to get around not being able to blanket-impl `Envelope` for `Option`
+#[derive(Serializable, Clone)]
+#[tag = "option-envelope"]
+pub enum OptionEnvelope<T> {
+    Some(T),
+    None,
+}
+
+impl<A: Envelope<B> + Storable<D>, B, D: DB> Envelope<OptionEnvelope<B>> for Option<Sp<A, D>> {
+    fn into_envelope(&self) -> OptionEnvelope<B> {
+        match self {
+            Some(t) => OptionEnvelope::Some((**t).into_envelope()),
+            None => OptionEnvelope::None,
+        }
+    }
+}
+
+// Technical means to get around not being able to blanket-impl `Envelope` for `Option`
+#[derive(Serializable, Clone)]
+#[tag = "vec-envelope"]
+pub struct VecEnvelope<T>(pub Vec<T>);
+
+impl<A: Envelope<B> + Storable<D>, B, D: DB> Envelope<VecEnvelope<B>>
+    for storage::storage::Array<A, D>
+{
+    fn into_envelope(&self) -> VecEnvelope<B> {
+        VecEnvelope(self.iter_deref().map(A::into_envelope).collect())
     }
 }

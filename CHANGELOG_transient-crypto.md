@@ -1,5 +1,16 @@
 # `transient-crypto` Changelog
 
+## Version `3.0.0`
+
+- breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7
+- breaking: `Zkir` trait reworked: removed `Relation + Tagged + Deserializable`
+  supertraits, added `type ProverKey` associated type, `read_raw_pk`,
+  `write_raw_pk`, `load_ir_from_tagged`, `load_prover_key_from_tagged` as
+  required methods, `k`/`keygen`/`keygen_vk` moved from defaults to required
+- feat: `VerifierKey` preserves `original_bytes()` across initialization for
+  v1/v2 round-tripping
+- feat: `VerifierKey::Initialized` variant now retains the original raw bytes
+
 ## Version `2.1.1`
 
 - security: `VerifierKey` serialization is now independent of whether the key has

@@ -1,0 +1,6 @@
+[env]
+# ZK proving (PLONK `create_proof` + circuit synthesis, e.g. the SHA256 chip)
+# is deeply recursive and overflows the 2 MiB default thread stack. The proof
+# server sidesteps this by proving on a `spawn_blocking` thread; local tests
+# (`#[tokio::test]`) run proving on the test-harness thread, so raise its stack.
+RUST_MIN_STACK = "67108864"

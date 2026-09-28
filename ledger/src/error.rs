@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
+use crate::dust::{DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
-use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
+use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{self, Commitment, Nullifier, PublicAddress, TokenType};
 use coin_structure::contract::ContractAddress;
@@ -86,7 +85,7 @@ pub enum SystemTransactionError {
         distributed_amount: u128,
         reserve_supply: u128,
     },
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
     TreasuryDisabled,
@@ -163,10 +162,10 @@ impl Display for SystemTransactionError {
                     "illegal distribution of {distributed_amount} reserve tokens, exceeding remaining supply of {reserve_supply}"
                 )
             }
-            SystemTransactionError::GenerationInfoAlreadyPresent(gen_info) => write!(
+            SystemTransactionError::InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             SystemTransactionError::InvalidBasisPoints(bp) => {
                 write!(
@@ -223,7 +222,7 @@ pub enum TransactionInvalid<D: DB> {
     InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvariantViolation(InvariantViolation),
     RewardTooSmall {
         claimed: u128,
@@ -231,6 +230,19 @@ pub enum TransactionInvalid<D: DB> {
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
+    ContractMetadataTooLarge {
+        address: ContractAddress,
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    ContractAuthorityMetadataTooLarge {
+        address: ContractAddress,
+        size: u64,
+        limit: u64,
+    },
+    IrNotFound(EntryPointBuf),
+    IrAlreadyPresent(EntryPointBuf),
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -303,14 +315,33 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
             ),
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            InitialNonceAlreadyPresent(nonce) => write!(
                 formatter,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
             MerkleTreeError(err) => err.fmt(formatter),
+            ContractMetadataTooLarge {
+                address,
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            ContractAuthorityMetadataTooLarge {
+                address,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
+            IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
         }
     }
 }
@@ -341,8 +372,8 @@ impl<D: DB> From<onchain_runtime::error::TranscriptRejected<D>> for TransactionI
 impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
     fn from(err: DustStateError) -> TransactionInvalid<D> {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                TransactionInvalid::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                TransactionInvalid::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => TransactionInvalid::MerkleTreeError(err),
         }
@@ -352,8 +383,8 @@ impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
 impl From<DustStateError> for SystemTransactionError {
     fn from(err: DustStateError) -> SystemTransactionError {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                SystemTransactionError::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                SystemTransactionError::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => SystemTransactionError::MerkleTreeError(err),
         }
@@ -396,6 +427,15 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
+    MetadataTooLarge {
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    AuthorityMetadataTooLarge {
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl Display for MalformedContractDeploy {
@@ -414,6 +454,18 @@ impl Display for MalformedContractDeploy {
             IncorrectChargedState => write!(
                 formatter,
                 "contract deployment contained an incorrectly computed map of charged keys"
+            ),
+            MetadataTooLarge {
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            AuthorityMetadataTooLarge { size, limit } => write!(
+                formatter,
+                "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
@@ -485,7 +537,7 @@ pub enum MalformedTransaction<D: DB> {
         validity_end: Timestamp,
     },
     MultipleDustRegistrationsForKey {
-        key: VerifyingKey,
+        key: SignatureVerifyingKey,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -543,6 +595,7 @@ pub enum MalformedTransaction<D: DB> {
         inputs: Vec<UtxoSpend>,
         erased_signatures: Vec<()>,
     },
+    ZeroValueUtxo(UtxoOutput),
 }
 
 #[derive(Clone, Debug)]
@@ -1066,6 +1119,12 @@ impl<D: DB> Display for MalformedTransaction<D> {
                     erased_signatures.len()
                 )
             }
+            ZeroValueUtxo(utxo) => {
+                write!(
+                    formatter,
+                    "unshielded offer validation error: zero-value utxo output not permitted: {utxo:?}"
+                )
+            }
         }
     }
 }
@@ -1219,6 +1278,7 @@ pub enum TransactionProvingError<D: DB> {
         entry_point: EntryPointBuf,
     },
     MissingKeyset(KeyLocation),
+    UnknownVerifierKeyVersion(String),
     Proving(ProvingError),
     Tokio(std::io::Error),
 }
@@ -1247,6 +1307,10 @@ impl<D: DB> Display for TransactionProvingError<D> {
             MissingKeyset(keyloc) => write!(
                 formatter,
                 "attempted proof, but couldn't find keys with ID {keyloc:?}"
+            ),
+            UnknownVerifierKeyVersion(tag) => write!(
+                formatter,
+                "attempted proof, but verifier key had unrecognized version tag {tag:?}"
             ),
             Proving(e) => e.fmt(formatter),
             Tokio(e) => e.fmt(formatter),
@@ -1429,7 +1493,7 @@ impl Error for DustLocalStateError {}
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum DustStateError {
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     MerkleTreeError(InvalidUpdate),
 }
 
@@ -1437,10 +1501,10 @@ impl Display for DustStateError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use DustStateError::*;
         match self {
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             MerkleTreeError(err) => err.fmt(f),
         }

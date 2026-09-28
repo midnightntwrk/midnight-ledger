@@ -1,6 +1,6 @@
 # `serialize` Changelog
 
-## Unreleased
+## Version `1.2.0`
 
 - feat: add `peek_tag` to identify a tag before deserialization
 

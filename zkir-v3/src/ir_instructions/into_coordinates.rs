@@ -17,7 +17,7 @@ use midnight_circuits::{
     instructions::{EccInstructions, ZeroInstructions},
 };
 
-use midnight_curves::JubjubExtended;
+use midnight_curves::{JubjubExtended, curve25519};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -31,6 +31,8 @@ use crate::{
 /// point as a pair of base field values. Supported on:
 ///   - `JubjubPoint`    -> `(Native, Native)`
 ///   - `Secp256k1Point` -> `(Secp256k1Base, Secp256k1Base)`
+///   - `Secp256r1Point`      -> `(Secp256r1Base, Secp256r1Base)`
+///   - `Curve25519Point`     -> `(Curve25519Base, Curve25519Base)`
 ///
 /// # Errors
 ///
@@ -53,6 +55,22 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
             let (x, y) = p.coordinates().unwrap();
             Ok((Secp256k1Base(x), Secp256k1Base(y)))
         }
+        Secp256r1Point(p) => {
+            if bool::from(p.is_identity()) {
+                return Err(anyhow::anyhow!(
+                    "Cannot extract coordinates of the Secp256r1 identity"
+                ));
+            }
+            let (x, y) = p.coordinates().unwrap();
+            Ok((Secp256r1Base(x), Secp256r1Base(y)))
+        }
+        Curve25519Point(p) => {
+            // Edwards points always have affine coordinates, including the
+            // identity, which is (0, 1).
+            let p_ext: curve25519::Curve25519 = (*p).into();
+            let (x, y) = p_ext.coordinates().unwrap();
+            Ok((Curve25519Base(x), Curve25519Base(y)))
+        }
         _ => Err(anyhow::anyhow!(
             "Unsupported coordinate extraction of {:?}",
             point.get_type(),
@@ -64,6 +82,8 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
 /// point as a pair of assigned base field values. Supported on:
 ///   - `JubjubPoint`    -> `(Native, Native)`
 ///   - `Secp256k1Point` -> `(Secp256k1Base, Secp256k1Base)`
+///   - `Secp256r1Point`      -> `(Secp256r1Base, Secp256r1Base)`
+///   - `Curve25519Point`     -> `(Curve25519Base, Curve25519Base)`
 ///
 /// For Weierstrass curves this constrains the point to not be the identity
 /// (which has no affine coordinates), making the circuit unsatisfiable on the
@@ -87,11 +107,28 @@ pub fn into_coordinates_incircuit(
             ))
         }
         Secp256k1Point(p) => {
-            let curve = std_lib.secp256k1_curve();
+            let curve = std_lib.secp256k1();
             curve.assert_non_zero(layouter, p)?;
             Ok((
                 Secp256k1Base(curve.x_coordinate(p)),
                 Secp256k1Base(curve.y_coordinate(p)),
+            ))
+        }
+        Secp256r1Point(p) => {
+            let curve = std_lib.p256();
+            curve.assert_non_zero(layouter, p)?;
+            Ok((
+                Secp256r1Base(curve.x_coordinate(p)),
+                Secp256r1Base(curve.y_coordinate(p)),
+            ))
+        }
+        Curve25519Point(p) => {
+            // Edwards points always have affine coordinates, including the
+            // identity, so no non-zero assertion is needed.
+            let curve = std_lib.curve25519();
+            Ok((
+                Curve25519Base(curve.x_coordinate(p)),
+                Curve25519Base(curve.y_coordinate(p)),
             ))
         }
         _ => Err(plonk::Error::Synthesis(format!(
@@ -103,7 +140,7 @@ pub fn into_coordinates_incircuit(
 
 #[cfg(test)]
 mod tests {
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, curve25519, k256, p256};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -119,7 +156,7 @@ mod tests {
             (Native(Fr(x)), Native(Fr(y)))
         );
 
-        let p = secp256k1::Secp256k1::random(OsRng);
+        let p = k256::K256::random(OsRng);
         let (x, y) = p.coordinates().unwrap();
         assert_eq!(
             into_coordinates_offcircuit(&Secp256k1Point(p)).unwrap(),
@@ -127,8 +164,23 @@ mod tests {
         );
 
         // The Secp256k1 identity has no affine coordinates.
-        assert!(
-            into_coordinates_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err()
+        assert!(into_coordinates_offcircuit(&Secp256k1Point(k256::K256::identity())).is_err());
+
+        let p = p256::P256::random(OsRng);
+        let (x, y) = p.coordinates().unwrap();
+        assert_eq!(
+            into_coordinates_offcircuit(&Secp256r1Point(p)).unwrap(),
+            (Secp256r1Base(x), Secp256r1Base(y))
+        );
+
+        // The Secp256r1 identity has no affine coordinates.
+        assert!(into_coordinates_offcircuit(&Secp256r1Point(p256::P256::identity())).is_err());
+
+        let p = curve25519::Curve25519Subgroup::random(OsRng);
+        let (x, y) = Into::<curve25519::Curve25519>::into(p).coordinates().unwrap();
+        assert_eq!(
+            into_coordinates_offcircuit(&Curve25519Point(p)).unwrap(),
+            (Curve25519Base(x), Curve25519Base(y))
         );
 
         // Coordinate extraction on a scalar is unsupported.

@@ -63,14 +63,15 @@ const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref OUTPUT_VK: VerifierKey =
-        tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
+    pub static ref OUTPUT_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
             .expect("Zswap Output VK should be valid");
-    pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
             .expect("Zswap Spend VK should be valid");
-    pub static ref SIGN_VK: VerifierKey = tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
-        .expect("Zswap Sign VK should be valid");
+    pub static ref SIGN_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
+            .expect("Zswap Sign VK should be valid");
 }
 
 #[cfg(feature = "proof-verifying")]
@@ -138,8 +139,15 @@ impl AuthorizedClaim<Proof> {
             op.field_repr(&mut statement);
         }
         SIGN_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
@@ -187,8 +195,15 @@ impl<D: DB> Input<Proof, D> {
             op.field_repr(&mut statement);
         }
         SPEND_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
@@ -255,8 +270,15 @@ impl<D: DB> Output<Proof, D> {
             op.field_repr(&mut statement);
         }
         OUTPUT_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
