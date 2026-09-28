@@ -1210,9 +1210,7 @@ mod partition_tests {
 
         let commitments = [com(10), com(1)];
         let flags = has_claims_in_fallible(&commitments, &all, |e, c| {
-            e.claimed_shielded_spends
-                .union(&e.claimed_shielded_receives)
-                .member(c)
+            e.claimed_shielded_spends.member(c) || e.claimed_shielded_receives.member(c)
         });
         // com(1) shares its bytes with the claimed *nullifier*, but is not a claimed spend.
         assert_eq!(flags, vec![true, false]);
