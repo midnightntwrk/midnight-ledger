@@ -24,6 +24,11 @@
 - feat: `ir_v1` module with `v1_prove`, `v1_verify`, `v1_mock_verify` and
   adapters (`V1Params`, `V1Resolver`, `preimage_to_v1`)
 
+## Version `2.1.1`
+
+- pull in hardened `serialize`, `base-crypto` and `transient-crypto`
+  deserialization.
+
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes
