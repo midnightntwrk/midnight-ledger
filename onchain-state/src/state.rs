@@ -1226,6 +1226,95 @@ mod tests {
         assert_eq!(val, copy);
     }
 
+    /// The scalar field modulus `p`, little-endian, with `x` added, giving the non-canonical
+    /// byte encoding of `x + p`. Checks the constant against `Fr` itself, so a wrong modulus
+    /// fails loudly instead of silently weakening the test.
+    fn field_alias(x: u8) -> AlignedValue {
+        let mut bytes = hex::decode("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001")
+            .unwrap();
+        bytes.reverse();
+        assert!(Fr::from_le_bytes(&bytes).is_none(), "p itself must not be a field element");
+        let mut carry = x as u16;
+        for b in bytes.iter_mut() {
+            let sum = *b as u16 + carry;
+            *b = sum as u8;
+            carry = sum >> 8;
+        }
+        assert_eq!(carry, 0);
+        let atom = ValueAtom(bytes);
+        assert!(atom.is_in_normal_form());
+        AlignedValue::new(
+            base_crypto::fab::Value(vec![atom]),
+            Alignment::singleton(AlignmentAtom::Field),
+        )
+        .expect("`x + p` fits `Field` in the unchecked encoding")
+    }
+
+    fn canonical_field(x: u8) -> AlignedValue {
+        AlignedValue::new(
+            base_crypto::fab::Value(vec![ValueAtom(vec![x])]),
+            Alignment::singleton(AlignmentAtom::Field),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn field_alias_is_rejected_in_checked_context() {
+        let canonical = canonical_field(5);
+        let alias = field_alias(5);
+
+        // The premise of the attack: distinct values, identical proof representation.
+        assert_ne!(canonical, alias);
+        let mut canonical_repr = Vec::<Fr>::new();
+        canonical.field_repr(&mut canonical_repr);
+        let mut alias_repr = Vec::<Fr>::new();
+        alias.field_repr(&mut alias_repr);
+        assert_eq!(canonical_repr, alias_repr);
+
+        // The canonical value is accepted, the alias is not.
+        assert!(AlignedValueChecked::try_from(canonical.clone()).is_ok());
+        assert!(AlignedValueChecked::try_from(alias.clone()).is_err());
+
+        // Binary deserialization enforces the same.
+        let mut bytes = Vec::new();
+        Serializable::serialize(&alias, &mut bytes).unwrap();
+        assert!(
+            <AlignedValueChecked as Deserializable>::deserialize(&mut bytes.as_slice(), 0).is_err()
+        );
+        let mut bytes = Vec::new();
+        Serializable::serialize(&canonical, &mut bytes).unwrap();
+        assert!(
+            <AlignedValueChecked as Deserializable>::deserialize(&mut bytes.as_slice(), 0).is_ok()
+        );
+    }
+
+    #[test]
+    fn field_alias_map_key_is_rejected_when_checking_state_values() {
+        // A `Set<Field>` replay guard holding the canonical key and its alias.
+        let cell = || StateValue::<InMemoryDB>::Cell(Sp::new(canonical_field(1)));
+        let canonical_only = StateValue::<InMemoryDB>::Map(
+            HashMap::new().insert(canonical_field(5), cell()),
+        );
+        let with_alias = StateValue::<InMemoryDB>::Map(
+            HashMap::new()
+                .insert(canonical_field(5), cell())
+                .insert(field_alias(5), cell()),
+        );
+        assert!(canonical_only.try_into_checked().is_ok());
+        assert!(with_alias.try_into_checked().is_err());
+        // Nested inside an array, and as a cell value, too.
+        assert!(
+            StateValue::<InMemoryDB>::Array(Array::new().push(with_alias.clone()))
+                .try_into_checked()
+                .is_err()
+        );
+        assert!(
+            StateValue::<InMemoryDB>::Cell(Sp::new(field_alias(5)))
+                .try_into_checked()
+                .is_err()
+        );
+    }
+
     #[test]
     fn test_state_ser() {
         let cs = ChargedState::<InMemoryDB>::new(StateValue::Null);
