@@ -6,6 +6,15 @@
 - feat: add `Envelope` trait derive macro, for building signing envelopes
 - feat: add `Mul` implementation of `CostDuration` and `FixedPoint`
 
+## Version `1.0.1`
+
+- security: reject non-canonical `Value` and `ValueAtom` encodings: a singleton
+  value encoded in the multi-entry form, and an atom that fits the single-byte
+  form encoded as multiple bytes.
+- security: `AlignedValue` deserialization now rejects a value that does not fit
+  its declared alignment.
+- fix: `Duration::from_hours` saturates instead of overflowing.
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
