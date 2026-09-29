@@ -6,6 +6,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: update rustls to address RUSTSEC-2026-0285.
+- fix: preserve full nonce width in integration test coin evolution.
+- feat: proof server resolves contract artifacts from configured directories.
+
 ## Ledger 9.1.0.0-rc.4
 
 - fix: dust registration accounting moved to block time, rather than declared

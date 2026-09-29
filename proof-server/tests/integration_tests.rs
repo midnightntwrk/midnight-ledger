@@ -18,6 +18,7 @@ mod common {
     use std::time::Duration;
 
     use actix_web::{dev::ServerHandle, rt};
+    use midnight_proof_server::artifacts::ArtifactRegistry;
     use midnight_proof_server::server;
     use midnight_proof_server::worker_pool::WorkerPool;
     use reqwest::Client;
@@ -61,7 +62,7 @@ mod common {
     }
 
     pub fn start_server(num_workers: usize, job_limit: usize) -> TestServer {
-        start_server_impl(num_workers, job_limit, false)
+        start_server_impl(num_workers, job_limit, false, None)
     }
 
     pub fn start_server_with_fetch_params(
@@ -69,11 +70,19 @@ mod common {
         job_limit: usize,
         fetch_params: bool,
     ) -> TestServer {
-        start_server_impl(num_workers, job_limit, fetch_params)
+        start_server_impl(num_workers, job_limit, fetch_params, None)
     }
 
-    fn start_server_impl(num_workers: usize, job_limit: usize, fetch_params: bool) -> TestServer {
+    pub fn start_server_impl(
+        num_workers: usize,
+        job_limit: usize,
+        fetch_params: bool,
+        artifacts: Option<ArtifactRegistry>,
+    ) -> TestServer {
         init_logger();
+        let artifacts = artifacts.unwrap_or_else(|| {
+            ArtifactRegistry::load(&[]).expect("Failed to create empty artifact registry")
+        });
 
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -81,7 +90,7 @@ mod common {
             rt::System::new().block_on(async move {
                 let pool = WorkerPool::new(num_workers, job_limit, 600.0);
                 let (srv, bound_port) =
-                    server(0, fetch_params, pool).expect("Failed to start server");
+                    server(0, fetch_params, pool, artifacts).expect("Failed to start server");
                 tx.send((srv.handle(), bound_port))
                     .expect("Failed to send server handle");
                 srv.await.expect("Server error");
@@ -883,6 +892,167 @@ mod prove_endpoint {
         log::info!("Prove response: {} bytes", bytes.len());
 
         let _proof: ledger::structure::ProofVersioned =
+            tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
+
+        stop_server(server).await;
+    }
+}
+
+mod registered_artifacts {
+    use super::common::*;
+    use super::test_data::create_zswap_output_proof_preimage;
+    use ledger::structure::{ProofPreimageVersioned, ProofVersioned};
+    use midnight_proof_server::artifacts::ArtifactRegistry;
+    use midnight_proof_server::endpoints::PUBLIC_PARAMS;
+    use serde_json::json;
+    use serialize::{tagged_deserialize, tagged_serialize};
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver, WrappedIr};
+
+    struct TestArtifacts {
+        directory: PathBuf,
+    }
+
+    impl TestArtifacts {
+        fn new(material: &ProvingKeyMaterial) -> Self {
+            let root = std::env::temp_dir().join(format!("proof-server-{}", uuid::Uuid::new_v4()));
+            for directory in ["compiler", "keys", "zkir"] {
+                fs::create_dir_all(root.join(directory))
+                    .expect("Failed to create artifact directory");
+            }
+            let mut manifest = json!({"manifest-version": "1", "keys": {}, "zkir": {}});
+            for (directory, name, bytes) in [
+                ("keys", "output.prover", &material.prover_key),
+                ("keys", "output.verifier", &material.verifier_key),
+                ("zkir", "output.bzkir", &material.ir_source),
+            ] {
+                fs::write(root.join(directory).join(name), bytes)
+                    .expect("Failed to write artifact");
+                manifest[directory][name] = json!({
+                    "type": "file",
+                    "size": bytes.len(),
+                    "hash": hex::encode(Sha256::digest(bytes)),
+                });
+            }
+            fs::write(
+                root.join("compiler/contract-manifest.json"),
+                manifest.to_string(),
+            )
+            .expect("Failed to write artifact manifest");
+
+            Self { directory: root }
+        }
+    }
+
+    impl Drop for TestArtifacts {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
+    #[tokio::test]
+    async fn checks_inline_ir_without_registered_artifacts() {
+        let mut preimage = create_zswap_output_proof_preimage();
+        let material = PUBLIC_PARAMS
+            .resolve_key(preimage.key_location().clone())
+            .await
+            .expect("Failed to resolve output key")
+            .expect("Output key not found");
+        let location = KeyLocation(
+            format!("contract:{}/output?vk={}", "ab".repeat(32), "00".repeat(32)).into(),
+        );
+        match &mut preimage {
+            ProofPreimageVersioned::V2(preimage) => Arc::make_mut(preimage).key_location = location,
+            _ => unreachable!(),
+        }
+
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let ir = Some(WrappedIr(material.ir_source));
+        let mut body = Vec::new();
+        tagged_serialize(&(preimage, ir), &mut body).expect("Failed to serialize check request");
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/check", server.base_url()))
+            .body(body)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 200);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn checks_and_proves_without_inline_artifacts() {
+        let mut preimage = create_zswap_output_proof_preimage();
+        let material = PUBLIC_PARAMS
+            .resolve_key(preimage.key_location().clone())
+            .await
+            .expect("Failed to resolve output key")
+            .expect("Output key not found");
+        let artifacts = TestArtifacts::new(&material);
+        let registry = ArtifactRegistry::load(std::slice::from_ref(&artifacts.directory))
+            .expect("Failed to register test artifacts");
+
+        let location = KeyLocation(
+            format!(
+                "contract:{}/output?vk={}",
+                "ab".repeat(32),
+                hex::encode(Sha256::digest(&material.verifier_key)),
+            )
+            .into(),
+        );
+        match &mut preimage {
+            ProofPreimageVersioned::V2(preimage) => Arc::make_mut(preimage).key_location = location,
+            _ => unreachable!(),
+        }
+
+        let server = start_server_impl(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            false,
+            Some(registry),
+        );
+        let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
+
+        let ir: Option<WrappedIr> = None;
+        let mut body = Vec::new();
+        tagged_serialize(&(preimage.clone(), ir), &mut body)
+            .expect("Failed to serialize check request");
+
+        let response = client
+            .post(format!("{}/check", server.base_url()))
+            .body(body)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 200);
+
+        let data: Option<ProvingKeyMaterial> = None;
+        let binding_input: Option<transient_crypto::curve::Fr> = None;
+        let mut body = Vec::new();
+        tagged_serialize(&(preimage, data, binding_input), &mut body)
+            .expect("Failed to serialize prove request");
+
+        let response = client
+            .post(format!("{}/prove", server.base_url()))
+            .body(body)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 200);
+
+        let bytes = response
+            .bytes()
+            .await
+            .expect("Failed to get response bytes");
+        let _proof: ProofVersioned =
             tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
 
         stop_server(server).await;

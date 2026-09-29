@@ -41,6 +41,8 @@ tokio = "1.46.1"
 async-channel = "2.5.0"
 time = { version = "0.3.47", features = ["serde-human-readable"] }
 serde = "1.0.219"
+serde_json = "1.0.140"
+sha2 = "0.10"
 
 [dev-dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger-v9", features = ["test-utilities", "proving"] }
@@ -53,4 +55,3 @@ function_name = "^0.3.0"
 tokio = { version = "^1.46.1", features = ["full"] }
 rustls = "0.23.28"
 reqwest = { version = "^0.13.4", default-features = false, features = ["json", "rustls"] }
-serde_json = "1.0.140"
