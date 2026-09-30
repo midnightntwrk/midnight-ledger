@@ -5,6 +5,11 @@
 - feat: add conversions from ECDSA keys to user addresses
 - breaking: updated ECDSA domain separator
 
+## Version `2.0.2`
+
+- pull in hardened `serialize`, `base-crypto`, `storage-core` and
+  `transient-crypto` deserialization.
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking transient-crypto changes

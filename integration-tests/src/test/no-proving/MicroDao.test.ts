@@ -109,7 +109,7 @@ describe('Ledger API - MicroDao', () => {
   test('should simulate DAO operations', () => {
     const orgSk = Random.generate32Bytes();
     const sep = [Static.encodeFromText('lares:udao:pk')];
-    const orgPk = persistentCommit([ATOM_BYTES_32], sep, [orgSk]);
+    const orgPk = persistentCommit([ATOM_BYTES_32], sep, [Static.trimTrailingZeros(orgSk)]);
 
     const ops = setupOperations();
 
@@ -299,7 +299,7 @@ describe('Ledger API - MicroDao', () => {
     );
 
     const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
-    const encodedAddr = encodeContractAddress(addr);
+    const encodedAddr = Static.trimTrailingZeros(encodeContractAddress(addr));
 
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());
@@ -329,6 +329,8 @@ describe('Ledger API - MicroDao', () => {
   }) {
     console.log(':: Part 2: Setting topic');
 
+    const coinPk = Static.trimTrailingZeros(encodeCoinPublicKey(state.zswapKeys.coinPublicKey));
+
     const context = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
     const program = programWithResults(
       [
@@ -339,7 +341,7 @@ describe('Ledger API - MicroDao', () => {
           alignment: [ATOM_BYTES_1, ATOM_COMPRESS]
         }),
         ...cellWrite(getKey(3), false, {
-          value: [ONE_VALUE, encodeCoinPublicKey(state.zswapKeys.coinPublicKey)],
+          value: [ONE_VALUE, coinPk],
           alignment: [ATOM_BYTES_1, ATOM_BYTES_32]
         }),
         ...cellWrite(getKey(1), true, {
@@ -370,7 +372,7 @@ describe('Ledger API - MicroDao', () => {
       transcripts[0][1],
       [{ value: [Static.trimTrailingZeros(orgSk)], alignment: [ATOM_BYTES_32] }],
       {
-        value: [Static.encodeFromText('test topic'), encodeCoinPublicKey(state.zswapKeys.coinPublicKey)],
+        value: [Static.encodeFromText('test topic'), coinPk],
         alignment: [ATOM_COMPRESS, ATOM_BYTES_32]
       },
       {
@@ -595,7 +597,7 @@ describe('Ledger API - MicroDao', () => {
         offer = offer.merge(ZswapOffer.fromTransient(transient));
       } else {
         publicTranscriptResults.push({
-          value: [encodeContractAddress(addr)],
+          value: [encodedAddr],
           alignment: [ATOM_BYTES_32]
         });
         publicTranscript.push(
@@ -844,7 +846,7 @@ describe('Ledger API - MicroDao', () => {
       advanceOp,
       transcripts[0][0],
       transcripts[0][1],
-      [{ value: [orgSk], alignment: [ATOM_BYTES_32] }],
+      [{ value: [Static.trimTrailingZeros(orgSk)], alignment: [ATOM_BYTES_32] }],
       { value: [], alignment: [] },
       { value: [], alignment: [] },
       communicationCommitmentRandomness(),
@@ -919,11 +921,11 @@ describe('Ledger API - MicroDao', () => {
       const nul = persistentCommit(
         [ATOM_BYTES_32],
         [Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0udao:rn\\0')],
-        [sk]
+        [Static.trimTrailingZeros(sk)]
       );
       const privateTranscriptOutputs: AlignedValue[] = [
         { value: [ONE_VALUE], alignment: [ATOM_BYTES_8] },
-        { value: [sk], alignment: [ATOM_BYTES_32] },
+        { value: [Static.trimTrailingZeros(sk)], alignment: [ATOM_BYTES_32] },
         { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] },
         { value: [vote ? ONE_VALUE : EMPTY_VALUE], alignment: [ATOM_BYTES_1] },
         { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] },
@@ -1066,6 +1068,9 @@ describe('Ledger API - MicroDao', () => {
   }) {
     console.log(':: Part 8: Cash Out');
 
+    const coinPk = Static.trimTrailingZeros(encodeCoinPublicKey(state.zswapKeys.coinPublicKey));
+    const encodedBeneficiary = Static.trimTrailingZeros(Static.encodeFromHex(beneficiary));
+
     const contract = state.ledger.index(addr)!;
     expect(contract.data.state.type(), 'array');
 
@@ -1118,7 +1123,7 @@ describe('Ledger API - MicroDao', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [ONE_VALUE, encodeCoinPublicKey(state.zswapKeys.coinPublicKey), EMPTY_VALUE],
+        value: [ONE_VALUE, coinPk, EMPTY_VALUE],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1153,11 +1158,11 @@ describe('Ledger API - MicroDao', () => {
       [
         { value: [THREE_VALUE], alignment: [ATOM_BYTES_1] },
         {
-          value: [ONE_VALUE, Static.encodeFromHex(beneficiary)],
+          value: [ONE_VALUE, encodedBeneficiary],
           alignment: [ATOM_BYTES_1, ATOM_BYTES_32]
         },
         {
-          value: [ONE_VALUE, Static.encodeFromHex(beneficiary)],
+          value: [ONE_VALUE, encodedBeneficiary],
           alignment: [ATOM_BYTES_1, ATOM_BYTES_32]
         },
         { value: [ONE_VALUE], alignment: [ATOM_BYTES_8] },
@@ -1194,7 +1199,7 @@ describe('Ledger API - MicroDao', () => {
       cashOutOp,
       transcripts[0][0],
       transcripts[0][1],
-      [{ value: [encodeCoinPublicKey(state.zswapKeys.coinPublicKey)], alignment: [ATOM_BYTES_32] }],
+      [{ value: [coinPk], alignment: [ATOM_BYTES_32] }],
       { value: [], alignment: [] },
       {
         value: [
