@@ -6,6 +6,30 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.0-rc.5
+
+Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
+Internal dependency requirements are pinned to the new exact versions so that
+consumers cannot resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an rc.5 node rejects data an rc.4 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
+- `storage` moves to `2.0.4` and `storage-core` to `1.2.2`, skipping the `2.0.3`
+  and `1.2.1` numbers that `8.1.2` published from the `ledger-8` line.
+
 ## Ledger 9.1.0.0-rc.4
 
 - fix: dust registration accounting moved to block time, rather than declared

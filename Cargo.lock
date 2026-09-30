@@ -3065,7 +3065,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-serialize",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 3.0.0",
  "pastey",
  "proptest",
@@ -3164,7 +3164,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",
@@ -3189,7 +3189,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm-v9"
-version = "1.0.0-rc.4"
+version = "1.0.0-rc.5"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3251,7 +3251,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "4.0.0-rc.3"
+version = "4.0.0-rc.4"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3436,7 +3436,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "criterion",
  "crypto",
@@ -3446,7 +3446,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "os_pipe",
  "parking_lot",
  "pastey",
@@ -3489,7 +3489,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "archery",
  "criterion",
@@ -3505,7 +3505,7 @@ dependencies = [
  "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-serialize",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "midnight-storage-macros 1.0.0",
  "parity-db",
  "parking_lot",
@@ -3531,7 +3531,7 @@ dependencies = [
  "derive-where",
  "midnight-serialize",
  "midnight-serialize-macros 1.0.0",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "pastey",
  "proc-macro2",
  "proptest",
@@ -3612,7 +3612,7 @@ dependencies = [
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
- "midnight-storage-core 1.2.1",
+ "midnight-storage-core 1.2.2",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.5",
  "pastey",

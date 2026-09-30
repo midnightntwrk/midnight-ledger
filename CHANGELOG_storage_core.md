@@ -1,6 +1,8 @@
 # `storage-core` Changelog
 
-## Version `1.2.1`
+## Version `1.2.2`
+
+Skips `1.2.1`, published from the `ledger-8` line.
 
 - pull in hardened `serialize` and `base-crypto` deserialization.
 

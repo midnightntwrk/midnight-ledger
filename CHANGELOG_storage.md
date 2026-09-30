@@ -1,6 +1,8 @@
 # `storage` Changelog
 
-## Version `2.0.3`
+## Version `2.0.4`
+
+Skips `2.0.3`, published from the `ledger-8` line.
 
 - security: `MerklePatriciaTrie` deserialization now enforces full structural
   canonicity rather than annotation consistency alone, so a trie whose structure
