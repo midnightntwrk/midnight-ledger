@@ -24,7 +24,7 @@
 //!   interface to the concrete [`IvcInstance`].
 
 pub use midnight_aggregation::{
-    ivc::{IvcError, IvcInstance, IvcVerifier, setup as ivc_setup},
+    ivc::{IvcError, IvcInstance, IvcState, IvcVerifier, setup as ivc_setup},
     multi_circuit_aggregator::{
         AggregableRelation, AggregationWitness, Aggregator, InnerCircuitsContext, ProofAggregation,
         Verifier as AggregationVerifier,
@@ -32,6 +32,12 @@ pub use midnight_aggregation::{
 };
 pub use midnight_circuits::hash::poseidon::PoseidonState as AggregationTranscript;
 pub use midnight_zk_stdlib::MidnightVK;
+pub use single_circuit::{
+    SingleCircuitAggregation, SingleCircuitAggregator, SingleCircuitContext, SingleCircuitInstance,
+    SingleCircuitState, SingleCircuitVerifier, SingleCircuitWitness,
+};
+
+mod single_circuit;
 
 use midnight_curves::Bls12;
 use midnight_proofs::{

@@ -691,3 +691,337 @@ async fn aggregate_dust_proofs() {
         verify_time.as_secs_f64() / verify_time_1.as_secs_f64().max(f64::EPSILON)
     );
 }
+
+/// Balances fresh, otherwise-empty transactions until `n` Dust spend proof
+/// preimages have been captured (see `aggregate_dust_proofs` for details).
+async fn collect_dust_preimages(n: usize) -> Vec<ProofPreimage> {
+    let mut rng = StdRng::seed_from_u64(0x44);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    state.give_fee_token(&mut rng, n + 5).await;
+
+    let strictness = WellFormedStrictness::default();
+    let mut dust_preimages: Vec<ProofPreimage> = Vec::new();
+    for _ in 0..2 * n + 10 {
+        if dust_preimages.len() >= n {
+            break;
+        }
+        let empty_tx: Transaction<Signature, _, _, _> =
+            Transaction::new("local-test", Default::default(), None, Default::default());
+        let tx = state
+            .balance_tx(rng.split(), empty_tx, &RESOLVER)
+            .await
+            .unwrap();
+        dust_preimages.extend(state.captured_dust_preimages.clone());
+        state.assert_apply(&tx, strictness);
+    }
+    assert!(
+        dust_preimages.len() >= n,
+        "only captured {}/{n} dust spend proofs",
+        dust_preimages.len()
+    );
+    dust_preimages.truncate(n);
+    dust_preimages
+}
+
+/// Compares the multi-circuit aggregator against the single-circuit one on
+/// the same `N` Dust spend proofs.
+///
+/// Every Dust proof shares one VK, so the single-circuit aggregator can pin
+/// that VK in its IVC context: no per-step VK hashing in-circuit, and the
+/// decider hashes each statement once instead of also re-hashing the whole
+/// inner VK per claim. Reports fold time, proof size, decider time and full
+/// verification time for both, plus a single-circuit N=1 baseline. As a
+/// no-aggregation baseline it also verifies the same inner proofs one by one
+/// and with `midnight_zk_stdlib::batch_verify`.
+///
+/// `N` defaults to 5 and can be set with `$AGG_N`.
+///
+/// Reads the SRS from `$SRS_DIR`, then `$MIDNIGHT_PP`, then `~/.cache/midnight/zk-params`.
+#[tokio::test]
+async fn aggregate_dust_proofs_single_vs_multi_circuit() {
+    use midnight_ledger::structure::{ContractProofEvidence, ProofKind, ProofMarker};
+    use std::time::{Duration, Instant};
+    use transient_crypto::aggregation::{
+        AggregatedContractProof, AggregationTranscript, AggregationVerifier, AggregationVerify,
+        AggregationWitness, InnerCircuitsContext, IvcInstance, IvcState, ProofAggregation,
+        SingleCircuitAggregation, SingleCircuitContext, SingleCircuitInstance,
+        SingleCircuitVerifier, SingleCircuitWitness,
+    };
+    use zkir_v3::ir_aggregation::AggregableIrSource;
+
+    type Single = SingleCircuitAggregation<AggregableIrSource>;
+
+    let n: usize = std::env::var("AGG_N")
+        .ok()
+        .map(|v| v.parse().expect("AGG_N must be a number"))
+        .unwrap_or(5);
+    const IVC_K: u32 = 19;
+    const INNER_K: u32 = 13;
+
+    let srs_dir = std::env::var("SRS_DIR")
+        .or_else(|_| std::env::var("MIDNIGHT_PP"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").expect("HOME must be set"))
+                .join(".cache/midnight/zk-params")
+        });
+    let load_outer_srs = || {
+        transient_crypto::aggregation::load_midnight_srs(&srs_dir, IVC_K).unwrap_or_else(|e| {
+            panic!("failed to load bls_midnight_2p{IVC_K} from {srs_dir:?}: {e}")
+        })
+    };
+
+    // ── Inner circuit and N real Dust spend proofs ────────────────────────────
+    let dust_preimages = collect_dust_preimages(n).await;
+
+    let dust_mat = RESOLVER
+        .resolve_key(KeyLocation(Cow::Borrowed("midnight/dust/spend")))
+        .await
+        .expect("resolver error for dust spend")
+        .expect("midnight/dust/spend IrSource not found");
+    let dust_ir_v3: zkir_v3::IrSource =
+        serialize::tagged_deserialize(std::io::Cursor::new(&dust_mat.ir_source[..]))
+            .expect("dust IrSource tagged deserialize must succeed");
+    let dust_agg_ir = AggregableIrSource(dust_ir_v3);
+
+    let inner_srs = transient_crypto::aggregation::load_midnight_srs(&srs_dir, INNER_K)
+        .unwrap_or_else(|e| panic!("failed to load bls_midnight_2p{INNER_K}: {e}"));
+    let dust_agg_vk = midnight_zk_stdlib::setup_vk(&inner_srs, &dust_agg_ir);
+    let dust_agg_pk = midnight_zk_stdlib::setup_pk(&dust_agg_ir, &dust_agg_vk);
+
+    let mut rng = StdRng::seed_from_u64(0x45);
+    let inner_proofs: Vec<(Vec<transient_crypto::curve::outer::Scalar>, Vec<u8>)> = dust_preimages
+        .iter()
+        .map(|preimage| {
+            let preproc = dust_agg_ir
+                .preprocess(preimage)
+                .expect("dust AggregableIrSource preprocess must succeed");
+            let pis = preproc.pis.clone();
+            let proof = midnight_zk_stdlib::prove::<
+                AggregableIrSource,
+                AggregationTranscript<transient_crypto::curve::outer::Scalar>,
+            >(
+                &inner_srs,
+                &dust_agg_pk,
+                &dust_agg_ir,
+                &pis,
+                preproc,
+                rng.split(),
+            )
+            .expect("dust inner prove must succeed");
+            (pis, proof)
+        })
+        .collect();
+
+    // What the decider pays per claim besides the 2-input chain step: the
+    // statement digest over the claim's raw public inputs.
+    let nb_public_inputs = inner_proofs[0].0.len();
+    let start = Instant::now();
+    for (pis, _) in &inner_proofs {
+        std::hint::black_box(zkir_v3::ir_aggregation::aggregation_digest(pis));
+    }
+    let digest_per_claim = start.elapsed() / n as u32;
+
+    // ── Baseline: no aggregation ──────────────────────────────────────────────
+    type Transcript = AggregationTranscript<transient_crypto::curve::outer::Scalar>;
+    let inner_params = inner_srs.verifier_params();
+    let inner_proofs_bytes: usize = inner_proofs.iter().map(|(_, p)| p.len()).sum();
+
+    let start = Instant::now();
+    for (pis, proof) in &inner_proofs {
+        midnight_zk_stdlib::verify::<AggregableIrSource, Transcript>(
+            &inner_params,
+            &dust_agg_vk,
+            pis,
+            None,
+            proof,
+        )
+        .expect("individual inner verification must succeed");
+    }
+    let individual_verify = start.elapsed();
+
+    let start = Instant::now();
+    let vks = vec![dust_agg_vk.clone(); n];
+    let formatted_pis: Vec<Vec<_>> = inner_proofs
+        .iter()
+        .map(|(pis, _)| vec![zkir_v3::ir_aggregation::aggregation_digest(pis)])
+        .collect();
+    let proofs: Vec<Vec<u8>> = inner_proofs.iter().map(|(_, p)| p.clone()).collect();
+    midnight_zk_stdlib::batch_verify::<Transcript>(
+        &inner_params,
+        &vks,
+        &formatted_pis,
+        &proofs,
+        false,
+    )
+    .expect("batch inner verification must succeed");
+    let batch_verify = start.elapsed();
+
+    struct Report {
+        fold: Duration,
+        proof_size: usize,
+        decider: Duration,
+        verify: Duration,
+    }
+
+    // ── Single-circuit aggregation ────────────────────────────────────────────
+    struct SingleVerifier {
+        verifier: SingleCircuitVerifier<AggregableIrSource>,
+        instance: SingleCircuitInstance<AggregableIrSource>,
+    }
+    impl AggregationVerify for SingleVerifier {
+        fn verify_aggregated_proof(
+            &self,
+            proof: &AggregatedContractProof,
+        ) -> Result<(), anyhow::Error> {
+            self.verifier
+                .verify(&self.instance, &proof.ivc_proof)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        }
+    }
+
+    let run_single = |proofs: &[(Vec<_>, Vec<u8>)]| -> Report {
+        let ctx = SingleCircuitContext::new(dust_agg_vk.clone(), inner_srs.verifier_params());
+        let (mut aggregator, verifier) = Single::setup(load_outer_srs(), IVC_K, ctx.clone());
+
+        let start = Instant::now();
+        let mut ivc_proof = vec![];
+        for (pis, proof) in proofs {
+            ivc_proof = aggregator
+                .prove_step(SingleCircuitWitness::new(pis.clone(), proof.clone()))
+                .expect("single-circuit IVC step must succeed");
+        }
+        let fold = start.elapsed();
+
+        let instance = aggregator.instance();
+        assert_eq!(instance.state().statements().len(), proofs.len());
+
+        let start = Instant::now();
+        assert!(Single::decider(&ctx, instance.state()));
+        let decider = start.elapsed();
+
+        let proof_size = ivc_proof.len();
+        let evidence = vec![ContractProofEvidence::Aggregated {
+            proof: AggregatedContractProof {
+                ivc_proof,
+                ivc_instance: vec![],
+            },
+        }];
+        let verifier = SingleVerifier { verifier, instance };
+        let start = Instant::now();
+        <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&evidence, &verifier)
+            .expect("single-circuit aggregated verification must succeed");
+        let verify = start.elapsed();
+
+        Report {
+            fold,
+            proof_size,
+            decider,
+            verify,
+        }
+    };
+
+    let single_n = run_single(&inner_proofs);
+    let single_1 = run_single(&inner_proofs[..1]);
+
+    // ── Multi-circuit aggregation (current integration) ───────────────────────
+    // SAFETY: see `aggregate_dust_proofs`; every statement is a
+    // `TypedStatement<AggregableIrSource>` and is never moved across threads.
+    struct MultiVerifier {
+        verifier: AggregationVerifier,
+        instance: IvcInstance<ProofAggregation>,
+    }
+    unsafe impl Send for MultiVerifier {}
+    unsafe impl Sync for MultiVerifier {}
+    impl AggregationVerify for MultiVerifier {
+        fn verify_aggregated_proof(
+            &self,
+            proof: &AggregatedContractProof,
+        ) -> Result<(), anyhow::Error> {
+            self.verifier
+                .verify_aggregation(&self.instance, &proof.ivc_proof)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        }
+    }
+
+    let multi_n = {
+        let ctx = InnerCircuitsContext::new(
+            AggregableIrSource::aggregation_arch(),
+            INNER_K,
+            inner_srs.verifier_params(),
+        );
+        let (mut aggregator, verifier) =
+            ProofAggregation::setup(load_outer_srs(), IVC_K, ctx.clone());
+
+        let start = Instant::now();
+        let mut ivc_proof = vec![];
+        for (pis, proof) in &inner_proofs {
+            let witness = AggregationWitness::new::<AggregableIrSource>(
+                dust_agg_vk.clone(),
+                pis.clone(),
+                proof.clone(),
+            );
+            ivc_proof = aggregator
+                .aggregate(witness)
+                .expect("multi-circuit IVC step must succeed");
+        }
+        let fold = start.elapsed();
+
+        let instance = aggregator.instance();
+        let start = Instant::now();
+        assert!(ProofAggregation::decider(&ctx, instance.state()));
+        let decider = start.elapsed();
+
+        let proof_size = ivc_proof.len();
+        let evidence = vec![ContractProofEvidence::Aggregated {
+            proof: AggregatedContractProof {
+                ivc_proof,
+                ivc_instance: vec![],
+            },
+        }];
+        let verifier = MultiVerifier { verifier, instance };
+        let start = Instant::now();
+        <ProofMarker as ProofKind<InMemoryDB>>::verify_aggregated_proofs(&evidence, &verifier)
+            .expect("multi-circuit aggregated verification must succeed");
+        let verify = start.elapsed();
+
+        Report {
+            fold,
+            proof_size,
+            decider,
+            verify,
+        }
+    };
+
+    // ── Report ────────────────────────────────────────────────────────────────
+    for (label, r) in [
+        (format!("multi-circuit  N={n}"), &multi_n),
+        (format!("single-circuit N={n}"), &single_n),
+        ("single-circuit N=1".to_string(), &single_1),
+    ] {
+        println!(
+            "[proof aggregation] {label}: fold {:?}, proof {} bytes, decider {:?}, verify {:?}",
+            r.fold, r.proof_size, r.decider, r.verify
+        );
+    }
+    println!(
+        "[proof aggregation] decider per claim: multi {:?}, single {:?}",
+        multi_n.decider / n as u32,
+        single_n.decider / n as u32
+    );
+    println!(
+        "[proof aggregation] no aggregation N={n}: {} inner proofs = {inner_proofs_bytes} bytes \
+         ({} bytes each), verify one-by-one {individual_verify:?}, batch_verify {batch_verify:?}",
+        n,
+        inner_proofs_bytes / n
+    );
+    println!(
+        "[proof aggregation] aggregation_digest per claim: {digest_per_claim:?} \
+         over {nb_public_inputs} public inputs"
+    );
+    println!(
+        "[proof aggregation] fold per step: multi {:?}, single {:?}",
+        multi_n.fold / n as u32,
+        single_n.fold / n as u32
+    );
+}
