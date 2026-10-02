@@ -1,0 +1,9 @@
+# quick-xml 0.26 is pulled in via pprof -> inferno 0.11 (dev/bench dependency only).
+# inferno 0.12 dropped quick-xml, but pprof 0.15 (latest) pins inferno 0.11 and
+# cargo [patch] can't cross semver boundaries for pre-1.0 crates.
+# These are not exploitable in our context as they only affect benchmark flamegraph generation.
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0194", # quick-xml: quadratic duplicate attribute check
+    "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
+]
