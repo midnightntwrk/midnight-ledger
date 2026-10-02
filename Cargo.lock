@@ -2787,7 +2787,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2901,7 +2901,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.1.2"
+version = "8.1.3"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "8.1.2"
+version = "8.1.3"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -2982,7 +2982,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3013,7 +3013,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -3079,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.1.2"
+version = "8.1.3"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3423,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.1.2"
+version = "8.1.3"
 dependencies = [
  "criterion",
  "derive-where",

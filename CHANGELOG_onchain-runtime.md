@@ -1,5 +1,20 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `3.1.2`
+
+Covers `onchain-state` `3.0.2` and `onchain-vm` `3.1.2`.
+
+- security: values embedded in a program (`push`, `pushs` and `idx`-style path
+  keys) must be canonical: every `field` atom must be less than the field
+  order, and any Merkle tree must be blank. Non-canonical values are rejected
+  on construction and deserialization.
+- feat: `onchain-state` adds `AlignedValueChecked`, and `StateValue` takes a
+  value-type parameter defaulting to `AlignedValue`; `StateValue<D,
+  AlignedValueChecked>` is obtained with `StateValue::try_into_checked`.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Released as a patch
+  regardless, as a security fix; serialization is unchanged.
+
 ## Version `3.1.1`
 
 Covers `onchain-state` `3.0.1` and `onchain-vm` `3.1.1`.
