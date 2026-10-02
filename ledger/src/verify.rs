@@ -2172,8 +2172,10 @@ mod well_formed_tests {
             binding_commitment: Default::default(),
         };
         let state = LedgerState::<InMemoryDB>::new("local-test");
-        let mut strictness = WellFormedStrictness::default();
-        strictness.verify_contract_proofs = false;
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            .. WellFormedStrictness::default()
+        };
         let call_with = |program: Vec<Op<ResultModeVerify, InMemoryDB>>| ContractCall::<
             (),
             InMemoryDB,

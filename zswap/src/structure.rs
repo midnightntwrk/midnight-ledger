@@ -554,8 +554,8 @@ impl Debug for DebugDelta {
 pub fn normalize_deltas<T: Ord, I: Iterator<Item = (T, i128)>>(deltas: I) -> Vec<(T, i128)> {
     let mut new_deltas: Vec<_> = deltas
         .fold(BTreeMap::new(), |mut map, (k, v)| {
-            let entry = map.entry(k).or_insert(0);
-            *entry = (*entry as i128).saturating_add(v);
+            let entry: &mut i128 = map.entry(k).or_insert(0);
+            *entry = entry.saturating_add(v);
             map
         })
         .into_iter()

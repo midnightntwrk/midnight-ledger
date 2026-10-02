@@ -229,6 +229,7 @@ impl<D: DB> StateValue<D, AlignedValue> {
     ///
     /// Must not be used on the critical path: this walks the value as a tree, so a value with
     /// shared (deduplicated) children takes time exponential in its serialized size.
+    #[allow(clippy::result_unit_err)]
     pub fn try_into_checked(&self) -> Result<StateValue<D, AlignedValueChecked>, ()> {
         let res = match self {
             StateValue::Null => StateValue::Null,
