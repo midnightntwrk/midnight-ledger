@@ -13,7 +13,7 @@ The implementation of the VM lives in the `onchain-vm` crate
 (`onchain-state/src/state.rs`) with a *strength* tag (§1). The `RunningCost`
 accumulator is in `base-crypto/src/cost_model.rs`.
 
-The Impact VM is a different layer from [ZKIR](./zkir.md) and the two should
+The Impact VM is a different layer from ZKIR and the two should
 not be confused:
 
 | | **Impact VM** (this doc) | **ZKIR** |
@@ -431,8 +431,7 @@ A Compact contract circuit compiles to **two coordinated artifacts**:
 
 1. an **Impact program** (these opcodes) — the public reads / writes to ledger
    state, executed by every node; and
-2. a **ZKIR circuit** — the zero-knowledge proof of the private computation
-   (see [zkir.md](./zkir.md)).
+2. a **ZKIR circuit** — the zero-knowledge proof of the private computation.
 
 They are **not** a 1:1 opcode↔instruction mapping — they are different layers
 — but they meet at two points:
