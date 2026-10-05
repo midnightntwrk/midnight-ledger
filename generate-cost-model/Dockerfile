@@ -1,4 +1,4 @@
-FROM rust:1.91.1-alpine3.23@sha256:45c1c35cd364b8055e9e86f8ecd3e8c874b2dcb658d8a4f94b5d111aa0d651a2
+FROM rust:1.98.1-alpine3.23@sha256:94a43bda4fd9b71fa3a74621c0982a646f83c7d1a3ba52bb4b7ddfd76d4dca93
 USER 1000:1000
 WORKDIR /cost-model
 COPY ./ ./
