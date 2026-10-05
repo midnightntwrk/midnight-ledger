@@ -15,5 +15,6 @@
 
 cd /cost-model
 export MIDNIGHT_PP=/cost-model/midnight-pp
-cargo bench
+export MIDNIGHT_LEDGER_TEST_STATIC_DIR=$MIDNIGHT_PP
+cargo bench --features bench
 cargo run --bin generate-cost-model -- target/criterion all /cost-model/output --plot --output-const

@@ -15,14 +15,14 @@
 
 use crate::arena::{ArenaKey, DirectChildNode, Opaque, Sp, hash};
 use crate::db::DB;
-use base_crypto::signatures::{Signature, VerifyingKey};
+use base_crypto::schnorr::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
 use base_crypto::{
     cost_model::RunningCost,
     fab::{AlignedValue, Alignment, Value},
     hash::HashOutput,
 };
-use crypto::digest::Digest;
+use digest::Digest;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,

@@ -18,7 +18,7 @@ use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAto
 use base_crypto::hash::persistent_hash;
 use base_crypto::hash::{BLANK_HASH, PERSISTENT_HASH_BYTES};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
-use base_crypto::signatures::VerifyingKey;
+use base_crypto::schnorr::VerifyingKey;
 use fake::Dummy;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;

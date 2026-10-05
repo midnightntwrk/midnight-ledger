@@ -20,7 +20,7 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_deserialize};
 use std::io::{self, Read};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
@@ -33,10 +33,16 @@ use crate::ir_types::IrType;
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3]"]
+#[tag = "ir-source[v3-generic]"]
 pub struct IrSource {
+    /// The minor version of this IR.
+    pub version: IrMinorVersion,
     /// The list of input identifiers for this circuit
     pub inputs: Vec<TypedIdentifier>,
+    /// The output types this circuit returns, positionally. The actual
+    /// values are produced by an `Instruction::Output` terminator whose
+    /// operand list is type-checked against this signature.
+    pub outputs: Vec<IrType>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -44,6 +50,24 @@ pub struct IrSource {
 }
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
+
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
+    Serializable,
+)]
+#[tag = "ir-minor-version[v3]"]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum IrMinorVersion {
+    #[default]
+    V0,
+}
 
 impl Zkir for IrSource {
     fn check(
@@ -74,6 +98,14 @@ impl Zkir for IrSource {
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + io::Seek) -> io::Result<Self> {
+        tagged_deserialize(reader)
+    }
+
+    fn load_prover_key_from_tagged(reader: impl Read + io::Seek) -> io::Result<ProverKey<Self>> {
+        tagged_deserialize(reader)
     }
 }
 
@@ -286,36 +318,18 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the input type:
     ///
-    ///  - Native:      1 output
-    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    ///  - Native:       1 output
+    ///  - JubjubPoint:  2 outputs (x and y coordinates)
+    ///  - JubjubScalar: 1 output
+    ///
+    ///  - Secp256k1Point:  8 outputs (4 for x and 4 for y)
+    ///  - Secp256k1Base:   4 outputs (64-bits LE limbs)
+    ///  - Secp256k1Scalar: 4 outputs (64-bits LE limbs)
     Encode {
         /// The value to encode
         input: Operand,
         /// The output variable names
         outputs: Vec<Identifier>,
-    },
-    /// Decodes the given raw Fr elements as a value of the given type.
-    ///
-    /// This operation will result in an error if the number of inputs
-    /// is not the exact number of raw Fr elements required to represent a
-    /// value of the given type:
-    ///
-    ///  - Native:      1 input
-    ///  - JubjubPoint: 2 inputs (x and y coordinates)
-    ///
-    /// It will also result in an error if the operands are not of type
-    /// `Native`.
-    ///
-    /// The circuit may become unsatisfiable if the inputs do not encode
-    /// a valid value of the given type.
-    Decode {
-        /// The inputs to decode
-        inputs: Vec<Operand>,
-        /// The type to decode as
-        #[serde(rename = "type")]
-        val_t: IrType,
-        /// The output variable name
-        output: Identifier,
     },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
@@ -325,6 +339,12 @@ pub enum Instruction {
         cond: Operand,
     },
     /// Conditionally select a value. UB if `bit` is not `0` or `1`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// Outputs one element, identical to `a` or `b`
     CondSelect {
@@ -347,6 +367,12 @@ pub enum Instruction {
         bits: u32,
     },
     /// Constrains two values `a` and `b` to be equal.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// No outputs
     ConstrainEq {
@@ -376,6 +402,13 @@ pub enum Instruction {
     ///
     /// No outputs, but adds the inputs as public inputs and activity information to
     /// [`IrSource::prove`] and [`IrSource::check`].
+    ///
+    /// In-circuit, if `guard` is `false`, instead of adding the `inputs` as public inputs,
+    /// it will add `n` zeros as public inputs (where `n` is the number of `inputs`).
+    /// This is enforced with in-circuit constraints.
+    ///
+    /// NB: Currently, we require that all `inputs` be of type `Native`.
+    /// A runtime error will be raised otherwise.
     Impact {
         /// The boolean condition under which the public inputs are active
         guard: Operand,
@@ -383,7 +416,10 @@ pub enum Instruction {
         inputs: Vec<Operand>,
     },
     /// Multiplies an elliptic curve point by a scalar.
-    /// curve point.
+    ///
+    /// This operation will result in an error if the operand given as `a`
+    /// is not of type `JubjubPoint`, or if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -396,6 +432,9 @@ pub enum Instruction {
     },
     /// Multiplies the group generator by a scalar.
     ///
+    /// This operation will result in an error if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
+    ///
     /// Outputs 1 element, the product
     EcMulGenerator {
         /// The scalar to multiply by
@@ -403,7 +442,7 @@ pub enum Instruction {
         /// The result of multiplication
         output: Identifier,
     },
-    /// Hashes a sequence of field elements to an embedded curve point.
+    /// Hashes a sequence of field elements to a Jubjub point.
     /// All inputs are required to be of type `Native`. Failure otherwise.
     ///
     /// Outputs 1 element, the point
@@ -411,6 +450,122 @@ pub enum Instruction {
         /// The values to hash to a curve point
         inputs: Vec<Operand>,
         /// The resulting point
+        output: Identifier,
+    },
+    /// The affine coordinates of the given elliptic curve point.
+    /// On Weierstrass curves the identity has no affine coordinates, so
+    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
+    ///
+    /// Supported on types:
+    /// * JubjubPoint
+    /// * Secp256k1Point
+    ///
+    /// Outputs 2 elements, the coordinates (x, y)
+    IntoCoordinates {
+        /// The point whose coordinate are extracted
+        point: Operand,
+        /// The output variable names (x, y)
+        outputs: (Identifier, Identifier),
+    },
+    /// Reconstructs an elliptic curve point from the given affine coordinates.
+    ///
+    /// On Weierstrass curves the identity cannot be built with this instruction.
+    ///
+    /// Supported on types:
+    /// * (Native, Native):               producing a JubjubPoint
+    /// * (Secp256k1Base, Secp256k1Base): producing a Secp256k1Point
+    ///
+    /// Outputs 1 element, the point
+    FromCoordinates {
+        /// The affine coordinates (x, y)
+        inputs: (Operand, Operand),
+        /// The output variable names
+        output: Identifier,
+    },
+    /// Transforms the given value into its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    IntoBytes32 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Constructs an element of the given type from its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    FromBytes32 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Decomposes a `Bytes32` value into two `Native` field elements.
+    ///
+    /// The first output (`low`) encodes the first 31 bytes of the input as a
+    /// little-endian native field element. The second output (`high`) encodes
+    /// the 32nd (most significant) byte as a native field element.
+    ///
+    /// This is the inverse of `Bytes32FromLowHigh`.
+    ///
+    /// This instruction imposes no off-circuit errors and no in-circuit constraints.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32IntoLowHigh {
+        /// The input bytes
+        bytes: Operand,
+        /// The output variables: (low, high)
+        outputs: (Identifier, Identifier),
+    },
+    /// Constructs a `Bytes32` value from two `Native` field elements in low-high form.
+    ///
+    /// The first input (`low`) must encode at most 31 bytes, i.e. its value must be
+    /// less than 2^248. The second input (`high`) must encode a single byte, i.e. its
+    /// value must be less than 256. The result concatenates the first 31 bytes from `low`
+    /// with byte `high`.
+    ///
+    /// This is the inverse of `Bytes32IntoLowHigh`.
+    ///
+    /// # Errors and constraints
+    ///
+    /// Off-circuit: returns an error if `low >= 2^248` or `high >= 256`.
+    ///
+    /// In-circuit: the constraint `low < 2^248` is enforced by asserting that the
+    /// 32nd byte of the little-endian decomposition of `low` is zero, making the
+    /// circuit unsatisfiable if violated. The constraint `high < 256` is enforced
+    /// by a byte range check on `high`, also causing unsatisfiability if violated.
+    ///
+    /// # Note
+    ///
+    /// This instruction is a temporary bridge for Compact, which cannot yet deal with
+    /// `Bytes32` values directly. It is intended to be removed once Compact can handle
+    /// `Bytes32` (or `Bytes(n)`) without decomposing it into field elements.
+    Bytes32FromLowHigh {
+        /// The inputs: (low, high)
+        inputs: (Operand, Operand),
+        /// The output variable name
         output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).
@@ -438,14 +593,6 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Outputs `val` from the circuit, including it in the communications
-    /// commitment.
-    ///
-    /// No outputs (at the level of the IR VM), despite the name
-    Output {
-        /// The variable or immediate to output
-        val: Operand,
-    },
     /// Calls a circuit-friendly hash function on a sequence of items.
     ///
     /// One output, `H(inputs)`
@@ -467,7 +614,25 @@ pub enum Instruction {
         /// The output variable names
         outputs: Vec<Identifier>,
     },
+    /// Evaluates the Keccak-256 hash function on a sequence of items with
+    /// a given alignment.
+    ///
+    /// Outputs 2 elements for binary format.
+    Keccak256 {
+        /// The alignment of the inputs being passed
+        alignment: Alignment,
+        /// The inputs to hash
+        inputs: Vec<Operand>,
+        /// The output variable names
+        outputs: Vec<Identifier>,
+    },
     /// Tests if `a` and `b` are equal.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One boolean output, `a == b`
     TestEq {
@@ -479,7 +644,12 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Adds `a` and `b`.
-    /// Supported on types: `Native, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `a + b`
     Add {
@@ -490,7 +660,11 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Multiplies `a` and `b` in the prime field.
+    /// Multiplies `a` and `b`.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `a * b`
     Mul {
@@ -501,11 +675,30 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Negates `a` in the prime field.
+    /// Negates `a`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `-a`
     Neg {
         /// The value to negate
+        a: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Inverts `a`, results in an error if `a` is zero.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///
+    /// One output `a^(-1)`
+    Inv {
+        /// The value to invert
         a: Operand,
         /// The output variable name
         output: Identifier,
@@ -533,27 +726,69 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a public input from the public transcript outputs.
+    /// Cast a Native value as a Jubjub scalar by reducing it modulo the Jubjub scalar
+    /// field order if necessary.
     ///
-    /// Outputs one element, the next public transcript output, or `0` if the
-    /// guard fails
+    /// NB: This instruction will be removed when the BigUint type becomes available.
+    JubjubScalarFromNative {
+        /// The native value to be converted.
+        native: Operand,
+        /// The output variable name.
+        output: Identifier,
+    },
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the public transcript outputs.
+    /// Outputs one element, the next public transcript output, or a default value
+    /// if the `guard` fails.
+    ///
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PrivateInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the public transcript outputs in this case).
     PublicInput {
         /// An optional condition for retrieving the next public transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a private input from the private transcript outputs.
+
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the private transcript outputs.
+    /// Outputs one element, the next private transcript output, or a default value
+    /// if the `guard` fails.
     ///
-    /// Outputs one element, the next private transcript output, or `0` if the
-    /// guard fails
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PublicInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the private transcript outputs in this case).
     PrivateInput {
         /// An optional condition for retrieving the next private transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
+    },
+    /// Circuit terminator. Produces the circuit's return values, in
+    /// signature order, and ends execution. The operand list is type-checked
+    /// against `IrSource::outputs` (length and per-position type), then each
+    /// operand is encoded via `encode_offcircuit` / `encode_incircuit` and
+    /// pushed into the outputs accumulator.
+    Output {
+        /// The values returned, one per `IrSource::outputs[i]`.
+        vals: Vec<Operand>,
     },
 }
 tag_enforcement_test!(Instruction);
@@ -593,8 +828,8 @@ impl IrSource {
     /// Attempts to parse an arbitrary input as IR.
     pub fn load<R: Read>(reader: R) -> io::Result<Self> {
         let value: serde_json::Value = serde_json::from_reader(reader)?;
-        match &value {
-            serde_json::Value::Object(obj) => {
+        match value {
+            serde_json::Value::Object(mut obj) => {
                 let ver = serde_json::from_value(
                     obj.get("version")
                         .ok_or(io::Error::new(
@@ -604,7 +839,16 @@ impl IrSource {
                         .clone(),
                 )?;
                 match ver {
-                    SerdeVersion { major: 3, minor: 0 } => Ok(serde_json::from_value(value)?),
+                    SerdeVersion {
+                        major: 3,
+                        minor: 0..=0,
+                    } => {
+                        obj.insert(
+                            "version".into(),
+                            serde_json::Value::Number(ver.minor.into()),
+                        );
+                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                    }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Unhandled version: {major}.{minor}"),

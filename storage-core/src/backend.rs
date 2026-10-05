@@ -1281,7 +1281,7 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     pub fn size(&self) -> usize {
         let data_size = self.data.len();
         let ref_count_size = 4;
-        let bytes_per_arena_key = <H as crypto::digest::OutputSizeUser>::output_size();
+        let bytes_per_arena_key = <H as digest::OutputSizeUser>::output_size();
         let children_refs_size = self.children.len() * bytes_per_arena_key;
         data_size + ref_count_size + children_refs_size
     }
@@ -1400,8 +1400,8 @@ pub(crate) mod raw_node {
 #[cfg(test)]
 mod tests {
     use crate::{self as storage, storable::child_from};
-    use crypto::digest::Digest;
     use derive_where::derive_where;
+    use digest::Digest;
     use raw_node::RawNode;
 
     use crate::{

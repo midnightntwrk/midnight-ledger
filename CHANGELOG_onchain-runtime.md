@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
+
 ## Version `3.1.2`
 
 Covers `onchain-state` `3.0.2` and `onchain-vm` `3.1.2`.
@@ -14,7 +18,7 @@ Covers `onchain-state` `3.0.2` and `onchain-vm` `3.1.2`.
 - note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
   `AlignedValueChecked` in place of `AlignedValue`. Released as a patch
   regardless, as a security fix; serialization is unchanged.
-
+  
 ## Version `3.1.1`
 
 Covers `onchain-state` `3.0.1` and `onchain-vm` `3.1.1`.

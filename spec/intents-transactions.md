@@ -724,7 +724,7 @@ impl LedgerState {
                     self = state;
                     segment_success = segment_success.insert(segment, true);
                 }
-                Err(e) => if segment == 0 {
+                Err(e) => if segment == GUARANTEED_SEGMENT {
                     return (self, TransactionResult::FailEntirely);
                 } else {
                     segment_success = segment_success.insert(segment, false);
@@ -747,7 +747,7 @@ impl LedgerState {
         segment: u16,
         context: TransactionContext,
     ) -> Result<Self> {
-        if segment == 0 {
+        if segment == GUARANTEED_SEGMENT {
             // Apply replay protection
             self.replay_protection = self.replay_protection.apply_tx(
                 tx,

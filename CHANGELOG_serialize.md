@@ -1,5 +1,9 @@
 # `serialize` Changelog
 
+## Unreleased
+
+- feat: add `peek_tag` to identify a tag before deserialization
+
 ## Version `1.1.1`
 
 - security: `HashMap` and `HashSet` deserialization now requires a normalized

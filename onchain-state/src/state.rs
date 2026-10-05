@@ -17,7 +17,7 @@ use base_crypto::fab::{
 };
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
-use base_crypto::signatures::VerifyingKey;
+use base_crypto::schnorr::VerifyingKey;
 use coin_structure::coin::TokenType;
 use derive_where::derive_where;
 use fake::Dummy;

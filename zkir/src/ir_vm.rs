@@ -11,16 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ir::{IrMinorVersion, OldIrSource};
+
 use super::ir::{Instruction as I, IrSource};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
-use group::Group;
+use group::{Group, ff::Field};
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, ZeroInstructions,
+    EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
@@ -30,8 +32,10 @@ use midnight_proofs::{
     plonk::Error,
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
-use serialize::{Deserializable, Serializable, VecExt};
+use num_bigint::BigUint;
+use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
 use std::cmp::Ordering;
+use std::io::Read;
 use transient_crypto::curve::EmbeddedGroupAffine;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::curve::{embedded, outer};
@@ -600,7 +604,7 @@ impl Relation for IrSource {
         for ins in self.instructions.iter() {
             match ins {
                 I::Assert { cond } => std.assert_non_zero(layouter, idx(&memory, *cond)?)?,
-                I::CondSelect { bit, a, b } => {
+                I::CondSelect { bit, a, b } if self.version == IrMinorVersion::V0 => {
                     let bit = std.is_zero(layouter, idx(&memory, *bit)?)?;
                     // Note that b comes first here, because the is_zero negates the bit.
                     // The negation is to ensure the bit bound. This may be
@@ -609,12 +613,26 @@ impl Relation for IrSource {
                         std.select(layouter, &bit, idx(&memory, *b)?, idx(&memory, *a)?)?;
                     mem_push(result, &mut memory)?;
                 }
-                I::ConstrainBits { var, bits } => drop(std.assigned_to_le_bits(
-                    layouter,
-                    idx(&memory, *var)?,
-                    Some(*bits as usize),
-                    *bits as usize >= FR_BITS,
-                )?),
+                I::CondSelect { bit, a, b } => {
+                    let bit: AssignedBit<_> = std.convert(layouter, idx(&memory, *bit)?)?;
+                    let result =
+                        std.select(layouter, &bit, idx(&memory, *a)?, idx(&memory, *b)?)?;
+                    mem_push(result, &mut memory)?;
+                }
+                I::ConstrainBits { var, bits } if self.version == IrMinorVersion::V0 => {
+                    drop(std.assigned_to_le_bits(
+                        layouter,
+                        idx(&memory, *var)?,
+                        Some(*bits as usize),
+                        *bits as usize >= FR_BITS,
+                    )?)
+                }
+                I::ConstrainBits { var, bits } => {
+                    if *bits < FR_BITS as u32 {
+                        let bound = BigUint::from(1u32) << *bits;
+                        std.assert_lower_than_fixed(layouter, idx(&memory, *var)?, &bound)?;
+                    }
+                }
                 I::ConstrainEq { a, b } => {
                     std.assert_equal(layouter, idx(&memory, *a)?, idx(&memory, *b)?)?
                 }
@@ -711,12 +729,12 @@ impl Relation for IrSource {
                     divisor,
                     modulus,
                     bits,
-                } => {
+                } if self.version == IrMinorVersion::V0 => {
                     let divisor_bits = std.assigned_to_le_bits(
                         layouter,
                         idx(&memory, *divisor)?,
                         Some(FR_BITS - *bits as usize),
-                        true,
+                        *bits as usize >= FR_BITS,
                     )?;
                     let modulus_bits = std.assigned_to_le_bits(
                         layouter,
@@ -724,8 +742,38 @@ impl Relation for IrSource {
                         Some(*bits as usize),
                         true,
                     )?;
+
                     let reconstituted = std
                         .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
+                    mem_push(reconstituted, &mut memory)?;
+                }
+                I::ReconstituteField {
+                    divisor,
+                    modulus,
+                    bits,
+                } => {
+                    let modulus = idx(&memory, *modulus)?.clone();
+                    let divisor = idx(&memory, *divisor)?.clone();
+
+                    std.assert_lower_than_fixed(
+                        layouter,
+                        &divisor,
+                        &(BigUint::from(1u32) << (FR_BITS as u32 - *bits)),
+                    )?;
+                    std.assert_lower_than_fixed(
+                        layouter,
+                        &modulus,
+                        &(BigUint::from(1u32) << *bits),
+                    )?;
+
+                    let reconstituted = std.linear_combination(
+                        layouter,
+                        &[
+                            (outer::Scalar::from(1), modulus),
+                            (outer::Scalar::from(2).pow([*bits as u64]), divisor),
+                        ],
+                        outer::Scalar::from(0),
+                    )?;
                     mem_push(reconstituted, &mut memory)?;
                 }
                 I::EcAdd { a_x, a_y, b_x, b_y } => {
@@ -813,6 +861,10 @@ impl Relation for IrSource {
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
+        let nr_pow2range_cols = match self.version {
+            IrMinorVersion::V0 => 1,
+            IrMinorVersion::V1 => 4,
+        };
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
@@ -821,7 +873,7 @@ impl Relation for IrSource {
             sha3_256: false,
             keccak_256: false,
             blake2b: false,
-            nr_pow2range_cols: 1, // TODO: Get this programmatically, not as a magic constant from Miguel :)
+            nr_pow2range_cols,
             secp256k1: false,
             bls12_381: false,
             base64: false,
@@ -830,10 +882,28 @@ impl Relation for IrSource {
     }
 
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        Serializable::serialize(&self, writer)
+        if let Ok(old_ir) = OldIrSource::try_from(self) {
+            Serializable::serialize(&old_ir, writer)
+        } else {
+            // 0xff is a magic byte indicating non-v0 versions. These are tagged, and in a vec
+            // container. This byte is *not* representable in v0, as it is illegal for a SCALE
+            // encoded u32.
+            writer.write_all(&[0xff])?;
+            let mut raw = Vec::new();
+            tagged_serialize(&self, &mut raw)?;
+            raw.serialize(writer)
+        }
     }
 
     fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Deserializable::deserialize(reader, 0)
+        let first_byte: u8 = Deserializable::deserialize(reader, 0)?;
+        if first_byte != 0xff {
+            let mut cursor = &[first_byte][..];
+            let mut reader = Read::chain(&mut cursor, reader);
+            OldIrSource::deserialize(&mut reader, 0).map(Into::into)
+        } else {
+            let raw: Vec<u8> = Deserializable::deserialize(reader, 0)?;
+            tagged_deserialize(&mut &raw[..])
+        }
     }
 }

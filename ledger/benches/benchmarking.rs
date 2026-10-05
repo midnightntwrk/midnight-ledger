@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 #![allow(unused)]
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};

@@ -49,7 +49,7 @@
     "@vitest/ui": "3.2.4",
     "allure-commandline": "2.34.1",
     "allure-vitest": "3.3.3",
-    "axios": "1.15.0",
+    "axios": "1.18.0",
     "axios-retry": "4.5.0",
     "cache-ts": "1.0.0",
     "cross-fetch": "4.1.0",
@@ -68,7 +68,7 @@
     "testcontainers": "11.5.1",
     "typescript": "6.0.2",
     "vite-plugin-wasm": "3.5.0",
-    "vitest": "3.2.4",
+    "vitest": "3.2.6",
     "vitest-ctrf-json-reporter": "0.0.2"
   },
   "files": [

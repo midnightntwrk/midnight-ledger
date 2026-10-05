@@ -227,9 +227,9 @@ export const stopProofServer = () => {
   return stopProofServerBinary();
 };
 
-// TODO: this was copied from @midnight-ntwrk/midnight-js-http-client-proof-provider
+// TODO: this was copied from @midnightntwrk/midnight-js-http-client-proof-provider
 // we should either update the source to be less dependent on ledger types
-// or use the ProofServerClient from @midnight-ntwrk/midnight-js-testing@1.0.1-0-pre.be9d6614
+// or use the ProofServerClient from @midnightntwrk/midnight-js-testing@1.0.1-0-pre.be9d6614
 
 /**
  * A type representing a prover key derived from a contract circuit.
