@@ -1301,16 +1301,13 @@ impl<D: DB> DustState<D> {
                 .generation
                 .generating_tree
                 .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
-                .map_err(TransactionInvalid::MerkleTreeError)?;
+                .map_err(TransactionInvalid::MerkleTreeError)?
+                .rehash();
             let tree_snapshot = state.generation.generating_tree.clone();
             let idx = *idx;
             let block_time = context.block_context.tblock;
             event_push(Box::new(move || EventDetails::DustGenerationDtimeUpdate {
-                // TODO: We maybe can do better than immediately rehashing here... But not much,
-                // because anything in the insertion evidence in the event *will* need to be
-                // computed here.
                 update: tree_snapshot
-                    .rehash()
                     .insertion_evidence(idx)
                     .expect("must be able to produce evidence for updated path"),
                 block_time,
@@ -2181,6 +2178,73 @@ mod tests {
     use serde::de::{Error, Unexpected};
     use serde::{Deserialize, Deserializer};
     use std::fs;
+
+    /// Retaining the rehash of the generation tree must not change the insertion evidence
+    /// the `dtime` update events carry: `rehash` only fills in hashes, so carrying it forward
+    /// has to produce the same evidence as rehashing a throwaway snapshot per update did.
+    #[test]
+    fn retained_rehash_yields_same_dtime_evidence() {
+        use super::{DUST_GENERATION_TREE_DEPTH, DustGenerationInfo, DustPublicKey, InitialNonce};
+        use base_crypto::hash::HashOutput;
+        use base_crypto::time::Timestamp;
+        use storage::db::InMemoryDB;
+        use transient_crypto::merkle_tree::MerkleTree;
+
+        let leaf = |i: u64, dtime: Timestamp| DustGenerationInfo {
+            value: 1_000 + i as u128,
+            owner: DustPublicKey(transient_crypto::curve::Fr::from(i)),
+            nonce: InitialNonce(HashOutput([i as u8; 32])),
+            dtime,
+        };
+
+        // Scattered indices, so the updated paths only share their topmost levels, and one
+        // index left untouched to keep part of the tree clean.
+        let indices = [0u64, 1, 7, 64, 65, 4096, 1 << 20];
+        let mut tree =
+            MerkleTree::<DustGenerationInfo, InMemoryDB>::blank(DUST_GENERATION_TREE_DEPTH);
+        for idx in indices.iter().chain([&(1u64 << 21)]) {
+            let info = leaf(*idx, Timestamp::MAX);
+            tree = tree
+                .try_update_hash(*idx, info.merkle_hash(), info)
+                .expect("populating the tree must succeed");
+        }
+
+        let tblock = Timestamp::from_secs(1_000);
+        // The old shape: the updates carry forward, but each one rehashes a snapshot and
+        // throws the result away, so the tree stays dirty.
+        let mut discarded = tree.clone();
+        // The new shape: the rehash is kept, so each update only ever dirties its own path.
+        let mut retained = tree;
+
+        for idx in indices.iter() {
+            let info = leaf(*idx, tblock);
+            discarded = discarded
+                .try_update_hash(*idx, info.merkle_hash(), info)
+                .expect("update must succeed");
+            retained = retained
+                .try_update_hash(*idx, info.merkle_hash(), info)
+                .expect("update must succeed")
+                .rehash();
+
+            let expected = discarded
+                .rehash()
+                .insertion_evidence(*idx)
+                .expect("evidence must be producible");
+            let actual = retained
+                .insertion_evidence(*idx)
+                .expect("evidence must be producible");
+
+            assert!(
+                actual.path.iter().all(|entry| entry.hash.is_some()),
+                "evidence for index {idx} must be fully hashed, or consumers that collapsed \
+                 this subtree cannot replay it"
+            );
+            assert_eq!(
+                actual, expected,
+                "evidence for index {idx} differs from the per-update computation"
+            );
+        }
+    }
 
     #[cfg(feature = "proving")]
     #[tokio::test]
