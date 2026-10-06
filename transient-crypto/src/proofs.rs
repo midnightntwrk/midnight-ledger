@@ -457,7 +457,7 @@ impl DeferredAccumulator {
 
     /// `None` unless `acc` is collapsed and fixed-base-resolved: one base per
     /// side, its scalar one, and no fixed-base scalars left.
-    pub fn from_accumulator(acc: &Accumulator<InnerSelfEmulation>) -> Option<Self> {
+    pub fn new(acc: &Accumulator<InnerSelfEmulation>) -> Option<Self> {
         let side = |msm: Msm<InnerSelfEmulation>| -> Option<outer::Affine> {
             let (bases, scalars) = (msm.bases(), msm.scalars());
             if bases.len() != 1 || scalars.len() != 1 || scalars[0] != outer::Scalar::ONE {
@@ -484,7 +484,7 @@ impl DeferredAccumulator {
 
     /// Inverse of [`as_public_input`](Self::as_public_input).
     pub fn from_public_input(fields: &[outer::Scalar]) -> Option<Self> {
-        Self::from_accumulator(&reconstruct_accumulator(fields)?)
+        Self::new(&reconstruct_accumulator(fields)?)
     }
 }
 
@@ -1138,9 +1138,9 @@ mod accumulator_discharge_tests {
     #[test]
     fn every_exposed_accumulator_is_checked_on_its_own() {
         let carried = [
-            DeferredAccumulator::from_accumulator(&Accumulator::<InnerSelfEmulation>::trivial(&[]))
+            DeferredAccumulator::new(&Accumulator::<InnerSelfEmulation>::trivial(&[]))
                 .expect("the trivial accumulator is collapsed"),
-            DeferredAccumulator::from_accumulator(&non_pairing_accumulator())
+            DeferredAccumulator::new(&non_pairing_accumulator())
                 .expect("collapsed, but does not pair"),
         ];
 
@@ -1169,7 +1169,7 @@ mod accumulator_discharge_tests {
             let fields = encode(&acc);
             assert_eq!(fields.len(), accumulator_pi_len());
 
-            let deferred = DeferredAccumulator::from_accumulator(&acc).expect("collapsed");
+            let deferred = DeferredAccumulator::new(&acc).expect("collapsed");
             assert_eq!(
                 deferred.as_public_input(),
                 fields,
@@ -1184,7 +1184,7 @@ mod accumulator_discharge_tests {
 
     #[test]
     fn the_wire_encoding_round_trips() {
-        let acc = DeferredAccumulator::from_accumulator(&non_pairing_accumulator()).unwrap();
+        let acc = DeferredAccumulator::new(&non_pairing_accumulator()).unwrap();
         let mut bytes = Vec::new();
         acc.serialize(&mut bytes).unwrap();
         assert_eq!(bytes.len(), acc.serialized_size());
@@ -1257,7 +1257,7 @@ mod accumulator_discharge_tests {
             Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
             Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
         );
-        assert!(DeferredAccumulator::from_accumulator(&scaled).is_none());
+        assert!(DeferredAccumulator::new(&scaled).is_none());
 
         let mut fixed = BTreeMap::new();
         fixed.insert("unresolved".to_owned(), outer::Scalar::ONE);
@@ -1265,6 +1265,6 @@ mod accumulator_discharge_tests {
             Msm::new(&[C::generator()], &[outer::Scalar::ONE], &BTreeMap::new()),
             Msm::new(&[C::generator()], &[outer::Scalar::ONE], &fixed),
         );
-        assert!(DeferredAccumulator::from_accumulator(&unresolved).is_none());
+        assert!(DeferredAccumulator::new(&unresolved).is_none());
     }
 }
