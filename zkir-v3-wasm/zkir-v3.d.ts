@@ -9,7 +9,7 @@ export type ProvingProvider = {
     keyLocation: string,
     overwriteBindingInput?: bigint,
   ): Promise<Uint8Array>;
-};
+} & KeyMaterialProvider;
 
 export type ProvingKeyMaterial = {
   proverKey: Uint8Array,

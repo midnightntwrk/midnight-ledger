@@ -37,7 +37,6 @@ use crate::ir_types::{CircuitValue, IrType, IrValue};
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use base_crypto::hash::{HashOutput, persistent_hash};
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::{
@@ -46,7 +45,7 @@ use midnight_circuits::instructions::{
     PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{AssignedBit, AssignedByte, AssignedNative, InnerValue};
-use midnight_curves::{JubjubSubgroup, secp256k1};
+use midnight_curves::{JubjubSubgroup, k256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -54,6 +53,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
+use sha2::Sha256;
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -62,7 +62,6 @@ use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
 use transient_crypto::proofs::{ProofPreimage, ProvingError};
-use transient_crypto::repr::FieldRepr;
 
 /// The raw data prior to proving. Note that this should *not* be considered part of the public
 /// API, and is subject to change at any time. It may be used in combination with
@@ -166,8 +165,8 @@ fn fab_decode_to_bytes_atom(
             }
             for i in 0..chunks {
                 bytes_from(res, FR_BYTES_STORED, inputs[chunks - 1 - i].clone())?;
-                *inputs = &inputs[1..];
             }
+            *inputs = &inputs[chunks..];
             res.extend(res_vec);
             Ok(())
         }
@@ -178,28 +177,6 @@ fn fab_decode_to_bytes_atom(
             ))
         }
     }
-}
-
-fn assemble_bytes(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    bytes: &[AssignedByte<outer::Scalar>],
-) -> Result<AssignedNative<outer::Scalar>, Error> {
-    const BITS: usize = 8;
-    let mut powers = Vec::with_bounded_capacity(bytes.len());
-    powers.push(std.convert(layouter, &bytes[0])?);
-    for (i, byte) in bytes.iter().enumerate().skip(1) {
-        let power = (0..i * BITS)
-            .fold(Fr::from(1), |acc, _| acc * Fr::from(2))
-            .0;
-        let byte = std.convert(layouter, byte)?;
-        powers.push(std.mul_by_constant(layouter, &byte, power)?);
-    }
-    let mut acc = powers[0].clone();
-    for limb in powers[1..].iter() {
-        acc = std.add(layouter, &acc, limb)?;
-    }
-    Ok(acc)
 }
 
 impl IrSource {
@@ -501,16 +478,13 @@ impl IrSource {
                 I::PersistentHash {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 }
                 | I::Keccak256 {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 } => {
-                    if outputs.len() != 2 {
-                        bail!("PersistentHash requires exactly 2 outputs");
-                    }
                     let inputs = inputs
                         .iter()
                         .map(|i| resolve_operand(&memory, i))
@@ -523,30 +497,29 @@ impl IrSource {
                     let mut repr = Vec::new();
                     ValueReprAlignedValue(value).binary_repr(&mut repr);
                     trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash = match ins {
-                        I::PersistentHash { .. } => persistent_hash(&repr),
-                        I::Keccak256 { .. } => HashOutput(Keccak256::digest(&repr).into()),
+                    let hash_output: [u8; 32] = match ins {
+                        I::PersistentHash { .. } => Sha256::digest(&repr).into(),
+                        I::Keccak256 { .. } => Keccak256::digest(&repr).into(),
                         _ => unreachable!(),
                     };
-                    let hash_fields = hash.field_vec();
-                    if hash_fields.len() >= 2 {
-                        memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
-                        memory.insert(outputs[1].clone(), IrValue::Native(hash_fields[1]));
-                    } else {
-                        bail!("PersistentHash did not produce expected output");
-                    }
+                    memory.insert(output.clone(), IrValue::Bytes32(hash_output));
                 }
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
-                    for input in inputs {
-                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
-                        pis.push(x);
-                        public_transcript_inputs_idx += 1;
-                    }
                     if !resolve_operand_bool(&memory, guard)? {
+                        // A guarded-off impact contributes zeroed public inputs,
+                        // matching the in-circuit `select(guard, x, 0)` of the
+                        // `synthesize` run, and is recorded as skipped.
+                        for _ in inputs {
+                            pis.push(0.into());
+                        }
                         pi_skips.push(Some(count));
-                        public_transcript_inputs_idx -= count;
                     } else {
+                        for input in inputs {
+                            let x: Fr = resolve_operand(&memory, input)?.try_into()?;
+                            pis.push(x);
+                            public_transcript_inputs_idx += 1;
+                        }
                         pi_skips.push(None);
                         for i in 0..count {
                             let idx = public_transcript_inputs_idx - count + i;
@@ -587,9 +560,7 @@ impl IrSource {
                     let s = resolve_operand(&memory, scalar)?;
                     let p = match s.get_type() {
                         IrType::JubjubScalar => IrValue::JubjubPoint(JubjubSubgroup::generator()),
-                        IrType::Secp256k1Scalar => {
-                            IrValue::Secp256k1Point(secp256k1::Secp256k1::generator())
-                        }
+                        IrType::Secp256k1Scalar => IrValue::Secp256k1Point(k256::K256::generator()),
                         t => bail!("Unsupported EcMulGenerator for scalar of type {t:?}"),
                     };
                     let r = ec_mul_offcircuit(&p, &s)?;
@@ -621,6 +592,12 @@ impl IrSource {
                     let bytes: [u8; 32] = bytes.try_into()?;
                     let x = from_bytes32_offcircuit(val_t, &bytes)?;
                     memory.insert(output.clone(), x);
+                }
+                I::ReverseBytes { bytes, output } => {
+                    let bytes = resolve_operand(&memory, bytes)?;
+                    let mut bytes: [u8; 32] = bytes.try_into()?;
+                    bytes.reverse();
+                    memory.insert(output.clone(), IrValue::Bytes32(bytes));
                 }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(&memory, bytes)?;
@@ -716,8 +693,8 @@ impl IrSource {
 
 impl Relation for IrSource {
     type Instance = Vec<outer::Scalar>;
-
     type Witness = Preprocessed;
+    type Error = midnight_proofs::plonk::Error;
 
     fn format_instance(
         instance: &Self::Instance,
@@ -916,18 +893,13 @@ impl Relation for IrSource {
                 I::PersistentHash {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 }
                 | I::Keccak256 {
                     alignment,
                     inputs,
-                    outputs,
+                    output,
                 } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of persistent hash instruction".into(),
-                        ));
-                    }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
                         let x = resolve_operand(std, layouter, &memory, inp)?;
@@ -936,19 +908,14 @@ impl Relation for IrSource {
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = match ins {
+                    let hash_output = match ins {
                         I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?,
                         I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?,
                         _ => unreachable!(),
                     };
                     mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(assemble_bytes(std, layouter, &res_bytes[..31])?),
+                        output.clone(),
+                        CircuitValue::Bytes32(hash_output),
                         &mut memory,
                     )?;
                 }
@@ -1102,8 +1069,8 @@ impl Relation for IrSource {
                                 .assign_fixed(layouter, JubjubSubgroup::generator())?,
                         ),
                         IrType::Secp256k1Scalar => CircuitValue::Secp256k1Point(
-                            std.secp256k1_curve()
-                                .assign_fixed(layouter, secp256k1::Secp256k1::generator())?,
+                            std.secp256k1()
+                                .assign_fixed(layouter, k256::K256::generator())?,
                         ),
                         t => {
                             return Err(Error::Synthesis(format!(
@@ -1154,6 +1121,12 @@ impl Relation for IrSource {
                     let bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
                     let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
                     memory.insert(output.clone(), x);
+                }
+                I::ReverseBytes { bytes, output } => {
+                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
+                    let mut bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
+                    bytes.reverse();
+                    memory.insert(output.clone(), CircuitValue::Bytes32(bytes));
                 }
                 I::Bytes32IntoLowHigh { bytes, outputs } => {
                     let bytes = resolve_operand(std, layouter, &memory, bytes)?;
@@ -1277,7 +1250,13 @@ impl Relation for IrSource {
                 IrType::Secp256k1Base,
                 IrType::Secp256k1Scalar,
             ]),
+            p256: involves_types(&[IrType::Secp256r1Point, IrType::Secp256r1Base, IrType::Secp256r1Scalar]),
             bls12_381: false,
+            curve25519: involves_types(&[
+                IrType::Curve25519Point,
+                IrType::Curve25519Base,
+                IrType::Curve25519Scalar,
+            ]),
             base64: false,
             automaton: false,
         }

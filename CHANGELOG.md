@@ -6,6 +6,64 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.0-rc.5
+
+Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
+Internal dependency requirements are pinned to the new exact versions so that
+consumers cannot resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an rc.5 node rejects data an rc.4 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
+- `storage` moves to `2.0.4` and `storage-core` to `1.2.2`, skipping the `2.0.3`
+  and `1.2.1` numbers that `8.1.2` published from the `ledger-8` line.
+
+## Ledger 9.1.0.0-rc.4
+
+- fix: dust registration accounting moved to block time, rather than declared
+  transaction time.
+
+## Ledger 9.1.0.0-rc.3
+
+- feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
+- breaking: unify the construction of signing envelopes
+- fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly
+- fix: `ContractOperationVersionedVerifierKey::V3` and `V4` serialize independently (no longer share a match arm)
+- feat: `IrInsert` / `IrRemove` wasm bindings with `IrBuf` support for IR field in contract operations
+- feat: `lookup_key` exposed in ledger-wasm proving path, allowing the prover to use the correct key version
+- feat: add explicit price floor, denominated in full blocks, and governed by
+  ledger parameters.
+- feat: add support for ECDSA signatures
+- feat: add `UnlockToTreasury` system transaction, moving funds from the locked
+  pool to the treasury.
+- feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
+  matching the new on-chain event format.
+- fix: correctly exclude the identity point during coin ciphertext decryption
+- feat: `ContractOperation` extended with `v3` field for zk-stdlib v2 verifier keys
+- feat: `ProofVersioned::V3` variant for proofs generated against zk-stdlib v2
+- feat: `proof_verify` dynamically dispatches v1 or v2 verification based on
+  proof version (V2 → `v1_verify`, V3 → current `vk.verify`)
+- feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
+  for the new v3 verifier key field
+- feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
+- feat: maintenance updates can insert and remove the IR of a contract operation
+  via the `SingleUpdate::IrInsert` / `SingleUpdate::IrRemove` variants (exposed in
+  ledger-wasm as `IrInsert` / `IrRemove`)
+
+## Unreleased (8.2)
+
 ## Ledger 8.2.0-rc.1
 
 - note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
@@ -71,6 +129,8 @@ resolve past the fix.
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
 - feat: expose event contents to the extent that they are useful to the wallet in wasm bindings.
+- breaking: fix Zswap root retention period to match spec - global TTL param instead of hardcoded 1 hour;
+- breaking: adjust Zswap Ledger state API to take retention duration in the `post_block_update` hook
 
 ## 8.0.3
 

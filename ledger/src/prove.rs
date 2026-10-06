@@ -24,6 +24,7 @@ use onchain_runtime::ops::Op;
 use onchain_runtime::transcript::Transcript;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serialize::peek_tag;
 use std::future::Future;
 use std::io;
 use std::ops::Deref;
@@ -33,7 +34,7 @@ use storage::db::DB;
 use tokio::runtime::Handle;
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::commitment::{Pedersen, PureGeneratorPedersen};
-use transient_crypto::proofs::{KeyLocation, ParamsProverProvider};
+use transient_crypto::proofs::{KeyLocation, ParamsProverProvider, Resolver as ResolverT};
 use transient_crypto::proofs::{ProvingError, ProvingKeyMaterial, ProvingProvider};
 use zswap::prove::ZswapResolver;
 
@@ -353,14 +354,30 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
         };
 
         let proof = match &self.proof {
-            ProofPreimageVersioned::V2(preimage) => ProofVersioned::V2(
-                prover
+            ProofPreimageVersioned::V2(preimage) => {
+                let vk = prover
+                    .resolver()
+                    .resolve_key(preimage.key_location.clone())
+                    .await
+                    .map_err(TransactionProvingError::Tokio)?
+                    .ok_or_else(|| {
+                        TransactionProvingError::MissingKeyset(preimage.key_location.clone())
+                    })?
+                    .verifier_key;
+                let proof = prover
                     .prove(
                         preimage,
                         Some(intermediate_call.binding_input(binding_commitment)),
                     )
-                    .await?,
-            ),
+                    .await?;
+                let tag = peek_tag(&mut std::io::Cursor::new(&vk))
+                    .map_err(TransactionProvingError::Tokio)?;
+                match tag.as_str() {
+                    "verifier-key[v6]" => ProofVersioned::V2(proof),
+                    "verifier-key[v7]" => ProofVersioned::V3(proof),
+                    _ => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
+                }
+            }
         };
 
         // Assemble the final call
@@ -415,18 +432,27 @@ impl ProvingProvider for MockProver {
     fn split(&mut self) -> Self {
         MockProver
     }
+    fn resolver(&self) -> &impl ResolverT {
+        self
+    }
+}
+
+impl ResolverT for MockProver {
+    async fn resolve_key(&self, _key: KeyLocation) -> io::Result<Option<ProvingKeyMaterial>> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use base_crypto::{
-        data_provider::{self, MidnightDataProvider},
-        schnorr::Signature,
-    };
+    use base_crypto::data_provider::{self, MidnightDataProvider};
     use storage::db::InMemoryDB;
     use zswap::ZSWAP_EXPECTED_FILES;
 
-    use crate::{dust::DUST_EXPECTED_FILES, structure::Transaction};
+    use crate::{
+        dust::DUST_EXPECTED_FILES,
+        structure::{Signature, Transaction},
+    };
 
     #[test]
     fn test_mock_proving() {

@@ -11,23 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base_crypto::{
-    rng::SplittableRng,
-    schnorr::{Signature, SigningKey},
-};
+use base_crypto::rng::SplittableRng;
 use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
-    dust::{DustActions, DustPublicKey, DustRegistration, INITIAL_DUST_PARAMETERS, InitialNonce},
+    dust::{
+        DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
+        INITIAL_DUST_PARAMETERS, InitialNonce,
+    },
+    events::{Event, EventDetails},
     semantics::TransactionResult,
     structure::{
-        CNightGeneratesDustEvent, Intent, SystemTransaction, Transaction, UnshieldedOffer,
-        UtxoOutput, UtxoSpend,
+        CNightGeneratesDustActionType, CNightGeneratesDustEvent, INITIAL_PARAMETERS, Intent,
+        Signature, SigningKey, SystemTransaction, Transaction, UnshieldedOffer, UtxoOutput,
+        UtxoSpend,
     },
-    test_utilities::{Resolver, TestState, test_resolver, tx_prove_bind},
+    test_utilities::{Resolver, TestState, dbg_fees_with_state, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
 };
+use midnight_ledger_v9 as midnight_ledger;
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use serialize::tagged_serialize;
 use std::collections::VecDeque;
 use storage::{arena::Sp, db::InMemoryDB};
 
@@ -97,10 +101,13 @@ async fn test_registration_dust_payment() {
     // Erase for fees due to technicality of the runtime fees calculation being slightly inaccurate
     // due to only having the proof-erased tx to hand.
     let dust_fee = dbg!(
-        tx.erase_proofs()
-            .erase_signatures()
-            .fees(&state.ledger.parameters, true)
-            .unwrap()
+        dbg_fees_with_state(
+            &tx.erase_proofs().erase_signatures(),
+            &state.ledger.parameters,
+            &state.ledger,
+            true,
+        )
+        .unwrap()
     );
     let result = state.apply(&tx, strictness).unwrap();
     assert!(matches!(result, TransactionResult::Success(_)));
@@ -111,6 +118,88 @@ async fn test_registration_dust_payment() {
         dt.as_seconds() as u128 * NIGHT_VAL * INITIAL_DUST_PARAMETERS.generation_decay_rate as u128;
     assert!(dust_bal > dust_generated);
     assert!(dbg!(dust_bal) <= dbg!(DUST_VAL - dust_fee + dust_generated));
+}
+
+#[tokio::test]
+async fn test_registration_does_not_backdate_new_dust() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    let verifying_key = state.night_key.verifying_key();
+    let addr = UserAddress::from(verifying_key.clone());
+
+    // Registers before rewarding, so the NIGHT spent below is already tracked for
+    // generation. That is what drives the registration's generationless
+    // availability to zero, leaving the declared `ctime` as the only thing that
+    // could give the replacement output a head start.
+    state.give_fee_token(&mut rng, 1).await;
+
+    let utxo = state
+        .ledger
+        .utxo
+        .utxos
+        .iter()
+        .map(|kv| (*kv.0).clone())
+        .find(|utxo| utxo.owner == addr && utxo.type_ == NIGHT)
+        .expect("rewarded NIGHT UTXO");
+
+    let mut intent = Intent::<Signature, _, _, _>::empty(&mut rng, state.time);
+    intent.guaranteed_unshielded_offer = Some(Sp::new(UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: utxo.intent_hash,
+            output_no: utxo.output_no,
+            owner: verifying_key.clone(),
+            type_: NIGHT,
+            value: utxo.value,
+        }]
+        .into(),
+        outputs: vec![UtxoOutput {
+            owner: addr,
+            type_: NIGHT,
+            value: utxo.value,
+        }]
+        .into(),
+        signatures: vec![].into(),
+    }));
+    intent.dust_actions = Some(Sp::new(DustActions {
+        spends: vec![].into(),
+        registrations: vec![DustRegistration {
+            allow_fee_payment: 0,
+            dust_address: Some(Sp::new(DustPublicKey::from(state.dust_key.clone()))),
+            night_key: verifying_key,
+            signature: None,
+        }]
+        .into(),
+        // The oldest timestamp the validity window admits.
+        ctime: state.time - INITIAL_DUST_PARAMETERS.dust_grace_period,
+    }));
+
+    let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    strictness.verify_signatures = false;
+    let result = state.apply(&tx, strictness).unwrap();
+    assert!(matches!(result, TransactionResult::Success(_)));
+
+    let (output, generation, block_time) = result
+        .events()
+        .iter()
+        .find_map(|event| match &event.content {
+            EventDetails::DustInitialUtxo {
+                output,
+                generation,
+                block_time,
+                ..
+            } => Some((*output, *generation, *block_time)),
+            _ => None,
+        })
+        .expect("registration should replace the spent output's DUST");
+
+    // The backing NIGHT output comes into existence in this block, so its DUST
+    // holds nothing yet, whatever time the author declared.
+    assert_eq!(
+        DustOutput::from(output).updated_value(&generation, block_time, &INITIAL_DUST_PARAMETERS),
+        0,
+    );
 }
 
 #[tokio::test]
@@ -166,6 +255,95 @@ async fn test_cnight_dust_payment() {
     assert!(state.dust.utxos().next().is_none());
 }
 
+/// Regression test for https://github.com/midnightntwrk/midnight-ledger/issues/455:
+/// `replay_events` must produce byte-identical state whether replayed in one
+/// batch or split across chunks, for a viewer that owns none of the UTXOs.
+#[tokio::test]
+async fn test_replay_events_associative_for_non_owning_viewer() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+
+    const CNIGHT_BAL: u128 = 10_000_000;
+    let nonce = InitialNonce(rng.r#gen());
+    // Owned by `owner`, not the viewer we replay with.
+    let owner = DustPublicKey::from(state.dust_key.clone());
+
+    let mut events: Vec<Event<InMemoryDB>> = Vec::new();
+
+    let create_tx = SystemTransaction::CNightGeneratesDustUpdate {
+        events: vec![CNightGeneratesDustEvent {
+            action: CNightGeneratesDustActionType::Create,
+            nonce,
+            owner,
+            time: state.time,
+            value: CNIGHT_BAL,
+        }],
+    };
+    let (ledger, evs) = state
+        .ledger
+        .apply_system_tx(&create_tx, state.time)
+        .expect("apply create");
+    state.ledger = ledger;
+    events.extend(evs);
+
+    state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
+
+    let destroy_tx = SystemTransaction::CNightGeneratesDustUpdate {
+        events: vec![CNightGeneratesDustEvent {
+            action: CNightGeneratesDustActionType::Destroy,
+            nonce,
+            owner,
+            time: state.time,
+            value: CNIGHT_BAL,
+        }],
+    };
+    let (ledger, evs) = state
+        .ledger
+        .apply_system_tx(&destroy_tx, state.time)
+        .expect("apply destroy");
+    state.ledger = ledger;
+    events.extend(evs);
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.content, EventDetails::DustInitialUtxo { .. })),
+        "fixture must contain a DustInitialUtxo event"
+    );
+    let split_idx = events
+        .iter()
+        .position(|e| matches!(e.content, EventDetails::DustGenerationDtimeUpdate { .. }))
+        .expect("fixture must contain a DustGenerationDtimeUpdate event");
+
+    let viewer = DustSecretKey::sample(&mut rng);
+    let viewer_state = DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust);
+
+    let batch = viewer_state
+        .replay_events(&viewer, events.iter())
+        .expect("batch replay");
+
+    let (head, tail) = events.split_at(split_idx);
+    let split = viewer_state
+        .replay_events(&viewer, head.iter())
+        .expect("replay head")
+        .replay_events(&viewer, tail.iter())
+        .expect("replay tail");
+
+    let mut batch_bytes = Vec::new();
+    tagged_serialize(&batch, &mut batch_bytes).expect("serialize batch state");
+    let mut split_bytes = Vec::new();
+    tagged_serialize(&split, &mut split_bytes).expect("serialize split state");
+
+    assert_eq!(
+        batch_bytes,
+        split_bytes,
+        "replay_events must be associative across chunk boundaries \
+         (batch = {} B, split = {} B)",
+        batch_bytes.len(),
+        split_bytes.len(),
+    );
+}
+
 #[tokio::test]
 async fn test_cycle_transfers() {
     // Test Night UTXOs being cycled through Y participants
@@ -190,7 +368,7 @@ async fn test_cycle_transfers() {
 
     let mut cycle = vec![(alice_vk.clone(), alice_addr, alice_dust)];
     for _ in 1..CYCLE_LEN {
-        let sk = SigningKey::sample(&mut rng);
+        let sk = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut rng));
         let vk = sk.verifying_key();
         let addr = UserAddress::from(vk.clone());
         let dust = DustPublicKey(rng.r#gen());

@@ -33,7 +33,7 @@ struct DustPublicKey {
 struct NoncePreimage {
   initial_nonce: Bytes<32>,
   seq_number: Uint<32>,
-  key: DustSecretKey,
+  key: Field,
 }
 
 struct DustPreimage {
@@ -101,6 +101,16 @@ export circuit spend(
   // Second public transcript part: root check
   generation_merkle_tree.checkRoot(disclose(merkleTreePathRootNoLeafHash<32>(generation_path)));
 
+  const old_nonce = transientHash<NoncePreimage>(
+    NoncePreimage {
+      initial_nonce: initial_nonce,
+      seq_number: seq_no,
+      key: seq_no == 0 ? dust.owner.key : sk.key,
+    }
+  );
+  assert(dust.nonce == old_nonce, "old dust nonce must match computed");
+  assert(gen.nonce == initial_nonce, "generation nonce must match initial nonce");
+
   const nul = disclose(transientCommit<DustPreimage>(
     DustPreimage {
       initial_value: dust.initial_value,
@@ -127,8 +137,8 @@ export circuit spend(
   const new_nonce = transientHash<NoncePreimage>(
     NoncePreimage {
 	  initial_nonce: initial_nonce,
-	  seq_number: dust.seq_number + 1 as Uint<32>,
-      key: sk,
+	  seq_number: seq_no + 1 as Uint<32>,
+      key: sk.key,
 	}
   );
   // Seventh public transcript part: cell read (ctime)

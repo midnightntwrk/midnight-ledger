@@ -44,6 +44,25 @@ fn err(msg: impl Into<String>) -> std::io::Error {
     std::io::Error::other(msg.into())
 }
 
+fn call_provider(provider: &JsValue, name: &str, arg: &JsValue) -> Result<Promise, JsError> {
+    js_sys::Reflect::get(provider, &name.into())
+        .map_err(|_| {
+            JsError::new(&format!(
+                "could not get property '{name}' on KeyMaterialProvider"
+            ))
+        })?
+        .dyn_into::<Function>()
+        .map_err(|_| {
+            JsError::new(&format!(
+                "property '{name}' on KeyMaterialProvider is not a function"
+            ))
+        })?
+        .call1(provider, arg)
+        .map_err(|e| JsError::new(&format!("error calling {name}: {}", try_to_string(e))))?
+        .dyn_into::<Promise>()
+        .map_err(|_| JsError::new(&format!("result of {name} was not a promise")))
+}
+
 impl ParamsProverProvider for JsKeyProvider {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
         let get_params = js_sys::Reflect::get(&self.0, &"getParams".into())
@@ -215,6 +234,18 @@ impl WrappedProvingProvider {
             overwrite_binding_input,
         )
         .await
+    }
+    #[wasm_bindgen(js_name = "lookupKey")]
+    pub fn lookup_key(&self, key_location: &str) -> Result<Promise, JsError> {
+        call_provider(
+            &self.km_provider,
+            "lookupKey",
+            &JsValue::from_str(key_location),
+        )
+    }
+    #[wasm_bindgen(js_name = "getParams")]
+    pub fn get_params(&self, k: u8) -> Result<Promise, JsError> {
+        call_provider(&self.km_provider, "getParams", &JsValue::from(k))
     }
 }
 

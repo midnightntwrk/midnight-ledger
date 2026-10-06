@@ -1,4 +1,4 @@
-<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v3.d.ts', 'utf8')); %>
+<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v4.d.ts', 'utf8')); %>
 
 /**
  * A zero-knowledge proof.
@@ -92,6 +92,7 @@ export class SignatureEnabled {
   toString(compact?: boolean): string;
   readonly instance: 'signature';
   private type_: 'signature';
+  readonly value: Signature;
 }
 
 export class SignatureErased {
@@ -285,6 +286,15 @@ export type EventDetails =
     vFee: bigint,
     declaredTime: Date,
     blockTime: Date,
+  } | {
+    tag: 'contractLog',
+    address: ContractAddress,
+    entryPoint: Uint8Array | string,
+    loggedItem: {
+      version: number,
+      eventType: LogEventType,
+      data: EncodedStateValue,
+    },
   } |
   // Other variants may be added and some events are not yet supported in this API.
   { tag: string };
@@ -627,6 +637,32 @@ export class LedgerState {
    * Use is for testing purposes only.
    */
   testingDistributeNight(recipient: UserAddress, amount: bigint, tblock: Date): LedgerState;
+
+  /**
+   * Constructs a ledger state with the given genesis parameterisation, using
+   * the default initial parameters. Allows seeding the locked, reserve, and
+   * treasury NIGHT pools so that subsequent system transactions (e.g.
+   * {@link testingUnlockToTreasury}) can be exercised
+   *
+   * Use is for testing purposes only.
+   */
+  static testingFromGenesis(network_id: string, lockedPool: bigint, reservePool: bigint, treasury: bigint): LedgerState;
+
+  /**
+   * Applies an `UnlockToTreasury` system transaction, moving the given amount
+   * of Night from the locked pool into the treasury.
+   *
+   * Use is for testing purposes only.
+   */
+  testingUnlockToTreasury(amount: bigint, tblock: Date): LedgerState;
+
+  /**
+   * Applies an `UnlockToReserve` system transaction, moving the given amount
+   * of Night from the locked pool into the reserve pool.
+   *
+   * Use is for testing purposes only.
+   */
+  testingUnlockToReserve(amount: bigint, tblock: Date): LedgerState;
 
   /**
    * The remaining size of the locked Night pool.
@@ -978,9 +1014,9 @@ export class Intent<S extends Signaturish, P extends Proofish, B extends Binding
 export class UnshieldedOffer<S extends Signaturish> {
   private constructor();
 
-  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: Signature[]): UnshieldedOffer<SignatureEnabled>;
+  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: SignatureEnabled[]): UnshieldedOffer<SignatureEnabled>;
 
-  addSignatures(signatures: Signature[]): UnshieldedOffer<S>;
+  addSignatures(signatures: S[]): UnshieldedOffer<S>;
 
   eraseSignatures(): UnshieldedOffer<SignatureErased>;
 
@@ -988,7 +1024,7 @@ export class UnshieldedOffer<S extends Signaturish> {
 
   readonly inputs: UtxoSpend[];
   readonly outputs: UtxoOutput[];
-  readonly signatures: Signature[];
+  readonly signatures: S[];
 }
 
 /**
@@ -1034,15 +1070,15 @@ export type ErasedTransactionResult = {
 /**
  * A single update instruction in a {@link MaintenanceUpdate}.
  */
-export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyInsert;
+export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyInsert | IrRemove | IrInsert;
 
 /**
  * The version associated with a {@link ContractOperation}
  */
 export class ContractOperationVersion {
-  constructor(version: 'v3');
+  constructor(version: 'v3' | 'v4');
 
-  readonly version: 'v3';
+  readonly version: 'v3' | 'v4';
 
   toString(compact?: boolean): string;
 }
@@ -1051,9 +1087,9 @@ export class ContractOperationVersion {
  * A versioned verifier key to be associated with a {@link ContractOperation}.
  */
 export class ContractOperationVersionedVerifierKey {
-  constructor(version: 'v3', rawVk: Uint8Array);
+  constructor(version: 'v3' | 'v4', rawVk: Uint8Array);
 
-  readonly version: 'v3';
+  readonly version: 'v3' | 'v4';
   readonly rawVk: Uint8Array;
 
   toString(compact?: boolean): string;
@@ -1093,6 +1129,29 @@ export class VerifierKeyInsert {
 
   readonly operation: string | Uint8Array;
   readonly vk: ContractOperationVersionedVerifierKey;
+
+  toString(compact?: boolean): string;
+}
+
+/**
+ * An update instruction to remove IR metadata of a specific operation.
+ */
+export class IrRemove {
+  constructor(operation: string | Uint8Array);
+
+  readonly operation: string | Uint8Array;
+
+  toString(compact?: boolean): string;
+}
+
+/**
+ * An update instruction to insert IR metadata at a specific operation.
+ */
+export class IrInsert {
+  constructor(operation: string | Uint8Array, ir: Uint8Array);
+
+  readonly operation: string | Uint8Array;
+  readonly ir: Uint8Array;
 
   toString(compact?: boolean): string;
 }
@@ -1164,6 +1223,7 @@ export type ProvingProvider = {
     keyLocation: string,
     overwriteBindingInput?: bigint,
   ): Promise<Uint8Array>;
+  lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined>;
 };
 
 /**
@@ -1710,8 +1770,11 @@ export class ZswapChainState {
    *
    * Typically, `postBlockUpdate` should be run after any (sequence of)
    * (system)-transaction application(s).
+   *
+   * @param tblock - timestamp of a block last batch of updates was applied at
+   * @param retentionDuration - number of seconds to retain past Merkle tree roots
    */
-  postBlockUpdate(tblock: Date): ZswapChainState;
+  postBlockUpdate(tblock: Date, retentionDuration: bigint): ZswapChainState;
 
   /**
    * Try to apply an {@link ZswapOffer} to the state, returning the updated state

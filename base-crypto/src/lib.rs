@@ -25,6 +25,7 @@
 pub mod cost_model;
 pub mod data_provider;
 pub mod ecdsa;
+pub mod envelope;
 pub mod fab;
 pub mod hash;
 pub mod repr;
