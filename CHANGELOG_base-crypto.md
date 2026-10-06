@@ -12,6 +12,12 @@
   its declared alignment.
 - fix: `Duration::from_hours` saturates instead of overflowing.
 
+## Version `1.0.2`
+
+- feat: `Alignment::fits_field_check`, `Alignment::consume_field_check` and
+  `AlignmentAtom::fits_field_check`, which apply an additional caller-supplied
+  check to atoms with `Field` alignment.
+
 ## Version `1.0.1`
 
 - security: reject non-canonical `Value` and `ValueAtom` encodings: a singleton

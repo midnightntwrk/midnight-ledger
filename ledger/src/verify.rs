@@ -1896,7 +1896,13 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         .into_iter()
         .flatten()
         {
-            for window in Vec::from(&transcript.program).windows(2) {
+            let program = Vec::from(&transcript.program);
+            // `noop 0` contributes nothing to the proof's public inputs, but still shifts the
+            // targets of `branch` and `jmp`, which count operations.
+            if program.iter().any(|op| matches!(op, Op::Noop { n: 0 })) {
+                return Err(MalformedTransaction::NotNormalized);
+            }
+            for window in program.windows(2) {
                 if let (Op::Noop { .. }, Op::Noop { .. }) = (&window[0], &window[1]) {
                     return Err(MalformedTransaction::NotNormalized);
                 }
@@ -2237,6 +2243,60 @@ mod sparse_unshielded_signature_tests {
 
         let check = offer.well_formed(1, &parent).unwrap();
         assert!(check().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod well_formed_tests {
+    use super::*;
+    use coin_structure::contract::ContractAddress;
+    use onchain_runtime::result_mode::ResultModeVerify;
+    use onchain_runtime::state::EntryPointBuf;
+    use onchain_runtime::transcript::Transcript;
+    use storage::{arena::Sp, db::InMemoryDB};
+    use transient_crypto::curve::Fr;
+
+    #[test]
+    fn contract_call_rejects_zero_length_noop() {
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let state = LedgerState::<InMemoryDB>::new("local-test");
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            .. WellFormedStrictness::default()
+        };
+        let call_with = |program: Vec<Op<ResultModeVerify, InMemoryDB>>| ContractCall::<
+            (),
+            InMemoryDB,
+        > {
+            address: ContractAddress::default(),
+            entry_point: EntryPointBuf(b"count".to_vec()),
+            guaranteed_transcript: None,
+            fallible_transcript: Some(Sp::new(Transcript {
+                gas: Default::default(),
+                effects: Default::default(),
+                program: program.into(),
+                version: None,
+            })),
+            communication_commitment: Fr::from(0u64),
+            proof: (),
+        };
+
+        assert!(
+            call_with(vec![Op::Noop { n: 1 }])
+                .well_formed(&state, strictness, &parent)
+                .is_ok()
+        );
+        assert!(matches!(
+            call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent),
+            Err(MalformedTransaction::NotNormalized)
+        ));
     }
 }
 

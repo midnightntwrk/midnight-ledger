@@ -76,6 +76,27 @@ consumers cannot resolve past the fix.
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 - fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
+## Ledger 8.1.3
+
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: contract call transcripts must embed canonical field values, across
+  `base-crypto`, `onchain-state` and `onchain-vm`. A `field` atom encoding
+  `x + p` has the same proof public inputs as `x`, but the VM compares and
+  hashes it differently; such values in `push`, `pushs` and `idx`-style path
+  keys are now rejected. This narrows what is well-formed: an 8.1.3 node
+  rejects contract calls an 8.1.2 node accepts. See the per-crate changelogs
+  for the individual rules.
+- security: `noop 0` in a contract call transcript is rejected as not
+  normalized. It contributes no public inputs, but shifted `branch` and `jmp`
+  targets.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Rust code constructing
+  these directly must convert with `AlignedValueChecked::try_from`.
+
 ## Ledger 8.1.2
 
 Security patch. All bumps are patch-level so that the release reads as one, even
