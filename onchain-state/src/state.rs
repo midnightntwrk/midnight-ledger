@@ -12,7 +12,9 @@
 // limitations under the License.
 
 use base_crypto::cost_model::RunningCost;
-use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom};
+use base_crypto::fab::{
+    Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, FIELD_BYTE_LIMIT, ValueAtom,
+};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
 use base_crypto::schnorr::VerifyingKey;
@@ -58,45 +60,263 @@ use transient_crypto::merkle_tree::MerkleTree;
 use transient_crypto::proofs::VerifierKey;
 use transient_crypto::repr::FieldRepr;
 
-#[cfg(feature = "proptest")]
-fn proptest_valid<D: DB>(value: &StateValue<D>) -> bool {
-    match value {
-        StateValue::Array(arr) => arr.len() <= 16,
-        _ => true,
-    }
-}
-
 /// The size limit for Cell's. Currently 32 kiB
 pub const CELL_BOUND: usize = 1 << 15;
 
+// Trait for possible cell values / map keys to allow using both `AlignedValue` and
+// `AlignedValueChecked` in different generic instantiations of `StateValue`.
+pub trait AlignedValueKind<D: DB>: ExpectFromAligned + Serializable + Storable<D> + Clone + Eq + Ord + Hash + Serialize + FieldRepr + Debug + for<'de> Deserialize<'de> {
+    fn additional_invariant_checks(value: &StateValue<D, Self>) -> io::Result<()>;
+}
+
+// Separate from `AlignedValueKind` because its signature does not mention `D`, which would then
+// be uninferable at call sites such as `stval!`.
+pub trait ExpectFromAligned: Sized {
+    fn expect_from<T: Into<AlignedValue>>(value: T, msg: &str) -> Self;
+}
+
+impl ExpectFromAligned for AlignedValue {
+    fn expect_from<T: Into<AlignedValue>>(value: T, _msg: &str) -> Self {
+        value.into()
+    }
+}
+
+impl ExpectFromAligned for AlignedValueChecked {
+    fn expect_from<T: Into<AlignedValue>>(value: T, msg: &str) -> Self {
+        AlignedValueChecked::try_from(value.into()).expect(msg)
+    }
+}
+
+impl<D: DB> AlignedValueKind<D> for AlignedValue {
+    fn additional_invariant_checks(_: &StateValue<D, Self>) -> io::Result<()> {
+        Ok(())
+    }
+}
+impl<D: DB> AlignedValueKind<D> for AlignedValueChecked {
+    fn additional_invariant_checks(value: &StateValue<D, Self>) -> io::Result<()> {
+        if let StateValue::BoundedMerkleTree(bmt) = value && bmt != &MerkleTree::blank(bmt.height()) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Checked-context Merkle trees must be empty",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default, Storable)]
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[cfg_attr(feature = "proptest", proptest(filter = "proptest_valid"))]
 #[storable(db = D, invariant = StateValue::invariant)]
 #[tag = "impact-state-value[v2]"]
 #[non_exhaustive]
-pub enum StateValue<D: DB = InMemoryDB> {
+pub enum StateValue<D: DB = InMemoryDB, V: AlignedValueKind<D> = AlignedValue> {
     #[default]
     Null,
-    Cell(#[storable(child)] Sp<AlignedValue, D>),
-    Map(HashMap<AlignedValue, StateValue<D>, D>),
+    Cell(#[storable(child)] Sp<V, D>),
+    Map(HashMap<V, StateValue<D, V>, D>),
     /// A fixed size array, with `0 <= len <= 16`. The upper 5 bits of the
     /// argument to the `new` opcode specify the length at creation time. The
     /// underlying `storage::Array` type is not fixed length, but in the VM we
     /// only allow size preserving operations.
-    Array(Array<StateValue<D>, D>),
+    Array(Array<StateValue<D, V>, D>),
     /// Merkle tree with `0 < height <= 32`.
-    BoundedMerkleTree(
-        // The `Serializable::unversioned_serialize` impl requires this.
-        #[cfg_attr(
-            feature = "proptest",
-            proptest(filter = "|mt| !(mt.height() == 0 || mt.height() > 32)")
-        )]
-        MerkleTree<(), D>,
-    ),
+    BoundedMerkleTree(MerkleTree<(), D>),
 }
 tag_enforcement_test!(StateValue);
+
+// Not derived: the derive cannot express the `Standard: Distribution<V>` bound that the container
+// strategies need, and those strategies do not shrink anyway.
+#[cfg(feature = "proptest")]
+impl<D: DB, V: AlignedValueKind<D>> Arbitrary for StateValue<D, V>
+where
+    Standard: Distribution<V>,
+{
+    type Parameters = ();
+    type Strategy = NoStrategy<StateValue<D, V>>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        NoStrategy(PhantomData)
+    }
+}
+
+/// Mirror of [AlignedValue] with additional checks. These check that field-aligned atoms are in
+/// fact within the field modulus, rejecting aligned values that would alias to to the same field
+/// representation via modular reduction.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Storable, FieldRepr)]
+#[storable(base)]
+pub struct AlignedValueChecked(AlignedValue);
+
+impl Distribution<AlignedValueChecked> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> AlignedValueChecked {
+        // The base sampler fills `Field` atoms with up to 64 random bytes, which usually exceed
+        // the modulus; reduce them so every sample is canonical.
+        fn reduce_field_atoms<'a>(
+            segments: &[AlignmentSegment],
+            atoms: &mut impl Iterator<Item = &'a mut ValueAtom>,
+        ) {
+            for segment in segments {
+                match segment {
+                    AlignmentSegment::Atom(AlignmentAtom::Field) => {
+                        let atom = atoms.next().expect("sampled value should fit its alignment");
+                        let mut bytes = [0u8; FIELD_BYTE_LIMIT];
+                        bytes[..atom.0.len()].copy_from_slice(&atom.0);
+                        *atom = Fr::from_uniform_bytes(&bytes).into();
+                    }
+                    AlignmentSegment::Atom(_) => {
+                        atoms.next();
+                    }
+                    AlignmentSegment::Option(options) => {
+                        let discriminant = atoms.next().expect("sampled value should fit its alignment");
+                        let choice = u16::try_from(&*discriminant)
+                            .expect("sampled discriminant should decode");
+                        reduce_field_atoms(&options[choice as usize].0, atoms);
+                    }
+                }
+            }
+        }
+        let mut value: AlignedValue = self.sample(rng);
+        reduce_field_atoms(&value.alignment.0, &mut value.value.0.iter_mut());
+        AlignedValueChecked::try_from(value).expect("reduced sample should be canonical")
+    }
+}
+
+#[cfg(feature = "proptest")]
+simple_arbitrary!(AlignedValueChecked);
+
+impl From<AlignedValueChecked> for AlignedValue {
+    fn from(value: AlignedValueChecked) -> Self {
+        value.0
+    }
+}
+
+impl TryFrom<AlignedValue> for AlignedValueChecked {
+    type Error = ();
+    fn try_from(value: AlignedValue) -> Result<Self, Self::Error> {
+        if value.alignment.fits_field_check(&value.value, |atom| Fr::try_from(atom).is_ok()) {
+            Ok(AlignedValueChecked(value))
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl From<u8> for AlignedValueChecked {
+    fn from(value: u8) -> Self {
+        AlignedValueChecked(AlignedValue::from(value))
+    }
+}
+
+// O(1), as `Push` costs are flat: both leaf kinds share one binary representation, so the top-level
+// node is re-read as the unchecked type, leaving its children lazy. The re-read goes through the
+// trusted loader and skips invariants, which is sound as every checked value is a valid unchecked
+// one.
+impl<D: DB> From<StateValue<D, AlignedValueChecked>> for StateValue<D, AlignedValue> {
+    fn from(value: StateValue<D, AlignedValueChecked>) -> Self {
+        let checked = Sp::<_, D>::new(value);
+        let unchecked: Sp<StateValue<D, AlignedValue>, D> = checked
+            .arena
+            .get_lazy(&checked.child_repr.clone().into())
+            .expect("lazy arena lookup should not fail");
+        (*unchecked).clone()
+    }
+}
+
+// A named method rather than a `TryFrom` impl: a second `TryFrom` candidate breaks inference for
+// untyped literals such as `StateValue::Null.try_into()` in the generated program fragments.
+impl<D: DB> StateValue<D, AlignedValue> {
+    /// Converts this state value into its checked form, failing if it contains a non-canonical
+    /// field encoding or a non-empty Merkle tree.
+    ///
+    /// Must not be used on the critical path: this walks the value as a tree, so a value with
+    /// shared (deduplicated) children takes time exponential in its serialized size.
+    #[allow(clippy::result_unit_err)]
+    pub fn try_into_checked(&self) -> Result<StateValue<D, AlignedValueChecked>, ()> {
+        let res = match self {
+            StateValue::Null => StateValue::Null,
+            StateValue::Cell(v) => {
+                StateValue::Cell(Sp::new(AlignedValueChecked::try_from((**v).clone())?))
+            }
+            StateValue::Map(m) => StateValue::Map(
+                m.iter()
+                    .map(|kv| {
+                        Ok((
+                            AlignedValueChecked::try_from((*kv.0).clone())?,
+                            kv.1.try_into_checked()?,
+                        ))
+                    })
+                    .collect::<Result<_, ()>>()?,
+            ),
+            StateValue::Array(arr) => StateValue::Array(
+                arr.iter()
+                    .map(|v| v.try_into_checked())
+                    .collect::<Result<_, ()>>()?,
+            ),
+            StateValue::BoundedMerkleTree(t) => StateValue::BoundedMerkleTree(t.clone()),
+        };
+        <AlignedValueChecked as AlignedValueKind<D>>::additional_invariant_checks(&res)
+            .map_err(|_| ())?;
+        Ok(res)
+    }
+}
+
+impl Debug for AlignedValueChecked {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl Serialize for AlignedValueChecked {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer
+    {
+        Serialize::serialize(&self.0, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for AlignedValueChecked {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>
+    {
+        let value: AlignedValue = Deserialize::deserialize(deserializer)?;
+        if value.alignment.fits_field_check(&value.value, |atom| Fr::try_from(atom).is_ok()) {
+            Ok(AlignedValueChecked(value))
+        } else {
+            Err(<D::Error as serde::de::Error>::custom("value failed field alignment check"))
+        }
+    }
+}
+
+impl Serializable for AlignedValueChecked {
+    fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        Serializable::serialize(&self.0, writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.0.serialized_size()
+    }
+}
+
+impl Deserializable for AlignedValueChecked {
+    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<Self> {
+        let val: AlignedValue = Deserializable::deserialize(reader, recursion_depth)?;
+        if !val.alignment.fits_field_check(&val.value, |atom| Fr::try_from(atom).is_ok()) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "deserialized AlignedValue is not aligned with field check"));
+        }
+        Ok(AlignedValueChecked(val))
+    }
+}
+
+// NOTE: Shared tag with AlignedValue to not change the serialization contract for security fix.
+impl Tagged for AlignedValueChecked {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        AlignedValue::tag()
+    }
+    fn tag_unique_factor() -> String {
+        AlignedValue::tag_unique_factor()
+    }
+}
+tag_enforcement_test!(AlignedValueChecked);
 
 impl<D: DB> From<u64> for StateValue<D> {
     fn from(value: u64) -> Self {
@@ -106,7 +326,7 @@ impl<D: DB> From<u64> for StateValue<D> {
 
 // We need to manually implement `Drop` to avoid implicit unbounded recursion, which could lead to
 // stack overflows. See https://rust-unofficial.github.io/too-many-lists/first-drop.html.
-impl<D: DB> Drop for StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> Drop for StateValue<D, V> {
     fn drop(&mut self) {
         // Early return for non-recursive types. This ensures that we have a base-case for Drop,
         // as we'll end up recursing at least once otherwise, because we keep a queue of state
@@ -140,8 +360,10 @@ impl<D: DB> Drop for StateValue<D> {
     }
 }
 
-impl<D: DB> Distribution<StateValue<D>> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> Distribution<StateValue<D, V>> for Standard
+    where Standard: Distribution<V>
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> StateValue<D, V> {
         let disc = rng.gen_range(0..40);
         // Converges because:
         // - 38/40 cases do not recurse
@@ -151,17 +373,24 @@ impl<D: DB> Distribution<StateValue<D>> for Standard {
         match disc {
             20..=35 => StateValue::Cell(Sp::new(rng.r#gen())),
             36..=37 => {
-                let mut mt: MerkleTree<(), D> = rng.r#gen();
+                let mut mt: MerkleTree<(), D> = rng.r#gen::<MerkleTree<(), D>>();
                 // The `Serializable::unversioned_serialize` impl requires this.
                 while mt.height() == 0 || mt.height() > 32 {
-                    mt = rng.r#gen();
+                    mt = rng.r#gen::<MerkleTree<(), D>>();
                 }
-                StateValue::BoundedMerkleTree(mt)
+                let height = mt.height();
+                let res = StateValue::BoundedMerkleTree(mt);
+                // Checked instantiations only admit blank trees.
+                if V::additional_invariant_checks(&res).is_ok() {
+                    res
+                } else {
+                    StateValue::BoundedMerkleTree(MerkleTree::blank(height))
+                }
             }
-            38 => StateValue::Map(rng.r#gen()),
+            38 => StateValue::Map(rng.r#gen::<HashMap<V, StateValue<D, V>, D>>()),
             39 => {
                 let len = rng.gen_range(0..=16);
-                let arr = (0..len).fold(Array::new(), |arr, _| arr.push(rng.r#gen()));
+                let arr = (0..len).fold(Array::<StateValue<D, V>, D>::new(), |arr, _| arr.push(rng.r#gen::<StateValue<D, V>>()));
                 StateValue::Array(arr)
             }
             _ => StateValue::Null,
@@ -169,7 +398,7 @@ impl<D: DB> Distribution<StateValue<D>> for Standard {
     }
 }
 
-impl<D: DB> FieldRepr for StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> FieldRepr for StateValue<D, V> {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
         use StateValue::*;
         match self {
@@ -223,7 +452,7 @@ impl<D: DB> FieldRepr for StateValue<D> {
     }
 }
 
-impl<D: DB> Serialize for StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> Serialize for StateValue<D, V> {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         match self {
             StateValue::Null => {
@@ -259,15 +488,15 @@ impl<D: DB> Serialize for StateValue<D> {
     }
 }
 
-struct StateValueVisitor<D: DB>(PhantomData<D>);
+struct StateValueVisitor<D: DB, V: AlignedValueKind<D>>(PhantomData<(D, V)>);
 
-impl<'de, D: DB> Visitor<'de> for StateValueVisitor<D> {
-    type Value = StateValue<D>;
+impl<'de, D: DB, V: AlignedValueKind<D>> Visitor<'de> for StateValueVisitor<D, V> {
+    type Value = StateValue<D, V>;
     fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
         write!(formatter, "a state value")
     }
 
-    fn visit_seq<V: SeqAccess<'de>>(self, mut seq: V) -> Result<StateValue<D>, V::Error> {
+    fn visit_seq<V2: SeqAccess<'de>>(self, mut seq: V2) -> Result<StateValue<D, V>, V2::Error> {
         let tag: String = seq
             .next_element()?
             .ok_or_else(|| de::Error::invalid_length(0, &self))?;
@@ -296,7 +525,7 @@ impl<'de, D: DB> Visitor<'de> for StateValueVisitor<D> {
         }
     }
 
-    fn visit_map<V: MapAccess<'de>>(self, mut map: V) -> Result<StateValue<D>, V::Error> {
+    fn visit_map<V2: MapAccess<'de>>(self, mut map: V2) -> Result<StateValue<D, V>, V2::Error> {
         let first_key: String = map
             .next_key()?
             .ok_or_else(|| de::Error::missing_field("tag"))?;
@@ -337,7 +566,7 @@ impl<'de, D: DB> Visitor<'de> for StateValueVisitor<D> {
     }
 }
 
-impl<'de, D1: DB> Deserialize<'de> for StateValue<D1> {
+impl<'de, D1: DB, V: AlignedValueKind<D1>> Deserialize<'de> for StateValue<D1, V> {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         let v = de.deserialize_struct(
             "StateValue",
@@ -355,18 +584,18 @@ macro_rules! stval {
         StateValue::Null
     };
     (($val:expr_2021)) => {
-        StateValue::Cell(Sp::new($val.into()))
+        StateValue::Cell(Sp::new($crate::state::ExpectFromAligned::expect_from($val, "`stval!` macro invocation should be within legal conversion space")))
     };
     ({MT($height:expr_2021) {$($key:expr_2021 => $val:expr_2021),*}}) => {
         StateValue::BoundedMerkleTree(MerkleTree::blank($height)$(.try_update_hash($key, $val, ()).expect("updating hash on `StateValue` should always succeed, as these should not be collapsed"))*.rehash())
     };
     ({$($key:expr_2021 => $val:tt),*}) => {
-        StateValue::Map(HashMap::new()$(.insert($key.into(), stval!($val)))*)
+        StateValue::Map(HashMap::new()$(.insert($crate::state::ExpectFromAligned::expect_from($key, "`stval!` macro invocation should be within legal conversion space"), stval!($val)))*)
     };
     ({$key:expr_2021 => $val:tt}; $n:expr_2021) => {
         {
-            StateValue::Map((0..$n).into_iter().map(|x|{
-                (AlignedValue::from($key + x as u32), stval!($val))
+            StateValue::Map((0..$n).into_iter().map(|x| {
+                ($crate::state::ExpectFromAligned::expect_from($key + x as u32, "`stval!` macro invocation should be within legal conversion space"), stval!($val))
             }).collect())
         }
     };
@@ -380,7 +609,7 @@ macro_rules! stval {
 
 pub use stval;
 
-impl<D: DB> Debug for StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> Debug for StateValue<D, V> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use StateValue::*;
         match self {
@@ -405,8 +634,9 @@ impl<D: DB> Debug for StateValue<D> {
     }
 }
 
-impl<D: DB> StateValue<D> {
+impl<D: DB, V: AlignedValueKind<D>> StateValue<D, V> {
     fn invariant(&self) -> std::io::Result<()> {
+        // NOTE: must be kept as a subset of `StateValueChecked::invariant`.
         match self {
             StateValue::Null | StateValue::Map(_) => {}
             StateValue::Cell(v) => {
@@ -446,6 +676,7 @@ impl<D: DB> StateValue<D> {
                 }
             }
         }
+        V::additional_invariant_checks(self)?;
         Ok(())
     }
 
@@ -459,7 +690,7 @@ impl<D: DB> StateValue<D> {
                 // Possible fixes: cache the size of the AlignedValue in the
                 // constructor. Not sure if this "size" necessarily needs to be the serialized
                 // size.
-                <AlignedValue as Serializable>::serialized_size(&**a)
+                <V as Serializable>::serialized_size(&**a)
                     .next_power_of_two()
                     .ilog2() as usize
             }
@@ -994,6 +1225,95 @@ mod tests {
         let copy = T::deserialize(&mut b, 0).unwrap();
         assert_eq!(b.bytes().count(), 0);
         assert_eq!(val, copy);
+    }
+
+    /// The scalar field modulus `p`, little-endian, with `x` added, giving the non-canonical
+    /// byte encoding of `x + p`. Checks the constant against `Fr` itself, so a wrong modulus
+    /// fails loudly instead of silently weakening the test.
+    fn field_alias(x: u8) -> AlignedValue {
+        let mut bytes = hex::decode("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001")
+            .unwrap();
+        bytes.reverse();
+        assert!(Fr::from_le_bytes(&bytes).is_none(), "p itself must not be a field element");
+        let mut carry = x as u16;
+        for b in bytes.iter_mut() {
+            let sum = *b as u16 + carry;
+            *b = sum as u8;
+            carry = sum >> 8;
+        }
+        assert_eq!(carry, 0);
+        let atom = ValueAtom(bytes);
+        assert!(atom.is_in_normal_form());
+        AlignedValue::new(
+            base_crypto::fab::Value(vec![atom]),
+            Alignment::singleton(AlignmentAtom::Field),
+        )
+        .expect("`x + p` fits `Field` in the unchecked encoding")
+    }
+
+    fn canonical_field(x: u8) -> AlignedValue {
+        AlignedValue::new(
+            base_crypto::fab::Value(vec![ValueAtom(vec![x])]),
+            Alignment::singleton(AlignmentAtom::Field),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn field_alias_is_rejected_in_checked_context() {
+        let canonical = canonical_field(5);
+        let alias = field_alias(5);
+
+        // The premise of the attack: distinct values, identical proof representation.
+        assert_ne!(canonical, alias);
+        let mut canonical_repr = Vec::<Fr>::new();
+        canonical.field_repr(&mut canonical_repr);
+        let mut alias_repr = Vec::<Fr>::new();
+        alias.field_repr(&mut alias_repr);
+        assert_eq!(canonical_repr, alias_repr);
+
+        // The canonical value is accepted, the alias is not.
+        assert!(AlignedValueChecked::try_from(canonical.clone()).is_ok());
+        assert!(AlignedValueChecked::try_from(alias.clone()).is_err());
+
+        // Binary deserialization enforces the same.
+        let mut bytes = Vec::new();
+        Serializable::serialize(&alias, &mut bytes).unwrap();
+        assert!(
+            <AlignedValueChecked as Deserializable>::deserialize(&mut bytes.as_slice(), 0).is_err()
+        );
+        let mut bytes = Vec::new();
+        Serializable::serialize(&canonical, &mut bytes).unwrap();
+        assert!(
+            <AlignedValueChecked as Deserializable>::deserialize(&mut bytes.as_slice(), 0).is_ok()
+        );
+    }
+
+    #[test]
+    fn field_alias_map_key_is_rejected_when_checking_state_values() {
+        // A `Set<Field>` replay guard holding the canonical key and its alias.
+        let cell = || StateValue::<InMemoryDB>::Cell(Sp::new(canonical_field(1)));
+        let canonical_only = StateValue::<InMemoryDB>::Map(
+            HashMap::new().insert(canonical_field(5), cell()),
+        );
+        let with_alias = StateValue::<InMemoryDB>::Map(
+            HashMap::new()
+                .insert(canonical_field(5), cell())
+                .insert(field_alias(5), cell()),
+        );
+        assert!(canonical_only.try_into_checked().is_ok());
+        assert!(with_alias.try_into_checked().is_err());
+        // Nested inside an array, and as a cell value, too.
+        assert!(
+            StateValue::<InMemoryDB>::Array(Array::new().push(with_alias.clone()))
+                .try_into_checked()
+                .is_err()
+        );
+        assert!(
+            StateValue::<InMemoryDB>::Cell(Sp::new(field_alias(5)))
+                .try_into_checked()
+                .is_err()
+        );
     }
 
     #[test]

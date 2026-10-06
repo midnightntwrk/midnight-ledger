@@ -148,6 +148,22 @@ require specifying if the data is expected to reside in-cache or not.
 | `insc`    |    `an` | `-{"a, pth*}       +{†b}`         |                               - | `sum size(x_i)` | as `ins`, but with `cached` set to `true` |
 | `ckpt`    |    `ff` | `-{}               +{}`           |                                 |             `1` | denotes boundary between internally atomic program segments. Should not be crossed by jumps. |
 
+Restrictions on values embedded in a program (the arguments of `push` and
+`pushs`, and the literal keys in `idx`-style paths), which are authenticated
+only through their [field representation](field-aligned-binary.md#field-representation):
+
+* All FAB values in them, including cells, map keys, and path keys, MUST be
+  [canonical](field-aligned-binary.md#canonical-field-values). Non-canonical
+  `field` atoms (`x + p`) alias `x` in the proof, but not in the VM's key
+  comparison or hashing, and are rejected.
+* A `BoundedMerkleTree` in them MUST be the blank tree of its height. Merkle
+  roots are not validated on load and are not bound by the field
+  representation of a `push`, and populating one would require hashing work
+  that the cost model does not account for.
+* Additionally, `noop` with `n = 0` MUST NOT appear in a transcript. It has
+  no field representation, but still counts as an operation for `branch` and
+  `jmp`.
+
 In the description above, the following short-hand notations were used. Where
 not specified, result values are placed in a `Cell`, and encoded as FAB values.
 

@@ -215,13 +215,13 @@ macro_rules! tuple_conversions {
             fn try_from(mut val: &ValueSlice) -> Result<Self, InvalidBuiltinDecode> {
                 let err = || InvalidBuiltinDecode(stringify!(($a, $($as),*)));
                 let a_align = <$a>::alignment();
-                let a_end = a_align.consume_internal(val, &|idx: &mut usize, _| *idx += 1, &|idx| *idx, 0usize).ok_or_else(err)?;
+                let a_end = a_align.consume_internal(val, &|idx: &mut usize, _| *idx += 1, &|idx| *idx, &|_| true, 0usize).ok_or_else(err)?;
                 let a_slice = ValueSlice::from_prim_slice(&val.0[..a_end]);
                 let a_val = <$a>::try_from(a_slice)?;
                 val = ValueSlice::from_prim_slice(&val.0[a_end..]);
                 $(
                     let as_align = <$as>::alignment();
-                    let as_end = as_align.consume_internal(val, &|idx: &mut usize, _| *idx += 1, &|idx| *idx, 0usize).ok_or_else(err)?;
+                    let as_end = as_align.consume_internal(val, &|idx: &mut usize, _| *idx += 1, &|idx| *idx, &|_| true, 0usize).ok_or_else(err)?;
                     let as_slice = ValueSlice::from_prim_slice(&val.0[..as_end]);
                     let $as = <$as>::try_from(as_slice)?;
                     val = ValueSlice::from_prim_slice(&val.0[as_end..]);

@@ -145,6 +145,28 @@ from the front of the alignment:
   `Alignment` options. It then consumes the `Alignment` at index `i` in the
   segment.
 
+### Canonical field values
+
+A `value: ValueAtom` that is valid for `align = field` is additionally
+*canonical* if, interpreted as a little-endian bigint, it is strictly less than
+the field order. Validity alone does not imply this: as the length bound above
+is a byte length, it admits both a field element `x` and the distinct value `x +
+p` (where `p` is the field order), which have the same
+[field representation](#field-representation) but different serializations.
+
+An `AlignedValue` is *canonical* if every `ValueAtom` consumed by a `field`
+`AlignmentAtom` is canonical.
+
+Any context in which a value's field representation is what is authenticated,
+while the value itself is what is *used* (compared, hashed, or stored as a map
+key), MUST require canonical values, and reject non-canonical ones on
+construction and deserialization. Otherwise two values with the same proof
+public inputs could produce different results. In particular, the values
+embedded in contract call transcripts (the arguments of `push`, `pushs`, and
+`idx`-style path keys, see [onchain-runtime](onchain-runtime.md)) MUST be
+canonical. Contexts that merely carry values without this requirement, such as
+`popeq` results that are compared against existing state, are not affected.
+
 ## Field representation
 
 An alignment-annotated `value: ValueAtom`, valid for alignment `align:
