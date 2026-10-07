@@ -1102,9 +1102,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.20"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2850,7 +2850,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3046,7 +3046,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3098,7 +3098,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "3.0.1"
+version = "3.0.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -3119,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "3.1.1"
+version = "3.1.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -4183,9 +4183,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.17"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04759210543be93709136e28212294a659ef5001836ff4eab4d663e4529bba83"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "aws-lc-rs",
  "bytes",
