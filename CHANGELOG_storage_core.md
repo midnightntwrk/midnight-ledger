@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: `Sp::into_inner` no longer leaks an `sp_cache` entry each time it consumes the last reference to a value, and no longer races a concurrent load of the same key into a panic in `increment_ref_locked`.
+
 ## Version `1.2.1`
 
 - pull in hardened `serialize` and `base-crypto` deserialization.
