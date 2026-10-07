@@ -63,10 +63,20 @@ pub static TCONSTRUCT: std::sync::Mutex<
     Option<HashMap<&'static str, (usize, std::time::Duration)>>,
 > = std::sync::Mutex::new(None);
 
+#[cfg(test)]
+thread_local! {
+    /// Per-thread count of `hash()` calls, for the deserialize regression test. Each
+    /// test runs on its own thread, so this is isolated from parallel tests. See
+    /// `deserialize_hashes_each_node_once_not_per_reference`.
+    pub(crate) static HASH_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
     child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
 ) -> ArenaHash<H> {
+    #[cfg(test)]
+    HASH_CALLS.with(|c| c.set(c.get() + 1));
     let mut hasher = H::default();
     hasher.update((root_binary_repr.len() as u32).to_le_bytes());
     hasher.update(root_binary_repr);
@@ -656,7 +666,14 @@ impl<D: DB> Arena<D> {
         let sp_cache_lock = self.lock_sp_cache();
         self.read_sp_cache_locked::<T>(&sp_cache_lock, key)
             .map(|arc| {
-                let child_repr = arc.as_child();
+                // Every node in the sp_cache is ref-tracked and keyed by its own arena
+                // hash (`alloc` and `into_tracked` only ever cache under `ArenaKey::Ref`;
+                // `Direct` nodes are inlined, never cached), so its child repr is exactly
+                // `Ref(key)`. Deriving it via `arc.as_child()` instead re-serializes and
+                // re-hashes the whole node -- O(node size) on *every* cache hit, which is
+                // quadratic when one node is referenced many times (the fan-in that makes
+                // a bounded-size payload do unbounded reconstruction work).
+                let child_repr = ArenaKey::Ref(key.clone());
                 Sp::eager(self.clone(), key.clone(), arc, child_repr)
             })
     }
@@ -830,83 +847,74 @@ impl<D: DB> Arena<D> {
         recursive_depth: u32,
     ) -> Result<Sp<T, D>, std::io::Error> {
         let nodes: TopoSortedNodes = Deserializable::deserialize(reader, recursive_depth)?;
-        let mut existing_nodes: Vec<IntermediateRepr<D>> = Vec::with_capacity(nodes.nodes.len());
-        fn idx_existing_nodes<D: DB>(
-            n: &[IntermediateRepr<D>],
-            i: u64,
-        ) -> std::io::Result<&IntermediateRepr<D>> {
-            if i < n.len() as u64 {
-                Ok(&n[i as usize])
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "error deserializing storage graph: child node index {i} out of range of processed nodes {}",
-                        n.len()
-                    ),
-                ))
-            }
-        }
-
-        let mut result = Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "no nodes",
-        ));
+        // Nodes are topologically sorted with every child *before* its parents, so one
+        // forward pass can memoize each node's hash by position. The previous code
+        // recomputed a referenced child's hash on every reference, in two separate loops:
+        // O(references x child size), so a bounded-size payload could declare unbounded
+        // hashing work -- a DoS on every path that deserializes caller-supplied bytes.
+        // This is a pure memoization of the same `hash(..)` calls in the same order, so
+        // every node hash -- and thus the committed state root -- is byte-for-byte
+        // unchanged; it is a performance fix, not a hard fork.
+        let node_count = nodes.nodes.len();
+        let mut existing_nodes: Vec<IntermediateRepr<D>> = Vec::with_capacity(node_count);
+        let mut node_hash: Vec<ArenaHash<D::Hasher>> = Vec::with_capacity(node_count);
+        let mut key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>> =
+            HashMap::new();
 
         for node in nodes.nodes.iter() {
-            let children = node
+            // A child index must point at an already-processed node -- strictly earlier in
+            // the topological order -- so its hash and arena key are already memoized.
+            let child_hashes = node
                 .child_indices
                 .iter()
-                .map(|i| {
-                    idx_existing_nodes(&existing_nodes, *i)
-                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
+                .map(|&i| {
+                    usize::try_from(i)
+                        .ok()
+                        .filter(|i| *i < node_hash.len())
+                        .map(|i| node_hash[i].clone())
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!(
+                                    "error deserializing storage graph: child node index {i} out of range of processed nodes {}",
+                                    node_hash.len()
+                                ),
+                            )
+                        })
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-            let root = hash::<D::Hasher>(&node.data, children.iter());
-            let ir: IntermediateRepr<D> = IntermediateRepr {
-                binary_repr: node.data.clone(),
-                children,
-                db_type: PhantomData,
-            };
-            existing_nodes.push(ir);
-            result = Ok(root);
-        }
+                .collect::<std::io::Result<Vec<_>>>()?;
+            let root = hash::<D::Hasher>(&node.data, child_hashes.iter());
 
-        let mut key_to_child_repr: HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<D::Hasher>> =
-            std::collections::HashMap::new();
-        for node in nodes.nodes.iter() {
-            let children = node
-                .child_indices
-                .iter()
-                .map(|i| {
-                    idx_existing_nodes(&existing_nodes, *i)
-                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let root = hash::<D::Hasher>(&node.data, children.iter());
-            let children = children
+            let child_keys = child_hashes
                 .iter()
                 .map(|h| {
                     key_to_child_repr
                         .get(h)
-                        .ok_or(std::io::Error::other("child not in key_to_child_repr"))
+                        .cloned()
+                        .ok_or_else(|| std::io::Error::other("child not in key_to_child_repr"))
                 })
-                .map(|r| r.cloned())
-                .collect::<Result<Vec<_>, _>>()?;
-            key_to_child_repr.insert(root, child_from(&node.data, &children));
+                .collect::<std::io::Result<Vec<_>>>()?;
+            key_to_child_repr.insert(root.clone(), child_from(&node.data, &child_keys));
+
+            existing_nodes.push(IntermediateRepr {
+                binary_repr: node.data.clone(),
+                children: child_hashes,
+                db_type: PhantomData,
+            });
+            node_hash.push(root);
         }
 
-        let key = result?;
+        let key = node_hash
+            .last()
+            .cloned()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no nodes"))?;
+
         let res: Sp<T, D> = IrLoader {
             arena: self,
             all: &existing_nodes
                 .into_iter()
-                .map(|node| {
-                    (
-                        hash::<D::Hasher>(&node.binary_repr, node.children.iter()),
-                        node,
-                    )
-                })
+                .zip(node_hash)
+                .map(|(node, root)| (root, node))
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
@@ -2112,6 +2120,70 @@ mod tests {
             16,
             DefaultDB::default(),
         ))
+    }
+
+    /// Groups up to 16 references to one shared leaf; `id` keeps fans distinct so they
+    /// do not dedup, preserving the fan-in. Used by the deserialize regression test.
+    #[derive(Clone, Storable)]
+    #[tag = "hashcount-fan"]
+    struct HashCountFan {
+        id: u64,
+        leaves: Vec<Sp<[u8; SMALL_OBJECT_LIMIT]>>,
+    }
+
+    #[derive(Clone, Storable)]
+    #[tag = "hashcount-root"]
+    struct HashCountRoot {
+        fans: Vec<Sp<HashCountFan>>,
+    }
+
+    /// Regression guard for the issue-606 deserialization quadratics. Deserializing a
+    /// high-fan-in graph must hash each *unique* node O(1) times, never once per
+    /// *reference*. Both historic quadratics surface as `hash()` calls that scale with
+    /// the reference count: the old `deserialize_sp` recomputed a child's hash per
+    /// reference, and the old `get_from_cache` called `as_child` (which re-hashes) per
+    /// reference. This pins the count to unique-node scale. The companion
+    /// `benches/deserialize_fanin.rs` shows the wall-clock curve; this is the CI gate.
+    #[test]
+    fn deserialize_hashes_each_node_once_not_per_reference() {
+        use serialize::{tagged_deserialize, tagged_serialize};
+
+        // `[u8; SMALL_OBJECT_LIMIT]` serializes above the small-object limit, so it is a
+        // ref-tracked (cached) node -- the shape that exercised both quadratics.
+        let arena = &default_storage::<DefaultDB>().arena;
+        let shared = arena.alloc([0xABu8; SMALL_OBJECT_LIMIT]);
+
+        const FANS: u64 = 16;
+        const REFS_PER_FAN: usize = 16;
+        let references = FANS as usize * REFS_PER_FAN; // 256 references to one leaf
+
+        let fans: Vec<Sp<HashCountFan>> = (0..FANS)
+            .map(|id| {
+                arena.alloc(HashCountFan {
+                    id,
+                    leaves: vec![shared.clone(); REFS_PER_FAN],
+                })
+            })
+            .collect();
+        let root = arena.alloc(HashCountRoot { fans });
+
+        let mut bytes = Vec::new();
+        tagged_serialize(&*root, &mut bytes).expect("serialize");
+
+        // Count only the deserialize under test (build + serialize also hash).
+        HASH_CALLS.with(|c| c.set(0));
+        let _: HashCountRoot = tagged_deserialize(&mut &bytes[..]).expect("deserialize");
+        let calls = HASH_CALLS.with(|c| c.get());
+
+        // 18 unique nodes (1 leaf + 16 fans + 1 root); the fixed path hashes each a
+        // small, constant number of times. A regression to per-reference hashing pushes
+        // this to >= `references`. The bound is linear in unique nodes and far below
+        // `references`, so it catches either quadratic without being timing-dependent.
+        assert!(
+            calls < references,
+            "deserialize made {calls} hash() calls for {references} references to a shared \
+             node; expected O(unique nodes). A quadratic re-hash has regressed."
+        );
     }
 
     #[test]
