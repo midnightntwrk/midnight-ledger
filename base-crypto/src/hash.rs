@@ -105,6 +105,20 @@ pub fn persistent_commit<T: BinaryHashRepr + ?Sized>(value: &T, opening: HashOut
 /// A writer object for building large persistent commitments of data.
 pub struct PersistentHashWriter(Sha256);
 
+// `PersistentHashWriter` is used to hash secret material (notably the wallet seed
+// in `Seed::derive_coin_secret_key` / `Seed::sample_bytes`). Inputs shorter than
+// one SHA-256 block stay in the hasher's block buffer verbatim until it is
+// dropped, so we depend on `sha2`'s `zeroize` feature to scrub the buffer and the
+// compression state. Assert that statically: without the feature this is a silent
+// no-op rather than a build failure.
+const _: () = {
+    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    fn assertion() {
+        assert_zeroize_on_drop::<Sha256>();
+    }
+    let _ = assertion;
+};
+
 impl MemWrite<u8> for PersistentHashWriter {
     fn write(&mut self, buf: &[u8]) {
         self.0.update(buf);

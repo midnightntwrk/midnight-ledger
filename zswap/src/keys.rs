@@ -69,7 +69,9 @@ impl Seed {
         const DOMAIN_SEPARATOR: &[u8; 12] = b"midnight:esk";
         const NUMBER_OF_BYTES: usize = 64;
         let mut raw_bytes = self.sample_bytes(NUMBER_OF_BYTES, DOMAIN_SEPARATOR);
-        let mut raw_bytes_arr: [u8; 64] = raw_bytes.clone().try_into().unwrap();
+        // Copy out of the slice rather than cloning the vector: `TryFrom<Vec<u8>>`
+        // frees the clone's buffer without zeroizing it.
+        let mut raw_bytes_arr: [u8; 64] = raw_bytes[..].try_into().unwrap();
 
         raw_bytes.zeroize();
         let res = encryption::SecretKey::from_uniform_bytes(&raw_bytes_arr);
@@ -80,19 +82,25 @@ impl Seed {
     pub fn sample_bytes(&self, no_of_bytes: usize, domain_separator: &[u8]) -> Vec<u8> {
         let hash_bytes = PERSISTENT_HASH_BYTES;
         let rounds = no_of_bytes.div_ceil(hash_bytes);
-        let mut res: Vec<u8> = Vec::new();
+        // Allocate the exact capacity up front: growing the vector would leave the
+        // already-sampled key material behind in freed allocations, which are not
+        // zeroized when the vector itself is.
+        let mut res: Vec<u8> = Vec::with_capacity(no_of_bytes);
         for round in 0..rounds {
             let mut outer_writer = PersistentHashWriter::new();
             MemWrite::write(&mut outer_writer, domain_separator);
-            MemWrite::write(&mut outer_writer, &{
+            let mut inner_hash = {
                 let mut inner_writer = PersistentHashWriter::new();
                 MemWrite::write(&mut inner_writer, &((round as u64).to_le_bytes()));
                 MemWrite::write(&mut inner_writer, &self.0);
                 inner_writer.finalize().0
-            });
-            let round_hash = outer_writer.finalize();
+            };
+            MemWrite::write(&mut outer_writer, &inner_hash);
+            inner_hash.zeroize();
+            let mut round_hash = outer_writer.finalize();
             let bytes_to_add = hash_bytes.min(no_of_bytes - round * 32);
-            res.extend_from_slice(&round_hash.0[0..bytes_to_add])
+            res.extend_from_slice(&round_hash.0[0..bytes_to_add]);
+            round_hash.zeroize();
         }
         res
     }
