@@ -426,7 +426,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
     /// Only the transient's storage-independent fields are taken from the input, so the
     /// input may be backed by a different database than the output — callers that build one
     /// against a scratch tree do exactly that.
-    pub fn from_parts<DIn: DB>(input: Input<P, DIn>, output: Output<P, D>) -> Self
+    pub(crate) fn from_parts<DIn: DB>(input: Input<P, DIn>, output: Output<P, D>) -> Self
     where
         P: Storable<DIn>,
     {

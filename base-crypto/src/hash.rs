@@ -109,14 +109,11 @@ pub struct PersistentHashWriter(Sha256);
 // in `Seed::derive_coin_secret_key` / `Seed::sample_bytes`). Inputs shorter than
 // one SHA-256 block stay in the hasher's block buffer verbatim until it is
 // dropped, so we depend on `sha2`'s `zeroize` feature to scrub the buffer and the
-// compression state. Assert that statically: without the feature this is a silent
-// no-op rather than a build failure.
+// compression state. Assert that statically, so a missing feature fails the build
+// instead of silently skipping the scrub.
 const _: () = {
-    fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
-    fn assertion() {
-        assert_zeroize_on_drop::<Sha256>();
-    }
-    let _ = assertion;
+    const fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+    assert_zeroize_on_drop::<Sha256>();
 };
 
 impl MemWrite<u8> for PersistentHashWriter {
