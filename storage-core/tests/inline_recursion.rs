@@ -91,9 +91,9 @@ fn deeply_nested_inline_chain_is_rejected() {
 /// The boundary itself, expressed relative to the limit so it holds for both
 /// the debug (50) and release (250) values.
 ///
-/// The root is entered at depth 0 and each level increments, so a chain of
-/// `RECURSION_LIMIT + 1` nodes has its deepest node at exactly the limit and is
-/// accepted; one more node is rejected.
+/// The root is decoded at depth 0, and descending to a child is rejected once
+/// its depth would exceed the limit, so at most `RECURSION_LIMIT` nodes are
+/// nested: `chain(depth)` has `depth + 1` nodes.
 #[test]
 fn recursion_limit_boundary_is_exact() {
     let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
@@ -107,10 +107,45 @@ fn recursion_limit_boundary_is_exact() {
             .is_ok()
     };
 
-    assert!(decode(limit - 1), "one below the limit must decode");
-    assert!(decode(limit), "the deepest accepted chain must decode");
-    assert!(!decode(limit + 1), "one past the limit must be rejected");
-    assert!(!decode(limit + 2), "two past the limit must be rejected");
+    assert!(decode(limit - 2), "one below the limit must decode");
+    assert!(decode(limit - 1), "the deepest accepted chain must decode");
+    assert!(!decode(limit), "one past the limit must be rejected");
+    assert!(!decode(limit + 1), "two past the limit must be rejected");
+}
+
+thread_local! {
+    /// The number of `Fan::from_binary_repr` calls currently on this thread's
+    /// stack, and the most there have been since the last `Frame::reset`.
+    static FRAMES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+struct Frame;
+
+impl Frame {
+    fn enter() -> Frame {
+        FRAMES.with(|f| {
+            let (active, max) = f.get();
+            f.set((active + 1, max.max(active + 1)));
+        });
+        Frame
+    }
+
+    fn reset() {
+        FRAMES.with(|f| f.set((0, 0)));
+    }
+
+    fn max() -> usize {
+        FRAMES.with(|f| f.get().1)
+    }
+}
+
+impl Drop for Frame {
+    fn drop(&mut self) {
+        FRAMES.with(|f| {
+            let (active, max) = f.get();
+            f.set((active - 1, max));
+        });
+    }
 }
 
 /// A node with up to 16 children and `pad` bytes of filler, so a test can
@@ -137,6 +172,7 @@ impl Storable<Db> for Fan {
         child_nodes: &mut impl Iterator<Item = ArenaKey<<Db as DB>::Hasher>>,
         loader: &impl Loader<Db>,
     ) -> Result<Self, std::io::Error> {
+        let _frame = Frame::enter();
         let mut n = [0u8; 1];
         reader.read_exact(&mut n)?;
         if n[0] > 16 {
@@ -246,14 +282,76 @@ fn shared_nodes_within_the_limit_still_decode() {
     let limit = serialize::RECURSION_LIMIT as usize;
     for pad in PADS {
         let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
-        // The root is at depth 0, so the leaf is at exactly the limit. Without
-        // memoization this is `2^(limit / 3)` work.
-        let bytes = diamonds(limit, pad);
+        // The root is at depth 0, so the leaf is the `limit`th nested node.
+        // Without memoization this is `2^(limit / 3)` work.
+        let bytes = diamonds(limit - 1, pad);
         let res = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0);
         assert!(res.is_ok(), "pad {pad}: {}", res.err().unwrap());
 
-        let bytes = diamonds(limit + 1, pad);
+        let bytes = diamonds(limit, pad);
         let res = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0);
         assert!(res.is_err(), "pad {pad}: one past the limit was accepted");
+    }
+}
+
+const SMALL: u16 = 0;
+
+/// The padding of the `i`th node of a chain, from the root.
+type Layout = fn(usize) -> u16;
+const LARGE: u16 = PADS[1];
+
+/// Serializes a chain of `nodes` nodes, the `i`th from the root padded with
+/// `pad(i)` bytes, so that it is in-lined or stored by reference.
+fn padded_chain(nodes: usize, pad: impl Fn(usize) -> u16) -> Vec<u8> {
+    let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+    let mut node = arena.alloc(Fan {
+        children: vec![],
+        pad: pad(nodes - 1),
+    });
+    for i in (0..nodes - 1).rev() {
+        node = arena.alloc(Fan {
+            children: vec![node],
+            pad: pad(i),
+        });
+    }
+    let mut bytes = Vec::new();
+    node.serialize(&mut bytes).unwrap();
+    bytes
+}
+
+/// Chains of in-lined, by-reference, and alternating nodes are all held to the
+/// same bound, just below, at, and just above it; and a rejected chain is
+/// rejected before any node past the limit is deserialized.
+#[test]
+fn mixed_chains_share_one_boundary() {
+    let limit = serialize::RECURSION_LIMIT as usize;
+    let layouts: [(&str, Layout); 4] = [
+        ("in-lined", |_| SMALL),
+        ("by-reference", |_| LARGE),
+        ("alternating, in-lined root", |i| [SMALL, LARGE][i % 2]),
+        ("alternating, by-reference root", |i| [LARGE, SMALL][i % 2]),
+    ];
+    for (name, pad) in layouts {
+        let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+        let decode = |nodes: usize| {
+            let bytes = padded_chain(nodes, pad);
+            Frame::reset();
+            let ok = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0).is_ok();
+            (ok, Frame::max())
+        };
+
+        assert_eq!(
+            decode(limit - 1),
+            (true, limit - 1),
+            "{name}: below the limit"
+        );
+        assert_eq!(decode(limit), (true, limit), "{name}: at the limit");
+        // Rejected without decoding the node past the limit.
+        assert_eq!(decode(limit + 1), (false, limit), "{name}: above the limit");
+        assert_eq!(
+            decode(4 * limit),
+            (false, limit),
+            "{name}: far above the limit"
+        );
     }
 }

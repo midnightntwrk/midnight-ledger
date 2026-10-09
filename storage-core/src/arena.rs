@@ -1138,16 +1138,40 @@ impl<D: DB> IrLoader<'_, D> {
         self.height.set(self.height.get().max(height + 1));
     }
 
+    /// Returns `depth + extra`, or an error if that exceeds the recursion
+    /// limit (or overflows).
+    fn within_limit(depth: u32, extra: u32) -> Result<u32, std::io::Error> {
+        depth
+            .checked_add(extra)
+            .filter(|&d| d <= serialize::RECURSION_LIMIT)
+            .ok_or_else(|| std::io::Error::other("Reached recursion limit".to_string()))
+    }
+
+    /// Returns the loader to deserialize a child with, one level deeper than
+    /// this one, or an error if that level would exceed the recursion limit.
+    ///
+    /// This is the single point at which `get` descends, for both in-lined and
+    /// by-reference children, so both are held to the same bound.
+    fn descend(&self) -> Result<Self, std::io::Error> {
+        Ok(IrLoader {
+            arena: self.arena,
+            all: self.all,
+            recursion_depth: Self::within_limit(self.recursion_depth, 1)?,
+            height: Cell::new(0),
+            visited: self.visited.clone(),
+            inlined: self.inlined.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
+        })
+    }
+
     /// Accounts for a memoized child of height `height`, failing if
     /// deserializing it afresh here would have exceeded the recursion limit.
     ///
-    /// A value of height `h` loaded at depth `d` loads descendants at depths up
-    /// to `d + h`, and `Loader::get` rejects any depth over `RECURSION_LIMIT`,
+    /// A value of height `h` deserialized with a loader at depth `d` descends
+    /// to depth `d + 1 + h`, which `descend` rejects beyond `RECURSION_LIMIT`,
     /// so this applies the same bound a fresh deserialization would.
     fn reuse_height(&self, height: u32) -> Result<(), std::io::Error> {
-        if self.recursion_depth.saturating_add(height) > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
+        Self::within_limit(self.recursion_depth, height.saturating_add(1))?;
         self.record_child_height(height);
         Ok(())
     }
@@ -1167,21 +1191,10 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
     ) -> Result<Sp<T, D>, std::io::Error> {
         // Every nesting level counts towards the recursion limit, whether the
         // child is by-reference or in-lined: both arms below recurse into
-        // `Storable::from_binary_repr`, and so consume stack. Checking here,
-        // *before* recursing, keeps the recursion depth of this loader (and
+        // `Storable::from_binary_repr`, and so consume stack. Descending here,
+        // *before* either arm, keeps the recursion depth of this loader (and
         // hence our stack usage) bounded by `RECURSION_LIMIT` for arbitrary input.
-        if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
-        let loader = IrLoader {
-            arena: self.arena,
-            all: self.all,
-            recursion_depth: self.recursion_depth + 1,
-            height: Cell::new(0),
-            visited: self.visited.clone(),
-            inlined: self.inlined.clone(),
-            key_to_child_repr: self.key_to_child_repr.clone(),
-        };
+        let loader = self.descend()?;
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
         //
