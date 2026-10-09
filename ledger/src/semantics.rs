@@ -321,7 +321,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<WithZswapStateChanges<Self>, EventReplayError> {
-        use coin_structure::transfer::SenderEvidence;
+        use coin_structure::transfer::{Recipient, SenderEvidence};
 
         let mut res = events.into_iter().try_fold(
             WithZswapStateChanges::new(self.clone()),
@@ -378,7 +378,14 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                             spent_coins: vec![],
                             source: event.source.transaction_hash,
                         })
-                    } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
+                    } else if let Some(ci) =
+                        preimage_evidence.try_with_keys(secret_keys).filter(|ci| {
+                            // The ciphertext is not bound to the commitment by the output
+                            // proof, so verify the preimage actually opens it.
+                            ci.commitment(&Recipient::User(secret_keys.coin_public_key()))
+                                == *commitment
+                        })
+                    {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
@@ -2098,6 +2105,7 @@ mod tests {
     };
 
     use super::*;
+    use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;
@@ -2514,5 +2522,165 @@ mod tests {
             amount
         );
         assert_eq!(new_state.locked_pool, 0);
+    }
+
+    fn zswap_output_event(
+        commitment: Commitment,
+        preimage_evidence: ZswapPreimageEvidence,
+        mt_index: u64,
+    ) -> Event<InMemoryDB> {
+        Event {
+            source: EventSource {
+                transaction_hash: TransactionHash(HashOutput([0u8; 32])),
+                logical_segment: 0,
+                physical_segment: 0,
+            },
+            content: EventDetails::ZswapOutput {
+                commitment,
+                preimage_evidence,
+                contract: None,
+                mt_index,
+            },
+        }
+    }
+
+    fn ciphertext_evidence(
+        rng: &mut StdRng,
+        coin: &coin_structure::coin::Info,
+        keys: &SecretKeys,
+    ) -> ZswapPreimageEvidence {
+        ZswapPreimageEvidence::Ciphertext(Box::new(zswap::CoinCiphertext::new(
+            rng,
+            coin,
+            keys.enc_public_key(),
+        )))
+    }
+
+    #[test]
+    fn replay_credits_ciphertext_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let coin: coin_structure::coin::Info = rng.r#gen();
+        let event = zswap_output_event(
+            coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &coin, &keys),
+            0,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&event])
+            .unwrap();
+
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(res.changes[0].received_coins, vec![coin.qualify(0)]);
+    }
+
+    #[test]
+    fn replay_ignores_ciphertext_not_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let attacker_keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let real_coin: coin_structure::coin::Info = rng.r#gen();
+        let phantom_coin: coin_structure::coin::Info = rng.r#gen();
+        let valid_coin: coin_structure::coin::Info = rng.r#gen();
+
+        // Commitment for a coin owned by the attacker, paired with a ciphertext of an
+        // unrelated coin encrypted to the victim.
+        let mismatched = zswap_output_event(
+            real_coin.commitment(&Recipient::User(attacker_keys.coin_public_key())),
+            ciphertext_evidence(&mut rng, &phantom_coin, &keys),
+            0,
+        );
+        let valid = zswap_output_event(
+            valid_coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &valid_coin, &keys),
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&mismatched, &valid])
+            .unwrap();
+
+        assert_eq!(res.result.first_free, 2);
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(res.changes[0].received_coins, vec![valid_coin.qualify(1)]);
+    }
+
+    #[test]
+    fn replay_ciphertext_cannot_overwrite_owned_coin() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let attacker_keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let owned_coin: coin_structure::coin::Info = rng.r#gen();
+        let cheap_coin: coin_structure::coin::Info = rng.r#gen();
+
+        let genuine = zswap_output_event(
+            owned_coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &owned_coin, &keys),
+            0,
+        );
+        // Re-encrypts the already-received coin under an unrelated commitment, which
+        // would otherwise re-key the owned coin to the wrong Merkle tree index.
+        let replayed = zswap_output_event(
+            cheap_coin.commitment(&Recipient::User(attacker_keys.coin_public_key())),
+            ciphertext_evidence(&mut rng, &owned_coin, &keys),
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&genuine, &replayed])
+            .unwrap();
+
+        let nullifier = owned_coin.nullifier(&coin_structure::transfer::SenderEvidence::User(
+            Cow::Borrowed(&keys.coin_secret_key),
+        ));
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(
+            res.result.coins.get(&nullifier).map(|qci| qci.mt_index),
+            Some(0)
+        );
+        assert_eq!(res.changes.len(), 1);
+    }
+
+    #[test]
+    fn replay_ignores_public_preimage_not_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let committed_coin: coin_structure::coin::Info = rng.r#gen();
+        let claimed_coin: coin_structure::coin::Info = rng.r#gen();
+
+        let mismatched = zswap_output_event(
+            committed_coin.commitment(&recipient),
+            ZswapPreimageEvidence::PublicPreimage {
+                coin: claimed_coin,
+                recipient: recipient.clone(),
+            },
+            0,
+        );
+        let valid = zswap_output_event(
+            committed_coin.commitment(&recipient),
+            ZswapPreimageEvidence::PublicPreimage {
+                coin: committed_coin,
+                recipient,
+            },
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&mismatched, &valid])
+            .unwrap();
+
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(
+            res.changes[0].received_coins,
+            vec![committed_coin.qualify(1)]
+        );
     }
 }
