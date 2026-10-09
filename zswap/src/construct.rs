@@ -59,7 +59,10 @@ impl AuthorizedClaim<ProofPreimage> {
         };
         let public_transcript_prog: &[Op<ResultModeVerify, D>] =
             &Cell_write!([Key::Value(4u8.into())], false, CoinPublicKey, pk);
-        let mut inputs = Vec::new();
+        // Exact capacity: reallocating while appending would leave copies of the
+        // secret witness behind in freed allocations, which `ProofPreimage`'s
+        // zeroize-on-drop does not reach.
+        let mut inputs = Vec::with_capacity(sk.field_size());
         sk.field_repr(&mut inputs);
         let mut public_transcript_inputs = Vec::new();
         for op in filter_invalid(public_transcript_prog.iter().cloned()) {
@@ -191,13 +194,16 @@ impl<D: DB> Input<ProofPreimage, D> {
             (Fr, Fr),
             value_commitment.0
         ));
-        let Commitment(hash) = CoinInfo::from(coin).commitment(&sk.clone().into());
-        let mut inputs = Vec::new();
+        let coin_info = CoinInfo::from(coin);
+        let Commitment(hash) = coin_info.commitment(&sk.clone().into());
+        let path = tree
+            .path_for_leaf(coin.mt_index, ((), hash))
+            .map_err(OfferCreationFailed::InvalidIndex)?;
+        let mut inputs =
+            Vec::with_capacity(sk.field_size() + path.field_size() + coin_info.field_size() + 1);
         sk.field_repr(&mut inputs);
-        tree.path_for_leaf(coin.mt_index, ((), hash))
-            .map_err(OfferCreationFailed::InvalidIndex)?
-            .field_repr(&mut inputs);
-        CoinInfo::from(coin).field_repr(&mut inputs);
+        path.field_repr(&mut inputs);
+        coin_info.field_repr(&mut inputs);
         inputs.push(rc);
         let mut public_transcript_inputs = Vec::new();
         for op in filter_invalid(public_transcript_prog.into_iter()) {
@@ -348,7 +354,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             (Fr, Fr),
             value_commitment.0
         ));
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::with_capacity(recipient.field_size() + coin.field_size() + 1);
         recipient.field_repr(&mut inputs);
         coin.field_repr(&mut inputs);
         inputs.push(rc);
