@@ -411,32 +411,13 @@ impl<D: DB> Transient<ProofPreimage, D> {
             .clone()
             .ok_or(OfferCreationFailed::NotContractOwned)?;
         let input = Input::new_contract_owned(rng, coin, segment, *addr.deref(), &tree)?;
-        let io = Transient {
-            nullifier: input.nullifier,
-            coin_com: output.coin_com,
-            value_commitment_input: input.value_commitment,
-            value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
-            proof_input: input.proof,
-            proof_output: output.proof,
-        };
-        Ok(io)
+        Ok(Transient::from_parts(input, output))
     }
 
     pub fn retarget_segment(&self, new_segment: u16) -> Self {
         let input = self.as_input().retarget_segment(new_segment);
         let output = self.as_output().retarget_segment(new_segment);
-        Transient {
-            nullifier: input.nullifier,
-            coin_com: output.coin_com,
-            value_commitment_input: input.value_commitment,
-            value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
-            proof_input: input.proof,
-            proof_output: output.proof,
-        }
+        Transient::from_parts(input, output)
     }
 }
 

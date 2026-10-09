@@ -416,6 +416,32 @@ impl<D: DB> Transient<ProofPreimage, D> {
 }
 
 impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
+    /// Recombines an input and an output into a transient: the inverse of
+    /// [`Transient::as_input`] and [`Transient::as_output`], and kept beside them so that a
+    /// change to the field set has to be made in one place.
+    ///
+    /// The coin commitment, contract address and ciphertext come from the output and the
+    /// nullifier from the input; each side keeps its own value commitment and proof.
+    ///
+    /// Only the transient's storage-independent fields are taken from the input, so the
+    /// input may be backed by a different database than the output — callers that build one
+    /// against a scratch tree do exactly that.
+    pub fn from_parts<DIn: DB>(input: Input<P, DIn>, output: Output<P, D>) -> Self
+    where
+        P: Storable<DIn>,
+    {
+        Transient {
+            nullifier: input.nullifier,
+            coin_com: output.coin_com,
+            value_commitment_input: input.value_commitment,
+            value_commitment_output: output.value_commitment,
+            contract_address: output.contract_address,
+            ciphertext: output.ciphertext,
+            proof_input: input.proof,
+            proof_output: output.proof,
+        }
+    }
+
     pub fn as_input(&self) -> Input<P, D> {
         Input {
             nullifier: self.nullifier,
