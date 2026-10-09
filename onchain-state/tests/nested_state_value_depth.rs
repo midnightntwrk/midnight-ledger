@@ -1,7 +1,15 @@
-// Independent-report vector: deeply nested one-element `StateValue::Array`
-// values. Every node is a legitimate production state variant satisfying the
-// 16-element array bound, so this reaches the arena decoder without relying on
-// any malformed MPT path.
+// This file is part of midnight-ledger.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 use midnight_onchain_state::state::StateValue;
 use serialize::Serializable;
@@ -34,6 +42,10 @@ fn round_trip(depth: usize) -> (usize, Result<(), String>) {
     (bytes.len(), outcome)
 }
 
+// Check deeply nested one-element `StateValue::Array` values.
+// Every node is a legitimate production state variant satisfying the
+// 16-element array bound, so this reaches the arena decoder without relying on
+// any malformed MPT path.
 #[test]
 fn nested_state_value_arrays_are_depth_bounded() {
     std::thread::Builder::new()
