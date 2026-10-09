@@ -8,6 +8,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - fix: reject contract calls declaring more than `MAX_CALL_PUBLIC_INPUTS` public inputs, 
   bounding the allocation on paths where fee enforcement is disabled.
+- breaking: `ContractCall::public_inputs` returns a `Result`, failing with
+  `TooManyPublicInputs` instead of materializing more than
+  `MAX_CALL_PUBLIC_INPUTS` field elements.
 
 ## Ledger 9.1.0.0-rc.5
 

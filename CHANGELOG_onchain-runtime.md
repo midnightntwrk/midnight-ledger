@@ -1,5 +1,11 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- security: the field representation of `noop n` is written in fixed-size
+  chunks instead of first allocating `n` zero elements, so materializing it
+  no longer needs a transient buffer proportional to the untrusted `n`.
+
 ## Version `4.0.0`
 
 - feat: `ContractOperation` includes ir field

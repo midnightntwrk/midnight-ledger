@@ -16,7 +16,8 @@
 //! unit of it contributes one 32-byte field element. Fee estimation must
 //! therefore count public inputs without materializing them.
 
-use midnight_ledger::structure::ContractCall;
+use midnight_ledger_v9::error::MalformedTransaction;
+use midnight_ledger_v9::structure::ContractCall;
 use onchain_runtime::context::Effects;
 use onchain_runtime::ops::{Key, Op};
 use onchain_runtime::result_mode::ResultModeVerify;
@@ -76,7 +77,7 @@ fn public_inputs_len_agrees_with_public_inputs() {
         },
         Op::Push {
             storage: true,
-            value: StateValue::Cell(Sp::new(9u64.into())),
+            value: StateValue::Cell(Sp::new(9u8.into())),
         },
         // Nested values: fee calculation now depends on `field_size` matching
         // `field_repr` all the way down, not just for the op discriminant.
@@ -85,8 +86,8 @@ fn public_inputs_len_agrees_with_public_inputs() {
             value: StateValue::Array(
                 vec![
                     StateValue::Null,
-                    StateValue::Cell(Sp::new(1u64.into())),
-                    StateValue::Array(vec![StateValue::Cell(Sp::new(2u64.into()))].into()),
+                    StateValue::Cell(Sp::new(1u8.into())),
+                    StateValue::Array(vec![StateValue::Cell(Sp::new(2u8.into()))].into()),
                 ]
                 .into(),
             ),
@@ -95,8 +96,8 @@ fn public_inputs_len_agrees_with_public_inputs() {
             storage: false,
             value: StateValue::Map(
                 storage::storage::HashMap::new()
-                    .insert(1u64.into(), StateValue::Cell(Sp::new(11u64.into())))
-                    .insert(2u64.into(), StateValue::Null),
+                    .insert(1u8.into(), StateValue::Cell(Sp::new(11u8.into())))
+                    .insert(2u8.into(), StateValue::Null),
             ),
         },
         Op::Branch { skip: 2 },
@@ -114,7 +115,7 @@ fn public_inputs_len_agrees_with_public_inputs() {
         Op::Idx {
             cached: false,
             push_path: false,
-            path: vec![Key::Stack, Key::Value(1u64.into())].into(),
+            path: vec![Key::Stack, Key::Value(1u8.into())].into(),
         },
         Op::Ins {
             cached: false,
@@ -136,7 +137,7 @@ fn public_inputs_len_agrees_with_public_inputs() {
     let call = call_with_program(program);
     assert_eq!(
         call.public_inputs_len(),
-        call.public_inputs(Default::default()).len()
+        call.public_inputs(Default::default()).unwrap().len()
     );
 }
 
@@ -160,15 +161,24 @@ fn public_inputs_len_does_not_materialize() {
 /// A 9-byte opcode must not be able to name an arbitrarily large statement.
 #[test]
 fn declared_public_inputs_are_capped() {
-    use midnight_ledger::verify::MAX_CALL_PUBLIC_INPUTS;
+    use midnight_ledger_v9::verify::MAX_CALL_PUBLIC_INPUTS;
 
     let over = call_with_program(vec![Op::Noop {
         n: MAX_CALL_PUBLIC_INPUTS as u32,
     }]);
     assert!(over.public_inputs_len() > MAX_CALL_PUBLIC_INPUTS);
+    // `public_inputs` enforces the cap itself rather than trusting its caller.
+    assert!(matches!(
+        over.public_inputs(Default::default()),
+        Err(MalformedTransaction::TooManyPublicInputs { .. })
+    ));
 
     let under = call_with_program(vec![Op::Noop {
         n: MAX_CALL_PUBLIC_INPUTS as u32 - 2,
     }]);
     assert_eq!(under.public_inputs_len(), MAX_CALL_PUBLIC_INPUTS);
+    assert_eq!(
+        under.public_inputs(Default::default()).unwrap().len(),
+        MAX_CALL_PUBLIC_INPUTS
+    );
 }

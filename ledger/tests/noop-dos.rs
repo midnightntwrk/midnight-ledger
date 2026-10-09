@@ -18,6 +18,7 @@ use base_crypto::rng::SplittableRng;
 use base_crypto::time::Timestamp;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
+use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::structure::{ContractAction, ContractDeploy, INITIAL_PARAMETERS, Transaction};
 use midnight_ledger::test_utilities::{
     Resolver, TestState, contract_operation, test_intents, test_resolver, tx_prove,
@@ -224,8 +225,26 @@ async fn noop_dos() {
         _ => unreachable!(),
     }
     dbg!(Serializable::serialized_size(&tx));
+    // Assert *which* check rejects the transaction, so that an unrelated
+    // failure cannot make this pass without exercising the hostile path.
+
+    // With fees enforced, pricing the declared public inputs rejects it.
     let t0 = Instant::now();
-    dbg!(tx.well_formed(&state.ledger, strictness, state.time)).ok();
-    let t1 = Instant::now();
-    assert!(t1 - t0 < Duration::from_millis(100));
+    let res = tx.well_formed(&state.ledger, WellFormedStrictness::default(), state.time);
+    let elapsed = t0.elapsed();
+    assert!(
+        matches!(res, Err(MalformedTransaction::FeeCalculation(_))),
+        "expected a fee calculation failure, got {res:?}"
+    );
+    assert!(elapsed < Duration::from_millis(100), "took {elapsed:?}");
+
+    // With fees not enforced, the public-input cap rejects it.
+    let t0 = Instant::now();
+    let res = tx.well_formed(&state.ledger, strictness, state.time);
+    let elapsed = t0.elapsed();
+    assert!(
+        matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
+        "expected the public-input cap to reject it, got {res:?}"
+    );
+    assert!(elapsed < Duration::from_millis(100), "took {elapsed:?}");
 }

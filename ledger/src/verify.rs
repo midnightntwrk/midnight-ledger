@@ -1903,15 +1903,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
         // Checked before anything materializes the public inputs below.
-        let public_inputs = self.public_inputs_len();
-        if public_inputs > MAX_CALL_PUBLIC_INPUTS {
-            return Err(MalformedTransaction::TooManyPublicInputs {
-                address: self.address,
-                operation: self.entry_point.clone(),
-                public_inputs,
-                limit: MAX_CALL_PUBLIC_INPUTS,
-            });
-        }
+        self.public_inputs_len_check()?;
         if let Some(fallible) = &self.fallible_transcript
             && fallible.program.get(0) != Some(&Op::Ckpt)
             && self.guaranteed_transcript.is_some()
@@ -1967,7 +1959,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 P::proof_verify(
                     op,
                     &self.proof,
-                    self.public_inputs(parent.binding_commitment),
+                    self.public_inputs(parent.binding_commitment)?,
                     self,
                     strictness.proof_verification_mode
                 )?;
@@ -1988,7 +1980,12 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     // In addition, it should receive
     //  - The communication commitment
     //  - The transcript
-    pub fn public_inputs(&self, binding_com: Pedersen) -> Vec<Fr> {
+    /// Fails without allocating if the call declares more than
+    /// [`MAX_CALL_PUBLIC_INPUTS`] public inputs: `Op::Noop { n }` lets a 9-byte
+    /// op name an arbitrarily large statement, so this must not trust callers
+    /// to have run [`Self::well_formed`] first.
+    pub fn public_inputs(&self, binding_com: Pedersen) -> Result<Vec<Fr>, MalformedTransaction<D>> {
+        self.public_inputs_len_check()?;
         let mut res = vec![self.binding_input(binding_com)];
         res.push(self.communication_commitment);
         if let Some(guaranteed) = self.guaranteed_transcript.as_ref() {
@@ -2001,7 +1998,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 op.field_repr(&mut res);
             }
         }
-        res
+        Ok(res)
     }
 
     /// The number of field elements [`Self::public_inputs`] would produce,
@@ -2015,6 +2012,19 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 .map(|op| op.field_size())
                 .fold(0, |a, b| a.saturating_add(b)),
         )
+    }
+
+    fn public_inputs_len_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let public_inputs = self.public_inputs_len();
+        if public_inputs > MAX_CALL_PUBLIC_INPUTS {
+            return Err(MalformedTransaction::TooManyPublicInputs {
+                address: self.address,
+                operation: self.entry_point.clone(),
+                public_inputs,
+                limit: MAX_CALL_PUBLIC_INPUTS,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
