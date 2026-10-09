@@ -112,3 +112,148 @@ fn recursion_limit_boundary_is_exact() {
     assert!(!decode(limit + 1), "one past the limit must be rejected");
     assert!(!decode(limit + 2), "two past the limit must be rejected");
 }
+
+/// A node with up to 16 children and `pad` bytes of filler, so a test can
+/// choose whether it is in-lined (small) or stored by reference (large).
+#[derive(Clone, Debug)]
+struct Fan {
+    children: Vec<Sp<Fan, Db>>,
+    pad: u16,
+}
+
+impl Storable<Db> for Fan {
+    fn children(&self) -> Vec<ArenaKey<<Db as DB>::Hasher>> {
+        self.children.iter().map(Sp::as_child).collect()
+    }
+
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        writer.write_all(&[self.children.len() as u8])?;
+        writer.write_all(&self.pad.to_le_bytes())?;
+        writer.write_all(&vec![0u8; self.pad as usize])
+    }
+
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_nodes: &mut impl Iterator<Item = ArenaKey<<Db as DB>::Hasher>>,
+        loader: &impl Loader<Db>,
+    ) -> Result<Self, std::io::Error> {
+        let mut n = [0u8; 1];
+        reader.read_exact(&mut n)?;
+        if n[0] > 16 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "too many children",
+            ));
+        }
+        let mut pad = [0u8; 2];
+        reader.read_exact(&mut pad)?;
+        let pad = u16::from_le_bytes(pad);
+        reader.read_exact(&mut vec![0u8; pad as usize])?;
+        let children = (0..n[0])
+            .map(|_| loader.get_next(child_nodes))
+            .collect::<Result<_, _>>()?;
+        Ok(Fan { children, pad })
+    }
+}
+
+/// Serializes a graph whose longest path is `chain_len` (plus the few levels
+/// of a fan-out), but whose every node is *first* reached at a shallow depth.
+///
+/// The chain `n_0 <- n_1 <- ... <- n_len` is reached through a 16-ary fan over
+/// `n_1, ..., n_len`, in order: so `n_i` is first visited from the fan, with
+/// its only child `n_{i-1}` already memoized.
+fn shared_chain(chain_len: usize, pad: u16) -> Vec<u8> {
+    let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+    let fan = |children| arena.alloc(Fan { children, pad });
+    let mut chain = vec![fan(vec![])];
+    for i in 1..=chain_len {
+        let next = fan(vec![chain[i - 1].clone()]);
+        chain.push(next);
+    }
+    let mut level = chain[1..].to_vec();
+    while level.len() > 1 {
+        level = level.chunks(16).map(|c| fan(c.to_vec())).collect();
+    }
+    let mut bytes = Vec::new();
+    level[0].serialize(&mut bytes).unwrap();
+    bytes
+}
+
+/// Serializes a stack of diamonds whose deepest node is `height` levels below
+/// the root.
+///
+/// Each diamond is a top node with two children, both leading to the top of
+/// the diamond below, with the right-hand path one node longer:
+///
+/// ```text
+///     top_i
+///     /   \
+///   a_i   b_i
+///    |     |
+///    |    c_i
+///     \   /
+///    top_{i-1}
+/// ```
+///
+/// So `top_{i-1}` is first deserialized under `a_i`, and then reused from the
+/// memo one level deeper, under `c_i`. Only the height check on memoized nodes
+/// catches the extra depth along the longer side. Each diamond adds three
+/// levels and doubles the number of paths; any remainder of `height` is made up
+/// with single nodes on top.
+fn diamonds(height: usize, pad: u16) -> Vec<u8> {
+    let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+    let fan = |children, pad| arena.alloc(Fan { children, pad });
+    let mut top = fan(vec![], pad);
+    for _ in 0..height / 3 {
+        // `a_i`, `b_i` and `c_i` differ in padding, so they are distinct nodes.
+        let a = fan(vec![top.clone()], pad);
+        let c = fan(vec![top], pad + 2);
+        let b = fan(vec![c], pad + 1);
+        top = fan(vec![a, b], pad);
+    }
+    for _ in 0..height % 3 {
+        top = fan(vec![top], pad);
+    }
+    let mut bytes = Vec::new();
+    top.serialize(&mut bytes).unwrap();
+    bytes
+}
+
+// Both padding sizes, so that both the in-lined and the by-reference memo
+// tables are exercised.
+const PADS: [u16; 2] = [
+    0,
+    2 * midnight_storage_core::storable::SMALL_OBJECT_LIMIT as u16,
+];
+
+#[test]
+fn shared_nodes_count_towards_the_recursion_limit() {
+    let limit = serialize::RECURSION_LIMIT as usize;
+    for pad in PADS {
+        let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+        let bytes = shared_chain(4 * limit, pad);
+        let res = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0);
+        assert!(
+            res.is_err(),
+            "pad {pad}: a graph deeper than the limit was accepted via shared nodes"
+        );
+        println!("pad {pad}: {}", res.err().unwrap());
+    }
+}
+
+#[test]
+fn shared_nodes_within_the_limit_still_decode() {
+    let limit = serialize::RECURSION_LIMIT as usize;
+    for pad in PADS {
+        let arena: Arena<Db> = Storage::<Db>::new(16, Db::default()).arena;
+        // The root is at depth 0, so the leaf is at exactly the limit. Without
+        // memoization this is `2^(limit / 3)` work.
+        let bytes = diamonds(limit, pad);
+        let res = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0);
+        assert!(res.is_ok(), "pad {pad}: {}", res.err().unwrap());
+
+        let bytes = diamonds(limit + 1, pad);
+        let res = arena.deserialize_sp::<Fan, _>(&mut &bytes[..], 0);
+        assert!(res.is_err(), "pad {pad}: one past the limit was accepted");
+    }
+}

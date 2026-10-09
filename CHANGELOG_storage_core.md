@@ -6,6 +6,9 @@
   recursion limit when deserializing a storage graph, so a deeply nested graph
   of small nodes can no longer overflow the stack. In-lined values are also
   memoized for the lifetime of the loader.
+- security: reusing an already-deserialized (memoized) node now counts its
+  height towards the recursion limit, so a graph that shares nodes can no
+  longer decode to a value nested deeper than the limit.
 
 ## Version `1.2.2`
 
