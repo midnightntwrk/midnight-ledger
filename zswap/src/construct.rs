@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::compact_slots::*;
 use crate::error::OfferCreationFailed;
 use crate::filter_invalid;
 use crate::structure::*;
@@ -58,7 +59,7 @@ impl AuthorizedClaim<ProofPreimage> {
             Recipient::Contract(_) => unreachable!(),
         };
         let public_transcript_prog: &[Op<ResultModeVerify, D>] =
-            &Cell_write!([Key::Value(4u8.into())], false, CoinPublicKey, pk);
+            &Cell_write!([Key::Value(ZSWAP_IDX_PUBLIC_KEY.into())], false, CoinPublicKey, pk);
         // Exact capacity: reallocating while appending would leave copies of the
         // secret witness behind in freed allocations, which `ProofPreimage`'s
         // zeroize-on-drop does not reach.
@@ -112,12 +113,12 @@ impl<D: DB> Input<ProofPreimage, D> {
             Pedersen::commit(&(delta.token_type, new_segment), &delta.value.into(), &rc_e);
         let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
         public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
+            Cell_read!([Key::Value(ZSWAP_IDX_SEGMENT.into())], false, u16)
                 .into_iter()
                 .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
         );
         public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             value_commitment.0
@@ -160,7 +161,7 @@ impl<D: DB> Input<ProofPreimage, D> {
         let mut public_transcript_prog: Vec<Op<ResultModeVerify, D>> = Vec::new();
         public_transcript_prog.extend(
             HistoricMerkleTree_check_root!(
-                [Key::Value(0u8.into())],
+                [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
                 false,
                 32,
                 [u8; 32],
@@ -170,26 +171,26 @@ impl<D: DB> Input<ProofPreimage, D> {
             .map(|op: Op<ResultModeGather, D>| op.translate(|()| true.into())),
         );
         public_transcript_prog.extend(Set_insert!(
-            [Key::Value(1u8.into())],
+            [Key::Value(ZSWAP_IDX_NULLIFIERS.into())],
             false,
             [u8; 32],
             nullifier
         ));
         if let SenderEvidence::Contract(addr) = &sk {
             public_transcript_prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 *addr
             ));
         }
         public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
+            Cell_read!([Key::Value(ZSWAP_IDX_SEGMENT.into())], false, u16)
                 .into_iter()
                 .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
         );
         public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             value_commitment.0
@@ -260,12 +261,12 @@ impl<D: DB> Output<ProofPreimage, D> {
         );
         let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
         public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
+            Cell_read!([Key::Value(ZSWAP_IDX_SEGMENT.into())], false, u16)
                 .into_iter()
                 .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
         );
         public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             value_commitment.0
@@ -328,7 +329,7 @@ impl<D: DB> Output<ProofPreimage, D> {
         let mut public_transcript_prog = Vec::new();
         public_transcript_prog.extend::<[Op<ResultModeVerify, InMemoryDB>; 17]>(
             HistoricMerkleTree_insert_hash!(
-                [Key::Value(0u8.into())],
+                [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
                 false,
                 32,
                 [u8; 32],
@@ -337,19 +338,19 @@ impl<D: DB> Output<ProofPreimage, D> {
         );
         if let Recipient::Contract(addr) = &recipient {
             public_transcript_prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 addr
             ));
         }
         public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
+            Cell_read!([Key::Value(ZSWAP_IDX_SEGMENT.into())], false, u16)
                 .into_iter()
                 .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
         );
         public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             value_commitment.0
