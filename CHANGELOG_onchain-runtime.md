@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- feat: `Transcript::public_inputs_len` counts the field elements a transcript
+  contributes to a contract call's public inputs without materializing them,
+  and `transcript::MAX_CALL_PUBLIC_INPUTS` exposes the ledger's per-call bound,
+  so consumers outside the ledger can apply the same check.
 - security: the field representation of `noop n` is written in fixed-size
   chunks instead of first allocating `n` zero elements, so materializing it
   no longer needs a transient buffer proportional to the untrusted `n`.
