@@ -25,6 +25,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
       - name: Install Nix
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
         with:
@@ -64,7 +71,8 @@ jobs:
 
       - name: Spellcheck comments
         run: |
-          nix develop .#ci -c cargo spellcheck -j1
+          df -h / /nix
+          nix develop .#ci-tools -c cargo spellcheck -j1
 
       # Run Cargo Clippy on the whole workspace with all features. This is important
       # to avoid bitrot of code that is feature gated behind non-default features
@@ -81,7 +89,11 @@ jobs:
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo doc --all-features --no-deps
 
       - name: Cargo audit
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci-tools -c cargo audit
+
+      - name: Report disk usage
+        if: always()
+        run: df -h / /nix
 
   build-wasm:
     strategy:
@@ -91,6 +103,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
@@ -142,6 +161,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
 
@@ -153,6 +179,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
@@ -207,6 +240,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31.11.0
