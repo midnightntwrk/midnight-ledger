@@ -25,9 +25,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Free disk space for Nix builds
+      - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
-        run: bash .github/scripts/free-ci-disk-space.sh
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -112,9 +115,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Free disk space for Nix builds
+      - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
-        run: bash .github/scripts/free-ci-disk-space.sh
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -178,9 +184,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Free disk space for Nix builds
+      - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
-        run: bash .github/scripts/free-ci-disk-space.sh
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
 
@@ -193,9 +202,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Free disk space for Nix builds
+      - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
-        run: bash .github/scripts/free-ci-disk-space.sh
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -263,9 +275,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Free disk space for Nix builds
+      - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
-        run: bash .github/scripts/free-ci-disk-space.sh
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
