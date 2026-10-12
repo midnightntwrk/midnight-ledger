@@ -19,8 +19,8 @@
 //!      memoizing each node's hash by position;
 //!   2. `get_from_cache` deriving a cached node's child repr via `as_child`, which
 //!      re-serializes and re-hashes the whole node -- O(node size) on every one of
-//!      its references. Fixed by using `Ref(key)` directly: everything in the sp
-//!      cache is ref-tracked and keyed by its own hash, so that is its child repr.
+//!      its references. Fixed by using `Ref(key)` directly: the deserializer only
+//!      reaches that path for a child it was handed as `Ref(key)`.
 //! With both fixes, a B-byte node referenced R times costs O(R + B), not O(R x B),
 //! so this bench's throughput is flat in `n`. It is the regression guard against
 //! either quadratic coming back. (A fixed-size shared node already looked linear in

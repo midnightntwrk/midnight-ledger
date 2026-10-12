@@ -666,13 +666,14 @@ impl<D: DB> Arena<D> {
         let sp_cache_lock = self.lock_sp_cache();
         self.read_sp_cache_locked::<T>(&sp_cache_lock, key)
             .map(|arc| {
-                // Every node in the sp_cache is ref-tracked and keyed by its own arena
-                // hash (`alloc` and `into_tracked` only ever cache under `ArenaKey::Ref`;
-                // `Direct` nodes are inlined, never cached), so its child repr is exactly
-                // `Ref(key)`. Deriving it via `arc.as_child()` instead re-serializes and
-                // re-hashes the whole node -- O(node size) on *every* cache hit, which is
-                // quadratic when one node is referenced many times (the fan-in that makes
-                // a bounded-size payload do unbounded reconstruction work).
+                // The only caller, `IrLoader::get`, reaches here for a child it was handed
+                // as `Ref(key)`, so that is the child repr to return. `arc.as_child()` is
+                // not a substitute: a cached Arc may represent as `Direct` (e.g. a small
+                // node cached by `into_tracked`), which would make the result depend on
+                // local cache state. It also re-serializes and re-hashes the whole node --
+                // O(node size) on *every* cache hit, which is quadratic when one node is
+                // referenced many times (the fan-in that makes a bounded-size payload do
+                // unbounded reconstruction work).
                 let child_repr = ArenaKey::Ref(key.clone());
                 Sp::eager(self.clone(), key.clone(), arc, child_repr)
             })
