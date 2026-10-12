@@ -19,7 +19,7 @@ jobs:
   check:
     strategy:
       matrix:
-        os: [ubuntu-24.04]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -117,7 +117,7 @@ jobs:
   build-wasm:
     strategy:
       matrix:
-        os: [ubuntu-24.04]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -189,12 +189,12 @@ jobs:
         run: nix build .#zkir-wasm
 
   # Inline matrix job (not a reusable-workflow call) so the check name stays
-  # `integration-tests (ubuntu-24.04)`. The steps live in a composite action
+  # `integration-tests (ubuntu-latest)`. The steps live in a composite action
   # shared with the release flow (prerelease.yml), so there is no duplication.
   integration-tests:
     strategy:
       matrix:
-        os: [ubuntu-24.04]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -212,7 +212,7 @@ jobs:
   build-ledger:
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -293,7 +293,7 @@ jobs:
   build-proof-server:
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
