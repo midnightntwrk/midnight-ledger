@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapSecretKeys, createShieldedCoinInfo, coinNullifier } from '@midnight-ntwrk/ledger';
+import { ZswapSecretKeys, createShieldedCoinInfo, coinNullifier } from '@midnightntwrk/ledger';
 import { CSK_CLEAR_MESSAGE } from '@/test-constants';
 import { Random } from '@/test-objects';
 

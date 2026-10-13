@@ -3,7 +3,7 @@
 #
 # Re-runs are safe: if the version already exists on the target registry,
 # the publish is skipped (exit 0). Optionally, when FORCE=true, the version
-# is deleted from GH Packages before publishing — public npm cannot be
+# is deleted from GH Packages before publishing - public npm cannot be
 # overwritten so FORCE on registry.npmjs.org errors out.
 #
 # Args:
@@ -77,7 +77,7 @@ if [ "${FORCE:-false}" = "true" ]; then
 fi
 
 if is_published; then
-  echo "Already published: $PKG@$VER on $REG_HOST — skipping"
+  echo "Already published: $PKG@$VER on $REG_HOST - skipping"
   exit 0
 fi
 
@@ -87,4 +87,20 @@ publish_args=(--registry="$REG" "$SCOPE_REG_ARG" --tag "$TAG")
 if [ "$REG_HOST" = "registry.npmjs.org" ]; then
   publish_args+=(--access public)
 fi
-npm publish "$TGZ" "${publish_args[@]}"
+set +e
+OUTPUT=$(npm publish "$TGZ" "${publish_args[@]}" 2>&1)
+STATUS=$?
+set -e
+printf '%s\n' "$OUTPUT"
+if [ "$STATUS" -ne 0 ]; then
+  # A conflict means the version is already there (race, or a registry whose
+  # metadata endpoint was not readable by this token) - that is the idempotent
+  # success condition, not a failure.
+  # Anchored on 'code E409': npm's shasum/integrity notices are hex/base64
+  # that a bare 'E409' would occasionally match.
+  if grep -qiE 'code E409|EPUBLISHCONFLICT|cannot publish over' <<<"$OUTPUT"; then
+    echo "Version already exists on $REG_HOST (registry reported a conflict) - skipping"
+    exit 0
+  fi
+  exit "$STATUS"
+fi

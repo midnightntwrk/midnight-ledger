@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { expect } from 'vitest';
-import { type QualifiedDustOutput } from '@midnight-ntwrk/ledger';
+import { type QualifiedDustOutput } from '@midnightntwrk/ledger';
 import { ProofMarker } from '@/test/utils/Markers';
 import { INITIAL_NIGHT_AMOUNT, initialParameters, NIGHT_DUST_RATIO } from '@/test-objects';
 import { generateSampleDust } from '@/test/utils/dust';

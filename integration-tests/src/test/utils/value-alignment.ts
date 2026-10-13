@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { type AlignmentSegment, bigIntToValue, type EncodedStateValue } from '@midnight-ntwrk/ledger';
+import { type AlignmentSegment, bigIntToValue, type EncodedStateValue } from '@midnightntwrk/ledger';
 
 function atomBytes(len: number): AlignmentSegment {
   return { tag: 'atom', value: { tag: 'bytes', length: len } };

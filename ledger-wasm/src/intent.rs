@@ -317,72 +317,72 @@ impl Intent {
         match &self.0 {
             UnprovenWithSignaturePreBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenWithSignatureBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenWithSignatureErasedPreBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             UnprovenWithSignatureErasedBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignaturePreBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignatureBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignatureErasedPreBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProvenWithSignatureErasedBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedWithSignatureNoBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
             ProofErasedWithSignatureErasedNoBinding(val) => {
                 if compact.unwrap_or(false) {
-                    format!("{:?}", &val)
+                    format!("{:?}", val)
                 } else {
-                    format!("{:#?}", &val)
+                    format!("{:#?}", val)
                 }
             }
         }

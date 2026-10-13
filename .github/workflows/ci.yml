@@ -23,13 +23,39 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      # Cheap, dependency-free guard placed before the Nix install.
+      # `zkir-precompiles` feeds the `local-params` derivation, but the
+      # crates embed a committed copy of that derivation's output from
+      # `*/static` via `include_bytes!`. Cargo never regenerates it, so a
+      # circuit change without a rebuild goes unnoticed until the data provider
+      # rejects the published artifacts.
+      - name: Check zkir-precompiles and committed static artifacts are in sync
+        run: ./scripts/check-zkir-precompiles-sync.sh
 
       - name: Install Nix
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -41,7 +67,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -64,7 +91,8 @@ jobs:
 
       - name: Spellcheck comments
         run: |
-          nix develop .#ci -c cargo spellcheck -j1
+          df -h / /nix
+          nix develop .#ci-tools -c cargo spellcheck -j1
 
       # Run Cargo Clippy on the whole workspace with all features. This is important
       # to avoid bitrot of code that is feature gated behind non-default features
@@ -81,7 +109,11 @@ jobs:
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo doc --all-features --no-deps
 
       - name: Cargo audit
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci-tools -c cargo audit
+
+      - name: Report disk usage
+        if: always()
+        run: df -h / /nix
 
   build-wasm:
     strategy:
@@ -90,13 +122,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -108,7 +157,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -131,6 +181,9 @@ jobs:
       - name: Build zkir-wasm
         run: nix build .#zkir-wasm
 
+  # Inline matrix job (not a reusable-workflow call) so the check name stays
+  # `integration-tests (ubuntu-latest)`. The steps live in a composite action
+  # shared with the release flow (prerelease.yml), so there is no duplication.
   integration-tests:
     strategy:
       matrix:
@@ -138,74 +191,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
 
-      - name: Install Nix (2)
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable #trya
-          extra_nix_config: |
-            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
-            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
-            accept-flake-config = true
-
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
-        with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
-
-      - name: Configure cargo
-        run: .github/scripts/configure-cargo.sh
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-      - name: Build
-        run: nix build .#integration-test-deps
-
-      - name: Add git bin to PATH for Yarn, verify git is installed
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
-          echo "/usr/bin" >> $GITHUB_PATH
-          which git
-          git --version
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 22
-
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
       - name: Run integration tests
-        run: |
-          export MN_AXIOS=true
-          set -o pipefail
-          cd integration-tests
-          yarn
-          yarn lint
-          yarn build
-          yarn test:coverage:prepare
-          nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
-
-      - name: Upload Logs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: logs-${{ matrix.os }}
-          path: integration-tests/logs/
-
-      - name: Upload Test Results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
-          path: "./integration-tests/reports/ctrf-report.json"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
-          path: ./integration-tests/reports/test-report.xml
+        uses: ./.github/actions/integration-tests
 
   build-ledger:
     strategy:
@@ -214,13 +209,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -232,7 +244,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -255,6 +268,7 @@ jobs:
 
       - name: Build and Test (default features)
         run: |
+          set -eo pipefail
           cargo install cargo2junit
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results.json
           # Filter is a workaround for johnterickson/cargo2junit#85
@@ -268,13 +282,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
-        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -286,7 +317,8 @@ jobs:
           restore-prefixes-first-match: nix-${{ runner.os }}-
           purge: true
           purge-prefixes: nix-${{ runner.os }}-
-          purge-created: 0
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -309,6 +341,7 @@ jobs:
 
       - name: Build and Test - Proof server (default features)
         run: |
+          set -eo pipefail
           cargo install cargo2junit
           cd proof-server
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results-proof-server.json

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { StateBoundedMerkleTree, StateValue, VmStack } from '@midnight-ntwrk/ledger';
+import { StateBoundedMerkleTree, StateValue, VmStack } from '@midnightntwrk/ledger';
 import { Static } from '@/test-objects';
 
 describe('Ledger API - VmStack', () => {

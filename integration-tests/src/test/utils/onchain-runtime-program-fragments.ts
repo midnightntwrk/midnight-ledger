@@ -20,7 +20,7 @@ import {
   StateBoundedMerkleTree,
   StateValue,
   type Value
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import {
   ATOM_BYTES_1,
   ATOM_BYTES_32,

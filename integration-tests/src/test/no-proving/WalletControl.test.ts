@@ -25,7 +25,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { TestState } from '@/test/utils/TestState';
 import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';

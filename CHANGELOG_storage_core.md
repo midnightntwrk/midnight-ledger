@@ -1,5 +1,21 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- security: in-lined (`ArenaKey::Direct`) children now count towards the
+  recursion limit when deserializing a storage graph, so a deeply nested graph
+  of small nodes can no longer overflow the stack. In-lined values are also
+  memoized for the lifetime of the loader.
+- security: reusing an already-deserialized (memoized) node now counts its
+  height towards the recursion limit, so a graph that shares nodes can no
+  longer decode to a value nested deeper than the limit.
+
+## Version `1.2.2`
+
+Skips `1.2.1`, published from the `ledger-8` line.
+
+- pull in hardened `serialize` and `base-crypto` deserialization.
+
 ## Version `1.2.0`
 
 - feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.

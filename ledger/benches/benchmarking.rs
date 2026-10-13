@@ -82,7 +82,7 @@ struct Allocator<A: GlobalAlloc>(A);
 unsafe impl<A: GlobalAlloc> GlobalAlloc for Allocator<A> {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
         CURALLOC
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + layout.size() as u64),
@@ -92,7 +92,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for Allocator<A> {
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
         CURALLOC
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x - layout.size() as u64),
@@ -102,7 +102,7 @@ unsafe impl<A: GlobalAlloc> GlobalAlloc for Allocator<A> {
     }
     unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
         CURALLOC
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + layout.size() as u64),

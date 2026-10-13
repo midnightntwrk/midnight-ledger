@@ -30,6 +30,12 @@ use crate::{
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -54,6 +60,12 @@ pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue,
 ///   - `Secp256k1Point`
 ///   - `Secp256k1Base`
 ///   - `Secp256k1Scalar`
+///   - `Secp256r1Point`
+///   - `Secp256r1Base`
+///   - `Secp256r1Scalar`
+///   - `Curve25519Point`
+///   - `Curve25519Base`
+///   - `Curve25519Scalar`
 ///
 /// # Errors
 ///
@@ -80,6 +92,24 @@ pub fn select_incircuit(
         )),
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(
             (std_lib.secp256k1().scalar_field_chip()).select(layouter, bit, s, r)?,
+        )),
+
+        (Secp256r1Point(p), Secp256r1Point(q)) => Ok(Secp256r1Point(std_lib.p256().select(layouter, bit, p, q)?)),
+        (Secp256r1Base(s), Secp256r1Base(r)) => Ok(Secp256r1Base(
+            (std_lib.p256().base_field_chip()).select(layouter, bit, s, r)?,
+        )),
+        (Secp256r1Scalar(s), Secp256r1Scalar(r)) => Ok(Secp256r1Scalar(
+            (std_lib.p256().scalar_field_chip()).select(layouter, bit, s, r)?,
+        )),
+
+        (Curve25519Point(p), Curve25519Point(q)) => Ok(Curve25519Point(
+            std_lib.curve25519().select(layouter, bit, p, q)?,
+        )),
+        (Curve25519Base(s), Curve25519Base(r)) => Ok(Curve25519Base(
+            (std_lib.curve25519().base_field_chip()).select(layouter, bit, s, r)?,
+        )),
+        (Curve25519Scalar(s), Curve25519Scalar(r)) => Ok(Curve25519Scalar(
+            (std_lib.curve25519().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 
         _ => Err(plonk::Error::Synthesis(format!(

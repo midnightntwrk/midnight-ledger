@@ -401,7 +401,10 @@ impl From<MidnightVK> for VerifierKey {
 pub(crate) enum InnerVerifierKey {
     Uninitialized(Vec<u8>),
     Invalid(Vec<u8>),
-    /// Initialized VK with the original raw bytes preserved.
+    /// Parsed key alongside the original bytes it was decoded from, so that
+    /// serialization stays a function of the value and does not change when a
+    /// key is initialized in place (initialization is shared across clones via
+    /// the `Arc<Mutex>`).
     Initialized(MidnightVK, Vec<u8>),
 }
 
@@ -526,9 +529,15 @@ impl VerifierKey {
             }
             InnerVerifierKey::Uninitialized(data) => data.clone(),
         };
-        let reader = &mut &data[..];
-        let vk = MidnightVK::read(reader, SerdeFormat::Processed)
+        let mut slice: &[u8] = &data;
+        let vk = MidnightVK::read(&mut slice, SerdeFormat::Processed)
             .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
+        // Reject keys with unconsumed trailing bytes: two encodings must not map
+        // to the same key, and the trailing bytes would otherwise survive in the
+        // preserved-original serialization.
+        if !slice.is_empty() {
+            return Err(anyhow::anyhow!("trailing bytes after verifier key"));
+        }
         *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
         Ok(vk)
     }
@@ -538,7 +547,7 @@ impl VerifierKey {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
                 writer.write_all(data)
             }
-            InnerVerifierKey::Initialized(key, _) => key.write(&mut writer, SerdeFormat::Processed),
+            InnerVerifierKey::Initialized(_, original) => writer.write_all(original),
         }
     }
 
@@ -753,7 +762,7 @@ impl ProofPreimage {
             .await?
             .ok_or(anyhow::Error::msg(format!(
                 "failed to find proving key for '{}'",
-                &self.key_location.0
+                self.key_location.0
             )))?;
         let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;

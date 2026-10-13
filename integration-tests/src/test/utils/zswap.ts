@@ -26,7 +26,7 @@ import {
   upgradeFromTransient,
   type Value,
   type ZswapOffer
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Static } from '@/test-objects';
 import { ATOM_FIELD } from '@/test/utils/value-alignment';
 

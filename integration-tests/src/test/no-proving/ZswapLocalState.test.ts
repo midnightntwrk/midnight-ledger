@@ -22,7 +22,7 @@ import {
   TransactionContext,
   WellFormedStrictness,
   MerkleTreeCollapsedUpdate
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 

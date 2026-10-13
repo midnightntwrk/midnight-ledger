@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import type { EncodedStateValue, Event, LogEventType } from '@midnight-ntwrk/ledger';
+import type { EncodedStateValue, Event, LogEventType } from '@midnightntwrk/ledger';
 import { arrayCell, intCell } from '@/test/utils/value-alignment';
 import { LogEventTypeMarker } from '@/test/utils/Markers';
 import { applyDoLogCall, type LogCallOutcome } from '@/test/utils/log-contract';

@@ -211,7 +211,7 @@ pub(crate) async fn check(
                             .ok_or_else(|| {
                                 WorkError::BadInput(format!(
                                     "couldn't find built-in key {}",
-                                    &ppi.key_location().0
+                                    ppi.key_location().0
                                 ))
                             })?
                             .ir_source
@@ -296,7 +296,7 @@ pub(crate) async fn prove(
                                 .ok_or_else(|| {
                                     WorkError::BadInput(format!(
                                         "couldn't find key {}",
-                                        &ppi.key_location.0
+                                        ppi.key_location.0
                                     ))
                                 })?,
                         };

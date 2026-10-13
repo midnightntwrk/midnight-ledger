@@ -33,7 +33,7 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[storable(db = D, invariant = MerklePatriciaTrie::invariant)]
+#[storable(db = D, invariant = MerklePatriciaTrie::canonicity)]
 pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
@@ -69,7 +69,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         MerklePatriciaTrie(Sp::new(Node::Empty))
     }
 
-    fn invariant(&self) -> Result<(), std::io::Error> {
+    fn annotation_consistency(&self) -> Result<(), std::io::Error> {
         fn err<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
             ann: &A,
             true_val: A,
@@ -123,6 +123,85 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
 
         let _ = sum_ann(self.0.deref())?;
         Ok(())
+    }
+
+    /// Check that the trie is in canonical form, returning a description of the
+    /// violated rule otherwise. A well-formed trie is *canonical*: its structure
+    /// is uniquely determined by its key-value contents (see the type-level
+    /// docs). This is a hand-enumerated statement of the structural rules,
+    /// composed with the annotation-consistency check.
+    ///
+    /// This is wired in as the `Storable` invariant, so it is also what
+    /// deserialization enforces: it replaces the narrower
+    /// annotation-consistency-only check, and a trie whose *structure* is
+    /// non-canonical no longer decodes.
+    pub fn canonicity(&self) -> Result<(), std::io::Error> {
+        fn err<T>(msg: &str) -> Result<T, std::io::Error> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("canonicity: {msg}"),
+            ))
+        }
+
+        fn structure<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+            node: &Node<V, D, A>,
+        ) -> Result<(), std::io::Error> {
+            match node {
+                Node::Empty | Node::Leaf { .. } => Ok(()),
+                Node::Branch { children, .. } => {
+                    if children
+                        .iter()
+                        .filter(|child| !matches!(***child, Node::Empty))
+                        .count()
+                        < 2
+                    {
+                        return err("Node::Branch must have at least two non-empty children");
+                    }
+                    children
+                        .iter()
+                        .try_for_each(|child| structure(child.deref()))
+                }
+                Node::Extension {
+                    compressed_path,
+                    child,
+                    ..
+                } => {
+                    if compressed_path.is_empty() {
+                        return err("Node::Extension path must be non-empty");
+                    }
+                    if compressed_path.len() > 255 {
+                        return err("Node::Extension path may not be longer than 255");
+                    }
+                    if compressed_path.iter().any(|b| *b > 0x0f) {
+                        return err("Node::Extension path must consist of nibbles");
+                    }
+                    match child.deref() {
+                        Node::Empty => {
+                            return err("Node::Extension child must not be Node::Empty");
+                        }
+                        Node::Extension { .. } if compressed_path.len() != 255 => {
+                            return err(
+                                "Node::Extension may only have a Node::Extension child when its own path is of length 255",
+                            );
+                        }
+                        _ => {}
+                    }
+                    structure(child.deref())
+                }
+                Node::MidBranchLeaf { child, .. } => match child.deref() {
+                    Node::Branch { .. } | Node::Extension { .. } => structure(child.deref()),
+                    _ => err("Node::MidBranchLeaf may only have Node::Branch or Node::Extension children"),
+                },
+            }
+        }
+
+        structure(self.0.deref())?;
+        self.annotation_consistency()
+    }
+
+    /// Whether [`Self::canonicity`] holds.
+    pub fn is_canonical(&self) -> bool {
+        self.canonicity().is_ok()
     }
 
     /// Insert a value into the trie
@@ -282,7 +361,7 @@ pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Anno
 #[derive_where(Ord; T: Ord, A: Ord)]
 #[allow(clippy::type_complexity)]
 #[cfg(not(feature = "public-internal-structure"))]
-pub(crate) enum Node<
+pub enum Node<
     T: Storable<D> + 'static,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<T> = SizeAnn,
@@ -1450,19 +1529,23 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Node<T, D, A>, std::io::Error> {
-        let disc = u8::deserialize(reader, 0)?;
+        // Thread the loader's recursion depth through, rather than restarting
+        // from zero: resetting it at every node boundary would let a nested
+        // structure evade `midnight-serialize`'s recursion limit entirely.
+        let depth = loader.get_recursion_depth();
+        let disc = u8::deserialize(reader, depth)?;
 
-        match disc {
-            0 => Ok(Node::Empty),
+        let node = match disc {
+            0 => Node::Empty,
             1 => {
-                let ann = A::deserialize(reader, 0)?;
-                Ok(Node::Leaf {
+                let ann = A::deserialize(reader, depth)?;
+                Node::Leaf {
                     ann,
                     value: loader.get_next(child_hashes)?,
-                })
+                }
             }
             2 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let Ok(children) = (0..16)
                     .map(|_| loader.get_next(child_hashes))
                     .collect::<Result<Vec<_>, _>>()?
@@ -1471,34 +1554,47 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                     unreachable!("iterator must be of expected length")
                 };
 
-                Ok(Node::Branch {
+                Node::Branch {
                     ann,
                     children: Box::new(children),
-                })
+                }
             }
             3 => {
-                let ann = A::deserialize(reader, 0)?;
-                let len = u8::deserialize(reader, 0)?;
-                let path =
-                    expand_nibbles(&std::vec::Vec::<u8>::deserialize(reader, 0)?, len as usize);
+                let ann = A::deserialize(reader, depth)?;
+                let len = u8::deserialize(reader, depth)? as usize;
+                let data = <std::vec::Vec<u8>>::deserialize(reader, depth)?;
+                if data.len() != len.div_ceil(2) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("inferred nibble byte length {} did not match actual data length of {}", len.div_ceil(2), data.len())));
+                };
+                let path = expand_nibbles(&data, len);
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
-                Ok(Node::Extension {
+                Node::Extension {
                     ann,
                     compressed_path: path,
                     child,
-                })
+                }
             }
             4 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
-                Ok(Node::MidBranchLeaf { ann, value, child })
+                Node::MidBranchLeaf { ann, value, child }
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "Unrecognised discriminant",
-            )),
-        }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Unrecognised discriminant",
+                ));
+            },
+        };
+
+        // Enforce structural node invariants when loading from an untrusted
+        // source. `do_check` is a no-op for trusted back-end loaders and runs
+        // `check_invariant` for wire loaders, rejecting malformed node shapes
+        // (e.g. a `MidBranchLeaf` whose child is not a `Branch`/`Extension`)
+        // that would otherwise let the size annotation diverge from the set of
+        // canonically-indexed entries reachable by `get`.
+        loader.do_check(node)
     }
 }
 

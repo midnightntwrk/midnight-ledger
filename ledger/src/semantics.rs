@@ -1189,7 +1189,6 @@ impl<D: DB> LedgerState<D> {
                                 &erased,
                                 reg,
                                 &state.parameters.dust,
-                                da.ctime,
                                 context,
                                 |content_fn| {
                                     let source = source.clone();

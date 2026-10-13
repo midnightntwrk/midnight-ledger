@@ -75,7 +75,7 @@ import {
   verifySignature,
   VmStack,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import {
   BOOLEAN_HASH_BYTES,
   getQualifiedShieldedCoinInfo,

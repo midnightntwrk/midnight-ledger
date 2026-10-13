@@ -69,7 +69,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapTransient
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 import { TestState } from '@/test/utils/TestState';
 import {
@@ -898,7 +898,7 @@ describe('Ledger API - TokenVault Shielded', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [ONE_VALUE, encodeCoinPublicKey(state.zswapKeys.coinPublicKey), EMPTY_VALUE],
+        value: [ONE_VALUE, Static.trimTrailingZeros(encodeCoinPublicKey(state.zswapKeys.coinPublicKey)), EMPTY_VALUE],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );

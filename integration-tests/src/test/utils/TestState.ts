@@ -54,7 +54,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {
   DEFAULT_TOKEN_TYPE,

@@ -20,7 +20,7 @@ import {
   ZswapOffer,
   ZswapOutput,
   ZswapSecretKeys
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { ESK_CLEAR_MESSAGE, CSK_CLEAR_MESSAGE, ZSWAP_SK_CLEAR_MESSAGE } from '@/test-constants';
 import { HEX_64_REGEX, Random } from '@/test-objects';
 

@@ -28,7 +28,7 @@ import {
   bigIntModFr,
   maxField,
   ZswapInput
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';

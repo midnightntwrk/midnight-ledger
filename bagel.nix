@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-{ system, rust-build-toolchain, nixpkgs, stdenv }:
+{ system, rust-build-toolchain, nixpkgs, stdenv, overlays ? [] }:
 
 {
   name,
@@ -30,7 +30,7 @@
 }:
 
 let
-  pkgs = import nixpkgs { inherit system; };
+  pkgs = import nixpkgs { inherit system overlays; };
   raw-wasm = ((pkgs.makeRustPlatform {
       rustc = rust-build-toolchain;
       cargo = rust-build-toolchain;
@@ -167,7 +167,7 @@ in pkgs.stdenvNoCC.mkDerivation {
     pkgs.nodejs
     pkgs.coreutils
     pkgs.gnused
-    pkgs.wasm-bindgen-cli_0_2_104
+    pkgs.wasm-bindgen-cli_0_2_108
     pkgs.binaryen
   ];
 }
