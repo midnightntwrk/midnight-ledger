@@ -10,6 +10,7 @@
 
 ## Version `1.2.0`
 
+- fix: `gc_weak_pointer` now keys the `sp_cache` lookup by the concrete type of the held value, so entries are removed when the last strong reference is dropped via an upcast `Sp<dyn Any + Send + Sync>`, fixing a weak-pointer leak
 - feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.
 - feat: allow parityDB to use existing instance
 - fix: removed race condition from `force_as_arc`
