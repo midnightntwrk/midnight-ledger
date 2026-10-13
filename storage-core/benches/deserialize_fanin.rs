@@ -21,6 +21,7 @@
 //!      re-serializes and re-hashes the whole node -- O(node size) on every one of
 //!      its references. Fixed by using `Ref(key)` directly: the deserializer only
 //!      reaches that path for a child it was handed as `Ref(key)`.
+//!
 //! With both fixes, a B-byte node referenced R times costs O(R + B), not O(R x B),
 //! so this bench's throughput is flat in `n`. It is the regression guard against
 //! either quadratic coming back. (A fixed-size shared node already looked linear in
