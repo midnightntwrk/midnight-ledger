@@ -802,6 +802,7 @@ mod prove_endpoint {
     use super::test_data::create_zswap_output_proof_preimage;
     use serialize::{tagged_deserialize, tagged_serialize};
     use transient_crypto::proofs::ProvingKeyMaterial;
+    #[cfg(feature = "gcp_cs")]
     use uuid::Uuid;
 
     #[tokio::test]
@@ -877,13 +878,16 @@ mod prove_endpoint {
             response.status()
         );
 
-        let job_id = response
-            .headers()
-            .get("proof-job-id")
-            .expect("missing proof-job-id header")
-            .to_str()
-            .expect("proof-job-id should be valid ASCII");
-        Uuid::parse_str(job_id).expect("proof-job-id should be a UUID");
+        #[cfg(feature = "gcp_cs")]
+        {
+            let job_id = response
+                .headers()
+                .get("proof-job-id")
+                .expect("missing proof-job-id header")
+                .to_str()
+                .expect("proof-job-id should be valid ASCII");
+            Uuid::parse_str(job_id).expect("proof-job-id should be a UUID");
+        }
 
         let bytes = response
             .bytes()

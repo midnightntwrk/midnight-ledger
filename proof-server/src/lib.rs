@@ -30,9 +30,12 @@ use {
 };
 
 use crate::endpoints::{
-    check, fetch_k, get_k, health, proof_status, proof_versions, prove, prove_transaction, ready,
-    version,
+    check, fetch_k, get_k, health, proof_versions, prove, prove_transaction, ready, version,
 };
+
+#[cfg(feature = "gcp_cs")]
+use crate::endpoints::proof_status;
+
 use crate::worker_pool::WorkerPool;
 
 pub mod endpoints;
@@ -130,7 +133,6 @@ pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Resul
             .service(get_k)
             .service(version)
             .service(proof_versions)
-            .service(proof_status)
             .service(ready)
             .route("/", web::get().to(health))
             .route("/health", web::get().to(health))
@@ -140,7 +142,8 @@ pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Resul
         #[cfg(feature = "gcp_cs")]
         let app = app
             .app_data(Data::new(server_encryption_key.clone()))
-            .service(attestation);
+            .service(attestation)
+            .service(proof_status);
 
         if fetch_params {
             app.service(fetch_k)
