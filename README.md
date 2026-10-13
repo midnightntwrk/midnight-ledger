@@ -136,6 +136,7 @@ Some of these rust crates use feature flags. For the most part, using default fe
 | --- | --- |
 | `binary` | Enables the ZKIR binary target, to avoid polluting downstream dependencies with CLI dependencies. |
 | `cli` | Enables CLI features in `base-crypto`, mainly used to provide the `zkir` binary |
+| `gcp_cs` | Enables GCP Confidential Space support in `proof-server` (encrypted prove transport, `/attestation`, `/status`). Compile-time only; there is no CLI flag. See [Proof server (`gcp_cs`)](#proof-server-gcp_cs) below. |
 | `mock-verify` | Enables a mock  verification mode to allow testing large quantities of transactions without the expensive proving step. Replaces proof verification with one that has comparable performance characteristics, but never fails. |
 | `parity-db` | Enables the [parity-db](https://github.com/paritytech/parity-db) storage backend. |
 | `proof-verifying` | Enables proof verifications. Enabled by default, except in the wasm targets, as this embeds verifier keys into binary artifacts and artifact size is a concern there. |
@@ -183,3 +184,43 @@ of the benchmarks in most cases.
 
 The TypeScript integration tests have [their own README covering more
 specialized usage](integration-tests/README.md).
+
+### Proof server (`gcp_cs`)
+
+The `proof-server` crate is an HTTP wrapper around proving. Default builds keep
+plaintext `/prove` and `/prove-tx`. Building with `--features gcp_cs` enables
+GCP Confidential Space support. This is compile-time only; the binary CLI
+(`--port`, `--verbose`, `--job-capacity`, `--num-workers`, `--job-timeout`,
+`--no-fetch-params`) is unchanged — there is no `--tee` or
+`--confidential-space` flag.
+
+```console
+$ cargo build -p midnight-proof-server --features gcp_cs
+$ cargo test -p midnight-proof-server --features gcp_cs
+```
+
+CI excludes `gcp_cs` from workspace `--all-features` runs (plaintext
+integration tests would fail) and tests the proof-server package with
+`--features experimental` instead.
+
+With `gcp_cs` enabled, the server generates a `crypto_box` (X25519) keypair at
+startup. `/prove` and `/prove-tx` require encrypted bodies; plaintext is rejected
+with `400`.
+
+Required request headers (both must be present):
+
+| Header | Value |
+| --- | --- |
+| `client-public-key` | Hex-encoded 32-byte client X25519 public key |
+| `request-nonce` | Hex-encoded 24-byte nonce used to encrypt the body |
+
+The body is `SalsaBox` ciphertext. Successful responses are re-encrypted to the
+client and include `response-nonce` (hex 24-byte nonce) and `proof-job-id`
+(UUID). HTTP status is set only after the job finishes.
+
+Additional routes when `gcp_cs` is enabled:
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/status?job_id=<uuid>` | Job state: `Pending` / `Processing` / `Success` / `Error` / `Cancelled`; JSON uses camelCase (`jobId`, `status`, `done`). Unknown jobs → `404`. |
+| `POST` | `/attestation?nonce=<…>` | Header `encryption-type`: `oidc` or `pki`. Proxies to the local TEE token socket `/run/container_launcher/teeserver.sock` at `/v1/token` with audience `https://sts.googleapis.com` and nonces `[query nonce, server public key hex]`. 10s timeout, 64 KiB max body. Success: `{ "token": "…" }`. Only meaningful inside Confidential Space. |
