@@ -261,7 +261,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         let mut required_children = T::child_translations(&self.value);
         required_children.retain(|(tid, obj)| cache.lookup(tid, obj.as_child()).is_none());
         let t1 = Instant::now();
-        TDEP.fetch_update(
+        TDEP.try_update(
             std::sync::atomic::Ordering::SeqCst,
             std::sync::atomic::Ordering::SeqCst,
             |x| Some(x + (t1 - t0).as_nanos() as u64),
@@ -294,7 +294,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
                 }
             };
             let t1 = Instant::now();
-            TFIN.fetch_update(
+            TFIN.try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + (t1 - t0).as_nanos() as u64),
@@ -709,21 +709,21 @@ impl<TABLE: TranslationTable<D>, D: DB> InflightTranslationState<TABLE, D> {
         let res = Ok(Either::Left(finished || *limit == CostDuration::ZERO));
         let t3 = Instant::now();
         TPROCESS
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + (t2 - t1).as_nanos() as u64),
             )
             .unwrap();
         TUPDATE
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + ((t3 - t2) + (t1 - t0)).as_nanos() as u64),
             )
             .unwrap();
         NPROC
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |x| Some(x + 1),
