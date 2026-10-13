@@ -8,6 +8,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
   segment specifiers in `addCalls`
+- security: contract call transcripts declaring `compute_time` or `read_time`
+  beyond the block limits are rejected as malformed, with the new
+  `MalformedTransaction::TranscriptGasExceedsBlockLimits`. Previously a
+  declaration of `2^63` ps or more was priced as zero compute, bypassing the
+  block compute limit and the time-to-dismiss check.
 
 ## Ledger 9.1.0.0-rc.5
 
