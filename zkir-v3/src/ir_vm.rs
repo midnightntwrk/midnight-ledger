@@ -744,11 +744,11 @@ impl Relation for IrSource {
                 .ok_or(Error::Synthesis(format!("value {id:?} not in memory")))
         }
 
-        fn resolve_operand<'a>(
+        fn resolve_operand(
             std: &ZkStdLib,
             layouter: &mut impl Layouter<outer::Scalar>,
-            memory: &'a HashMap<Identifier, CircuitValue>,
-            operand: &'a Operand,
+            memory: &HashMap<Identifier, CircuitValue>,
+            operand: &Operand,
         ) -> Result<CircuitValue, Error> {
             match operand {
                 Operand::Variable(id) => idx(memory, id).cloned(),
