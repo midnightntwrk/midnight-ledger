@@ -62,7 +62,11 @@ impl OwnedDb {
         }
 
         let mut options = parity_db::Options::with_columns(path, NUM_COLUMNS);
-        set_init_options(&mut options, 0, false);
+        // Nodes are serialized trees with a lot of repeated structure; LZ4 on the node
+        // column trades a little CPU per read/write for materially less disk and I/O. The
+        // option is part of the column config, so it applies to databases created from
+        // here on (an existing database keeps the config it was created with).
+        set_init_options(&mut options, 0, true);
 
         let db = parity_db::Db::open_or_create(&options).unwrap_or_else(|e| {
             panic!(

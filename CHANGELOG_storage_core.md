@@ -3,6 +3,7 @@
 ## Unreleased
 
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
+- perf: enable LZ4 compression on the node column of the parity-db backend's own database (new databases only; `set_init_options` callers already chose this per column).
 
 ## Version `1.2.1`
 
