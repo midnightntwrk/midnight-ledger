@@ -1909,6 +1909,35 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
             }
         }
 
+        // Declared gas is the VM's execution ceiling, and is priced at face value. Bound it
+        // by the block limits, so that no transcript can declare more work than could ever
+        // fit into a block, and cannot push fee arithmetic into overflow.
+        if strictness.enforce_limits {
+            ref_state.param_check(true, |params| {
+                let limits = &params.limits.block_limits;
+                for transcript in [
+                    self.guaranteed_transcript.as_ref(),
+                    self.fallible_transcript.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if transcript.gas.compute_time > limits.compute_time
+                        || transcript.gas.read_time > limits.read_time
+                    {
+                        return Err(MalformedTransaction::TranscriptGasExceedsBlockLimits {
+                            address: self.address,
+                            declared_compute_time: transcript.gas.compute_time,
+                            declared_read_time: transcript.gas.read_time,
+                            compute_time_limit: limits.compute_time,
+                            read_time_limit: limits.read_time,
+                        });
+                    }
+                }
+                Ok(())
+            })?;
+        }
+
         if strictness.verify_contract_proofs {
             ref_state.op_check(self.address, &self.entry_point, |op| {
                 let gt = self
@@ -1976,7 +2005,14 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     }
 
     pub fn public_inputs_len(&self) -> usize {
-        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
+        2usize.saturating_add(
+            self.guaranteed_transcript
+                .iter()
+                .chain(self.fallible_transcript.iter())
+                .flat_map(|t| t.program.iter())
+                .map(|op| op.field_size())
+                .fold(0, |a, b| a.saturating_add(b)),
+        )
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
