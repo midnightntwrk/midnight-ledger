@@ -1876,6 +1876,13 @@ impl<D: DB> MaintenanceUpdate<D> {
     }
 }
 
+/// Re-exported from `onchain-runtime`, so that consumers outside the ledger can
+/// apply the same bound before materializing a call's public inputs. Fee
+/// calculation rejects transcripts far below this bound long before it is
+/// reached (see [`ContractCall::public_inputs_len`]); in the ledger it exists to
+/// bound the allocation on paths where fee enforcement is disabled.
+pub use onchain_runtime::transcript::MAX_CALL_PUBLIC_INPUTS;
+
 impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     pub(crate) fn well_formed(
         &self,
@@ -1883,6 +1890,8 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
+        // Checked before anything materializes the public inputs below.
+        self.public_inputs_len_check()?;
         if let Some(fallible) = &self.fallible_transcript
             && fallible.program.get(0) != Some(&Op::Ckpt)
             && self.guaranteed_transcript.is_some()
@@ -1984,7 +1993,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 P::proof_verify(
                     op,
                     &self.proof,
-                    self.public_inputs(parent.binding_commitment),
+                    self.public_inputs(parent.binding_commitment)?,
                     self,
                     strictness.proof_verification_mode
                 )?;
@@ -1995,17 +2004,27 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         Ok(())
     }
 
-    // NOTE: The proof should receive the following inputs for binding purposes:
-    //  - The contract address
-    //  - The contract entry point
-    //  - Both transcript parts's declared gas costs, and effects
-    //  - The count of instructions in the guaranteed transcript
-    //  - The parent ContractCalls's `binding_commitment.commitment`.
-    // These need to be *truely* binding (see note at the bottom of this file!)
-    // In addition, it should receive
-    //  - The communication commitment
-    //  - The transcript
-    pub fn public_inputs(&self, binding_com: Pedersen) -> Vec<Fr> {
+    /// Builds the public input vector this call's proof will be validated against.
+    ///
+    /// NOTE: The proof should receive the following inputs for binding purposes:
+    ///  - The contract address
+    ///  - The contract entry point
+    ///  - Both transcript parts's declared gas costs, and effects
+    ///  - The count of instructions in the guaranteed transcript
+    ///  - The parent ContractCalls's `binding_commitment.commitment`.
+    ///
+    /// These need to be *truely* binding (see note at the bottom of this file!)
+    ///
+    /// In addition, it should receive
+    ///  - The communication commitment
+    ///  - The transcript
+    ///
+    /// Fails without allocating if the call declares more than
+    /// [`MAX_CALL_PUBLIC_INPUTS`] public inputs: `Op::Noop { n }` lets a 9-byte
+    /// op name an arbitrarily large statement, so this must not trust callers
+    /// to have checked well-formedness first.
+    pub fn public_inputs(&self, binding_com: Pedersen) -> Result<Vec<Fr>, MalformedTransaction<D>> {
+        self.public_inputs_len_check()?;
         let mut res = vec![self.binding_input(binding_com)];
         res.push(self.communication_commitment);
         if let Some(guaranteed) = self.guaranteed_transcript.as_ref() {
@@ -2018,10 +2037,13 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 op.field_repr(&mut res);
             }
         }
-        res
+        Ok(res)
     }
 
+    /// The number of field elements [`Self::public_inputs`] would produce,
+    /// computed without materializing them.
     pub fn public_inputs_len(&self) -> usize {
+        // The binding input and the communication commitment.
         2usize.saturating_add(
             self.guaranteed_transcript
                 .iter()
@@ -2030,6 +2052,19 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 .map(|op| op.field_size())
                 .fold(0, |a, b| a.saturating_add(b)),
         )
+    }
+
+    fn public_inputs_len_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let public_inputs = self.public_inputs_len();
+        if public_inputs > MAX_CALL_PUBLIC_INPUTS {
+            return Err(MalformedTransaction::TooManyPublicInputs {
+                address: self.address,
+                operation: self.entry_point.clone(),
+                public_inputs,
+                limit: MAX_CALL_PUBLIC_INPUTS,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {

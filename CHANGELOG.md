@@ -6,6 +6,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: reject contract calls declaring more than `MAX_CALL_PUBLIC_INPUTS` public inputs, 
+  bounding the allocation on paths where fee enforcement is disabled.
+- breaking: `ContractCall::public_inputs` returns a `Result`, failing with
+  `TooManyPublicInputs` instead of materializing more than
+  `MAX_CALL_PUBLIC_INPUTS` field elements.
 - fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
   segment specifiers in `addCalls`
 - security: contract call transcripts declaring `compute_time` or `read_time`
