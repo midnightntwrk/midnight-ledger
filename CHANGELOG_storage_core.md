@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- perf: the incremental GC tracks root-count changes incrementally instead of re-reading every DB root after each flush; a scanned node with a positive root count is never deleted
+
 ## Version `1.2.1`
 
 - pull in hardened `serialize` and `base-crypto` deserialization.

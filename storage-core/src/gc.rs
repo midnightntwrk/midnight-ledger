@@ -89,6 +89,12 @@ impl RunningBenchmark {
     }
 }
 
+/// Incremental mark & sweep state.
+///
+/// The root set (`last_roots`) is maintained incrementally between cycle boundaries: root-count
+/// changes flushed to the DB are reported via `note_root_count`, and in-memory roots are added on
+/// every `run`. A full read of all DB roots (`get_roots`) happens only at init and once per
+/// completed sweep cycle, not after each flush.
 #[derive(Debug)]
 pub(crate) struct GcState<D: DB> {
     rescan: bool,
@@ -113,8 +119,34 @@ impl<D: DB> Default for GcState<D> {
 }
 
 impl<D: DB> GcState<D> {
-    pub(crate) fn force_rescan(&mut self) {
-        self.rescan = true;
+    /// Notes that the root count of `key` has been set to `new_count` in the DB.
+    ///
+    /// A positive count adds the node to the root set, and greys it if not yet marked, so the next
+    /// `run` marks its subtree before sweeping. A zero count removes it from the root set only;
+    /// anything it kept alive is reconciled by the full rescan after a completed sweep. Does not
+    /// trigger a rescan. While a rescan is pending this is a no-op, as the rescan reads the DB.
+    pub(crate) fn note_root_count(&mut self, key: &ArenaHash<D::Hasher>, new_count: u32) {
+        if self.rescan {
+            return;
+        }
+        if new_count > 0 {
+            self.last_roots.insert(key.clone());
+            if !self.mark_set.contains(key) {
+                self.grey_set.insert(key.clone());
+            }
+        } else {
+            self.last_roots.remove(key);
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn sweep_in_progress(&self) -> bool {
+        self.sweep_resume.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rescan_pending(&self) -> bool {
+        self.rescan
     }
 
     pub(crate) fn run<'a, 'b: 'a>(
@@ -216,15 +248,38 @@ impl<D: DB> GcState<D> {
         let mut cull_set = vec![];
         while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
-            let (nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
-            self.sweep_resume = handle;
+            let batch_resume = self.sweep_resume.clone();
+            let (nodes, handle) = db.scan(batch_resume.clone(), batch_size);
             let batch_size = nodes.len();
-            // Cull all nodes in the batch that are *not* marked.
-            let to_delete = nodes
-                .into_iter()
-                .map(|(k, _)| k)
-                .filter(|k| !self.mark_set.contains(k))
-                .collect::<Vec<_>>();
+            // Cull all nodes in the batch that are *not* marked, *unless* they have a positive root
+            // count in the DB. The root count check is a point read, performed only for garbage
+            // candidates. It is a safety net behind `note_root_count`, and also protects persisted
+            // roots that a `gc_override_gc_roots` caller left out of the root set (the safe
+            // direction: the override never causes a persisted root to be deleted).
+            let mut to_delete = vec![];
+            let mut late_roots = vec![];
+            for (k, _) in nodes {
+                if self.mark_set.contains(&k) {
+                    continue;
+                }
+                if db.get_root_count(&k) > 0 {
+                    late_roots.push(k);
+                } else {
+                    to_delete.push(k);
+                }
+            }
+            if !late_roots.is_empty() {
+                // Grey the late roots so that their subtrees get marked at the start of the next
+                // call. Nothing from this batch is deleted, as it may be reachable from them;
+                // the batch is rescanned from its start next time.
+                for root in late_roots {
+                    self.last_roots.insert(root.clone());
+                    self.grey_set.insert(root);
+                }
+                self.sweep_resume = batch_resume;
+                return cull_set;
+            }
+            self.sweep_resume = handle;
             db.batch_update(to_delete.iter().map(|k| (k.clone(), Update::DeleteNode)));
             cull_set.extend(to_delete);
             self.running_bench
@@ -320,5 +375,276 @@ mod tests {
         }
         assert_eq!(culled, 3 * CHUNK);
         assert_eq!(size(), 6 * CHUNK);
+    }
+
+    mod late_roots {
+        use crate::arena::{Arena, ArenaHash, Sp, bin_tree::BinTree};
+        use crate::backend::StorageBackend;
+        use crate::db::{DB, InMemoryDB};
+        use std::collections::HashSet;
+        use std::time::Duration;
+
+        type Db = InMemoryDB<crate::DefaultHasher>;
+        type A = Arena<Db>;
+        type H = ArenaHash<crate::DefaultHasher>;
+
+        fn new_arena() -> A {
+            Arena::new_from_backend(StorageBackend::new(1, Db::default()))
+        }
+
+        fn size(a: &A) -> usize {
+            a.with_backend(|b| b.database.size())
+        }
+
+        /// A budget allowing only a couple of batches per call.
+        fn small_budget() -> impl Fn() -> Duration {
+            let n = std::cell::Cell::new(0usize);
+            move || {
+                let i = n.get();
+                n.set(i + 1);
+                if i < 2 { Duration::MAX } else { Duration::ZERO }
+            }
+        }
+
+        /// Persisted nodes (roots, kept) plus unreferenced garbage, all flushed and dropped.
+        fn populate(a: &A, kept: usize, garbage: usize) {
+            let mut sps = (0..(kept + garbage) as u64)
+                .map(|i| a.alloc(i))
+                .collect::<Vec<_>>();
+            sps.iter_mut().for_each(|s| s.persist());
+            a.with_backend(|b| b.flush_all_changes_to_db());
+            sps[kept..].iter_mut().for_each(|s| s.unpersist());
+            a.with_backend(|b| b.flush_all_changes_to_db());
+        }
+
+        /// Drive small-budget gc calls until a sweep is mid-way.
+        fn drive_to_mid_sweep(a: &A) {
+            for _ in 0..1000 {
+                a.with_backend(|b| b.gc_budgeted(small_budget()));
+                if a.with_backend(|b| b.gc_state().sweep_in_progress()) {
+                    return;
+                }
+            }
+            panic!("never reached mid-sweep");
+        }
+
+        /// Runs two full cycles (the second collects anything protected only by the first).
+        fn gc_to_completion(a: &A) {
+            for _ in 0..2 {
+                for _ in 0..100_000 {
+                    a.with_backend(|b| b.gc_budgeted(small_budget()));
+                    if a.with_backend(|b| b.gc_state().rescan_pending()) {
+                        break;
+                    }
+                }
+                assert!(a.with_backend(|b| b.gc_state().rescan_pending()));
+            }
+        }
+
+        fn subtree(a: &A, root: &H) -> HashSet<H> {
+            let mut seen = HashSet::new();
+            let mut todo = vec![root.clone()];
+            while let Some(h) = todo.pop() {
+                if !seen.insert(h.clone()) {
+                    continue;
+                }
+                if let Some(obj) = a.with_backend(|b| b.database.get_node(&h)) {
+                    for c in obj.children.iter().flat_map(|c| c.refs().into_iter()) {
+                        todo.push(c.clone());
+                    }
+                }
+            }
+            seen
+        }
+
+        fn assert_all_in_db(a: &A, nodes: &HashSet<H>) {
+            for h in nodes {
+                assert!(
+                    a.with_backend(|b| b.database.get_node(h)).is_some(),
+                    "node {h:?} was deleted"
+                );
+            }
+        }
+
+        /// Persist a wrapper `W` over a fresh subtree, flush, and drop every `Sp`.
+        fn persist_wrapper(a: &A, seed: u64) -> H {
+            let leaf = |v| Some(a.alloc(BinTree::<Db>::new(v, None, None)));
+            let mut w: Sp<BinTree<Db>, Db> = a.alloc(BinTree::new(
+                seed,
+                Some(a.alloc(BinTree::new(seed + 1, leaf(seed + 2), leaf(seed + 3)))),
+                leaf(seed + 4),
+            ));
+            w.persist();
+            let h = w.hash();
+            a.with_backend(|b| b.flush_all_changes_to_db());
+            h
+        }
+
+        #[test]
+        fn late_root_survives_in_progress_sweep() {
+            let a = new_arena();
+            populate(&a, 2_000, 6_000);
+            drive_to_mid_sweep(&a);
+            let w = persist_wrapper(&a, 1_000_000);
+            let reachable = subtree(&a, &w);
+            assert!(reachable.len() >= 5);
+            gc_to_completion(&a);
+            assert_all_in_db(&a, &reachable);
+            assert_eq!(a.with_backend(|b| b.get_root_count(&w)), 1);
+            assert!(a.with_backend(|b| b.get_roots()).contains_key(&w));
+            assert_eq!(size(&a), 2_000 + reachable.len());
+        }
+
+        #[test]
+        fn late_root_children_sorting_before_root_survive() {
+            let a = new_arena();
+            populate(&a, 2_000, 6_000);
+            drive_to_mid_sweep(&a);
+            // Persist several wrappers, and require that for at least one, a descendant's key sorts
+            // before the root's key.
+            let mut all = HashSet::new();
+            let mut roots = vec![];
+            let mut child_before_root = false;
+            for i in 0..20u64 {
+                let w = persist_wrapper(&a, 10_000_000 + i * 10);
+                let sub = subtree(&a, &w);
+                child_before_root |= sub.iter().any(|h| *h < w);
+                all.extend(sub);
+                roots.push(w);
+            }
+            assert!(child_before_root);
+            gc_to_completion(&a);
+            assert_all_in_db(&a, &all);
+            let db_roots = a.with_backend(|b| b.get_roots());
+            for r in &roots {
+                assert!(db_roots.contains_key(r));
+            }
+            assert_eq!(size(&a), 2_000 + all.len());
+        }
+
+        /// Writes persisted leaf roots straight into the DB, behind the backend's back, so that no
+        /// rescan is forced and no root note is made. This models a root persisted after the
+        /// cycle's root set was taken; only the root-count guard can protect it.
+        fn inject_leaf_root(a: &A, seed: u64) -> H {
+            use crate::db::Update;
+            let scratch = new_arena();
+            let mut sp = scratch.alloc(BinTree::<Db>::new(seed, None, None));
+            sp.persist();
+            let w = sp.hash();
+            scratch.with_backend(|b| b.flush_all_changes_to_db());
+            let obj = scratch.with_backend(|b| b.database.get_node(&w)).unwrap();
+            a.with_backend(|b| {
+                b.database.batch_update(
+                    [
+                        (w.clone(), Update::InsertNode(obj)),
+                        (w.clone(), Update::SetRootCount(1)),
+                    ]
+                    .into_iter(),
+                )
+            });
+            w
+        }
+
+        #[test]
+        fn root_count_guard_protects_roots_written_behind_the_backend() {
+            let a = new_arena();
+            populate(&a, 2_000, 6_000);
+            drive_to_mid_sweep(&a);
+            let roots = (0..50u64)
+                .map(|i| inject_leaf_root(&a, 20_000_000 + i))
+                .collect::<Vec<_>>();
+            gc_to_completion(&a);
+            for r in &roots {
+                assert_eq!(a.with_backend(|b| b.get_root_count(r)), 1);
+                assert!(a.with_backend(|b| b.database.get_node(r)).is_some());
+            }
+            assert_eq!(size(&a), 2_000 + roots.len());
+        }
+
+        fn run_counting(a: &A, calls: &std::cell::Cell<usize>) {
+            a.with_backend(|b| {
+                b.gc_budgeted_with_roots(small_budget(), |db| {
+                    calls.set(calls.get() + 1);
+                    db.get_roots().keys().cloned().collect()
+                })
+            });
+        }
+
+        #[test]
+        fn root_persisted_mid_cycle_is_marked_without_full_rescan() {
+            let a = new_arena();
+            populate(&a, 2_000, 6_000);
+            let calls = std::cell::Cell::new(0usize);
+            for _ in 0..1000 {
+                run_counting(&a, &calls);
+                if a.with_backend(|b| b.gc_state().sweep_in_progress()) {
+                    break;
+                }
+            }
+            assert!(a.with_backend(|b| b.gc_state().sweep_in_progress()));
+            // One full get_roots per cycle started so far (a small cycle may complete early).
+            let at_mid = calls.get();
+            let w = persist_wrapper(&a, 1_000_000);
+            let reachable = subtree(&a, &w);
+            // The flush must not have forced a rescan.
+            assert!(!a.with_backend(|b| b.gc_state().rescan_pending()));
+            run_counting(&a, &calls);
+            assert_eq!(
+                calls.get(),
+                at_mid,
+                "no get_roots right after a mid-cycle flush"
+            );
+            // Finish the cycle.
+            for _ in 0..100_000 {
+                if a.with_backend(|b| b.gc_state().rescan_pending()) {
+                    break;
+                }
+                run_counting(&a, &calls);
+            }
+            assert!(a.with_backend(|b| b.gc_state().rescan_pending()));
+            assert_eq!(calls.get(), at_mid, "no get_roots until the cycle boundary");
+            assert_all_in_db(&a, &reachable);
+            assert_eq!(a.with_backend(|b| b.get_root_count(&w)), 1);
+            // The next call starts a new cycle, with exactly one more full read.
+            run_counting(&a, &calls);
+            assert_eq!(calls.get(), at_mid + 1);
+            eprintln!(
+                "get_roots invocations: mid-cycle {at_mid}, final {}",
+                calls.get()
+            );
+        }
+
+        #[test]
+        fn root_released_mid_cycle_is_collected_next_cycle() {
+            let a = new_arena();
+            let mut sps = (0..8_000u64).map(|i| a.alloc(i)).collect::<Vec<_>>();
+            sps.iter_mut().for_each(|s| s.persist());
+            a.with_backend(|b| b.flush_all_changes_to_db());
+            sps[2_000..].iter_mut().for_each(|s| s.unpersist());
+            a.with_backend(|b| b.flush_all_changes_to_db());
+            sps.truncate(2_000);
+            let victim = sps.pop().unwrap();
+            let victim_hash = victim.hash();
+            drive_to_mid_sweep(&a);
+            victim.unpersist();
+            a.with_backend(|b| b.flush_all_changes_to_db());
+            drop(victim);
+            drop(sps);
+            gc_to_completion(&a);
+            assert!(
+                a.with_backend(|b| b.database.get_node(&victim_hash))
+                    .is_none()
+            );
+            assert_eq!(size(&a), 1_999);
+        }
+
+        #[test]
+        fn unpersisted_garbage_is_still_collected() {
+            let a = new_arena();
+            populate(&a, 100, 900);
+            assert_eq!(size(&a), 1_000);
+            gc_to_completion(&a);
+            assert_eq!(size(&a), 100);
+        }
     }
 }

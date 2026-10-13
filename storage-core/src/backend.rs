@@ -763,7 +763,7 @@ impl<D: DB> StorageBackend<D> {
                             "roots counts can't be negative (for {k:?})!"
                         );
                         #[cfg(feature = "gc-v1")]
-                        self.gc_state.force_rescan();
+                        self.gc_state.note_root_count(&k, root_count as u32);
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -791,7 +791,7 @@ impl<D: DB> StorageBackend<D> {
                             delta.root_delta as u32
                         };
                         #[cfg(feature = "gc-v1")]
-                        self.gc_state.force_rescan();
+                        self.gc_state.note_root_count(&k, root_count);
                         updates.push((k, Update::SetRootCount(root_count)));
                     }
                 }
@@ -808,7 +808,7 @@ impl<D: DB> StorageBackend<D> {
                             "roots counts can't be negative (for {k:?})!"
                         );
                         #[cfg(feature = "gc-v1")]
-                        self.gc_state.force_rescan();
+                        self.gc_state.note_root_count(&k, root_count as u32);
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -894,9 +894,25 @@ impl<D: DB> StorageBackend<D> {
     }
 
     #[cfg(all(test, feature = "gc-v1"))]
+    pub(crate) fn gc_state(&self) -> &GcState<D> {
+        &self.gc_state
+    }
+
+    #[cfg(all(test, feature = "gc-v1"))]
     pub(crate) fn gc_budgeted(
         &mut self,
         remaining_budget: impl Fn() -> std::time::Duration,
+    ) -> usize {
+        self.gc_budgeted_with_roots(remaining_budget, |db| {
+            db.get_roots().keys().cloned().collect()
+        })
+    }
+
+    #[cfg(all(test, feature = "gc-v1"))]
+    pub(crate) fn gc_budgeted_with_roots(
+        &mut self,
+        remaining_budget: impl Fn() -> std::time::Duration,
+        db_roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> usize {
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
@@ -908,7 +924,7 @@ impl<D: DB> StorageBackend<D> {
                     .or_else(|| self.read_cache.peek(&key))
                     .and_then(|v| v.get_obj())
             },
-            |db| db.get_roots().keys().cloned().collect(),
+            db_roots,
         );
         for hash in culled.iter() {
             self.write_cache.remove(hash);
