@@ -19,7 +19,7 @@
 //! `Sp`. This module makes that unrepresentable outside it: the `Arc` is private to [`Slot`],
 //! and no function here returns one. The only operations that release a strong reference are
 //! [`Slot::unload`] and [`Slot::take_inner`], and the `Sp` methods that call them follow up with
-//! [`SpCache::gc`].
+//! [`SpCache::gc`], keyed by the concrete type [`Slot::unload`] returns.
 //!
 //! Everything here is zero cost: [`Slot`] is a transparent wrapper of the `OnceLock<Arc<T>>`
 //! that `Sp` held before.
@@ -76,9 +76,20 @@ impl<T: ?Sized> Slot<T> {
         }
     }
 
-    /// Release this slot's strong reference. Must be followed by [`SpCache::gc`].
-    pub(super) fn unload(&mut self) {
+    /// Release this slot's strong reference, returning the type to pass to [`SpCache::gc`].
+    ///
+    /// That is the concrete type the data is cached under, which for an upcast
+    /// `Slot<dyn Any>` differs from `T`, so ask the value before dropping it.
+    pub(super) fn unload(&mut self) -> TypeId
+    where
+        T: 'static,
+    {
+        let type_id = self
+            .0
+            .get()
+            .map_or_else(TypeId::of::<T>, |arc| Any::type_id(&**arc));
         let _ = self.0.take();
+        type_id
     }
 
     /// Whether two slots share one allocation.
@@ -167,9 +178,9 @@ impl<H: WellBehavedHasher> SpCache<H> {
         }
     }
 
-    /// Remove the entry for `key` if its data has been freed.
-    pub(super) fn gc<T: ?Sized + 'static>(&mut self, key: &ArenaHash<H>) {
-        let key = (key.clone(), TypeId::of::<T>());
+    /// Remove the entry for `key` and `type_id` if its data has been freed.
+    pub(super) fn gc(&mut self, key: &ArenaHash<H>, type_id: TypeId) {
+        let key = (key.clone(), type_id);
         // NOTE: Here, we rely on the `Arc` reference count to perform the cleanup if and only if
         // the underlying `Arc` is no longer allocated. This relies on the `Sp`s internal `Arc`
         // not leaking, as this ensures this check will be made during each `Arc` drop, including

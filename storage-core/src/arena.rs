@@ -1552,13 +1552,16 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // `data`, if any. This must happen before `gc_weak_pointer`, so that
         // the strong count of the Arc is decremented before we check if the
         // sp_cache entry can be cleaned up.
-        self.data.unload();
-        self.gc_weak_pointer();
+        let type_id = self.data.unload();
+        self.gc_weak_pointer(type_id);
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
-    fn gc_weak_pointer(&mut self) {
-        self.arena.lock_sp_cache().borrow_mut().gc::<T>(&self.root);
+    fn gc_weak_pointer(&mut self, type_id: TypeId) {
+        self.arena
+            .lock_sp_cache()
+            .borrow_mut()
+            .gc(&self.root, type_id);
     }
 }
 
@@ -2227,6 +2230,49 @@ mod tests {
         assert!(
             !arena.lock_sp_cache().borrow().contains::<V>(&root_key),
             "the weak reference should be gone after unloading sp2"
+        );
+    }
+
+    // Regression test: dropping the last strong reference through an upcast
+    // `Sp<dyn Any + Send + Sync>` must still remove the weak pointer from the
+    // `sp_cache`. The cache entry is keyed by the concrete type's `TypeId`, so
+    // cleanup keyed on the dyn type would miss it and leak the entry.
+    #[test]
+    fn sp_cache_sp_drop_via_upcast() {
+        type V = [u8; SMALL_OBJECT_LIMIT];
+        let arena = &new_arena();
+
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let root_key = sp.root.clone();
+        let dyn_sp = sp.upcast();
+
+        // Both `Sp`s share the same `Arc` allocation.
+        assert_eq!(sp.data.strong_count(), 2);
+
+        // Drop the concretely typed `Sp` first, so the upcast `Sp` holds the
+        // last strong reference.
+        drop(sp);
+
+        // The entry must survive while the dyn `Sp` still holds the data.
+        assert!(
+            arena
+                .read_sp_cache_locked::<V>(&arena.lock_sp_cache(), &root_key)
+                .is_some(),
+            "weak reference should still be valid while the dyn Sp is alive"
+        );
+
+        // Dropping the dyn `Sp` drops the last strong reference; the cache
+        // entry under the concrete `TypeId` must be cleaned up.
+        drop(dyn_sp);
+        let sp_cache = arena.lock_sp_cache();
+        let sp_cache = sp_cache.borrow();
+        assert!(
+            !sp_cache.contains::<V>(&root_key),
+            "the weak reference should be gone after the upcast Sp drops the last Arc"
+        );
+        assert!(
+            sp_cache.is_empty(),
+            "no dangling entries should remain in the sp_cache"
         );
     }
 
