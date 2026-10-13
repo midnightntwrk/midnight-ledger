@@ -1995,7 +1995,9 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     ///  - Both transcript parts's declared gas costs, and effects
     ///  - The count of instructions in the guaranteed transcript
     ///  - The parent ContractCalls's `binding_commitment.commitment`.
+    ///
     /// These need to be *truely* binding (see note at the bottom of this file!)
+    ///
     /// In addition, it should receive
     ///  - The communication commitment
     ///  - The transcript
