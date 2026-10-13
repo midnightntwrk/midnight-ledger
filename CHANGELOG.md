@@ -11,6 +11,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   `MalformedTransaction::TranscriptGasExceedsBlockLimits`. Previously a
   declaration of `2^63` ps or more was priced as zero compute, bypassing the
   block compute limit and the time-to-dismiss check.
+- security: contract call transcripts listing `TokenType::Dust` in
+  `unshielded_inputs` or `unshielded_outputs` are rejected as malformed, with
+  the new `MalformedTransaction::ContractDustTransfer`. Previously a contract
+  could absorb the surplus Dust balance credited by a registration's
+  `allow_fee_payment`, while the registration still minted the full
+  entitlement to the registrant.
 
 ## Ledger 9.1.0.0-rc.5
 
