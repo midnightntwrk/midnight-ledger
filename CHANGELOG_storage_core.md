@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- perf: the incremental GC tracks root-count changes incrementally instead of re-reading every DB root after each flush; a scanned node with a positive root count is never deleted
+- perf: the incremental GC tracks root-count changes incrementally instead of re-reading every DB root after each flush
+- fix: the incremental GC no longer discards a finished mark phase when the sweep gets no budget in the same call
 
 ## Version `1.2.1`
 

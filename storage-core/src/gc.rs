@@ -246,40 +246,20 @@ impl<D: DB> GcState<D> {
         // Whew. We're now done with the mark phase, and we want to do sweeping. We use the resume
         // handle if we have one, and stop when we run out of budget or the scan completes.
         let mut cull_set = vec![];
+        // Set only once a scan reports the end of the node set. A sweep that gets no budget at
+        // all leaves `sweep_resume` at `None` too, and must not be taken for a completed one.
+        let mut sweep_finished = false;
         while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
-            let batch_resume = self.sweep_resume.clone();
-            let (nodes, handle) = db.scan(batch_resume.clone(), batch_size);
-            let batch_size = nodes.len();
-            // Cull all nodes in the batch that are *not* marked, *unless* they have a positive root
-            // count in the DB. The root count check is a point read, performed only for garbage
-            // candidates. It is a safety net behind `note_root_count`, and also protects persisted
-            // roots that a `gc_override_gc_roots` caller left out of the root set (the safe
-            // direction: the override never causes a persisted root to be deleted).
-            let mut to_delete = vec![];
-            let mut late_roots = vec![];
-            for (k, _) in nodes {
-                if self.mark_set.contains(&k) {
-                    continue;
-                }
-                if db.get_root_count(&k) > 0 {
-                    late_roots.push(k);
-                } else {
-                    to_delete.push(k);
-                }
-            }
-            if !late_roots.is_empty() {
-                // Grey the late roots so that their subtrees get marked at the start of the next
-                // call. Nothing from this batch is deleted, as it may be reachable from them;
-                // the batch is rescanned from its start next time.
-                for root in late_roots {
-                    self.last_roots.insert(root.clone());
-                    self.grey_set.insert(root);
-                }
-                self.sweep_resume = batch_resume;
-                return cull_set;
-            }
+            let (nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
             self.sweep_resume = handle;
+            let batch_size = nodes.len();
+            // Cull all nodes in the batch that are *not* marked.
+            let to_delete = nodes
+                .into_iter()
+                .map(|(k, _)| k)
+                .filter(|k| !self.mark_set.contains(k))
+                .collect::<Vec<_>>();
             db.batch_update(to_delete.iter().map(|k| (k.clone(), Update::DeleteNode)));
             cull_set.extend(to_delete);
             self.running_bench
@@ -287,12 +267,13 @@ impl<D: DB> GcState<D> {
 
             // We have finished!
             if self.sweep_resume.is_none() {
+                sweep_finished = true;
                 break;
             }
         }
         //eprintln!("SWEEP PHASE END: {} (resume: {:?})", cull_set.len(), self.sweep_resume);
         // We ran against our bound, return.
-        if self.sweep_resume.is_some() {
+        if !sweep_finished {
             return cull_set;
         }
 
@@ -522,43 +503,94 @@ mod tests {
             assert_eq!(size(&a), 2_000 + all.len());
         }
 
-        /// Writes persisted leaf roots straight into the DB, behind the backend's back, so that no
-        /// rescan is forced and no root note is made. This models a root persisted after the
-        /// cycle's root set was taken; only the root-count guard can protect it.
-        fn inject_leaf_root(a: &A, seed: u64) -> H {
-            use crate::db::Update;
-            let scratch = new_arena();
-            let mut sp = scratch.alloc(BinTree::<Db>::new(seed, None, None));
-            sp.persist();
-            let w = sp.hash();
-            scratch.with_backend(|b| b.flush_all_changes_to_db());
-            let obj = scratch.with_backend(|b| b.database.get_node(&w)).unwrap();
-            a.with_backend(|b| {
-                b.database.batch_update(
-                    [
-                        (w.clone(), Update::InsertNode(obj)),
-                        (w.clone(), Update::SetRootCount(1)),
-                    ]
-                    .into_iter(),
-                )
-            });
-            w
-        }
-
+        /// Excluding persisted roots via `gc_override_gc_roots` collects them together with their
+        /// whole subtree: no surviving node may reference a deleted one.
         #[test]
-        fn root_count_guard_protects_roots_written_behind_the_backend() {
+        fn override_excluded_roots_are_collected_with_their_subtrees() {
             let a = new_arena();
             populate(&a, 2_000, 6_000);
-            drive_to_mid_sweep(&a);
-            let roots = (0..50u64)
-                .map(|i| inject_leaf_root(&a, 20_000_000 + i))
-                .collect::<Vec<_>>();
-            gc_to_completion(&a);
-            for r in &roots {
-                assert_eq!(a.with_backend(|b| b.get_root_count(r)), 1);
-                assert!(a.with_backend(|b| b.database.get_node(r)).is_some());
+            let mut excluded = HashSet::new();
+            let mut child_before_root = false;
+            for i in 0..20u64 {
+                let w = persist_wrapper(&a, 10_000_000 + i * 10);
+                child_before_root |= subtree(&a, &w).iter().any(|h| *h < w);
+                excluded.insert(w);
             }
-            assert_eq!(size(&a), 2_000 + roots.len());
+            assert!(child_before_root);
+            for _ in 0..2 {
+                for _ in 0..100_000 {
+                    let ex = excluded.clone();
+                    a.with_backend(|b| {
+                        b.gc_budgeted_with_roots(small_budget(), move |db| {
+                            db.get_roots()
+                                .keys()
+                                .filter(|k| !ex.contains(*k))
+                                .cloned()
+                                .collect()
+                        })
+                    });
+                    if a.with_backend(|b| b.gc_state().rescan_pending()) {
+                        break;
+                    }
+                }
+                assert!(a.with_backend(|b| b.gc_state().rescan_pending()));
+            }
+            for w in &excluded {
+                assert!(a.with_backend(|b| b.database.get_node(w)).is_none());
+            }
+            assert_eq!(size(&a), 2_000);
+        }
+
+        /// A mark phase that uses up the whole budget leaves no budget for the sweep. That must
+        /// not count as a completed cycle: the marks are kept, and the next call sweeps without
+        /// re-reading the roots.
+        #[test]
+        fn mark_survives_sweep_with_no_budget() {
+            // A cache large enough that marking happens entirely in memory, with zero budget.
+            let a: A = Arena::new_from_backend(StorageBackend::new(100_000, Db::default()));
+            populate(&a, 100, 900);
+            let calls = std::cell::Cell::new(0usize);
+            a.with_backend(|b| {
+                b.gc_budgeted_with_roots(
+                    || Duration::ZERO,
+                    |db| {
+                        calls.set(calls.get() + 1);
+                        db.get_roots().keys().cloned().collect()
+                    },
+                )
+            });
+            assert_eq!(calls.get(), 1);
+            assert_eq!(size(&a), 1_000, "no budget, so nothing swept");
+            assert!(
+                !a.with_backend(|b| b.gc_state().rescan_pending()),
+                "an unstarted sweep must not complete the cycle"
+            );
+            for _ in 0..100_000 {
+                run_counting(&a, &calls);
+                if a.with_backend(|b| b.gc_state().rescan_pending()) {
+                    break;
+                }
+            }
+            assert!(a.with_backend(|b| b.gc_state().rescan_pending()));
+            assert_eq!(calls.get(), 1, "the cycle completed on the first root read");
+            assert_eq!(size(&a), 100);
+        }
+
+        /// The first completed cycle on a fresh GC state has actually swept, with one root read.
+        #[test]
+        fn first_cycle_sweeps_with_one_root_read() {
+            let a = new_arena();
+            populate(&a, 2_000, 6_000);
+            let calls = std::cell::Cell::new(0usize);
+            for _ in 0..100_000 {
+                run_counting(&a, &calls);
+                if a.with_backend(|b| b.gc_state().rescan_pending()) {
+                    break;
+                }
+            }
+            assert!(a.with_backend(|b| b.gc_state().rescan_pending()));
+            assert_eq!(calls.get(), 1);
+            assert_eq!(size(&a), 2_000);
         }
 
         fn run_counting(a: &A, calls: &std::cell::Cell<usize>) {

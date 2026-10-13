@@ -868,6 +868,10 @@ impl<D: DB> StorageBackend<D> {
     /// **Warning**: this effectively unpersists any roots not passed in. This is irreversible, and
     /// should only be done if this is the deliberate goal, for instance because roots that are
     /// still required are being tracked elsewhere.
+    ///
+    /// `roots` is read only at the start of each collection cycle. Roots whose count becomes
+    /// positive in a flush during a cycle are kept for the rest of that cycle, whether or not
+    /// `roots` includes them.
     pub fn gc_override_gc_roots(
         &mut self,
         bound: std::time::Duration,
