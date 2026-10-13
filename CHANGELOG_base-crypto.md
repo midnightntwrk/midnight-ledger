@@ -11,6 +11,9 @@
 - security: `AlignedValue` deserialization now rejects a value that does not fit
   its declared alignment.
 - fix: `Duration::from_hours` saturates instead of overflowing.
+- security: `FixedPoint::from_u64_div` saturates to `FixedPoint::MAX` instead of
+  wrapping negative for quotients of `2^63` or more, which made
+  `CostDuration * FixedPoint` return zero for such durations.
 
 ## Version `1.0.2`
 

@@ -1,5 +1,10 @@
 # `storage` Changelog
 
+## Unreleased
+
+- security: `MerklePatriciaTrie` node deserialization threads the loader's
+  recursion depth through, rather than restarting it at every node boundary.
+
 ## Version `2.0.4`
 
 Skips `2.0.3`, published from the `ledger-8` line.

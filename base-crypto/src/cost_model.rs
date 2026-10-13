@@ -736,8 +736,15 @@ impl FixedPoint {
             return FixedPoint(i128::MAX);
         }
         let ashift = (a as u128) << 64;
-        let c = ashift.div_ceil(b as u128) as i128;
-        FixedPoint(c)
+        let c = ashift.div_ceil(b as u128);
+        // `a / b` may be up to `2^64 - 1`, which does not fit into the signed
+        // representation. Saturate rather than wrapping into negatives, which
+        // would otherwise be clamped to zero cost downstream.
+        if c > i128::MAX as u128 {
+            FixedPoint(i128::MAX)
+        } else {
+            FixedPoint(c as i128)
+        }
     }
 
     /// Instantiates a fixed point from a/b (rounded up to the nearest 2^-64)
@@ -994,6 +1001,47 @@ mod tests {
         }
         for ((t, a), _x) in target.iter().zip(approx.iter()).zip(xs.iter()) {
             within_permissible_error(*t, *a, 1e-9f64);
+        }
+    }
+
+    #[test]
+    fn from_u64_div_never_negative() {
+        for a in [
+            0,
+            1,
+            (1u64 << 63) - 1,
+            1u64 << 63,
+            (1u64 << 63) + 1,
+            u64::MAX,
+        ] {
+            for b in [1, 2, 3, u64::MAX] {
+                assert!(
+                    FixedPoint::from_u64_div(a, b).0 >= 0,
+                    "{a} / {b} went negative"
+                );
+            }
+        }
+        assert_eq!(FixedPoint::from_u64_div(1u64 << 63, 1), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u64_div(u64::MAX, 1), FixedPoint::MAX);
+        assert_eq!(
+            FixedPoint::from_u64_div(u64::MAX, 2).0,
+            ((u64::MAX as u128) << 63) as i128
+        );
+    }
+
+    #[test]
+    fn cost_duration_scaling_does_not_wrap_to_zero() {
+        let below = CostDuration::from_picoseconds((1u64 << 63) - 1);
+        assert_eq!(below * FixedPoint::ONE, below);
+        assert_eq!(FixedPoint::ONE * below, below);
+        for ps in [1u64 << 63, (1u64 << 63) + 1, u64::MAX] {
+            let d = CostDuration::from_picoseconds(ps);
+            for scaled in [d * FixedPoint::ONE, FixedPoint::ONE * d] {
+                assert!(
+                    scaled >= CostDuration::from_picoseconds(1u64 << 63),
+                    "{ps} ps scaled down to {scaled:?}"
+                );
+            }
         }
     }
 

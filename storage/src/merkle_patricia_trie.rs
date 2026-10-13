@@ -1529,19 +1529,23 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Node<T, D, A>, std::io::Error> {
-        let disc = u8::deserialize(reader, 0)?;
+        // Thread the loader's recursion depth through, rather than restarting
+        // from zero: resetting it at every node boundary would let a nested
+        // structure evade `midnight-serialize`'s recursion limit entirely.
+        let depth = loader.get_recursion_depth();
+        let disc = u8::deserialize(reader, depth)?;
 
         let node = match disc {
             0 => Node::Empty,
             1 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 Node::Leaf {
                     ann,
                     value: loader.get_next(child_hashes)?,
                 }
             }
             2 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let Ok(children) = (0..16)
                     .map(|_| loader.get_next(child_hashes))
                     .collect::<Result<Vec<_>, _>>()?
@@ -1556,9 +1560,9 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 }
             }
             3 => {
-                let ann = A::deserialize(reader, 0)?;
-                let len = u8::deserialize(reader, 0)? as usize;
-                let data = <std::vec::Vec<u8>>::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
+                let len = u8::deserialize(reader, depth)? as usize;
+                let data = <std::vec::Vec<u8>>::deserialize(reader, depth)?;
                 if data.len() != len.div_ceil(2) {
                     return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("inferred nibble byte length {} did not match actual data length of {}", len.div_ceil(2), data.len())));
                 };
@@ -1571,7 +1575,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 }
             }
             4 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
                 Node::MidBranchLeaf { ann, value, child }

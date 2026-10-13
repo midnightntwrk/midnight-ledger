@@ -38,20 +38,14 @@ use rand::Rng;
 use rand::distributions::{Distribution, Standard};
 use serialize::{self, Deserializable, Serializable, Tagged};
 use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt::Display;
 use std::io;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::{
-    any::Any,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-    io::Read,
-    ops::Deref,
-    sync::Arc,
+    any::Any, collections::HashMap, fmt::Debug, hash::Hash, io::Read, ops::Deref, sync::Arc,
 };
 
 #[cfg(feature = "test-utilities")]
@@ -675,6 +669,15 @@ impl<D: DB> Arena<D> {
     /// recursing down to the leaves and building DAG up from there. If this is
     /// not acceptable, then use [`Self::get_lazy`] instead, which has no
     /// unbounded recursion, and instead loads nested `Sp`s on demand.
+    ///
+    /// This is only safe because the depth of anything *in* the arena is
+    /// bounded: values allocated in-process are as deep as the caller made
+    /// them, and values arriving over the wire go through
+    /// [`Self::deserialize_sp`], whose `IrLoader` refuses graphs nested deeper
+    /// than [`serialize::RECURSION_LIMIT`]. Anything that lets untrusted input
+    /// into the arena at an unbounded depth would make this path a stack
+    /// overflow; use [`BackendLoader::new`] with a `max_depth` for bounded
+    /// loading in that case.
     pub fn get<T: Storable<D>>(
         &self,
         key: &TypedArenaKey<T, D::Hasher>,
@@ -909,7 +912,9 @@ impl<D: DB> Arena<D> {
                 })
                 .collect(),
             recursion_depth: recursive_depth,
-            visited: Rc::new(RefCell::new(HashSet::new())),
+            height: Cell::new(0),
+            visited: Rc::new(RefCell::new(HashMap::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
         }
         .get(&ArenaKey::Ref(key))?;
@@ -1057,6 +1062,12 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     }
 }
 
+/// Memo table for in-lined values deserialized by a single [`IrLoader`],
+/// holding erased `Sp<T, D>`s and their heights, keyed by (hash,
+/// `TypeId::of::<T>()`).
+type InlineMemo<D> =
+    Rc<RefCell<HashMap<DynTypedArenaHash<<D as DB>::Hasher>, (Box<dyn Any + Send + Sync>, u32)>>>;
+
 /// A `Loader` that uses `IntermediateRepr` objects to get the binary data for
 /// deserialization.
 ///
@@ -1079,8 +1090,26 @@ pub(crate) struct IrLoader<'a, D: DB> {
     arena: &'a Arena<D>,
     all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
     recursion_depth: u32,
-    /// The keys we've already deserialized once.
-    visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
+    /// The height of the value currently being deserialized with this loader,
+    /// so far: one more than the greatest height of any child it has loaded
+    /// through [`Loader::get`], or zero if it has loaded none.
+    height: Cell<u32>,
+    /// The keys we've already deserialized once, with their heights.
+    ///
+    /// The height of a value is the length of its longest chain of
+    /// descendants, counting shared children once per path. A memoized value
+    /// is returned without recursing into it again, so its height must be
+    /// checked against the remaining recursion budget instead: otherwise a
+    /// graph that shares nodes could be first visited along short paths, and
+    /// yet decode to a value arbitrarily deeper than `RECURSION_LIMIT`.
+    visited: Rc<RefCell<HashMap<DynTypedArenaHash<D::Hasher>, u32>>>,
+    /// The in-lined ([`ArenaKey::Direct`]) values we've already deserialized
+    /// once.
+    ///
+    /// In-lined values get their own memo table because, unlike by-reference
+    /// values, they are not tracked in the arena's `Sp` cache (see
+    /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
+    inlined: InlineMemo<D>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
 }
 
@@ -1095,9 +1124,56 @@ impl<'a, D: DB> IrLoader<'a, D> {
             arena,
             all,
             recursion_depth: 0,
-            visited: Rc::new(RefCell::new(HashSet::new())),
+            height: Cell::new(0),
+            visited: Rc::new(RefCell::new(HashMap::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
         }
+    }
+}
+
+impl<D: DB> IrLoader<'_, D> {
+    /// Notes that the value being deserialized has a child of height `height`.
+    fn record_child_height(&self, height: u32) {
+        self.height.set(self.height.get().max(height + 1));
+    }
+
+    /// Returns `depth + extra`, or an error if that exceeds the recursion
+    /// limit (or overflows).
+    fn within_limit(depth: u32, extra: u32) -> Result<u32, std::io::Error> {
+        depth
+            .checked_add(extra)
+            .filter(|&d| d <= serialize::RECURSION_LIMIT)
+            .ok_or_else(|| std::io::Error::other("Reached recursion limit".to_string()))
+    }
+
+    /// Returns the loader to deserialize a child with, one level deeper than
+    /// this one, or an error if that level would exceed the recursion limit.
+    ///
+    /// This is the single point at which `get` descends, for both in-lined and
+    /// by-reference children, so both are held to the same bound.
+    fn descend(&self) -> Result<Self, std::io::Error> {
+        Ok(IrLoader {
+            arena: self.arena,
+            all: self.all,
+            recursion_depth: Self::within_limit(self.recursion_depth, 1)?,
+            height: Cell::new(0),
+            visited: self.visited.clone(),
+            inlined: self.inlined.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
+        })
+    }
+
+    /// Accounts for a memoized child of height `height`, failing if
+    /// deserializing it afresh here would have exceeded the recursion limit.
+    ///
+    /// A value of height `h` deserialized with a loader at depth `d` descends
+    /// to depth `d + 1 + h`, which `descend` rejects beyond `RECURSION_LIMIT`,
+    /// so this applies the same bound a fresh deserialization would.
+    fn reuse_height(&self, height: u32) -> Result<(), std::io::Error> {
+        Self::within_limit(self.recursion_depth, height.saturating_add(1))?;
+        self.record_child_height(height);
+        Ok(())
     }
 }
 
@@ -1113,26 +1189,53 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
-        let key = match child {
-            ArenaKey::Direct(child) => {
-                let value = T::from_binary_repr(
-                    &mut &child.data[..],
-                    &mut child.children.iter().cloned(),
-                    self,
-                )?;
-                return Ok(self.arena.alloc(value));
-            }
-            ArenaKey::Ref(key) => key,
-        };
+        // Every nesting level counts towards the recursion limit, whether the
+        // child is by-reference or in-lined: both arms below recurse into
+        // `Storable::from_binary_repr`, and so consume stack. Descending here,
+        // *before* either arm, keeps the recursion depth of this loader (and
+        // hence our stack usage) bounded by `RECURSION_LIMIT` for arbitrary input.
+        let loader = self.descend()?;
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
         //
         // Mistakes have been made:
         // https://shielded.atlassian.net/browse/PM-16347
-        let typed_key = (key.clone(), TypeId::of::<T>());
+        let typed_key = (child.hash().clone(), TypeId::of::<T>());
+        let key = match child {
+            ArenaKey::Direct(direct) => {
+                // In-lined values are memoized here, rather than via the `Sp`
+                // cache, since `Arena::alloc` doesn't put them there.
+                let memoized = self
+                    .inlined
+                    .borrow()
+                    .get(&typed_key)
+                    .and_then(|(sp, height)| {
+                        Some((sp.downcast_ref::<Sp<T, D>>()?.clone(), *height))
+                    });
+                if let Some((sp, height)) = memoized {
+                    assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+                    self.reuse_height(height)?;
+                    return Ok(sp);
+                }
+                let value = T::from_binary_repr(
+                    &mut &direct.data[..],
+                    &mut direct.children.iter().cloned(),
+                    &loader,
+                )?;
+                let sp = self.arena.alloc(value);
+                let height = loader.height.get();
+                self.record_child_height(height);
+                self.inlined
+                    .borrow_mut()
+                    .insert(typed_key, (Box::new(sp.clone()), height));
+                return Ok(sp);
+            }
+            ArenaKey::Ref(key) => key,
+        };
 
         // If we've visited this key before, then try to get it from the cache.
-        if self.visited.borrow().contains(&typed_key) {
+        let visited_height = self.visited.borrow().get(&typed_key).copied();
+        if let Some(height) = visited_height {
             // In a sane world we could assume that the Sp cache contained any
             // values we've already deserialized, but in theory someone could
             // implement a malicious/stupid `Storable::from_binary_repr` that
@@ -1141,6 +1244,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             // our own cache for the duration of this `IrLoader`.
             if let Some(sp) = self.arena.get_from_cache::<T>(key) {
                 assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+                self.reuse_height(height)?;
                 return Ok(sp);
             }
         }
@@ -1150,16 +1254,6 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             io::ErrorKind::NotFound,
             "IR not found in `all` map",
         ))?;
-        if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
-        let loader = IrLoader {
-            arena: self.arena,
-            all: self.all,
-            recursion_depth: self.recursion_depth + 1,
-            visited: self.visited.clone(),
-            key_to_child_repr: self.key_to_child_repr.clone(),
-        };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
             &mut ir.children.clone().into_iter().map(|k| {
@@ -1171,7 +1265,9 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
-        self.visited.borrow_mut().insert(typed_key);
+        let height = loader.height.get();
+        self.record_child_height(height);
+        self.visited.borrow_mut().insert(typed_key, height);
         Ok(sp)
     }
 
