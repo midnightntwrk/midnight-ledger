@@ -19,7 +19,7 @@ use actix_web::web::{self, Bytes, BytesMut, Data, Payload};
 use actix_web::{Error, HttpResponse, HttpResponseBuilder, Responder, get, post};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::data_provider::{FetchMode, OutputMode};
-use base_crypto::schnorr::Signature;
+use base_crypto::signatures::Signature;
 use futures_util::stream::StreamExt;
 use hex::ToHex;
 use introspection::Introspection;
@@ -39,37 +39,28 @@ use tracing::{debug, info};
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
+use uuid::Uuid;
+#[cfg(feature = "gcp_cs")]
+use {
+    crate::ServerEncryptionKey,
+    actix_web::HttpRequest,
+    actix_web::error::{ErrorBadGateway, ErrorGatewayTimeout},
+    actix_web::http::header::{HeaderName, HeaderValue},
+    async_channel::Receiver,
+    http_body_util::{BodyExt, Full, Limited},
+    hyper::{Method, Request},
+    hyper_util::client::legacy::Client as HyperClient,
+    hyper_util::rt::TokioExecutor,
+    hyperlocal::{UnixConnector, Uri},
+    std::time::Duration,
+    tracing::warn,
+};
 
 use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
 
 use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
-
-#[cfg(feature = "gcp_cs")]
-use {
-    crate::ServerEncryptionKey,
-    actix_web::HttpRequest,
-    async_channel::Receiver,
-    futures_util::stream::once,
-    http_body_util::{BodyExt, Full},
-    hyper::{Method, Request},
-    hyper_util::client::legacy::Client as HyperClient,
-    hyper_util::rt::TokioExecutor,
-    hyperlocal::{UnixConnector, Uri},
-    uuid::Uuid,
-};
-
-#[cfg(feature = "gcp_cs")]
-const ENCRYPTION_TYPE_HEADER: &str = "encryption-type";
-#[cfg(feature = "gcp_cs")]
-const CLIENT_PUBLIC_KEY_HEADER: &str = "client-public-key";
-#[cfg(feature = "gcp_cs")]
-const REQUEST_NONCE_HEADER: &str = "request-nonce";
-#[cfg(feature = "gcp_cs")]
-const RESPONSE_NONCE_HEADER: &str = "response-nonce";
-#[cfg(feature = "gcp_cs")]
-const PROOF_JOB_ID_HEADER: &str = "proof-job-id";
 
 lazy_static! {
     pub static ref PUBLIC_PARAMS: ZswapResolver = ZswapResolver(
@@ -95,6 +86,26 @@ type TransactionProvePayload<S> = (
     Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
     HashMap<String, ProvingKeyMaterial>,
 );
+
+#[cfg(feature = "gcp_cs")]
+const ENCRYPTION_TYPE_HEADER: &str = "encryption-type";
+#[cfg(feature = "gcp_cs")]
+const CLIENT_PUBLIC_KEY_HEADER: &str = "client-public-key";
+#[cfg(feature = "gcp_cs")]
+const REQUEST_NONCE_HEADER: &str = "request-nonce";
+#[cfg(feature = "gcp_cs")]
+const RESPONSE_NONCE_HEADER: &str = "response-nonce";
+#[cfg(feature = "gcp_cs")]
+const PROOF_JOB_ID_HEADER: &str = "proof-job-id";
+
+/// How long the local confidential space token endpoint gets to answer.
+#[cfg(feature = "gcp_cs")]
+const ATTESTATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Upper bound on the attestation token we're willing to buffer. Tokens are
+/// JWTs of a few kilobytes; anything beyond this is a malfunction.
+#[cfg(feature = "gcp_cs")]
+const ATTESTATION_MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 #[cfg(feature = "gcp_cs")]
 #[derive(serde::Deserialize)]
@@ -125,6 +136,12 @@ fn get_encrypted_transport_headers(
     let request_nonce = req.headers().get(REQUEST_NONCE_HEADER);
 
     match (client_public_key, request_nonce) {
+        #[cfg(feature = "gcp_cs")]
+        (None, None) => Err(ErrorBadRequest(format!(
+            "{CLIENT_PUBLIC_KEY_HEADER} and {REQUEST_NONCE_HEADER} are required: \
+             this server only accepts encrypted requests"
+        ))),
+        #[cfg(not(feature = "gcp_cs"))]
         (None, None) => Ok(None),
         (Some(_), Some(_)) => Ok(Some(EncryptedTransportHeaders {
             client_public_key_hex: client_public_key
@@ -154,6 +171,75 @@ fn get_encryption_type(req: &HttpRequest) -> Result<&'static str, Error> {
         },
         None => Err(ErrorBadRequest("the encryption-type is not set correctly")),
     }
+}
+
+#[cfg(feature = "gcp_cs")]
+fn decode_proving_request(
+    request: Bytes,
+    transport_headers: &Option<EncryptedTransportHeaders>,
+    server_encryption_key: &ServerEncryptionKey,
+) -> Result<Vec<u8>, Error> {
+    match transport_headers {
+        Some(headers) => server_encryption_key
+            .decrypt_request(
+                &headers.client_public_key_hex,
+                &headers.request_nonce_hex,
+                &request,
+            )
+            .ok_or_else(|| ErrorBadRequest("failed to decrypt request payload")),
+        None => Ok(request.to_vec()),
+    }
+}
+
+#[cfg(feature = "gcp_cs")]
+fn encode_proving_response_body(
+    response: Vec<u8>,
+    transport_headers: &Option<EncryptedTransportHeaders>,
+    server_encryption_key: &ServerEncryptionKey,
+) -> Result<(Option<String>, Bytes), Error> {
+    match transport_headers {
+        Some(headers) => {
+            let (response_nonce_hex, ciphertext) = server_encryption_key
+                .encrypt_response(&headers.client_public_key_hex, &response)
+                .ok_or_else(|| {
+                    actix_web::error::ErrorInternalServerError("failed to encrypt response payload")
+                })?;
+            Ok((Some(response_nonce_hex), Bytes::from(ciphertext)))
+        }
+        None => Ok((None, Bytes::from(response))),
+    }
+}
+
+#[cfg(feature = "gcp_cs")]
+async fn proving_response(
+    job_id: Uuid,
+    updates: Arc<Receiver<JobStatus>>,
+    transport_headers: Option<EncryptedTransportHeaders>,
+    server_encryption_key: &ServerEncryptionKey,
+) -> HttpResponse {
+    let result = match JobStatus::wait_for_success(updates.as_ref()).await {
+        Ok(response) => {
+            encode_proving_response_body(response, &transport_headers, server_encryption_key)
+        }
+        Err(e) => Err(e.into()),
+    };
+
+    let mut response = match result {
+        Ok((response_nonce_hex, body)) => {
+            let mut builder = HttpResponse::Ok();
+            if let Some(response_nonce_hex) = response_nonce_hex {
+                builder.append_header((RESPONSE_NONCE_HEADER, response_nonce_hex));
+            }
+            builder.body(body)
+        }
+        Err(e) => HttpResponse::from_error(e),
+    };
+
+    response.headers_mut().insert(
+        HeaderName::from_static(PROOF_JOB_ID_HEADER),
+        HeaderValue::try_from(job_id.to_string()).expect("a uuid is a valid header value"),
+    );
+    response
 }
 
 #[get("/version")]
@@ -193,6 +279,34 @@ enum Status {
     Busy,
 }
 
+#[derive(Clone, Copy, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+enum ProofJobState {
+    Pending,
+    Processing,
+    Success,
+    Error,
+    Cancelled,
+}
+
+impl ProofJobState {
+    fn done(self) -> bool {
+        matches!(self, Self::Success | Self::Error | Self::Cancelled)
+    }
+}
+
+impl From<&JobStatus> for ProofJobState {
+    fn from(value: &JobStatus) -> Self {
+        match value {
+            JobStatus::Pending => Self::Pending,
+            JobStatus::Processing => Self::Processing,
+            JobStatus::Cancelled => Self::Cancelled,
+            JobStatus::Error(_) => Self::Error,
+            JobStatus::Success(_) => Self::Success,
+        }
+    }
+}
+
 impl From<Status> for StatusCode {
     fn from(val: Status) -> Self {
         match val {
@@ -200,79 +314,6 @@ impl From<Status> for StatusCode {
             Status::Busy => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
-}
-
-#[cfg(feature = "gcp_cs")]
-fn decode_proving_request(
-    request: Bytes,
-    transport_headers: &Option<EncryptedTransportHeaders>,
-    server_encryption_key: &ServerEncryptionKey,
-) -> Result<Vec<u8>, Error> {
-    match transport_headers {
-        Some(headers) => server_encryption_key
-            .decrypt_request(
-                &headers.client_public_key_hex,
-                &headers.request_nonce_hex,
-                &request,
-            )
-            .ok_or_else(|| ErrorBadRequest("failed to decrypt request payload")),
-        None => Ok(request.to_vec()),
-    }
-}
-
-#[cfg(feature = "gcp_cs")]
-fn encode_proving_response_body(
-    response: Vec<u8>,
-    transport_headers: &Option<EncryptedTransportHeaders>,
-    response_nonce_hex: &Option<String>,
-    server_encryption_key: &ServerEncryptionKey,
-) -> Result<Bytes, Error> {
-    match transport_headers {
-        Some(headers) => Ok(Bytes::from(
-            server_encryption_key
-                .encrypt_response_with_nonce(
-                    &headers.client_public_key_hex,
-                    response_nonce_hex.as_deref().ok_or_else(|| {
-                        actix_web::error::ErrorInternalServerError(
-                            "missing response nonce for encrypted payload",
-                        )
-                    })?,
-                    &response,
-                )
-                .ok_or_else(|| {
-                    actix_web::error::ErrorInternalServerError("failed to encrypt response payload")
-                })?,
-        )),
-        None => Ok(Bytes::from(response)),
-    }
-}
-
-#[cfg(feature = "gcp_cs")]
-fn proving_response(
-    job_id: Uuid,
-    updates: Arc<Receiver<JobStatus>>,
-    transport_headers: Option<EncryptedTransportHeaders>,
-    server_encryption_key: ServerEncryptionKey,
-) -> HttpResponse {
-    let response_nonce_hex = transport_headers
-        .as_ref()
-        .map(|_| server_encryption_key.generate_response_nonce_hex());
-
-    let mut builder = HttpResponse::Ok();
-    builder.append_header((PROOF_JOB_ID_HEADER, job_id.to_string()));
-    if let Some(response_nonce_hex) = response_nonce_hex.as_ref() {
-        builder.append_header((RESPONSE_NONCE_HEADER, response_nonce_hex.clone()));
-    }
-
-    builder.streaming(once(async move {
-        let response = JobStatus::wait_for_success(updates.as_ref()).await?;
-        encode_proving_response_body(
-            response,
-            &transport_headers,
-            &response_nonce_hex,
-            &server_encryption_key,
-        )
-    }))
 }
 
 #[derive(serde::Serialize)]
@@ -283,6 +324,20 @@ struct ReadyResponse {
     jobs_pending: usize,
     job_capacity: usize,
     timestamp: time::OffsetDateTime,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProofStatusResponse {
+    job_id: Uuid,
+    status: ProofJobState,
+    done: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProofStatusQuery {
+    job_id: Uuid,
 }
 
 #[get("/ready")]
@@ -304,6 +359,25 @@ pub(crate) async fn ready(pool: web::Data<Arc<WorkerPool>>) -> Result<HttpRespon
 
     let builder = HttpResponseBuilder::new(status.status.into()).json(status);
     Ok(builder)
+}
+
+#[get("/status")]
+pub(crate) async fn proof_status(
+    query: web::Query<ProofStatusQuery>,
+    pool: web::Data<Arc<WorkerPool>>,
+) -> Result<HttpResponse, Error> {
+    let job_id = query.job_id;
+    let status = pool
+        .poll(job_id)
+        .await
+        .ok_or_else(|| actix_web::error::ErrorNotFound("job not found"))?;
+    let status = ProofJobState::from(&status);
+
+    Ok(HttpResponse::Ok().json(ProofStatusResponse {
+        job_id,
+        status,
+        done: status.done(),
+    }))
 }
 
 #[get("/proof-versions")]
@@ -361,17 +435,37 @@ pub(crate) async fn attestation(
         .body(Full::new(hyper::body::Bytes::from(body)))
         .map_err(actix_web::error::ErrorInternalServerError)?;
 
-    let response = hyper_client
-        .request(request)
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?;
-    let response_bytes = response
-        .collect()
-        .await
-        .map_err(actix_web::error::ErrorInternalServerError)?
-        .to_bytes();
+    let response_bytes = tokio::time::timeout(ATTESTATION_TIMEOUT, async move {
+        let response = hyper_client.request(request).await.map_err(|e| {
+            warn!("attestation request to the token endpoint failed: {e}");
+            ErrorBadGateway("attestation request failed")
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            warn!("token endpoint rejected the attestation request with status {status}");
+            return Err(ErrorBadGateway(format!(
+                "attestation request failed with status {status}"
+            )));
+        }
+
+        Limited::new(response.into_body(), ATTESTATION_MAX_RESPONSE_BYTES)
+            .collect()
+            .await
+            .map(|body| body.to_bytes())
+            .map_err(|e| {
+                warn!("failed to read the attestation response: {e}");
+                ErrorBadGateway("attestation response was unreadable or too large")
+            })
+    })
+    .await
+    .map_err(|_| ErrorGatewayTimeout("attestation request timed out"))??;
+
     let token = String::from_utf8(response_bytes.to_vec())
-        .map_err(actix_web::error::ErrorInternalServerError)?;
+        .map_err(|_| ErrorBadGateway("attestation token was not valid UTF-8"))?;
+    if token.is_empty() {
+        return Err(ErrorBadGateway("attestation token was empty"));
+    }
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "token": token })))
 }
@@ -389,7 +483,7 @@ pub(crate) async fn check(
     );
     let (ppi, ir): (ProofPreimageVersioned, Option<WrappedIr>) =
         tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    let (_id, updates) = pool
+    let (_job_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -467,8 +561,9 @@ pub(crate) async fn prove(
     };
 
     debug!(
-        "Received request: {}",
-        (&request[..]).encode_hex::<String>()
+        endpoint = "/prove",
+        request_bytes = request.len(),
+        "received proving request"
     );
 
     let (ppi, data, binding_input): (
@@ -478,7 +573,7 @@ pub(crate) async fn prove(
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
 
     let data_resolver = data.clone();
-    let (_id, updates) = pool
+    let (job_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -538,14 +633,16 @@ pub(crate) async fn prove(
             })
         })
         .await?;
+    debug!(endpoint = "/prove", %job_id, "submitted proving job");
 
     #[cfg(feature = "gcp_cs")]
     return Ok(proving_response(
-        _id,
+        job_id,
         updates,
         transport_headers,
-        server_encryption_key.get_ref().clone(),
-    ));
+        server_encryption_key.get_ref(),
+    )
+    .await);
 
     #[cfg(not(feature = "gcp_cs"))]
     {
@@ -572,13 +669,14 @@ pub(crate) async fn prove_transaction(
     };
 
     debug!(
-        "Received request: {}",
-        (&request[..]).encode_hex::<String>()
+        endpoint = "/prove-tx",
+        request_bytes = request.len(),
+        "received proving request"
     );
 
     let (tx, keys): TransactionProvePayload<Signature> =
         tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    let (_id, updates) = pool
+    let (job_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -617,14 +715,16 @@ pub(crate) async fn prove_transaction(
             })
         })
         .await?;
+    debug!(endpoint = "/prove-tx", %job_id, "submitted proving job");
 
     #[cfg(feature = "gcp_cs")]
     return Ok(proving_response(
-        _id,
+        job_id,
         updates,
         transport_headers,
-        server_encryption_key.get_ref().clone(),
-    ));
+        server_encryption_key.get_ref(),
+    )
+    .await);
 
     #[cfg(not(feature = "gcp_cs"))]
     {
