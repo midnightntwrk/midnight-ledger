@@ -1987,20 +1987,23 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         Ok(())
     }
 
-    // NOTE: The proof should receive the following inputs for binding purposes:
-    //  - The contract address
-    //  - The contract entry point
-    //  - Both transcript parts's declared gas costs, and effects
-    //  - The count of instructions in the guaranteed transcript
-    //  - The parent ContractCalls's `binding_commitment.commitment`.
-    // These need to be *truely* binding (see note at the bottom of this file!)
-    // In addition, it should receive
-    //  - The communication commitment
-    //  - The transcript
+    /// Builds the public input vector this call's proof will be validated against.
+    ///
+    /// NOTE: The proof should receive the following inputs for binding purposes:
+    ///  - The contract address
+    ///  - The contract entry point
+    ///  - Both transcript parts's declared gas costs, and effects
+    ///  - The count of instructions in the guaranteed transcript
+    ///  - The parent ContractCalls's `binding_commitment.commitment`.
+    /// These need to be *truely* binding (see note at the bottom of this file!)
+    /// In addition, it should receive
+    ///  - The communication commitment
+    ///  - The transcript
+    ///
     /// Fails without allocating if the call declares more than
     /// [`MAX_CALL_PUBLIC_INPUTS`] public inputs: `Op::Noop { n }` lets a 9-byte
     /// op name an arbitrarily large statement, so this must not trust callers
-    /// to have run [`Self::well_formed`] first.
+    /// to have checked well-formedness first.
     pub fn public_inputs(&self, binding_com: Pedersen) -> Result<Vec<Fr>, MalformedTransaction<D>> {
         self.public_inputs_len_check()?;
         let mut res = vec![self.binding_input(binding_com)];
