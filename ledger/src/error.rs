@@ -509,6 +509,9 @@ pub enum MalformedTransaction<D: DB> {
         compute_time_limit: CostDuration,
         read_time_limit: CostDuration,
     },
+    ContractDustTransfer {
+        address: ContractAddress,
+    },
     IllegallyDeclaredGuaranteed,
     ClaimReceiveFailed(coin::Commitment),
     ClaimSpendFailed(coin::Commitment),
@@ -926,6 +929,10 @@ impl<D: DB> Display for MalformedTransaction<D> {
             } => write!(
                 formatter,
                 "transcript for contract {address:?} declares gas exceeding the block limits (compute: {declared_compute_time:?}, limit: {compute_time_limit:?}; read: {declared_read_time:?}, limit: {read_time_limit:?})"
+            ),
+            ContractDustTransfer { address } => write!(
+                formatter,
+                "contract call to {address:?} attempted to receive or send Dust"
             ),
             NotNormalized => write!(formatter, "transaction is not in normal form"),
             ClaimReceiveFailed(com) => write!(

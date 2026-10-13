@@ -1896,6 +1896,23 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         .into_iter()
         .flatten()
         {
+            // Dust is not transferable, so contracts may neither hold nor release it. Otherwise
+            // the Dust balance credited by a registration's `allow_fee_payment` could be absorbed
+            // by a contract instead of paying fees, while the registration still mints the full
+            // entitlement to the registrant.
+            if transcript
+                .effects
+                .unshielded_inputs
+                .contains_key(&TokenType::Dust)
+                || transcript
+                    .effects
+                    .unshielded_outputs
+                    .contains_key(&TokenType::Dust)
+            {
+                return Err(MalformedTransaction::ContractDustTransfer {
+                    address: self.address,
+                });
+            }
             let program = Vec::from(&transcript.program);
             // `noop 0` contributes nothing to the proof's public inputs, but still shifts the
             // targets of `branch` and `jmp`, which count operations.
@@ -2286,6 +2303,7 @@ mod sparse_unshielded_signature_tests {
 mod well_formed_tests {
     use super::*;
     use coin_structure::contract::ContractAddress;
+    use onchain_runtime::context::Effects;
     use onchain_runtime::result_mode::ResultModeVerify;
     use onchain_runtime::state::EntryPointBuf;
     use onchain_runtime::transcript::Transcript;
@@ -2333,6 +2351,74 @@ mod well_formed_tests {
             call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent),
             Err(MalformedTransaction::NotNormalized)
         ));
+    }
+
+    #[test]
+    fn contract_call_rejects_dust_transfer() {
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let state = LedgerState::<InMemoryDB>::new("local-test");
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            ..WellFormedStrictness::default()
+        };
+        let call_with = |effects: Effects<InMemoryDB>, guaranteed: bool| {
+            let transcript = Some(Sp::new(Transcript {
+                gas: Default::default(),
+                effects,
+                program: vec![Op::Noop { n: 1 }].into(),
+                version: None,
+            }));
+            let (guaranteed_transcript, fallible_transcript) = if guaranteed {
+                (transcript, None)
+            } else {
+                (None, transcript)
+            };
+            ContractCall::<(), InMemoryDB> {
+                address: ContractAddress::default(),
+                entry_point: EntryPointBuf(b"count".to_vec()),
+                guaranteed_transcript,
+                fallible_transcript,
+                communication_commitment: Fr::from(0u64),
+                proof: (),
+            }
+        };
+        let night = TokenType::Unshielded(coin_structure::coin::NIGHT);
+        let inputs = |tt| Effects {
+            unshielded_inputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+        let outputs = |tt| Effects {
+            unshielded_outputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+
+        for guaranteed in [true, false] {
+            // Non-Dust token transfers remain allowed.
+            assert!(
+                call_with(inputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            assert!(
+                call_with(outputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            // Contracts may neither receive nor send Dust.
+            for effects in [inputs(TokenType::Dust), outputs(TokenType::Dust)] {
+                assert!(matches!(
+                    call_with(effects, guaranteed).well_formed(&state, strictness, &parent),
+                    Err(MalformedTransaction::ContractDustTransfer { .. })
+                ));
+            }
+        }
     }
 }
 
