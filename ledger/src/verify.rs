@@ -1876,6 +1876,13 @@ impl<D: DB> MaintenanceUpdate<D> {
     }
 }
 
+/// Re-exported from `onchain-runtime`, so that consumers outside the ledger can
+/// apply the same bound before materializing a call's public inputs. Fee
+/// calculation rejects transcripts far below this bound long before it is
+/// reached (see [`ContractCall::public_inputs_len`]); in the ledger it exists to
+/// bound the allocation on paths where fee enforcement is disabled.
+pub use onchain_runtime::transcript::MAX_CALL_PUBLIC_INPUTS;
+
 impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     pub(crate) fn well_formed(
         &self,
@@ -1883,6 +1890,8 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
+        // Checked before anything materializes the public inputs below.
+        self.public_inputs_len_check()?;
         if let Some(fallible) = &self.fallible_transcript
             && fallible.program.get(0) != Some(&Op::Ckpt)
             && self.guaranteed_transcript.is_some()
@@ -1896,6 +1905,23 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         .into_iter()
         .flatten()
         {
+            // Dust is not transferable, so contracts may neither hold nor release it. Otherwise
+            // the Dust balance credited by a registration's `allow_fee_payment` could be absorbed
+            // by a contract instead of paying fees, while the registration still mints the full
+            // entitlement to the registrant.
+            if transcript
+                .effects
+                .unshielded_inputs
+                .contains_key(&TokenType::Dust)
+                || transcript
+                    .effects
+                    .unshielded_outputs
+                    .contains_key(&TokenType::Dust)
+            {
+                return Err(MalformedTransaction::ContractDustTransfer {
+                    address: self.address,
+                });
+            }
             let program = Vec::from(&transcript.program);
             // `noop 0` contributes nothing to the proof's public inputs, but still shifts the
             // targets of `branch` and `jmp`, which count operations.
@@ -1907,6 +1933,35 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                     return Err(MalformedTransaction::NotNormalized);
                 }
             }
+        }
+
+        // Declared gas is the VM's execution ceiling, and is priced at face value. Bound it
+        // by the block limits, so that no transcript can declare more work than could ever
+        // fit into a block, and cannot push fee arithmetic into overflow.
+        if strictness.enforce_limits {
+            ref_state.param_check(true, |params| {
+                let limits = &params.limits.block_limits;
+                for transcript in [
+                    self.guaranteed_transcript.as_ref(),
+                    self.fallible_transcript.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if transcript.gas.compute_time > limits.compute_time
+                        || transcript.gas.read_time > limits.read_time
+                    {
+                        return Err(MalformedTransaction::TranscriptGasExceedsBlockLimits {
+                            address: self.address,
+                            declared_compute_time: transcript.gas.compute_time,
+                            declared_read_time: transcript.gas.read_time,
+                            compute_time_limit: limits.compute_time,
+                            read_time_limit: limits.read_time,
+                        });
+                    }
+                }
+                Ok(())
+            })?;
         }
 
         if strictness.verify_contract_proofs {
@@ -1938,7 +1993,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 P::proof_verify(
                     op,
                     &self.proof,
-                    self.public_inputs(parent.binding_commitment),
+                    self.public_inputs(parent.binding_commitment)?,
                     self,
                     strictness.proof_verification_mode
                 )?;
@@ -1949,17 +2004,27 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         Ok(())
     }
 
-    // NOTE: The proof should receive the following inputs for binding purposes:
-    //  - The contract address
-    //  - The contract entry point
-    //  - Both transcript parts's declared gas costs, and effects
-    //  - The count of instructions in the guaranteed transcript
-    //  - The parent ContractCalls's `binding_commitment.commitment`.
-    // These need to be *truely* binding (see note at the bottom of this file!)
-    // In addition, it should receive
-    //  - The communication commitment
-    //  - The transcript
-    pub fn public_inputs(&self, binding_com: Pedersen) -> Vec<Fr> {
+    /// Builds the public input vector this call's proof will be validated against.
+    ///
+    /// NOTE: The proof should receive the following inputs for binding purposes:
+    ///  - The contract address
+    ///  - The contract entry point
+    ///  - Both transcript parts's declared gas costs, and effects
+    ///  - The count of instructions in the guaranteed transcript
+    ///  - The parent ContractCalls's `binding_commitment.commitment`.
+    ///
+    /// These need to be *truely* binding (see note at the bottom of this file!)
+    ///
+    /// In addition, it should receive
+    ///  - The communication commitment
+    ///  - The transcript
+    ///
+    /// Fails without allocating if the call declares more than
+    /// [`MAX_CALL_PUBLIC_INPUTS`] public inputs: `Op::Noop { n }` lets a 9-byte
+    /// op name an arbitrarily large statement, so this must not trust callers
+    /// to have checked well-formedness first.
+    pub fn public_inputs(&self, binding_com: Pedersen) -> Result<Vec<Fr>, MalformedTransaction<D>> {
+        self.public_inputs_len_check()?;
         let mut res = vec![self.binding_input(binding_com)];
         res.push(self.communication_commitment);
         if let Some(guaranteed) = self.guaranteed_transcript.as_ref() {
@@ -1972,11 +2037,34 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 op.field_repr(&mut res);
             }
         }
-        res
+        Ok(res)
     }
 
+    /// The number of field elements [`Self::public_inputs`] would produce,
+    /// computed without materializing them.
     pub fn public_inputs_len(&self) -> usize {
-        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
+        // The binding input and the communication commitment.
+        2usize.saturating_add(
+            self.guaranteed_transcript
+                .iter()
+                .chain(self.fallible_transcript.iter())
+                .flat_map(|t| t.program.iter())
+                .map(|op| op.field_size())
+                .fold(0, |a, b| a.saturating_add(b)),
+        )
+    }
+
+    fn public_inputs_len_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let public_inputs = self.public_inputs_len();
+        if public_inputs > MAX_CALL_PUBLIC_INPUTS {
+            return Err(MalformedTransaction::TooManyPublicInputs {
+                address: self.address,
+                operation: self.entry_point.clone(),
+                public_inputs,
+                limit: MAX_CALL_PUBLIC_INPUTS,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
@@ -2250,6 +2338,7 @@ mod sparse_unshielded_signature_tests {
 mod well_formed_tests {
     use super::*;
     use coin_structure::contract::ContractAddress;
+    use onchain_runtime::context::Effects;
     use onchain_runtime::result_mode::ResultModeVerify;
     use onchain_runtime::state::EntryPointBuf;
     use onchain_runtime::transcript::Transcript;
@@ -2297,6 +2386,74 @@ mod well_formed_tests {
             call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent),
             Err(MalformedTransaction::NotNormalized)
         ));
+    }
+
+    #[test]
+    fn contract_call_rejects_dust_transfer() {
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let state = LedgerState::<InMemoryDB>::new("local-test");
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            ..WellFormedStrictness::default()
+        };
+        let call_with = |effects: Effects<InMemoryDB>, guaranteed: bool| {
+            let transcript = Some(Sp::new(Transcript {
+                gas: Default::default(),
+                effects,
+                program: vec![Op::Noop { n: 1 }].into(),
+                version: None,
+            }));
+            let (guaranteed_transcript, fallible_transcript) = if guaranteed {
+                (transcript, None)
+            } else {
+                (None, transcript)
+            };
+            ContractCall::<(), InMemoryDB> {
+                address: ContractAddress::default(),
+                entry_point: EntryPointBuf(b"count".to_vec()),
+                guaranteed_transcript,
+                fallible_transcript,
+                communication_commitment: Fr::from(0u64),
+                proof: (),
+            }
+        };
+        let night = TokenType::Unshielded(coin_structure::coin::NIGHT);
+        let inputs = |tt| Effects {
+            unshielded_inputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+        let outputs = |tt| Effects {
+            unshielded_outputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+
+        for guaranteed in [true, false] {
+            // Non-Dust token transfers remain allowed.
+            assert!(
+                call_with(inputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            assert!(
+                call_with(outputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            // Contracts may neither receive nor send Dust.
+            for effects in [inputs(TokenType::Dust), outputs(TokenType::Dust)] {
+                assert!(matches!(
+                    call_with(effects, guaranteed).well_formed(&state, strictness, &parent),
+                    Err(MalformedTransaction::ContractDustTransfer { .. })
+                ));
+            }
+        }
     }
 }
 

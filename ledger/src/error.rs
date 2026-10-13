@@ -489,6 +489,12 @@ pub enum MalformedTransaction<D: DB> {
         tx_size: usize,
         limit: u64,
     },
+    TooManyPublicInputs {
+        address: ContractAddress,
+        operation: EntryPointBuf,
+        public_inputs: usize,
+        limit: usize,
+    },
     VerifierKeyTooLarge {
         actual: u64,
         limit: u64,
@@ -502,6 +508,16 @@ pub enum MalformedTransaction<D: DB> {
     BindingCommitmentOpeningInvalid,
     NotNormalized,
     FallibleWithoutCheckpoint,
+    TranscriptGasExceedsBlockLimits {
+        address: ContractAddress,
+        declared_compute_time: CostDuration,
+        declared_read_time: CostDuration,
+        compute_time_limit: CostDuration,
+        read_time_limit: CostDuration,
+    },
+    ContractDustTransfer {
+        address: ContractAddress,
+    },
     IllegallyDeclaredGuaranteed,
     ClaimReceiveFailed(coin::Commitment),
     ClaimSpendFailed(coin::Commitment),
@@ -889,6 +905,15 @@ impl<D: DB> Display for MalformedTransaction<D> {
                 formatter,
                 "transaction too large (size: {tx_size}, limit: {limit})"
             ),
+            TooManyPublicInputs {
+                address,
+                operation,
+                public_inputs,
+                limit,
+            } => write!(
+                formatter,
+                "call to {address:?}'s {operation:?} declares {public_inputs} public inputs, exceeding the limit of {limit}"
+            ),
             VerifierKeyTooLarge { actual, limit } => write!(
                 formatter,
                 "verifier key for operation too large for deserialization (size: {actual}, limit: {limit})"
@@ -909,6 +934,20 @@ impl<D: DB> Display for MalformedTransaction<D> {
             FallibleWithoutCheckpoint => write!(
                 formatter,
                 "fallible transcript did not start with a checkpoint"
+            ),
+            TranscriptGasExceedsBlockLimits {
+                address,
+                declared_compute_time,
+                declared_read_time,
+                compute_time_limit,
+                read_time_limit,
+            } => write!(
+                formatter,
+                "transcript for contract {address:?} declares gas exceeding the block limits (compute: {declared_compute_time:?}, limit: {compute_time_limit:?}; read: {declared_read_time:?}, limit: {read_time_limit:?})"
+            ),
+            ContractDustTransfer { address } => write!(
+                formatter,
+                "contract call to {address:?} attempted to receive or send Dust"
             ),
             NotNormalized => write!(formatter, "transaction is not in normal form"),
             ClaimReceiveFailed(com) => write!(
