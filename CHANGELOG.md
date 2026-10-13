@@ -6,6 +6,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: proof-server optional `gcp_cs` feature for GCP Confidential Space —
+  encrypted `/prove` and `/prove-tx` (NaCl `crypto_box` / SalsaBox),
+  `POST /attestation` (OIDC or PKI token via the local TEE token socket), and
+  `GET /status` with a `proof-job-id` response header. See the `gcp_cs` notes
+  in [`README.md`](./README.md).
+
 ## Ledger 8.2.0-rc.1
 
 - note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
