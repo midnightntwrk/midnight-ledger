@@ -81,7 +81,8 @@ from the consensus layer that produces it.
   `unclaimed_block_rewards` / `bridge_receiving` by a `DistributeNight`
   system transaction (§3).
 * **Validity constraints:** the signature must verify; `network_id` must
-  match; the amount must be claimable (the ledger enforces a minimum,
+  match; the value must be non-zero for either `ClaimKind` (otherwise
+  `ZeroValueClaim`); the amount must be claimable (for `Reward` claims the ledger enforces a minimum,
   `LedgerParameters::min_claimable_rewards`, derived so the claim can cover
   its own theoretical DUST fee at the Dust cap — otherwise `RewardTooSmall`);
   and the claimed value must not exceed the address's claimable balance.

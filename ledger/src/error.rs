@@ -228,6 +228,10 @@ pub enum TransactionInvalid<D: DB> {
         claimed: u128,
         minimum: u128,
     },
+    ZeroValueClaim {
+        claimant: UserAddress,
+        kind: ClaimKind,
+    },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
     ContractMetadataTooLarge {
@@ -314,6 +318,10 @@ impl<D: DB> Display for TransactionInvalid<D> {
             RewardTooSmall { claimed, minimum } => write!(
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
+            ),
+            ZeroValueClaim { claimant, kind } => write!(
+                formatter,
+                "zero-value {kind} claim by {claimant:?} not permitted"
             ),
             InitialNonceAlreadyPresent(nonce) => write!(
                 formatter,
