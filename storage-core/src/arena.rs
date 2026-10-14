@@ -1559,15 +1559,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
     /// the only reference to its data.  When the `Sp` is initialized, this
     /// behaves like [`Arc::into_inner`].
-    pub fn into_inner(this: Sp<T, D>) -> Option<T> {
+    pub fn into_inner(mut this: Sp<T, D>) -> Option<T> {
         // Note that we don't want to call `self.force_as_arc()` here, since
         // that could force an uninitialized `Sp` unnecessarily.
-        let data: Option<Arc<T>> = this.data.get().cloned();
-        // The `Sp` gets dropped, decrementing the ref count, but if initialized
-        // the content survives, either in another `Arc`, or in the return
-        // value.
+        //
+        // Release our strong reference *before* dropping the `Sp`: `Sp::drop`
+        // only cleans up the `sp_cache` entry if the strong count is already
+        // zero, and must do that before it removes the metadata entry. See the
+        // invariants on `Arena::sp_cache`.
+        let data: Option<T> = this.data.take().and_then(|arc| Arc::into_inner(arc));
         drop(this);
-        data.and_then(|arc| Arc::into_inner(arc))
+        data
     }
 }
 
@@ -2338,6 +2340,57 @@ mod tests {
         }
     }
 
+    type BigValue = [u8; SMALL_OBJECT_LIMIT];
+
+    #[test]
+    fn into_inner_clears_sp_cache_entry() {
+        let arena = &new_arena();
+
+        assert!(Sp::into_inner(arena.alloc([2u8; SMALL_OBJECT_LIMIT])).is_some());
+
+        assert!(
+            arena.lock_sp_cache().borrow().is_empty(),
+            "`Sp::into_inner` call which returns `Some` should clear sp_cache entry; nothing will ever remove it"
+        );
+    }
+
+    /// Test intensive concurrent `get` and `Sp::into_inner` for the same key.
+    ///
+    /// When originally written, this test exercised a race between removing a
+    /// key from the metadata when `Sp::into_inner` dropped the consumed `Sp`,
+    /// and the strong count of its `Arc` reaching zero. `into_inner` cloned the
+    /// `Arc` before dropping the `Sp`, so `Sp::drop` saw a live `Arc`, kept the
+    /// `sp_cache` entry, and removed the key from the metadata anyway. In
+    /// between, another thread could read the `Arc` from the `sp_cache` and
+    /// assume the key was still in the metadata, an invariant violation that
+    /// caused `increment_ref_locked` to panic.
+    ///
+    /// The same ordering also left a dead `sp_cache` entry behind once the clone
+    /// was consumed; see `into_inner_clears_sp_cache_entry`.
+    #[test]
+    fn into_inner_concurrent_get_race() {
+        use std::thread;
+        let arena = new_arena();
+        let mut sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let key = sp.as_typed_key();
+        sp.persist();
+        drop(sp);
+
+        let arena1 = arena.clone();
+        let key1 = key.clone();
+        let t1 = thread::spawn(move || {
+            for _ in 0..5000 {
+                let sp = arena1.get::<BigValue>(&key1).unwrap();
+                let _ = Sp::into_inner(sp);
+            }
+        });
+        for _ in 0..5000 {
+            let sp = arena.get::<BigValue>(&key).unwrap();
+            let _ = Sp::into_inner(sp);
+        }
+        t1.join().unwrap();
+    }
+
     // Test that attempting to load the same value into the arena twice,
     // independently, using `Arena::alloc`, results in the underlying `Arc`
     // being shared.
@@ -2700,7 +2753,7 @@ mod tests {
 
         // Create a persistent key that we can get from both threads.
 
-        let mut sp = arena.alloc(42u32);
+        let mut sp = arena.alloc([1u8; SMALL_OBJECT_LIMIT]);
         let key = sp.as_typed_key();
         sp.persist();
         drop(sp);
@@ -2711,17 +2764,17 @@ mod tests {
         let key1 = key.clone();
         let t1 = thread::spawn(move || {
             for _ in 0..1000 {
-                let sp = arena1.get::<u32>(&key1).unwrap();
+                let sp = arena1.get::<BigValue>(&key1).unwrap();
                 drop(sp);
             }
         });
         for i in 0..1000 {
             // Alternate between get and get_lazy
             if i % 2 == 0 {
-                let sp = arena.get_lazy::<u32>(&key).unwrap();
+                let sp = arena.get_lazy::<BigValue>(&key).unwrap();
                 drop(sp);
             } else {
-                let sp = arena.get::<u32>(&key).unwrap();
+                let sp = arena.get::<BigValue>(&key).unwrap();
                 drop(sp);
             }
         }
