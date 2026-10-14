@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
+
 ## Version `1.2.1`
 
 - pull in hardened `serialize` and `base-crypto` deserialization.
