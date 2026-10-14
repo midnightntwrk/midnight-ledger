@@ -1765,18 +1765,6 @@ fn claim_unshielded<D: DB>(
     let old_state = state.clone();
     let address = UserAddress::from(tx.owner.clone());
 
-    // Claims pay no fees, so each must consume a funded balance. A zero-value
-    // claim consumes nothing and would otherwise mint a zero-value UTXO for free.
-    if tx.value == 0 {
-        return (
-            old_state,
-            TransactionResult::Failure(TransactionInvalid::ZeroValueClaim {
-                claimant: address,
-                kind: tx.kind,
-            }),
-        );
-    }
-
     let claimable = match tx.kind {
         ClaimKind::CardanoBridge => {
             // We can use the full amount since bridge fees are taken at-source
@@ -1811,6 +1799,19 @@ fn claim_unshielded<D: DB>(
             TransactionResult::Failure(TransactionInvalid::RewardTooSmall {
                 claimed: tx.value,
                 minimum: state.parameters.min_claimable_rewards(),
+            }),
+        );
+    }
+
+    // Claims are valid if they are one of:
+    // - At least the min bridge amount
+    // - The maximum non-zero claimable value
+    if tx.kind == ClaimKind::CardanoBridge && !(tx.value >= state.parameters.c_to_m_bridge_min_amount || (tx.value == claimable && claimable != 0)) {
+        return (
+            old_state,
+            TransactionResult::Failure(TransactionInvalid::BridgeClaimTooSmall {
+                claimed: tx.value,
+                minimum: claimable.min(state.parameters.c_to_m_bridge_min_amount),
             }),
         );
     }
@@ -2277,22 +2278,24 @@ mod tests {
                 physical_segment: 0,
             },
         ) {
-            (new_st, TransactionResult::Failure(TransactionInvalid::ZeroValueClaim { .. })) => {
+            (new_st, TransactionResult::Failure(e)) => {
                 assert_eq!(new_st.utxo.utxos.iter().count(), 0);
                 assert_eq!(new_st.bridge_receiving, state.bridge_receiving);
                 assert_eq!(
                     new_st.unclaimed_block_rewards,
                     state.unclaimed_block_rewards
                 );
-            }
-            (_, TransactionResult::Failure(e)) => {
-                panic!("Expected ZeroValueClaim, but got {e}")
+                match (e, kind) {
+                    (TransactionInvalid::RewardTooSmall { .. }, ClaimKind::Reward) => {}
+                    (TransactionInvalid::BridgeClaimTooSmall { .. }, ClaimKind::CardanoBridge) => {}
+                    (e, _) => panic!("Expected error for {kind:?}, got {e:?}"),
+                }
             }
             (_, TransactionResult::PartialSuccess(e, _)) => {
-                panic!("Expected ZeroValueClaim, but got {:?}", e)
+                panic!("Expected failure, but got partial success {:?}", e)
             }
             (_, TransactionResult::Success(_)) => {
-                panic!("Expected ZeroValueClaim, succeeded unexpectedly")
+                panic!("Expected failure, succeeded unexpectedly")
             }
         }
     }
