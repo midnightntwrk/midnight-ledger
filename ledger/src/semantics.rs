@@ -1805,8 +1805,12 @@ fn claim_unshielded<D: DB>(
 
     // Claims are valid if they are one of:
     // - At least the min bridge amount
-    // - The maximum non-zero claimable value
-    if tx.kind == ClaimKind::CardanoBridge && !(tx.value >= state.parameters.c_to_m_bridge_min_amount || (tx.value == claimable && claimable != 0)) {
+    // - The full non-zero claimable value
+    let meets_min_amount = tx.value >= state.parameters.c_to_m_bridge_min_amount;
+    let claims_full_balance = tx.value == claimable && claimable != 0;
+    let is_valid_amount = meets_min_amount || claims_full_balance;
+
+    if tx.kind == ClaimKind::CardanoBridge && !is_valid_amount {
         return (
             old_state,
             TransactionResult::Failure(TransactionInvalid::BridgeClaimTooSmall {
