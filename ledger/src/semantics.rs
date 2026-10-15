@@ -1815,7 +1815,8 @@ fn claim_unshielded<D: DB>(
             old_state,
             TransactionResult::Failure(TransactionInvalid::BridgeClaimTooSmall {
                 claimed: tx.value,
-                minimum: claimable.min(state.parameters.c_to_m_bridge_min_amount),
+                minimum: state.parameters.c_to_m_bridge_min_amount,
+                claimable,
             }),
         );
     }
@@ -2291,7 +2292,18 @@ mod tests {
                 );
                 match (e, kind) {
                     (TransactionInvalid::RewardTooSmall { .. }, ClaimKind::Reward) => {}
-                    (TransactionInvalid::BridgeClaimTooSmall { .. }, ClaimKind::CardanoBridge) => {}
+                    (
+                        TransactionInvalid::BridgeClaimTooSmall {
+                            claimed,
+                            minimum,
+                            claimable,
+                        },
+                        ClaimKind::CardanoBridge,
+                    ) => {
+                        assert_eq!(claimed, 0);
+                        assert_eq!(minimum, state.parameters.c_to_m_bridge_min_amount);
+                        assert_eq!(claimable, bridge_balance);
+                    }
                     (e, _) => panic!("Expected error for {kind:?}, got {e:?}"),
                 }
             }

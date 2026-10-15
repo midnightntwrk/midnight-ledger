@@ -231,6 +231,7 @@ pub enum TransactionInvalid<D: DB> {
     BridgeClaimTooSmall {
         claimed: u128,
         minimum: u128,
+        claimable: u128,
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
@@ -319,9 +320,21 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
             ),
-            BridgeClaimTooSmall { claimed, minimum } => write!(
+            BridgeClaimTooSmall {
+                claimed,
+                minimum,
+                claimable: 0,
+            } => write!(
                 formatter,
-                "claimed bridge transfer ({claimed} STARs) below payout threshold ({minimum} STARs)"
+                "claimed bridge transfer ({claimed} STARs) below payout threshold ({minimum} STARs); no bridge balance is claimable"
+            ),
+            BridgeClaimTooSmall {
+                claimed,
+                minimum,
+                claimable,
+            } => write!(
+                formatter,
+                "claimed bridge transfer ({claimed} STARs) below payout threshold ({minimum} STARs); claims below the threshold must withdraw the full claimable balance ({claimable} STARs)"
             ),
             InitialNonceAlreadyPresent(nonce) => write!(
                 formatter,
