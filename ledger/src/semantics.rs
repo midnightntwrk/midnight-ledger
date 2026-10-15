@@ -1810,6 +1810,24 @@ fn claim_unshielded<D: DB>(
         );
     }
 
+    // Claims are valid if they are one of:
+    // - At least the min bridge amount
+    // - The full non-zero claimable value
+    let meets_min_amount = tx.value >= state.parameters.c_to_m_bridge_min_amount;
+    let claims_full_balance = tx.value == claimable && claimable != 0;
+    let is_valid_amount = meets_min_amount || claims_full_balance;
+
+    if tx.kind == ClaimKind::CardanoBridge && !is_valid_amount {
+        return (
+            old_state,
+            TransactionResult::Failure(TransactionInvalid::BridgeClaimTooSmall {
+                claimed: tx.value,
+                minimum: state.parameters.c_to_m_bridge_min_amount,
+                claimable,
+            }),
+        );
+    }
+
     let remaining = claimable - tx.value;
 
     let res = match tx.kind {
@@ -2219,6 +2237,106 @@ mod tests {
                 panic!("Expected InsufficientClaimable, succeeded unexpectedly")
             }
         }
+    }
+
+    fn assert_zero_value_claim_rejected(
+        kind: ClaimKind,
+        bridge_balance: u128,
+        reward_balance: u128,
+    ) {
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let network_id = "a".to_string();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let address = UserAddress::from(vk.clone());
+        let mut bridge_receiving = Map::new();
+        if bridge_balance > 0 {
+            bridge_receiving = bridge_receiving.insert(address, bridge_balance);
+        }
+        let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
+        if reward_balance > 0 {
+            unclaimed_block_rewards = unclaimed_block_rewards.insert(address, reward_balance);
+        }
+        let state = LedgerState {
+            network_id: network_id.clone(),
+            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
+            locked_pool: 0,
+            bridge_receiving,
+            reserve_pool: MAX_SUPPLY - bridge_balance - reward_balance,
+            block_reward_pool: 0,
+            unclaimed_block_rewards,
+            treasury: Map::new(),
+            zswap: Sp::new(State::default()),
+            contract: Map::new(),
+            utxo: Sp::new(UtxoState::default()),
+            replay_protection: Sp::new(ReplayProtectionState::new()),
+            dust: Sp::new(DustState::default()),
+        };
+        let claim: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
+            network_id,
+            value: 0,
+            owner: vk,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind,
+        };
+        let context = BlockContext::default();
+        match claim_unshielded(
+            &state,
+            &claim,
+            &context,
+            EventSource {
+                transaction_hash: TransactionHash(rng.r#gen()),
+                logical_segment: 0,
+                physical_segment: 0,
+            },
+        ) {
+            (new_st, TransactionResult::Failure(e)) => {
+                assert_eq!(new_st.utxo.utxos.iter().count(), 0);
+                assert_eq!(new_st.bridge_receiving, state.bridge_receiving);
+                assert_eq!(
+                    new_st.unclaimed_block_rewards,
+                    state.unclaimed_block_rewards
+                );
+                match (e, kind) {
+                    (TransactionInvalid::RewardTooSmall { .. }, ClaimKind::Reward) => {}
+                    (
+                        TransactionInvalid::BridgeClaimTooSmall {
+                            claimed,
+                            minimum,
+                            claimable,
+                        },
+                        ClaimKind::CardanoBridge,
+                    ) => {
+                        assert_eq!(claimed, 0);
+                        assert_eq!(minimum, state.parameters.c_to_m_bridge_min_amount);
+                        assert_eq!(claimable, bridge_balance);
+                    }
+                    (e, _) => panic!("Expected error for {kind:?}, got {e:?}"),
+                }
+            }
+            (_, TransactionResult::PartialSuccess(e, _)) => {
+                panic!("Expected failure, but got partial success {:?}", e)
+            }
+            (_, TransactionResult::Success(_)) => {
+                panic!("Expected failure, succeeded unexpectedly")
+            }
+        }
+    }
+
+    #[test]
+    fn bridge_claim_zero_value_unfunded() {
+        assert_zero_value_claim_rejected(ClaimKind::CardanoBridge, 0, 0);
+    }
+
+    #[test]
+    fn bridge_claim_zero_value_funded() {
+        assert_zero_value_claim_rejected(ClaimKind::CardanoBridge, 1000, 0);
+    }
+
+    #[test]
+    fn rewards_claim_zero_value() {
+        assert_zero_value_claim_rejected(ClaimKind::Reward, 0, MAX_SUPPLY);
     }
 
     #[test]
