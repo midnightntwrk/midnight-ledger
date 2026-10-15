@@ -587,6 +587,23 @@ mod tests {
     }
 
     #[test]
+    fn list_head_of_two_full_32_byte_atoms() {
+        // The `concat` operands, a 2-byte flag and a 74-byte head, total 76 bytes, but `List_head`
+        // bounds them by 2 plus the head's `max_aligned_size` of 72.
+        let f = [Key::Value(0u8.into())];
+        let run_program = run_program::<InMemoryDB, ResultModeGather>;
+        let head = ([0xa1u8; 32], [0xa2u8; 32]);
+        let list = vmval!([[(head), [null, null, (0u64)], (1u64)]]);
+        assert_eq!(
+            run_program(
+                slice::from_ref(&list),
+                &List_head!(f, false, ([u8; 32], [u8; 32])),
+            ),
+            Ok((vec![list.clone()], vec![read!((true, head))]))
+        );
+    }
+
+    #[test]
     fn merkle_tree_flow() {
         let f = [Key::Value(0u8.into())];
         let run_program = run_program::<InMemoryDB, ResultModeGather>;

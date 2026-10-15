@@ -684,3 +684,43 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod max_aligned_size_tests {
+    use super::*;
+    use serialize::Serializable;
+
+    #[test]
+    fn bounds_two_full_32_byte_atoms() {
+        // As in a Compact `Vector<2, Bytes<32>>`: 74 bytes against a bound of 72.
+        let alignment = Alignment(vec![
+            AlignmentSegment::Atom(AlignmentAtom::Bytes { length: 32 }),
+            AlignmentSegment::Atom(AlignmentAtom::Bytes { length: 32 }),
+        ]);
+        let value = AlignedValue::new(
+            Value(vec![ValueAtom(vec![0xff; 32]), ValueAtom(vec![0xff; 32])]),
+            alignment.clone(),
+        )
+        .unwrap();
+        let size = Serializable::serialized_size(&value);
+        let bound = alignment.max_aligned_size();
+        assert!(
+            size <= bound,
+            "serialized size {size} exceeds max_aligned_size {bound}"
+        );
+    }
+
+    #[test]
+    fn bounds_compress_atom() {
+        // 103 bytes against a bound of 36: a compress atom's payload has no fixed size.
+        let alignment = Alignment(vec![AlignmentSegment::Atom(AlignmentAtom::Compress)]);
+        let value =
+            AlignedValue::new(Value(vec![ValueAtom(vec![0xff; 100])]), alignment.clone()).unwrap();
+        let size = Serializable::serialized_size(&value);
+        let bound = alignment.max_aligned_size();
+        assert!(
+            size <= bound,
+            "serialized size {size} exceeds max_aligned_size {bound}"
+        );
+    }
+}
