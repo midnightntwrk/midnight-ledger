@@ -479,7 +479,7 @@ impl RunningCost {
         self.read_time <= bounds.read_time
             && self.compute_time <= bounds.compute_time
             && self.bytes_written <= bounds.bytes_written
-            && self.bytes_deleted <= bounds.bytes_deleted
+            && self.bytes_deleted >= bounds.bytes_deleted
     }
 }
 
@@ -1094,6 +1094,29 @@ mod tests {
         fn u128_div(a: u128, b in 1u128..u128::MAX) {
             within_permissible_error(a as f64 / b as f64, f64::from(FixedPoint::from_u128_div(a, b)), 1e-9f64);
         }
+        // Declared deletions lower the priced net writes, so they must not exceed
+        // the actual deletions; every other component is an upper bound.
+        #[test]
+        fn within_bounds_bounds_deletions_from_below(
+            actual in running_cost(),
+            declared in running_cost(),
+        ) {
+            let expected = actual.read_time <= declared.read_time
+                && actual.compute_time <= declared.compute_time
+                && actual.bytes_written <= declared.bytes_written
+                && declared.bytes_deleted <= actual.bytes_deleted;
+            prop_assert_eq!(actual.within_bounds(&declared), expected);
+        }
+    }
+
+    // Small ranges, so that independently drawn costs often compare both ways.
+    fn running_cost() -> impl Strategy<Value = RunningCost> {
+        (0u64..4, 0u64..4, 0u64..4, 0u64..4).prop_map(|(r, c, w, d)| RunningCost {
+            read_time: CostDuration::from_picoseconds(r),
+            compute_time: CostDuration::from_picoseconds(c),
+            bytes_written: w,
+            bytes_deleted: d,
+        })
     }
 
     #[test]

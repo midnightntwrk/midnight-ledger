@@ -860,7 +860,20 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
         include_external: bool,
         public_input_count: usize,
     ) -> RunningCost {
-        let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+        const TIME_OVERHEAD: f64 = 1.2;
+        // Declared deletions are a lower bound, and any shortfall is priced as
+        // net growth; overhead is therefore applied to net growth, not churn.
+        const NET_WRITE_OVERHEAD: f64 = 1.2;
+        const DELETION_UNDERESTIMATE: f64 = 0.95;
+        let actual = self.gas_cost;
+        let churned = actual.bytes_written.min(actual.bytes_deleted);
+        let net_written = actual.bytes_written - churned;
+        let transcript_gas_cost_with_overhead = RunningCost {
+            bytes_written: churned
+                .saturating_add((net_written as f64 * NET_WRITE_OVERHEAD).ceil() as u64),
+            bytes_deleted: (actual.bytes_deleted as f64 * DELETION_UNDERESTIMATE).floor() as u64,
+            ..actual * TIME_OVERHEAD
+        };
         if !include_external {
             return transcript_gas_cost_with_overhead;
         }
@@ -1180,4 +1193,52 @@ pub fn partition_transcripts<D: DB>(
         .enumerate()
         .map(|(i, sections)| calls[i].split_at(sections, params))
         .collect::<Result<Vec<_>, _>>()?)
+}
+
+#[cfg(test)]
+mod gas_heuristic_tests {
+    use super::QueryResultsExt;
+    use crate::structure::INITIAL_PARAMETERS;
+    use base_crypto::cost_model::{CostDuration, RunningCost, SyntheticCost};
+    use coin_structure::contract::ContractAddress;
+    use onchain_runtime::context::{QueryContext, QueryResults};
+    use onchain_runtime::result_mode::ResultModeVerify;
+    use onchain_runtime::state::{ChargedState, StateValue};
+    use proptest::prelude::*;
+    use storage::db::InMemoryDB;
+
+    fn declared(actual: RunningCost) -> RunningCost {
+        let res = QueryResults::<ResultModeVerify, InMemoryDB> {
+            context: QueryContext::new(
+                ChargedState::new(StateValue::Null),
+                ContractAddress::default(),
+            ),
+            events: Vec::new(),
+            gas_cost: actual,
+        };
+        res.gas_heuristic(&INITIAL_PARAMETERS, false, 0)
+    }
+
+    proptest! {
+        // The declaration must survive the post-execution check. Padding writes in
+        // proportion to churn would price churned bytes as net growth.
+        #[test]
+        fn declared_writes_pad_net_growth_only(
+            written in 0u64..10_000_000,
+            deleted in 0u64..10_000_000,
+        ) {
+            let actual = RunningCost {
+                read_time: CostDuration::ZERO,
+                compute_time: CostDuration::ZERO,
+                bytes_written: written,
+                bytes_deleted: deleted,
+            };
+            let declared = declared(actual);
+            prop_assert!(declared.bytes_deleted <= actual.bytes_deleted);
+            prop_assert!(declared.bytes_written >= actual.bytes_written);
+
+            let actual_net = SyntheticCost::from(actual).bytes_written;
+            prop_assert!(declared.bytes_written <= actual.bytes_written + actual_net.div_ceil(5));
+        }
+    }
 }
