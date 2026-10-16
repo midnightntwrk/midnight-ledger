@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: add `TransactionShape`, `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape` to partition calls against the final transaction's part counts.
+- feat: expose `TransactionShape` in the wasm API as a class obtained from `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to `partitionTranscripts` and `Transaction.addCalls`.
+
 ## Ledger 8.2.0-rc.1
 
 - note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly

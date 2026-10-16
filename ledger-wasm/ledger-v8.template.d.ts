@@ -1178,6 +1178,40 @@ export type ProvingProvider = {
 export type SegmentSpecifier = { tag: 'first' } | { tag: 'guaranteedOnly' } | { tag: 'random' } | { tag: 'specific', value: number };
 
 /**
+ * Counts of a transaction's non-call parts, whose cost
+ * {@link partitionTranscripts} reserves from the guaranteed budget.
+ *
+ * Pass the counts of the final transaction, so the guaranteed section is
+ * sized for it rather than for the derived default.
+ *
+ * Obtained from {@link TransactionShape.forCalls}. Adjust a count
+ * by assigning to it; a count added in a later version keeps its derived
+ * default.
+ */
+export class TransactionShape {
+  private constructor();
+
+  /**
+   * Runs each call once and derives the shape that
+   * {@link partitionTranscripts} assumes by default.
+   *
+   * These are the partitioner's heuristic totals.
+   */
+  static forCalls(calls: PreTranscript[], params: LedgerParameters): TransactionShape;
+
+  intents: number;
+  nightSpends: number;
+  nightOutputs: number;
+  nonNightUnshieldedSpends: number;
+  nonNightUnshieldedOutputs: number;
+  dustSpends: number;
+  zswapInputs: number;
+  zswapOutputs: number;
+
+  toString(compact?: boolean): string;
+}
+
+/**
  * A transaction that has been validated with `wellFormed`.
  **/
 export class VerifiedTransaction {
@@ -1244,6 +1278,8 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    * target intent where needed, and will ensure that relevant Zswap parts are
    * placed in the same section as contract interactions with them.
    *
+   * `expectedTxShape` is passed on to {@link partitionTranscripts}.
+   *
    * @throws If called on bound, proven, or proof-erased transactions.
    */
   addCalls(
@@ -1254,6 +1290,7 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
     zswapInputs?: ZswapInput<PreProof>[],
     zswapOutputs?: ZswapOutput<PreProof>[],
     zswapTransient?: ZswapTransient<PreProof>[],
+    expectedTxShape?: TransactionShape,
   ): Transaction<S, P, B>;
 
   /**
@@ -1428,8 +1465,11 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
  * Finalizes a set of programs against their initial contexts,
  * resulting in guaranteed and fallible {@link Transcript}s, optimally
  * allocated, and heuristically covered for gas fees.
+ *
+ * `expectedTxShape` replaces the shape {@link TransactionShape.forCalls} would
+ * derive for `calls`.
  */
-export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): PartitionedTranscript[];
+export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters, expectedTxShape?: TransactionShape): PartitionedTranscript[];
 
 /**
  * The hash of a transaction, as a hex-encoded 256-bit bytestring
