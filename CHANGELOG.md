@@ -6,6 +6,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: ledger 9 refuses 2026-Q3 functionality, which is admitted from ledger
+  10 via the new `sow-26q3` feature (off here). Verifier keys using the P256,
+  Curve25519, SHA-512, SHA3-256, Blake2b, in-circuit BLS12-381, base64 or
+  automaton zk-stdlib chips fail to initialize, and the ZKIR v3 dependency
+  (`ledger` test utilities, `proof-server`) is built without its own
+  `sow-26q3` feature, refusing the Secp256r1/Curve25519 types and ZKIR 3.1.
+
 ## Ledger 9.1.0.0-rc.5
 
 Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
@@ -135,7 +142,7 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`

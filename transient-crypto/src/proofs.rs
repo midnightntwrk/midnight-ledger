@@ -25,7 +25,7 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightVK, Relation};
+use midnight_zk_stdlib::{MidnightVK, Relation, ZkStdLibArch};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -509,6 +509,54 @@ impl Serializable for VerifierKey {
     }
 }
 
+/// Refuses keys using zk-stdlib chips that are 2026-Q3 functionality, unless
+/// built with the `sow-26q3` feature. Contracts can be built directly against
+/// midnight-zk, so this - not ZKIR - is what keeps such circuits off chain.
+///
+/// Reads only the architecture header, so it runs before the full parse. The
+/// exhaustive destructure makes a new zk-stdlib chip a compile error here
+/// rather than silently admitted.
+fn check_chips(vk: &[u8]) -> Result<(), VerifyingError> {
+    let ZkStdLibArch {
+        jubjub: _,
+        poseidon: _,
+        sha2_256: _,
+        keccak_256: _,
+        secp256k1: _,
+        nr_pow2range_cols: _,
+        sha2_512,
+        sha3_256,
+        blake2b,
+        p256,
+        bls12_381,
+        curve25519,
+        base64,
+        automaton,
+    } = ZkStdLibArch::read_from_serialized_vk(&mut &vk[..])
+        .map_err(|_| anyhow::anyhow!("problem reading the verifier key architecture"))?;
+    let q3 = [
+        ("sha2_512", sha2_512),
+        ("sha3_256", sha3_256),
+        ("blake2b", blake2b),
+        ("p256", p256),
+        ("bls12_381", bls12_381),
+        ("curve25519", curve25519),
+        ("base64", base64),
+        ("automaton", automaton),
+    ]
+    .into_iter()
+    .filter_map(|(chip, on)| on.then_some(chip))
+    .collect::<Vec<_>>();
+    if q3.is_empty() || cfg!(feature = "sow-26q3") {
+        return Ok(());
+    }
+    Err(anyhow::anyhow!(
+        "verifier key uses zk-stdlib chip(s) {}: 2026-Q3 functionality, which this \
+         ledger excludes (admitted from ledger 10, via the `sow-26q3` feature)",
+        q3.join(", ")
+    ))
+}
+
 impl VerifierKey {
     /// Initializes the lazy verifier key
     pub fn init(&self) -> Result<(), VerifyingError> {
@@ -529,6 +577,7 @@ impl VerifierKey {
             }
             InnerVerifierKey::Uninitialized(data) => data.clone(),
         };
+        check_chips(&data)?;
         let mut slice: &[u8] = &data;
         let vk = MidnightVK::read(&mut slice, SerdeFormat::Processed)
             .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;

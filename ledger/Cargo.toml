@@ -17,6 +17,8 @@ test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
+# 2026-Q3 functionality (P256, Curve25519, ZKIR 3.1, ...). Off for ledger 9.
+sow-26q3 = ["transient-crypto/sow-26q3", "zkir_v3?/sow-26q3"]
 
 [dependencies]
 coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
@@ -30,7 +32,8 @@ serialize = { version = "1.1.1", path = "../serialize", package = "midnight-seri
 midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
-zkir_v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.1.0-rc.1", package = "midnight-zkir", optional = true }
+# zkir-3.1.0-rc.1 plus the `sow-26q3` gate; repin to the zkir-3.1.0-rc.2 tag once cut.
+zkir_v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "b1ad8473b654201083b05ca69b2414fe0ebcefd3", package = "midnight-zkir", default-features = false, optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"

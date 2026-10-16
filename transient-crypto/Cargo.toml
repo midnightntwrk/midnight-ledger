@@ -17,6 +17,9 @@ proptest = [
   "storage-core/proptest",
 ]
 mock-verify = []
+# Admit verifier keys using 2026-Q3 zk-stdlib chips (P256, Curve25519,
+# SHA-512, in-circuit BLS12-381, ...). Off for ledger 9.
+sow-26q3 = []
 public-internal-structure = []
 
 [dependencies]

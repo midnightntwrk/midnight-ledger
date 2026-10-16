@@ -1,5 +1,12 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: `VerifierKey` initialization refuses keys whose zk-stdlib
+  architecture enables a 2026-Q3 chip (P256, Curve25519, SHA-512, SHA3-256,
+  Blake2b, BLS12-381, base64, automaton), unless built with the new
+  `sow-26q3` feature. The check reads only the architecture header.
+
 ## Version `3.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7

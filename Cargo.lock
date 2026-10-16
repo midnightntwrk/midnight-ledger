@@ -3724,7 +3724,7 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "3.1.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.1.0-rc.1#e82d81d25aabcc5f5092e2bd559083487f577914"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?rev=b1ad8473b654201083b05ca69b2414fe0ebcefd3#b1ad8473b654201083b05ca69b2414fe0ebcefd3"
 dependencies = [
  "anyhow",
  "const-hex",
