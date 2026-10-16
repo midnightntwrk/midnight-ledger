@@ -7,6 +7,8 @@ publish = false
 
 [features]
 default = []
+# 2026-Q3 functionality (P256, Curve25519, ZKIR 3.1, ...). Off for ledger 9.
+sow-26q3 = ["zkir-v3/sow-26q3", "transient-crypto/sow-26q3"]
 # Disabled for now, as we currently have no experimental features.
 #experimental = []
 
@@ -19,7 +21,8 @@ storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 zkir = { path = "../zkir", package = "midnight-zkir" }
-zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", tag = "zkir-3.1.0-rc.1", package = "midnight-zkir" }
+# zkir-3.1.0-rc.1 plus the `sow-26q3` gate; repin to the zkir-3.1.0-rc.2 tag once cut.
+zkir-v3 = { git = "https://github.com/midnightntwrk/midnight-zkir", rev = "b1ad8473b654201083b05ca69b2414fe0ebcefd3", package = "midnight-zkir", default-features = false }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
