@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::coin::{ShieldedTokenType, UnshieldedTokenType};
+use crate::custom_spend::SpendRule;
 use crate::hash_serde;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
@@ -56,17 +57,29 @@ impl rand::distributions::Distribution<ContractAddress> for rand::distributions:
 }
 
 impl ContractAddress {
-    fn custom_token_type(&self, domain_sep: HashOutput) -> HashOutput {
+    fn custom_token_type(&self, domain_sep: HashOutput, rule: &SpendRule) -> HashOutput {
         let inner_domain_sep = HashOutput(*b"midnight:derive_token\0\0\0\0\0\0\0\0\0\0\0");
-        persistent_commit(&(domain_sep, self.0), inner_domain_sep)
+        match rule.descriptor_hash() {
+            // NOTE: The no-rule preimage must remain byte-identical to the
+            // pre-`SpendRule` derivation for existing token types to be
+            // preserved.
+            None => persistent_commit(&(domain_sep, self.0), inner_domain_sep),
+            Some(descriptor) => {
+                persistent_commit(&(domain_sep, self.0, descriptor), inner_domain_sep)
+            }
+        }
     }
 
-    pub fn custom_shielded_token_type(&self, domain_sep: HashOutput) -> ShieldedTokenType {
-        ShieldedTokenType(self.custom_token_type(domain_sep))
+    pub fn custom_shielded_token_type(
+        &self,
+        domain_sep: HashOutput,
+        rule: &SpendRule,
+    ) -> ShieldedTokenType {
+        ShieldedTokenType(self.custom_token_type(domain_sep, rule))
     }
 
     pub fn custom_unshielded_token_type(&self, domain_sep: HashOutput) -> UnshieldedTokenType {
-        UnshieldedTokenType(self.custom_token_type(domain_sep))
+        UnshieldedTokenType(self.custom_token_type(domain_sep, &SpendRule::Empty))
     }
 }
 

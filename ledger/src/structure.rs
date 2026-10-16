@@ -955,7 +955,7 @@ pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 #[derive(Storable, Envelope)]
 #[envelope(InnerIntentSigningEnvelope<S, P, B, D>)]
 #[envelope(InnerIntentPedersenEnvelope<S, P, B, D>)]
-#[tag = "intent[v9]"]
+#[tag = "intent[v10]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
@@ -969,7 +969,7 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, 
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-signing-envelope[v9]"]
+#[tag = "inner-intent-signing-envelope[v10]"]
 #[phantom(D)]
 // Note: This signing envelope is *not* just the erased intent in order to not count the number of
 // signatures in unshielded offers. For this same reason, no wrapper is required for contract
@@ -985,7 +985,7 @@ pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: S
 tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-signing-envelope[v9]"]
+#[tag = "intent-signing-envelope[v10]"]
 #[phantom(D)]
 pub struct IntentSigningEnvelope<D: DB> {
     pub segment: u16,
@@ -994,7 +994,7 @@ pub struct IntentSigningEnvelope<D: DB> {
 tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-pedersen-challenge-envelope[v9]"]
+#[tag = "inner-intent-pedersen-challenge-envelope[v10]"]
 #[phantom(D)]
 // Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
 // binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
@@ -1017,7 +1017,7 @@ struct InnerIntentPedersenEnvelope<
 tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-pedersen-challenge-envelope[v9]"]
+#[tag = "intent-pedersen-challenge-envelope[v10]"]
 #[phantom(D)]
 struct IntentPedersenEnvelope<D: DB> {
     segment: u16,
@@ -1297,7 +1297,16 @@ impl TransactionCostModel {
                 eff.claimed_contract_calls.size(),
                 PERSISTENT_HASH_BYTES * 2 + FR_BYTES + 8,
             ),
-            (eff.shielded_mints.size(), PERSISTENT_HASH_BYTES),
+            (
+                eff.shielded_mints.size(),
+                // Mint keys are variable-length (domain separator plus spend
+                // rule); charge for the largest key present.
+                eff.shielded_mints
+                    .iter()
+                    .map(|kv| Serializable::serialized_size(&*kv.0))
+                    .max()
+                    .unwrap_or(PERSISTENT_HASH_BYTES),
+            ),
             (eff.unshielded_mints.size(), PERSISTENT_HASH_BYTES),
             (eff.unshielded_inputs.size(), PERSISTENT_HASH_BYTES + 1),
             (eff.unshielded_outputs.size(), PERSISTENT_HASH_BYTES + 1),
@@ -1467,7 +1476,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v12]"]
+#[tag = "transaction[v13]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1751,7 +1760,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v12]"]
+#[tag = "standard-transaction[v13]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -2730,7 +2739,7 @@ impl rand::distributions::Distribution<ContractCall<(), InMemoryDB>>
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; P)]
 #[storable(db = D)]
-#[tag = "contract-call[v3]"]
+#[tag = "contract-call[v4]"]
 pub struct ContractCall<P: ProofKind<D>, D: DB> {
     pub address: ContractAddress,
     pub entry_point: EntryPointBuf,
@@ -3140,7 +3149,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v9]"]
+#[tag = "contract-action[v10]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),

@@ -539,9 +539,12 @@ export function decodeQualifiedShieldedCoinInfo(coin: {
 
 /**
  * Derives the raw {@link RawTokenType} associated with a particular
- * {@link DomainSeparator} and contract.
+ * {@link DomainSeparator} and contract, and optionally a custom spend rule
+ * (hex-encoded tagged serialization of a `SpendRule`). Omitting `spend_rule`
+ * derives the token type with the empty spend rule, matching the historical
+ * derivation.
  */
-export function rawTokenType(domain_sep: DomainSeparator, contract: ContractAddress): RawTokenType;
+export function rawTokenType(domain_sep: DomainSeparator, contract: ContractAddress, spend_rule?: string): RawTokenType;
 
 /**
  * Samples a uniform contract address, for use in testing

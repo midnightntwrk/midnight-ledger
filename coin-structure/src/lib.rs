@@ -18,6 +18,7 @@
 
 pub mod coin;
 pub mod contract;
+pub mod custom_spend;
 mod fab;
 pub mod transfer;
 

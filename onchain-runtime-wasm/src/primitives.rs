@@ -19,6 +19,7 @@ use base_crypto::repr::BinaryHashRepr;
 use base_crypto::{ecdsa, hash, schnorr};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
+use coin_structure::custom_spend::SpendRule;
 
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, JsString, Uint8Array};
@@ -138,13 +139,26 @@ pub fn verify_signature(
 }
 
 #[wasm_bindgen(js_name = "rawTokenType")]
-pub fn raw_token_type(domain_sep: Uint8Array, contract: &str) -> Result<String, JsError> {
+pub fn raw_token_type(
+    domain_sep: Uint8Array,
+    contract: &str,
+    spend_rule: Option<String>,
+) -> Result<String, JsError> {
     let contract: ContractAddress = from_value_hex_ser(contract)?;
     let domain_sep_buf = <[u8; PERSISTENT_HASH_BYTES]>::try_from(domain_sep.to_vec())
         .map_err(|_| JsError::new("Expected 32-byte bytearray"))?;
+    let rule = match spend_rule {
+        None => SpendRule::Empty,
+        Some(rule_hex) => {
+            let rule_bytes: Vec<u8> = FromHex::from_hex(rule_hex)
+                .map_err(|_| JsError::new("Expected hex-encoded spend rule"))?;
+            serialize::tagged_deserialize(&mut &rule_bytes[..])
+                .map_err(|e| JsError::new(&format!("Invalid spend rule: {e}")))?
+        }
+    };
     to_value_hex_ser(
         &contract
-            .custom_shielded_token_type(HashOutput(domain_sep_buf))
+            .custom_shielded_token_type(HashOutput(domain_sep_buf), &rule)
             .0,
     )
 }

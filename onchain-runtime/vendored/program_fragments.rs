@@ -72,7 +72,11 @@ macro_rules! kernel_mint {
     [
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(4 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($domain_sep.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: {
+        let domain_sep: AlignedValue = $domain_sep.clone().try_into().unwrap();
+        let rule: AlignedValue = coin_structure::custom_spend::SpendRule::Empty.into();
+        StateValue::Cell(Sp::new(AlignedValue::concat([&domain_sep, &rule]))).try_into().unwrap()
+      } },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Member,

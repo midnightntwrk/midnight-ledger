@@ -32,6 +32,7 @@ use coin_structure::coin::{
 };
 use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use coin_structure::contract::ContractAddress;
+use coin_structure::custom_spend::SpendRule;
 use coin_structure::transfer::Recipient;
 use derive_where::derive_where;
 use hex::FromHexError;
@@ -348,6 +349,42 @@ pub struct BlockContext {
 }
 tag_enforcement_test!(BlockContext);
 
+/// The JSON form of a [`ShieldedMintKey`]: a mint with [`SpendRule::Empty`]
+/// is the bare hex domain separator (the historical format), while a
+/// non-empty rule is appended as `":"` followed by the hex of the rule's
+/// tagged serialization.
+fn shielded_mint_key_to_hex(key: &ShieldedMintKey) -> String {
+    match &key.1 {
+        SpendRule::Empty => key.0.0.encode_hex(),
+        rule => {
+            let mut rule_bytes = Vec::new();
+            serialize::tagged_serialize(rule, &mut rule_bytes)
+                .expect("In-memory serialization must succeed");
+            format!(
+                "{}:{}",
+                key.0.0.encode_hex::<String>(),
+                rule_bytes.encode_hex::<String>()
+            )
+        }
+    }
+}
+
+fn shielded_mint_key_from_hex(s: &str) -> Result<ShieldedMintKey, std::io::Error> {
+    match s.split_once(':') {
+        None => Ok(ShieldedMintKey(
+            HashOutput(FromHex::from_hex(s).map_err(err_conv)?),
+            SpendRule::Empty,
+        )),
+        Some((domain_sep, rule_hex)) => {
+            let rule_bytes: Vec<u8> = FromHex::from_hex(rule_hex).map_err(err_conv)?;
+            Ok(ShieldedMintKey(
+                HashOutput(FromHex::from_hex(domain_sep).map_err(err_conv)?),
+                serialize::tagged_deserialize(&mut &rule_bytes[..])?,
+            ))
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SerdeEffects {
@@ -399,7 +436,7 @@ impl<D: DB> From<Effects<D>> for SerdeEffects {
             shielded_mints: eff
                 .shielded_mints
                 .into_iter()
-                .map(|(tt, val)| (tt.0.encode_hex(), val))
+                .map(|(key, val)| (shielded_mint_key_to_hex(&key), val))
                 .collect(),
             unshielded_mints: eff
                 .unshielded_mints
@@ -467,9 +504,8 @@ impl<D: DB> TryFrom<SerdeEffects> for Effects<D> {
             shielded_mints: eff
                 .shielded_mints
                 .into_iter()
-                .map(|(tt, val)| Ok::<_, FromHexError>((HashOutput(FromHex::from_hex(tt)?), val)))
-                .collect::<Result<_, _>>()
-                .map_err(err_conv)?,
+                .map(|(key, val)| Ok::<_, std::io::Error>((shielded_mint_key_from_hex(&key)?, val)))
+                .collect::<Result<_, _>>()?,
             unshielded_mints: eff
                 .unshielded_mints
                 .into_iter()
@@ -559,6 +595,66 @@ impl Distribution<ClaimedUnshieldedSpendsKey> for Standard {
     }
 }
 
+/// The key of a shielded mint effect: the domain separator the minting
+/// contract chose, together with the [`SpendRule`] the minted token type
+/// commits to. Together with the calling contract's address this fully
+/// determines the minted
+/// [`ShieldedTokenType`](coin_structure::coin::ShieldedTokenType).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable, Hash)]
+#[storable(base)]
+#[tag = "contract-effects-shielded-mint-key[v1]"]
+pub struct ShieldedMintKey(pub HashOutput, pub SpendRule);
+tag_enforcement_test!(ShieldedMintKey);
+
+impl ShieldedMintKey {
+    pub fn domain_sep(&self) -> HashOutput {
+        self.0
+    }
+
+    pub fn rule(&self) -> &SpendRule {
+        &self.1
+    }
+
+    pub fn from_inner(domain_sep: HashOutput, rule: SpendRule) -> ShieldedMintKey {
+        ShieldedMintKey(domain_sep, rule)
+    }
+}
+
+impl From<ShieldedMintKey> for Value {
+    fn from(val: ShieldedMintKey) -> Value {
+        let v1: Value = val.0.into();
+        let v2: Value = val.1.into();
+        Value::concat([&v1, &v2])
+    }
+}
+
+impl TryFrom<&ValueSlice> for ShieldedMintKey {
+    type Error = InvalidBuiltinDecode;
+
+    fn try_from(value: &ValueSlice) -> Result<ShieldedMintKey, InvalidBuiltinDecode> {
+        if value.0.len() == 5 {
+            Ok(ShieldedMintKey(
+                (&value[0..1]).try_into()?,
+                (&value[1..5]).try_into()?,
+            ))
+        } else {
+            Err(InvalidBuiltinDecode("ShieldedMintKey"))
+        }
+    }
+}
+
+impl Aligned for ShieldedMintKey {
+    fn alignment() -> Alignment {
+        Alignment::concat([&HashOutput::alignment(), &SpendRule::alignment()])
+    }
+}
+
+impl Distribution<ShieldedMintKey> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ShieldedMintKey {
+        ShieldedMintKey(rng.r#gen(), rng.r#gen())
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -641,13 +737,13 @@ impl Distribution<ClaimedContractCallsValue> for Standard {
 #[derive_where(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
-#[tag = "contract-effects[v3]"]
+#[tag = "contract-effects[v4]"]
 pub struct Effects<D: DB> {
     pub claimed_nullifiers: storage::storage::HashSet<Nullifier, D>,
     pub claimed_shielded_receives: storage::storage::HashSet<CoinCommitment, D>,
     pub claimed_shielded_spends: storage::storage::HashSet<CoinCommitment, D>,
     pub claimed_contract_calls: storage::storage::HashSet<ClaimedContractCallsValue, D>,
-    pub shielded_mints: storage::storage::HashMap<HashOutput, u64, D>,
+    pub shielded_mints: storage::storage::HashMap<ShieldedMintKey, u64, D>,
     pub unshielded_mints: storage::storage::HashMap<HashOutput, u64, D>,
     pub unshielded_inputs: storage::storage::HashMap<TokenType, u128, D>,
     pub unshielded_outputs: storage::storage::HashMap<TokenType, u128, D>,
@@ -734,7 +830,12 @@ impl<'a, D: DB> From<&'a Effects<D>> for VmValue<D> {
                     StateValue::Map(
                         eff.shielded_mints
                             .iter()
-                            .map(|x| ((*x.0).into(), StateValue::Cell(Sp::new((*(x.1)).into()))))
+                            .map(|sp_item| {
+                                let (ref key_sp, ref value_sp) = *sp_item;
+                                let key: ShieldedMintKey = (*(*key_sp).clone()).clone();
+                                let value: u64 = *(*value_sp).clone();
+                                (key.into(), StateValue::Cell(Sp::new(value.into())))
+                            })
                             .collect(),
                     ),
                     StateValue::Map(
@@ -1008,4 +1109,62 @@ fn ensure_fully_deserialized(data: &[u8]) -> Result<(), std::io::Error> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod shielded_mint_key_tests {
+    use super::*;
+    use storage::db::InMemoryDB;
+
+    fn sample_effects() -> Effects<InMemoryDB> {
+        Effects {
+            shielded_mints: [
+                (
+                    ShieldedMintKey(HashOutput([1u8; 32]), SpendRule::Empty),
+                    5u64,
+                ),
+                (
+                    ShieldedMintKey(
+                        HashOutput([2u8; 32]),
+                        SpendRule::GateCircuit(HashOutput([3u8; 32])),
+                    ),
+                    7u64,
+                ),
+                (
+                    ShieldedMintKey(
+                        HashOutput([4u8; 32]),
+                        SpendRule::GateContract(
+                            ContractAddress(HashOutput([5u8; 32])),
+                            HashOutput([6u8; 32]),
+                        ),
+                    ),
+                    9u64,
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..Effects::default()
+        }
+    }
+
+    #[test]
+    fn serde_effects_roundtrip_spend_rules() {
+        let eff = sample_effects();
+        let serde_eff: SerdeEffects = eff.clone().into();
+        // An Empty rule must keep the historical bare-hex key format.
+        assert!(
+            serde_eff.shielded_mints.contains_key(&"01".repeat(32)),
+            "Empty-rule mint key must serialize as the bare hex domain separator"
+        );
+        let back: Effects<InMemoryDB> = serde_eff.try_into().unwrap();
+        assert_eq!(eff, back);
+    }
+
+    #[test]
+    fn vm_value_roundtrip_spend_rules() {
+        let eff = sample_effects();
+        let vm: VmValue<InMemoryDB> = (&eff).into();
+        let back: Effects<InMemoryDB> = vm.try_into().unwrap();
+        assert_eq!(eff, back);
+    }
 }

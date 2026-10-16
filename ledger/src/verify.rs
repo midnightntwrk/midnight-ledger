@@ -863,8 +863,10 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
                     .chain(call.fallible_transcript.iter().map(|t| (*segment, t)));
 
                 for (segment, transcript) in transcripts {
-                    for (pre_token, val) in transcript.effects.shielded_mints.clone() {
-                        let tt = call.address.custom_shielded_token_type(pre_token);
+                    for (mint_key, val) in transcript.effects.shielded_mints.clone() {
+                        let tt = call
+                            .address
+                            .custom_shielded_token_type(mint_key.domain_sep(), mint_key.rule());
                         update_balance(
                             &mut res,
                             TokenType::Shielded(tt),
