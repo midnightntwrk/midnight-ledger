@@ -44,17 +44,17 @@ use transient_crypto::fab::AlignmentExt;
 use super::ir::{Instruction as I, IrSource};
 
 /// The old outer scalar type, from midnight-curves v0.2 (via transient-crypto-old).
-type OldScalar = transient_crypto_old::curve::outer::Scalar;
+pub(crate) type OldScalar = transient_crypto_old::curve::outer::Scalar;
 
 /// The old embedded affine type.
-type OldEmbeddedAffineExt = transient_crypto_old::curve::embedded::AffineExtended;
+pub(crate) type OldEmbeddedAffineExt = transient_crypto_old::curve::embedded::AffineExtended;
 
 /// The old embedded affine (non-extended).
-type OldEmbeddedAffine = transient_crypto_old::curve::embedded::Affine;
+pub(crate) type OldEmbeddedAffine = transient_crypto_old::curve::embedded::Affine;
 
 /// Converts a current outer scalar to the old (v1) outer scalar.
 /// Both are BLS12-381 Fq with identical byte representations.
-fn cvt(s: transient_crypto::curve::outer::Scalar) -> OldScalar {
+pub(crate) fn cvt(s: transient_crypto::curve::outer::Scalar) -> OldScalar {
     OldScalar::from_bytes_le(&s.to_bytes_le()).expect("BLS12-381 Fq round-trip")
 }
 
@@ -92,7 +92,7 @@ fn v1_lnot(
     std.convert(layouter, &bit)
 }
 
-fn v1_fab_decode_to_bytes(
+pub(crate) fn v1_fab_decode_to_bytes(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<OldScalar>,
     align: &Alignment,
@@ -179,7 +179,7 @@ fn v1_fab_decode_to_bytes_atom(
     }
 }
 
-fn v1_assemble_bytes(
+pub(crate) fn v1_assemble_bytes(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<OldScalar>,
     bytes: &[AssignedByte<OldScalar>],
@@ -203,7 +203,7 @@ fn v1_assemble_bytes(
     Ok(acc)
 }
 
-fn v1_ecc_from_parts(
+pub(crate) fn v1_ecc_from_parts(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<OldScalar>,
     x: &AssignedNative<OldScalar>,

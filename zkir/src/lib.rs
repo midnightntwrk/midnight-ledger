@@ -21,6 +21,7 @@ use transient_crypto::proofs::Proof;
 mod ir;
 pub mod ir_v1;
 mod ir_vm;
+pub mod zswap_spend;
 
 pub use ir::{Instruction, IrMinorVersion, IrSource};
 pub use ir_vm::Preprocessed;

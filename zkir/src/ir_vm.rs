@@ -214,10 +214,7 @@ fn ecc_from_parts(
 impl IrSource {
     /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
     /// to produce a public input vector, and public input skip information.
-    pub(crate) fn preprocess(
-        &self,
-        preimage: &ProofPreimage,
-    ) -> Result<Preprocessed, ProvingError> {
+    pub fn preprocess(&self, preimage: &ProofPreimage) -> Result<Preprocessed, ProvingError> {
         if preimage.inputs.len() != self.num_inputs as usize {
             bail!(
                 "Expected {} inputs, received {}",
