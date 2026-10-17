@@ -142,8 +142,10 @@ where
 }
 
 fn lt<D: DB>(a: &Value, b: &Value) -> Result<AlignedValue, OnchainProgramError<D>> {
-    let a: u64 = (&**a).try_into()?;
-    let b: u64 = (&**b).try_into()?;
+    // u128 so comparisons cover the full range of unshielded balances, which
+    // are stored as u128.
+    let a: u128 = (&**a).try_into()?;
+    let b: u128 = (&**b).try_into()?;
     Ok((a < b).into())
 }
 
