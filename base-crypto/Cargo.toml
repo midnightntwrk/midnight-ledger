@@ -16,7 +16,7 @@ fixed-point-custom-serde = []
 derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
 serialize = { version = "1.1.1", path = "../serialize", package = "midnight-serialize" }
 
-ff = "^0.13.1"
+ff = "^0.14.0"
 group = "^0.13.0"
 anyhow = { version = "^1.0.102" }
 
