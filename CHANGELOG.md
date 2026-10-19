@@ -11,6 +11,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   `POST /attestation` (OIDC or PKI token via the local TEE token socket), and
   `GET /status` with a `proof-job-id` response header. See the `gcp_cs` notes
   in [`README.md`](./README.md).
+- fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
+- feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 
 ## Ledger 8.2.0-rc.1
 
@@ -81,7 +83,7 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
