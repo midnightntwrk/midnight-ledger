@@ -29,4 +29,4 @@ jobs:
       # False-positive suppressions live in .gitleaks.toml at the repo root,
       # each with a written justification.
       - name: Scan code
-        uses: midnightntwrk/upload-sarif-github-action@816cd32eca4455557a762aa732c55f4eb8c99a04
+        uses: midnightntwrk/upload-sarif-github-action@6e93ae0ea1494d29b521a2c8bbfa068375bf7a26  #v1.0.5
