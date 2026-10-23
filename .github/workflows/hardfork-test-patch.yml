@@ -41,7 +41,7 @@ jobs:
           } >> "$HOME/.config/git/config"
 
       - name: Get the rust toolchain
-        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8  # master 2026-10-16
         with:
           components: rustfmt
 
