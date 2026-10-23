@@ -1,17 +1,18 @@
 # osv-scanner suppressions, read by the Scan workflow's osv-scanner and by
 # Scorecard's Vulnerabilities check. Every entry needs a reason a reviewer
-# would accept and an expiry; prefer fixing over ignoring.
+# would accept and an expiry; prefer fixing over ignoring. Use the OSV
+# primary id (GHSA-* for npm, RUSTSEC-* for crates); CVE aliases do not match.
 
 # tinypool 1.x is vitest 3's worker pool in integration-tests. Both advisories
 # need an attacker to control worker/run options; here the only caller is
 # vitest running this repo's own tests, and nothing from it ships. No 1.x
 # fix exists - the fix is the vitest 4 migration, which is its own change.
 [[IgnoredVulns]]
-id = "CVE-2026-104848"
+id = "GHSA-5gmw-xhrv-c9v3"
 ignoreUntil = 2026-12-31
-reason = "dev-only vitest 3 worker pool; fixed by the vitest 4 migration (GHSA-5gmw-xhrv-c9v3)"
+reason = "dev-only vitest 3 worker pool; fixed by the vitest 4 migration (CVE-2026-104848)"
 
 [[IgnoredVulns]]
-id = "CVE-2026-104849"
+id = "GHSA-85c8-ppgw-ccpr"
 ignoreUntil = 2026-12-31
-reason = "dev-only vitest 3 worker pool; fixed by the vitest 4 migration (GHSA-85c8-ppgw-ccpr)"
+reason = "dev-only vitest 3 worker pool; fixed by the vitest 4 migration (CVE-2026-104849)"
