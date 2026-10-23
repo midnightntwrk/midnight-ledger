@@ -1,5 +1,6 @@
-# osv-scanner suppressions, read by the Scan workflow's osv-scanner and by
-# Scorecard's Vulnerabilities check. Every entry needs a reason a reviewer
+# osv-scanner suppressions for the lockfiles in THIS directory: osv-scanner
+# reads osv-scanner.toml next to each lockfile, so a repo-root file only
+# covers root-level lockfiles. Read by the Scan workflow and by Scorecard. Every entry needs a reason a reviewer
 # would accept and an expiry; prefer fixing over ignoring. Use the OSV
 # primary id (GHSA-* for npm, RUSTSEC-* for crates); CVE aliases do not match.
 
