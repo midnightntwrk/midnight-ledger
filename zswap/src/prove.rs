@@ -213,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_proof_sizes() {
-        use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
+        use coin_structure::coin::Info as CoinInfo;
         use serialize::Serializable;
         let mut rng = StdRng::seed_from_u64(0x42);
         let resolver = ZswapResolver(
@@ -230,13 +230,11 @@ mod tests {
             resolver: &resolver,
         };
 
-        let qcoin = QualifiedCoinInfo {
+        let coin = CoinInfo {
             value: Default::default(),
             type_: Default::default(),
             nonce: rng.r#gen(),
-            mt_index: 0,
         };
-        let coin = CoinInfo::from(&qcoin);
         let recipient = Recipient::Contract(Default::default());
         let tree = MerkleTree::<(), InMemoryDB>::blank(32)
             .try_update_hash(0, coin.commitment(&recipient).0, ())
@@ -244,7 +242,7 @@ mod tests {
             .rehash();
 
         let inp =
-            Input::new_contract_owned(&mut rng, &qcoin, None, Default::default(), &tree).unwrap();
+            Input::new_contract_owned(&mut rng, &coin, None, Default::default(), &tree).unwrap();
         let inp_proven = inp.prove(provider.split()).await.unwrap();
         assert_eq!(inp_proven.proof.serialized_size(), INPUT_PROOF_SIZE);
 

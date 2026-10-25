@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { ZswapOffer, ZswapOutput, Transaction, ZswapTransient } from '@midnightntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
+import { HEX_64_REGEX, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
 
@@ -28,7 +28,7 @@ describe('Ledger API - ZswapTransient [@slow][@proving]', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
@@ -52,7 +52,7 @@ describe('Ledger API - ZswapTransient [@slow][@proving]', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );

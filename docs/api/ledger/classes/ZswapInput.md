@@ -118,7 +118,7 @@ static newContractOwned(
 
 ##### coin
 
-[`QualifiedShieldedCoinInfo`](../type-aliases/QualifiedShieldedCoinInfo.md)
+[`ShieldedCoinInfo`](../type-aliases/ShieldedCoinInfo.md)
 
 ##### segment
 
