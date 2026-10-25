@@ -1385,13 +1385,8 @@ async fn composable_funded() {
             ]
             .into(),
             transient: vec![
-                Transient::new_from_contract_owned_output(
-                    &mut rng,
-                    &coin_in.qualify(0),
-                    None,
-                    coin_in_out,
-                )
-                .unwrap(),
+                Transient::new_from_contract_owned_output(&mut rng, &coin_in, None, coin_in_out)
+                    .unwrap(),
             ]
             .into(),
             deltas: vec![Delta {

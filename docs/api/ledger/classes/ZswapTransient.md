@@ -136,13 +136,11 @@ static newFromContractOwnedOutput(
 
 Creates a new contract-owned transient, from a given output and its coin.
 
-The [QualifiedShieldedCoinInfo](../type-aliases/QualifiedShieldedCoinInfo.md) should have an `mt_index` of `0`
-
 #### Parameters
 
 ##### coin
 
-[`QualifiedShieldedCoinInfo`](../type-aliases/QualifiedShieldedCoinInfo.md)
+[`ShieldedCoinInfo`](../type-aliases/ShieldedCoinInfo.md)
 
 ##### segment
 

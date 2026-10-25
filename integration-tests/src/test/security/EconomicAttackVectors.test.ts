@@ -29,7 +29,7 @@ import {
   sampleUserAddress,
   WellFormedStrictness
 } from '@midnightntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { Random, Static } from '@/test-objects';
 import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -37,21 +37,21 @@ describe('Economic Attack Vector Tests', () => {
   describe('Double Spending Prevention', () => {
     /**
      * Prevents spending of non-existent coins through merkle tree validation
-     * @given an invalid index that doesn't exist in the chain state
+     * @given a coin whose commitment is not in the chain state
      * @when attempting to create an input for a non-existent coin
-     * @then the system should throw an invalid index error
+     * @then the system should throw a commitment-not-in-tree error
      */
     test('should prevent spending non-existent coins', () => {
       const chainState = new ZswapChainState();
 
       expect(() => {
         ZswapInput.newContractOwned(
-          getQualifiedShieldedCoinInfo(Static.shieldedCoinInfo(1000n)),
+          Static.shieldedCoinInfo(1000n),
           999999,
           Random.contractAddress(),
           chainState
         );
-      }).toThrow('invalid index into sparse merkle tree');
+      }).toThrow('is not in the coin commitment tree');
     });
 
     /**

@@ -16,6 +16,7 @@ use crate::filter_invalid;
 use crate::structure::*;
 use crate::{ZSWAP_TREE_HEIGHT, ciphertext_to_field};
 use base_crypto::fab::AlignedValue;
+use base_crypto::hash::HashOutput;
 use coin_structure::coin::{
     self, Commitment, Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo,
     SecretKey as CoinSecretKey,
@@ -42,7 +43,7 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, Fr};
 use transient_crypto::encryption;
 use transient_crypto::hash::transient_commit;
-use transient_crypto::merkle_tree::MerkleTree;
+use transient_crypto::merkle_tree::{MerklePath, MerkleTree, MerkleTreeDigest};
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
 
@@ -86,17 +87,27 @@ impl<D: DB> Input<ProofPreimage, D> {
     #[instrument(skip(rng))]
     pub fn new_contract_owned<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
-        coin: &QualifiedCoinInfo,
+        coin: &CoinInfo,
         segment: Option<u16>,
         contract: ContractAddress,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
-        Self::new_from_secret_key::<A, R>(
+        let merkle_tree_root = tree.root().ok_or(OfferCreationFailed::TreeNotRehashed)?;
+        let commitment = coin.commitment(&Recipient::Contract(contract));
+        let path = tree
+            .find_path_for_hashed_leaf_within_range(commitment.0, ..)
+            .ok_or(OfferCreationFailed::CommitmentNotInTree(commitment))?;
+        debug!("spending contract-owned coin");
+        Self::new_from_path::<R>(
             rng,
             coin,
             segment,
             SenderEvidence::Contract(contract),
-            tree,
+            merkle_tree_root,
+            MerklePath {
+                leaf: ((), path.leaf),
+                path: path.path,
+            },
         )
     }
 
@@ -144,16 +155,31 @@ impl<D: DB> Input<ProofPreimage, D> {
         sk: SenderEvidence<'_>,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
+        let merkle_tree_root = tree.root().ok_or(OfferCreationFailed::TreeNotRehashed)?;
+        let coin_info = CoinInfo::from(coin);
+        let Commitment(hash) = coin_info.commitment(&sk.clone().into());
+        let path = tree
+            .path_for_leaf(coin.mt_index, ((), hash))
+            .map_err(OfferCreationFailed::InvalidIndex)?;
+        Self::new_from_path::<R>(rng, &coin_info, segment, sk, merkle_tree_root, path)
+    }
+
+    fn new_from_path<R: Rng + CryptoRng + ?Sized>(
+        rng: &mut R,
+        coin: &CoinInfo,
+        segment: Option<u16>,
+        sk: SenderEvidence<'_>,
+        merkle_tree_root: MerkleTreeDigest,
+        path: MerklePath<((), HashOutput)>,
+    ) -> Result<Self, OfferCreationFailed> {
         let rc_e: EmbeddedFr = rng.r#gen();
         let rc = Fr::try_from(rc_e).expect("Fr should be larger than EmbeddedFr");
-        let nullifier = CoinInfo::from(coin).nullifier(&sk);
+        let nullifier = coin.nullifier(&sk);
         let value_commitment = Pedersen::commit(
             &(coin.type_, segment.unwrap_or(0)),
             &coin.value.into(),
             &rc_e,
         );
-        let merkle_tree_root = tree.root().ok_or(OfferCreationFailed::TreeNotRehashed)?;
-        debug!("spending contract-owned coin");
         let mut public_transcript_prog: Vec<Op<ResultModeVerify, D>> = Vec::new();
         public_transcript_prog.extend(
             HistoricMerkleTree_check_root!(
@@ -191,13 +217,10 @@ impl<D: DB> Input<ProofPreimage, D> {
             (Fr, Fr),
             value_commitment.0
         ));
-        let Commitment(hash) = CoinInfo::from(coin).commitment(&sk.clone().into());
         let mut inputs = Vec::new();
         sk.field_repr(&mut inputs);
-        tree.path_for_leaf(coin.mt_index, ((), hash))
-            .map_err(OfferCreationFailed::InvalidIndex)?
-            .field_repr(&mut inputs);
-        CoinInfo::from(coin).field_repr(&mut inputs);
+        path.field_repr(&mut inputs);
+        coin.field_repr(&mut inputs);
         inputs.push(rc);
         let mut public_transcript_inputs = Vec::new();
         for op in filter_invalid(public_transcript_prog.into_iter()) {
@@ -387,7 +410,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
     #[instrument(skip(rng))]
     pub fn new_from_contract_owned_output<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
-        coin: &QualifiedCoinInfo,
+        coin: &CoinInfo,
         segment: Option<u16>,
         output: Output<ProofPreimage, D>,
     ) -> Result<Self, OfferCreationFailed> {
@@ -496,8 +519,7 @@ mod tests {
         let pk = CoinPublicKey(rng.r#gen());
         let out: Output<ProofPreimage, InMemoryDB> =
             Output::new::<_>(&mut rng, &coin, None, &pk, None).unwrap();
-        let trans =
-            Transient::new_from_contract_owned_output(&mut rng, &coin.qualify(0), None, out);
+        let trans = Transient::new_from_contract_owned_output(&mut rng, &coin, None, out);
         assert!(trans.is_err());
     }
 }

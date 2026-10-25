@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- breaking: `zswap::Input::new_contract_owned` and `zswap::Transient::new_from_contract_owned_output` take a `CoinInfo` instead of a `QualifiedCoinInfo`. A contract-owned coin's commitment is located in the tree by hash, since the contract address that completes it is public; the caller no longer supplies a Merkle index. `OfferCreationFailed` gains `CommitmentNotInTree` for a coin the tree does not hold.
+- breaking: `ZswapInput.newContractOwned` and `ZswapTransient.newFromContractOwnedOutput` in `ledger-wasm` take a `ShieldedCoinInfo` instead of a `QualifiedShieldedCoinInfo`.
+
 ## Ledger 9.1.0.0-rc.5
 
 Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
