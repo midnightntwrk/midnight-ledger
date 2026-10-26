@@ -16,6 +16,7 @@
 use crate as storage;
 use crate::arena::{ArenaHash, ArenaKey, Sp};
 use crate::dag_memo::{DagMemo, InvariantMemos};
+use crate::map_key::{ByShape, ByValue, HoldsKey, MapKey};
 use crate::db::{DB, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::{MerklePatriciaTrie, Node};
@@ -30,7 +31,9 @@ use proptest::arbitrary::Arbitrary;
 use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use serialize::{Deserializable, EncodingShape, Serializable, Tagged, tag_enforcement_test};
+use std::cell::RefCell;
+use std::rc::Rc;
 use sha2::Sha256;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
@@ -43,6 +46,8 @@ pub use storage_core::storage::*;
 
 #[cfg(test)]
 mod array_invariant_tests;
+#[cfg(test)]
+mod map_key_tests;
 #[cfg(any(test, feature = "test-utilities"))]
 mod shared_structure;
 
@@ -1157,6 +1162,8 @@ pub struct BigEndianU64(u64);
 #[derive(Debug)]
 struct BigEndianU64(u64);
 
+serialize::encoding_shape_as!(BigEndianU64, serialize::Fixed<8>);
+
 impl Serializable for BigEndianU64 {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         writer.write_all(&self.0.to_be_bytes())
@@ -1378,11 +1385,13 @@ impl<K: Tagged, V: Storable<D> + Tagged, D: DB, A: Storable<D> + Annotation<V> +
 tag_enforcement_test!(Map<(), ()>);
 
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Storable<D> for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     /// Rather than in-lining the wrapped MPT it is a child such that we know the public Map has
     /// only a single child element (rather than up to 16)
@@ -1413,18 +1422,158 @@ impl<
     }
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        self.mpt
-            .iter()
-            .try_for_each(|(k, _)| from_nibbles::<K>(&k).and(Ok(())))
+        self.check_invariant_memoized(&mut InvariantMemos::new())
+    }
+
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        if K::Check::keys_valid(&self.mpt.0, memos) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Map key does not decode",
+            ))
+        }
     }
 }
 
+/// How decoding checks that every key of a `Map` decodes, in time linear in
+/// the trie's distinct nodes; see [`MapKey`].
+pub trait KeyCheck<K, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> {
+    /// Whether every path in the trie below `root` is a valid key.
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool;
+}
+
+impl<K: EncodingShape + 'static, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>
+    KeyCheck<K, V, D, A> for ByShape
+{
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool {
+        let memo = memos.memo::<MapKeyCheck<K>, KeyTable<K>>();
+        keys_decode::<K, V, D, A>(root, (K::start(), None), memo)
+    }
+}
+
+impl<K: Serializable, V: Storable<D> + HoldsKey<K>, D: DB, A: Storable<D> + Annotation<V>>
+    KeyCheck<K, V, D, A> for ByValue
+{
+    /// Each value pins its key to one path, so a node reached twice is
+    /// misplaced on at least one of its paths; this visits each node once.
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, _: &mut InvariantMemos<D>) -> bool {
+        fn go<K: Serializable, V: Storable<D> + HoldsKey<K>, D: DB, A: Storable<D> + Annotation<V>>(
+            sp: &Sp<Node<V, D, A>, D>,
+            path: &mut std::vec::Vec<u8>,
+            seen: &mut std::collections::HashSet<ArenaHash<D::Hasher>>,
+        ) -> bool {
+            if matches!(sp.deref(), Node::Empty) {
+                return true;
+            }
+            if !seen.insert(sp.hash()) {
+                return false;
+            }
+            let at_own_key = |value: &Sp<V, D>, path: &[u8]| to_nibbles(value.key()) == path;
+            match sp.deref() {
+                Node::Empty => true,
+                Node::Leaf { value, .. } => at_own_key(value, path),
+                Node::Branch { children, .. } => children.iter().enumerate().all(|(i, child)| {
+                    path.push(i as u8);
+                    let ok = go(child, path, seen);
+                    path.pop();
+                    ok
+                }),
+                Node::Extension {
+                    compressed_path,
+                    child,
+                    ..
+                } => {
+                    let len = path.len();
+                    path.extend_from_slice(compressed_path);
+                    let ok = go(child, path, seen);
+                    path.truncate(len);
+                    ok
+                }
+                Node::MidBranchLeaf { value, child, .. } => {
+                    at_own_key(value, path) && go(child, path, seen)
+                }
+            }
+        }
+        go(root, &mut std::vec::Vec::new(), &mut std::collections::HashSet::new())
+    }
+}
+
+/// A position within a `Map` key's encoding: its shape's state, and the high
+/// nibble of a byte not yet complete.
+type KeyPosition<K> = (<K as EncodingShape>::State, Option<u8>);
+
+/// Marks the memo of [`keys_decode`] for keys of type `K`.
+struct MapKeyCheck<K>(PhantomData<K>);
+
+/// Per trie node, whether every key below it decodes from a given position,
+/// filled in as positions are reached.
+type KeyTable<K> = Rc<RefCell<std::collections::HashMap<KeyPosition<K>, bool>>>;
+
+fn key_step<K: EncodingShape>(pos: &KeyPosition<K>, nibble: u8) -> Option<KeyPosition<K>> {
+    if nibble > 0x0f {
+        return None;
+    }
+    match pos.1 {
+        None => Some((pos.0.clone(), Some(nibble))),
+        Some(hi) => K::step(&pos.0, (hi << 4) | nibble).map(|state| (state, None)),
+    }
+}
+
+fn key_accepts<K: EncodingShape>(pos: &KeyPosition<K>) -> bool {
+    pos.1.is_none() && K::accepts(&pos.0)
+}
+
+/// Whether every key in the trie below `sp`, read on from `pos`, decodes as a
+/// `K`. Each node is visited once per position it is reached at, and a key
+/// shape has few positions, so this is linear in the trie's distinct nodes.
+fn keys_decode<K: EncodingShape, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+    sp: &Sp<Node<V, D, A>, D>,
+    pos: KeyPosition<K>,
+    memo: &mut DagMemo<KeyTable<K>, D>,
+) -> bool {
+    let table: KeyTable<K> = memo.get_or_compute(sp, |_, _| Rc::default());
+    if let Some(ok) = RefCell::borrow(&table).get(&pos).copied() {
+        return ok;
+    }
+    let ok = match sp.deref() {
+        Node::Empty => true,
+        Node::Leaf { .. } => key_accepts::<K>(&pos),
+        Node::Branch { children, .. } => children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| !matches!(***child, Node::Empty))
+            .all(|(i, child)| {
+                key_step::<K>(&pos, i as u8).is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, memo))
+            }),
+        Node::Extension {
+            compressed_path,
+            child,
+            ..
+        } => compressed_path
+            .iter()
+            .try_fold(pos.clone(), |pos, n| key_step::<K>(&pos, *n))
+            .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, memo)),
+        Node::MidBranchLeaf { child, .. } => {
+            key_accepts::<K>(&pos) && keys_decode::<K, V, D, A>(child, pos.clone(), memo)
+        }
+    };
+    table.borrow_mut().insert(pos, ok);
+    ok
+}
+
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Serializable for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         Sp::new(self.clone()).serialize(writer)
@@ -1435,11 +1584,13 @@ impl<
 }
 
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Deserializable for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     fn deserialize(reader: &mut impl std::io::Read, recursion_depth: u32) -> std::io::Result<Self> {
         <Sp<Map<K, V, D, A>, D> as Deserializable>::deserialize(reader, recursion_depth)

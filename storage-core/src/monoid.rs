@@ -184,7 +184,7 @@ mod tests {
 
         #[test]
         fn times_saturates(x in any::<u64>(), n in any::<u64>()) {
-            prop_assert_eq!(x.times(n), x.checked_mul(n).unwrap_or(u64::MAX));
+            prop_assert_eq!(x.times(n), x.saturating_mul(n));
         }
     }
 }

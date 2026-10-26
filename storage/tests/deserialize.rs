@@ -35,6 +35,44 @@ mod tests {
     #[cfg(feature = "proptest")]
     simple_arbitrary!(TestVec);
 
+    #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+    enum TestVecState {
+        Len(serialize::ScaleState, std::vec::Vec<u8>),
+        Elems(u32),
+    }
+
+    // A SCALE length, then that many booleans.
+    impl serialize::EncodingShape for TestVec {
+        type State = TestVecState;
+        fn start() -> TestVecState {
+            TestVecState::Len(<u32 as serialize::EncodingShape>::start(), vec![])
+        }
+        fn step(state: &TestVecState, byte: u8) -> Option<TestVecState> {
+            match state {
+                TestVecState::Len(len_state, bytes) => {
+                    let len_state = <u32 as serialize::EncodingShape>::step(len_state, byte)?;
+                    let mut bytes = bytes.clone();
+                    bytes.push(byte);
+                    if <u32 as serialize::EncodingShape>::accepts(&len_state) {
+                        Some(TestVecState::Elems(u32::deserialize(&mut &bytes[..], 0).ok()?))
+                    } else {
+                        Some(TestVecState::Len(len_state, bytes))
+                    }
+                }
+                TestVecState::Elems(left) => (*left > 0 && byte <= 1).then(|| TestVecState::Elems(left - 1)),
+            }
+        }
+        fn accepts(state: &TestVecState) -> bool {
+            *state == TestVecState::Elems(0)
+        }
+    }
+
+    #[cfg(feature = "proptest")]
+    #[test]
+    fn test_vec_shape_matches_decoding() {
+        serialize::check_encoding_shape::<TestVec>();
+    }
+
     impl Distribution<TestVec> for Standard {
         fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> TestVec {
             let len = rng.gen_range(0..16);

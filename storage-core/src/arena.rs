@@ -211,6 +211,19 @@ impl<H: Digest> Serializable for ArenaHash<H> {
     }
 }
 
+impl<H: Digest> serialize::EncodingShape for ArenaHash<H> {
+    type State = usize;
+    fn start() -> usize {
+        0
+    }
+    fn step(read: &usize, _: u8) -> Option<usize> {
+        (*read < <H as Digest>::output_size()).then_some(read + 1)
+    }
+    fn accepts(read: &usize) -> bool {
+        *read == <H as Digest>::output_size()
+    }
+}
+
 impl<H: Digest> Deserializable for ArenaHash<H> {
     fn deserialize(
         reader: &mut impl std::io::Read,
