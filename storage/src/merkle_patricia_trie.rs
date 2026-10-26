@@ -24,6 +24,7 @@ use std::ops::Deref;
 use crate::DefaultDB;
 use crate::Storable;
 use crate::arena::{ArenaKey, Sp};
+use crate::dag_memo::DagMemo;
 use crate::db::DB;
 use crate::storable::{Loader, SizeAnn};
 pub use storage_core::monoid::{Monoid, Semigroup};
@@ -256,6 +257,30 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
             .flat_map(Node::into_inner_for_drop)
     }
 
+    /// Combines `leaf` over every entry, in [`Self::iter`] order, counting an
+    /// entry once per path it is reached by. Each distinct node is visited
+    /// once, so a trie with shared subtrees folds in time linear in its
+    /// distinct nodes.
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        Node::fold(&self.0, memo, &mut leaf, &|_, r| r)
+    }
+
+    /// As [`Self::fold`], with `under(path, r)` applied to the result `r` of
+    /// each subtree reached from its parent by the nibbles `path`.
+    #[allow(dead_code)]
+    pub(crate) fn fold_paths<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+        under: &impl Fn(&[u8], R) -> R,
+    ) -> R {
+        Node::fold(&self.0, memo, &mut leaf, under)
+    }
+
     /// Generate iterator over leaves, `(path, &value)`
     pub fn iter(&self) -> MPTIter<'_, V, D> {
         MPTIter(Node::<V, D, A>::leaves(&self.0, vec![]))
@@ -432,6 +457,35 @@ fn expand_nibbles(compressed: &[u8], len: usize) -> std::vec::Vec<u8> {
 }
 
 impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
+    fn fold<R: Monoid + Clone>(
+        sp: &Sp<Self, D>,
+        memo: &mut DagMemo<R, D>,
+        leaf: &mut impl FnMut(&mut DagMemo<R, D>, &Sp<T, D>) -> R,
+        under: &impl Fn(&[u8], R) -> R,
+    ) -> R {
+        memo.get_or_compute(sp, |memo, node| match node {
+            Node::Empty => R::empty(),
+            Node::Leaf { value, .. } => leaf(memo, value),
+            Node::Extension {
+                compressed_path,
+                child,
+                ..
+            } => under(compressed_path, Self::fold(child, memo, leaf, under)),
+            Node::Branch { children, .. } => {
+                children
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, child)| !matches!(***child, Node::Empty))
+                    .fold(R::empty(), |acc, (i, child)| {
+                        acc.append(&under(&[i as u8], Self::fold(child, memo, leaf, under)))
+                    })
+            }
+            Node::MidBranchLeaf { value, child, .. } => {
+                Self::fold(child, memo, leaf, under).append(&leaf(memo, value))
+            }
+        })
+    }
+
     fn into_inner_for_drop(self) -> impl Iterator<Item = T> {
         let res: Box<dyn Iterator<Item = T>> = match self {
             Node::Empty => Box::new(empty()),
@@ -1504,6 +1558,9 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         loader.do_check(node)
     }
 }
+
+#[cfg(test)]
+mod fold_tests;
 
 #[cfg(test)]
 mod tests {

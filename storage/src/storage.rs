@@ -15,10 +15,11 @@
 
 use crate as storage;
 use crate::arena::{ArenaHash, ArenaKey, Sp};
+use crate::dag_memo::DagMemo;
 use crate::db::{DB, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::MerklePatriciaTrie;
-use crate::merkle_patricia_trie::Semigroup;
+use crate::merkle_patricia_trie::{Monoid, Semigroup};
 use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
@@ -309,6 +310,16 @@ impl<
         })
     }
 
+    /// Combines `leaf` over every entry, in [`Self::iter`] order, in time
+    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<K, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.0.fold(memo, |memo, kv| leaf(memo, &kv.0, &kv.1))
+    }
+
     /// Iterate over the key value pairs in the hash map
     #[allow(clippy::type_complexity)]
     pub fn iter(
@@ -477,6 +488,16 @@ impl<V: Storable<D> + Serializable, D: DB, A: Storable<D> + Annotation<(Sp<V, D>
         other
             .iter()
             .fold(self.clone(), |acc, x| acc.insert(x.deref().deref().clone()))
+    }
+
+    /// Combines `leaf` over every element, in [`Self::iter`] order, in time
+    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.0.fold(memo, |memo, v, _| leaf(memo, v))
     }
 
     /// Iterate over the key value pairs in the hash set
@@ -791,6 +812,17 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
             .flat_map(MerklePatriciaTrie::into_inner_for_drop)
     }
 
+    /// Combines `leaf` over every element in time linear in the distinct
+    /// nodes; see [`MerklePatriciaTrie::fold`]. The order is the trie's, not
+    /// index order.
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.0.fold(memo, leaf)
+    }
+
     /// Iterate over the elements in the array as `Sp<V>`s
     pub fn iter(&self) -> ArrayIter<'_, V, D> {
         ArrayIter::new(self)
@@ -901,6 +933,17 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
         MultiSet {
             elements: HashMap::new(),
         }
+    }
+
+    /// Combines `leaf` over every element, once per unit of its quantity, in
+    /// time linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.elements
+            .fold(memo, |memo, v, count| leaf(memo, v).times(**count as u64))
     }
 
     /// Insert an element with a quantity of one or, if the element is already in the set, increase its quantity by one
@@ -1531,6 +1574,16 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         Sp::into_inner(self.mpt)
             .into_iter()
             .flat_map(MerklePatriciaTrie::into_inner_for_drop)
+    }
+
+    /// Combines `leaf` over every value, in [`Self::iter`] order, in time
+    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.mpt.fold(memo, leaf)
     }
 
     /// Iterate over the key-value pairs in the map in a deterministic, but unspecified order.
