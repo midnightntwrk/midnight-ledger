@@ -116,7 +116,7 @@ impl Monoid for i128 {
 
 impl Semigroup for SizeAnn {
     fn append(&self, other: &Self) -> Self {
-        SizeAnn(self.0 + other.0)
+        SizeAnn(self.0.saturating_add(other.0))
     }
 }
 

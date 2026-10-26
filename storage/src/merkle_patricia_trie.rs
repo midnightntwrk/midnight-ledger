@@ -27,15 +27,14 @@ use crate::arena::{ArenaKey, Sp};
 use crate::dag_memo::DagMemo;
 use crate::db::DB;
 use crate::storable::{Loader, SizeAnn};
-pub use storage_core::monoid::{Monoid, Semigroup};
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
+pub use storage_core::monoid::{Monoid, Semigroup};
 
 /// A Merkle Patricia Trie
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[storable(db = D, invariant = MerklePatriciaTrie::canonicity)]
 pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
@@ -71,134 +70,39 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         MerklePatriciaTrie(Sp::new(Node::Empty))
     }
 
-    fn annotation_consistency(&self) -> Result<(), std::io::Error> {
-        fn err<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            ann: &A,
-            true_val: A,
-        ) -> Result<A, std::io::Error> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "MPT annotation isn't correctly calculated: Annotation {:?}, correct calculation: {:?}",
-                    ann, true_val
-                ),
-            ))
-        }
-
-        fn sum_ann<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            node: &Node<V, D, A>,
-        ) -> Result<A, std::io::Error> {
-            match node {
-                Node::Empty => Ok(A::empty()),
-                Node::Leaf { ann, value } => {
-                    let true_val = A::from_value(value);
-                    if ann != &A::from_value(value) {
-                        return err(ann, true_val);
-                    };
-                    Ok(true_val)
-                }
-                Node::Branch { ann, children } => {
-                    let true_val = children.iter().try_fold(A::empty(), |acc, x| {
-                        Ok::<A, std::io::Error>(acc.append(&sum_ann(&x.deref().clone())?))
-                    })?;
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-                Node::Extension { ann, child, .. } => {
-                    let true_val = sum_ann(&child.deref().clone())?;
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-                Node::MidBranchLeaf { ann, value, child } => {
-                    let true_val = sum_ann(&child.deref().clone())?.append(&A::from_value(value));
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-            }
-        }
-
-        let _ = sum_ann(self.0.deref())?;
-        Ok(())
-    }
-
     /// Check that the trie is in canonical form, returning a description of the
     /// violated rule otherwise. A well-formed trie is *canonical*: its structure
     /// is uniquely determined by its key-value contents (see the type-level
-    /// docs). This is a hand-enumerated statement of the structural rules,
-    /// composed with the annotation-consistency check.
+    /// docs).
     ///
-    /// This is wired in as the `Storable` invariant, so it is also what
-    /// deserialization enforces: it replaces the narrower
-    /// annotation-consistency-only check, and a trie whose *structure* is
-    /// non-canonical no longer decodes.
+    /// Every rule is local to a node and its children, so deserialization
+    /// enforces this by checking each decoded node. This checks a trie built
+    /// in memory, visiting each distinct node once.
     pub fn canonicity(&self) -> Result<(), std::io::Error> {
-        fn err<T>(msg: &str) -> Result<T, std::io::Error> {
-            Err(std::io::Error::new(
+        fn check<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+            sp: &Sp<Node<V, D, A>, D>,
+            memo: &mut DagMemo<Result<(), String>, D>,
+        ) -> Result<(), String> {
+            memo.get_or_compute(sp, |memo, node| {
+                let children: Vec<&Sp<Node<V, D, A>, D>> = match node {
+                    Node::Empty | Node::Leaf { .. } => vec![],
+                    Node::Branch { children, .. } => children.iter().collect(),
+                    Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => {
+                        vec![child]
+                    }
+                };
+                for child in children {
+                    check(child, memo)?;
+                }
+                Storable::<D>::check_invariant(node).map_err(|e| e.to_string())
+            })
+        }
+        check(&self.0, &mut DagMemo::new()).map_err(|msg| {
+            std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("canonicity: {msg}"),
-            ))
-        }
-
-        fn structure<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            node: &Node<V, D, A>,
-        ) -> Result<(), std::io::Error> {
-            match node {
-                Node::Empty | Node::Leaf { .. } => Ok(()),
-                Node::Branch { children, .. } => {
-                    if children
-                        .iter()
-                        .filter(|child| !matches!(***child, Node::Empty))
-                        .count()
-                        < 2
-                    {
-                        return err("Node::Branch must have at least two non-empty children");
-                    }
-                    children
-                        .iter()
-                        .try_for_each(|child| structure(child.deref()))
-                }
-                Node::Extension {
-                    compressed_path,
-                    child,
-                    ..
-                } => {
-                    if compressed_path.is_empty() {
-                        return err("Node::Extension path must be non-empty");
-                    }
-                    if compressed_path.len() > 255 {
-                        return err("Node::Extension path may not be longer than 255");
-                    }
-                    if compressed_path.iter().any(|b| *b > 0x0f) {
-                        return err("Node::Extension path must consist of nibbles");
-                    }
-                    match child.deref() {
-                        Node::Empty => {
-                            return err("Node::Extension child must not be Node::Empty");
-                        }
-                        Node::Extension { .. } if compressed_path.len() != 255 => {
-                            return err(
-                                "Node::Extension may only have a Node::Extension child when its own path is of length 255",
-                            );
-                        }
-                        _ => {}
-                    }
-                    structure(child.deref())
-                }
-                Node::MidBranchLeaf { child, .. } => match child.deref() {
-                    Node::Branch { .. } | Node::Extension { .. } => structure(child.deref()),
-                    _ => err("Node::MidBranchLeaf may only have Node::Branch or Node::Extension children"),
-                },
-            }
-        }
-
-        structure(self.0.deref())?;
-        self.annotation_consistency()
+            )
+        })
     }
 
     /// Whether [`Self::canonicity`] holds.
@@ -471,15 +375,13 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                 child,
                 ..
             } => under(compressed_path, Self::fold(child, memo, leaf, under)),
-            Node::Branch { children, .. } => {
-                children
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, child)| !matches!(***child, Node::Empty))
-                    .fold(R::empty(), |acc, (i, child)| {
-                        acc.append(&under(&[i as u8], Self::fold(child, memo, leaf, under)))
-                    })
-            }
+            Node::Branch { children, .. } => children
+                .iter()
+                .enumerate()
+                .filter(|(_, child)| !matches!(***child, Node::Empty))
+                .fold(R::empty(), |acc, (i, child)| {
+                    acc.append(&under(&[i as u8], Self::fold(child, memo, leaf, under)))
+                }),
             Node::MidBranchLeaf { value, child, .. } => {
                 Self::fold(child, memo, leaf, under).append(&leaf(memo, value))
             }
@@ -1407,79 +1309,79 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         Ok(())
     }
 
+    /// Checks this node's canonicity rules against its children, which were
+    /// checked when decoded, so a decode checks each distinct node once.
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        match self {
-            Node::Empty | Node::Leaf { .. } => {}
+        fn err(msg: &str) -> Result<(), std::io::Error> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                msg.to_string(),
+            ))
+        }
+        fn size<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
+            node: &Sp<Node<T, D, A>, D>,
+        ) -> u64 {
+            Node::<T, D, A>::ann(node).get_size()
+        }
+        let (ann, true_ann, true_size) = match self {
+            Node::Empty => return Ok(()),
+            Node::Leaf { ann, value } => (ann, A::from_value(value), Some(1)),
             Node::Branch { ann, children } => {
                 let non_empty_children = children
                     .iter()
                     .filter(|child| !matches!(***child, Node::Empty))
                     .count();
                 if non_empty_children < 2 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Fewer than 2 non-empty children in Node::Branch".to_string(),
-                    ));
+                    return err("Fewer than 2 non-empty children in Node::Branch");
                 }
-                if ann.get_size()
-                    != children
-                        .iter()
-                        .map(|child| Self::size(child) as u64)
-                        .sum::<u64>()
-                {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded branch size doesn't match sum of children",
-                    ));
-                }
+                let true_ann = children
+                    .iter()
+                    .fold(A::empty(), |acc, child| acc.append(&Self::ann(child)));
+                let true_size = children
+                    .iter()
+                    .try_fold(0u64, |acc, child| acc.checked_add(size(child)));
+                (ann, true_ann, true_size)
             }
             Node::Extension {
                 ann,
                 compressed_path,
                 child,
             } => {
-                if matches!(child.deref(), Node::Extension { .. }) && compressed_path.len() != 255 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path must be of length 255 when having another Node::Extension child",
-                    ));
+                if compressed_path.is_empty() {
+                    return err("Node::Extension path must be non-empty");
                 }
                 if compressed_path.len() > 255 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path may not be longer than 255",
-                    ));
-                }
-                if ann.get_size() != Self::size(child) as u64 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded extension size doesn't match child size",
-                    ));
+                    return err("Node::Extension path may not be longer than 255");
                 }
                 if compressed_path.iter().any(|b| *b > 0x0f) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path must consist of nibbles",
-                    ));
+                    return err("Node::Extension path must consist of nibbles");
                 }
-            }
-            Node::MidBranchLeaf { ann, child, .. } => {
                 match child.deref() {
-                    Node::Branch { .. } | Node::Extension { .. } => {}
-                    _ => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Node::MidBranchLeaf may only have Node::Branch or Node::Extension children",
-                        ));
+                    Node::Empty => return err("Node::Extension child must not be Node::Empty"),
+                    Node::Extension { .. } if compressed_path.len() != 255 => {
+                        return err(
+                            "Node::Extension path must be of length 255 when having another Node::Extension child",
+                        );
                     }
+                    _ => {}
                 }
-                if ann.get_size() != Self::size(child) as u64 + 1 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded mid-branch-leaf size isn't one greater than child size",
-                    ));
-                }
+                (ann, Self::ann(child), Some(size(child)))
             }
+            Node::MidBranchLeaf { ann, value, child } => {
+                if !matches!(child.deref(), Node::Branch { .. } | Node::Extension { .. }) {
+                    return err(
+                        "Node::MidBranchLeaf may only have Node::Branch or Node::Extension children",
+                    );
+                }
+                let true_ann = Self::ann(child).append(&A::from_value(value));
+                (ann, true_ann, size(child).checked_add(1))
+            }
+        };
+        if true_size.is_none() {
+            return err("MPT size overflows u64");
+        }
+        if Some(ann.get_size()) != true_size || *ann != true_ann {
+            return err("MPT annotation isn't correctly calculated");
         }
         Ok(())
     }
@@ -1559,6 +1461,8 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
     }
 }
 
+#[cfg(test)]
+mod canonicity_tests;
 #[cfg(test)]
 mod fold_tests;
 
