@@ -90,6 +90,19 @@ proptest! {
     }
 
     #[test]
+    fn distinct_values_count_entries(mpt in trie()) {
+        let mut expected = std::collections::BTreeMap::<u64, u128>::new();
+        for (_, v) in mpt.iter() {
+            *expected.entry(*v).or_default() += 1;
+        }
+        let mut actual = std::collections::BTreeMap::<u64, u128>::new();
+        for (v, n) in mpt.distinct_values() {
+            prop_assert!(actual.insert(*v, n).is_none(), "value listed twice");
+        }
+        prop_assert_eq!(actual, expected);
+    }
+
+    #[test]
     fn fold_paths_reconstructs_iter_paths(mpt in trie()) {
         let paths = mpt.fold_paths(
             &mut DagMemo::new(),

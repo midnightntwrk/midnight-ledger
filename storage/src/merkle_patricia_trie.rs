@@ -173,6 +173,52 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         Node::fold(&self.0, memo, &mut leaf, &|_, r| r)
     }
 
+    /// Each distinct value with the number of entries holding it, saturating,
+    /// in an unspecified order. Linear in the trie's distinct nodes, however
+    /// many entries they stand for.
+    pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
+        type Key<D> = crate::arena::ArenaHash<<D as DB>::Hasher>;
+        fn children<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+            node: &Node<V, D, A>,
+        ) -> impl Iterator<Item = &Sp<Node<V, D, A>, D>> {
+            let children: std::vec::Vec<_> = match node {
+                Node::Empty | Node::Leaf { .. } => vec![],
+                Node::Branch { children, .. } => children.iter().collect(),
+                Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => vec![child],
+            };
+            children
+                .into_iter()
+                .filter(|child| !matches!(***child, Node::Empty))
+        }
+        // Reverse post-order visits every node after all of its parents.
+        let mut order = std::vec::Vec::new();
+        let mut seen = std::collections::HashSet::<Key<D>>::new();
+        let mut stack = vec![(self.0.clone(), false)];
+        while let Some((node, expanded)) = stack.pop() {
+            if expanded {
+                order.push(node);
+            } else if seen.insert(node.hash()) {
+                stack.push((node.clone(), true));
+                stack.extend(children(&node).map(|child| (child.clone(), false)));
+            }
+        }
+        let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
+        paths.insert(self.0.hash(), 1);
+        let mut values = std::collections::HashMap::<Key<D>, (Sp<V, D>, u128)>::new();
+        for node in order.iter().rev() {
+            let n = paths[&node.hash()];
+            for child in children(node) {
+                let count = paths.entry(child.hash()).or_insert(0);
+                *count = count.saturating_add(n);
+            }
+            if let Node::Leaf { value, .. } | Node::MidBranchLeaf { value, .. } = node.deref() {
+                let entry = values.entry(value.hash()).or_insert((value.clone(), 0));
+                entry.1 = entry.1.saturating_add(n);
+            }
+        }
+        values.into_values().collect()
+    }
+
     /// As [`Self::fold`], with `under(path, r)` applied to the result `r` of
     /// each subtree reached from its parent by the nibbles `path`.
     pub(crate) fn fold_paths<R: Monoid + Clone>(

@@ -48,6 +48,8 @@ pub use storage_core::storage::*;
 mod array_invariant_tests;
 #[cfg(test)]
 mod map_key_tests;
+#[cfg(test)]
+mod time_filter_map_tests;
 #[cfg(any(test, feature = "test-utilities"))]
 mod shared_structure;
 
@@ -1245,9 +1247,21 @@ impl<C: Container<D> + Storable<D> + Serializable, D: DB> TimeFilterMap<C, D>
 where
     <C as Container<D>>::Item: Serializable,
 {
+    /// Counts each container's items once per entry holding it, so a time map
+    /// whose trie shares subtrees is checked in time linear in its encoding.
     fn invariant(&self) -> std::io::Result<()> {
-        let reconstructed_set: MultiSet<<C as Container<D>>::Item, D> = self.time_map.iter().flat_map(|e| e.1.deref().clone().iter_items()).fold(MultiSet::new(), |s, i| s.insert(i));
-        if reconstructed_set != self.set {
+        let mut counts = std::collections::BTreeMap::<<C as Container<D>>::Item, u128>::new();
+        for (container, entries) in self.time_map.mpt.distinct_values() {
+            for item in container.deref().clone().iter_items() {
+                let count = counts.entry(item).or_insert(0);
+                *count = count.saturating_add(entries);
+            }
+        }
+        let matches = counts.len() == self.set.elements.size()
+            && counts
+                .iter()
+                .all(|(item, count)| self.set.count(item) as u128 == *count);
+        if !matches {
             Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "TimeFilterMap decoded with mismatching set/map representations"))
         } else {
             Ok(())
