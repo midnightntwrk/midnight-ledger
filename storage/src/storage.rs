@@ -878,6 +878,13 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         self.0.fold(memo, leaf)
     }
 
+    /// Each distinct element with the number of indices holding it,
+    /// saturating, in an unspecified but deterministic order; see
+    /// [`MerklePatriciaTrie::distinct_values`].
+    pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
+        self.0.distinct_values()
+    }
+
     /// Iterate over the elements in the array as `Sp<V>`s
     pub fn iter(&self) -> ArrayIter<'_, V, D> {
         ArrayIter::new(self)

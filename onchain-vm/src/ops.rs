@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::fmt::Debug;
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 #[cfg(feature = "proptest")]
 use storage::db::InMemoryDB;
@@ -606,6 +607,17 @@ impl<D: DB> FieldRepr for Op<ResultModeVerify, D> {
             Popeq { result, .. } => 1 + result.field_size(),
             Push { value, .. } => 1 + value.field_size(),
             Idx { path, .. } => 1 + path.iter().map(|item| item.field_size()).sum::<usize>(),
+        }
+    }
+}
+
+impl<D: DB> Op<ResultModeVerify, D> {
+    /// [`FieldRepr::field_size`], visiting each distinct node of pushed values
+    /// once across every op sharing `memo`.
+    pub fn field_size_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
+        match self {
+            Op::Push { value, .. } => 1usize.saturating_add(value.field_size_memoized(memo)),
+            op => op.field_size(),
         }
     }
 }

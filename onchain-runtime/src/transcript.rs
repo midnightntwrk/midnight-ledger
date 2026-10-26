@@ -20,9 +20,9 @@ use serialize::tag_enforcement_test;
 use serialize::{Deserializable, Serializable, Tagged};
 use storage::Storable;
 use storage::arena::{ArenaKey, Sp};
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 use storage::storable::Loader;
-use transient_crypto::repr::FieldRepr;
 // #[cfg(feature = "proptest")] TODO WG
 // use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
@@ -95,16 +95,22 @@ impl<D: DB> Transcript<D> {
     /// Saturates rather than overflowing, so it is safe to call on untrusted
     /// programs.
     pub fn public_inputs_len(&self) -> usize {
-        self.program
-            .iter()
-            .map(|op| op.field_size())
-            .fold(0, usize::saturating_add)
+        self.public_inputs_len_memoized(&mut DagMemo::new())
+    }
+
+    /// As [`Self::public_inputs_len`], visiting each distinct op and pushed
+    /// node once across every transcript sharing `memo`.
+    pub fn public_inputs_len_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
+        self.program.fold(memo, |memo, op| {
+            memo.get_or_compute(op, |memo, op| op.field_size_memoized(memo))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use transient_crypto::repr::FieldRepr;
     use storage::db::InMemoryDB;
 
     fn transcript(program: Vec<Op<ResultModeVerify, InMemoryDB>>) -> Transcript<InMemoryDB> {

@@ -46,6 +46,7 @@ use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
 use storage::arena::{ArenaHash, Sp};
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
@@ -2043,15 +2044,18 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     /// The number of field elements [`Self::public_inputs`] would produce,
     /// computed without materializing them.
     pub fn public_inputs_len(&self) -> usize {
+        self.public_inputs_len_memoized(&mut DagMemo::new())
+    }
+
+    /// As [`Self::public_inputs_len`], visiting each distinct op and pushed
+    /// node once across every call sharing `memo`.
+    pub fn public_inputs_len_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
         // The binding input and the communication commitment.
-        2usize.saturating_add(
-            self.guaranteed_transcript
-                .iter()
-                .chain(self.fallible_transcript.iter())
-                .flat_map(|t| t.program.iter())
-                .map(|op| op.field_size())
-                .fold(0, |a, b| a.saturating_add(b)),
-        )
+        self.guaranteed_transcript
+            .iter()
+            .chain(self.fallible_transcript.iter())
+            .map(|t| t.public_inputs_len_memoized(memo))
+            .fold(2, usize::saturating_add)
     }
 
     fn public_inputs_len_check(&self) -> Result<(), MalformedTransaction<D>> {

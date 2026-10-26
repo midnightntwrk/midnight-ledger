@@ -174,7 +174,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     }
 
     /// Each distinct value with the number of entries holding it, saturating,
-    /// in an unspecified order. Linear in the trie's distinct nodes, however
+    /// in an unspecified but deterministic order. Linear in the trie's distinct nodes, however
     /// many entries they stand for.
     pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
         type Key<D> = crate::arena::ArenaHash<<D as DB>::Hasher>;
@@ -204,7 +204,8 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         }
         let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
         paths.insert(self.0.hash(), 1);
-        let mut values = std::collections::HashMap::<Key<D>, (Sp<V, D>, u128)>::new();
+        let mut index = std::collections::HashMap::<Key<D>, usize>::new();
+        let mut values = std::vec::Vec::<(Sp<V, D>, u128)>::new();
         for node in order.iter().rev() {
             let n = paths[&node.hash()];
             for child in children(node) {
@@ -212,11 +213,14 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
                 *count = count.saturating_add(n);
             }
             if let Node::Leaf { value, .. } | Node::MidBranchLeaf { value, .. } = node.deref() {
-                let entry = values.entry(value.hash()).or_insert((value.clone(), 0));
-                entry.1 = entry.1.saturating_add(n);
+                let i = *index.entry(value.hash()).or_insert_with(|| {
+                    values.push((value.clone(), 0));
+                    values.len() - 1
+                });
+                values[i].1 = values[i].1.saturating_add(n);
             }
         }
-        values.into_values().collect()
+        values
     }
 
     /// As [`Self::fold`], with `under(path, r)` applied to the result `r` of
