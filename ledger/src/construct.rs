@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod tx_shape;
+
+pub use tx_shape::TransactionShape;
+
 use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
@@ -31,7 +35,6 @@ use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::schnorr::Signature;
 use base_crypto::schnorr::SigningKey;
 use base_crypto::time::Timestamp;
-use coin_structure::coin::{NIGHT, TokenType};
 use coin_structure::contract::ContractAddress;
 use itertools::Itertools;
 use onchain_runtime::context::{Effects, QueryContext, QueryResults};
@@ -110,6 +113,64 @@ impl<S: SignatureKind<D>, D: DB>
     where
         P: ContractCallExt<D>,
     {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_calls_with_tx_shape<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        expected_tx_shape: &TransactionShape,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            Some(expected_tx_shape),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_calls_inner<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        expected_tx_shape: Option<&TransactionShape>,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
         let pre_transcripts = calls
             .iter()
             .map(|call| PreTranscript {
@@ -121,7 +182,7 @@ impl<S: SignatureKind<D>, D: DB>
                 ..call.pre_transcript.clone()
             })
             .collect::<Vec<_>>();
-        let partitioned = partition_transcripts(&pre_transcripts, params)?;
+        let partitioned = partition_transcripts_inner(&pre_transcripts, params, expected_tx_shape)?;
         let segment = match segment {
             SegmentSpecifier::First => 1,
             SegmentSpecifier::GuaranteedOnly
@@ -840,16 +901,15 @@ trait QueryResultsExt {
 //     + map_insert for contract depth and sequence number) and
 //     stack_setup_cost for the call's effects.
 //
-// per_tx_cost_reserve covers:
+// per_tx_cost_reserve covers, with counts from expected TransactionShape:
 //   From validation_cost: baseline_cost, zswap input/output proof
-//     verifications (approximated via claimed_nullifiers/receives counts),
-//     Pedersen binding check + final ec_mul (deltas assumed balanced),
-//     unshielded offer signature verifications, and one heuristic dust spend
-//     proof. Parallelism applied.
-//   From application_cost: baseline_cost, replay protection, unshielded UTXO
-//     membership/removal/insertion, NIGHT-specific dust generation costs
-//     (dtime update, address table, generation tree, night indices,
-//     commitment tree, commitment hash), and one heuristic dust spend's
+//     verifications, Pedersen binding check + final ec_mul (deltas assumed
+//     balanced), unshielded offer signature verifications, and dust spend
+//     proofs. Parallelism applied.
+//   From application_cost: baseline_cost, replay protection and Dust roots
+//     lookups, unshielded UTXO membership/removal/insertion, NIGHT-specific
+//     dust generation costs (dtime update, address table, generation tree,
+//     night indices, commitment tree, commitment hash), and dust spends'
 //     nullifier + commitment processing.
 
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
@@ -886,49 +946,15 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
     }
 }
 
-/// Estimate per-transaction non-contract costs from the union of all calls'
-/// effects. Subtracted from the partition budget in `partition_transcripts`.
-///
-/// Effect sizes are summed across calls: exact for nullifiers/receives
-/// (disjoint), conservative overestimate for token types if calls overlap.
-fn per_tx_cost_reserve<D: DB>(
-    full_runs: &[QueryResults<ResultModeVerify, D>],
-    model: &TransactionCostModel,
-) -> CostDuration {
-    let zswap_inputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.claimed_nullifiers.size())
-        .sum();
-    let zswap_outputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.claimed_shielded_receives.size())
-        .sum();
-    let unshielded_inputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.unshielded_inputs.size())
-        .sum();
-    let unshielded_outputs: usize = full_runs
-        .iter()
-        .map(|r| {
-            r.context.effects.unshielded_outputs.size() + r.context.effects.unshielded_mints.size()
-        })
-        .sum();
-    let has_night_input = full_runs.iter().any(|r| {
-        r.context
-            .effects
-            .unshielded_inputs
-            .keys()
-            .any(|tt| tt == TokenType::Unshielded(NIGHT))
-    });
-    let has_night_output = full_runs.iter().any(|r| {
-        r.context
-            .effects
-            .unshielded_outputs
-            .keys()
-            .any(|tt| tt == TokenType::Unshielded(NIGHT))
-    });
-    let night_inputs = has_night_input as usize;
-    let night_outputs = has_night_output as usize;
+/// Estimates the non-call costs of a transaction of shape `tx_shape`.
+/// Subtracted from the partition budget.
+fn per_tx_cost_reserve(tx_shape: &TransactionShape, model: &TransactionCostModel) -> CostDuration {
+    let zswap_inputs = tx_shape.zswap_inputs;
+    let zswap_outputs = tx_shape.zswap_outputs;
+    let unshielded_inputs = tx_shape.night_spends + tx_shape.non_night_unshielded_spends;
+    let unshielded_outputs = tx_shape.night_outputs + tx_shape.non_night_unshielded_outputs;
+    let night_inputs = tx_shape.night_spends;
+    let night_outputs = tx_shape.night_outputs;
 
     // === Validation cost (parallelized) ===
     let mut validation = model.baseline_cost;
@@ -943,16 +969,18 @@ fn per_tx_cost_reserve<D: DB>(
     // Unshielded offer signature verifications
     validation.compute_time +=
         model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
-    // Dust spend proof verification (heuristically assume 1)
-    validation += model.proof_verify(crate::dust::DUST_SPEND_PIS);
+    // Dust spend proof verifications
+    validation += model.proof_verify(crate::dust::DUST_SPEND_PIS) * tx_shape.dust_spends;
     validation.compute_time = validation.compute_time / model.parallelism_factor;
 
     // === Application cost ===
     let mut application = model.baseline_cost;
     // Replay protection
-    application += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
-    application +=
-        model.time_filter_map_insert(false) + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
+    application += (model.time_filter_map_lookup()
+        + model.cell_read(PERSISTENT_HASH_BYTES as u64)
+        + model.time_filter_map_insert(false)
+        + model.cell_write(PERSISTENT_HASH_BYTES as u64, false))
+        * tx_shape.intents;
     // Unshielded UTXO processing
     application += (model.map_index(EXPECTED_UTXO_DEPTH)
         + model.map_remove(EXPECTED_UTXO_DEPTH, true)
@@ -980,15 +1008,17 @@ fn per_tx_cost_reserve<D: DB>(
     application += RunningCost::compute(
         model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
     );
-    // Dust spend application costs (1 spend)
-    application += model.map_index(32)
+    // Dust spend application costs
+    application += (model.map_index(32)
         + model.map_insert(EXPECTED_UTXO_DEPTH, false)
         + model.cell_write(FR_BYTES as u64, false)
         + model.cell_read(8)
         + model.cell_write(8, true)
         + model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false)
-        + model.time_filter_map_lookup() * 2u64;
+        + model.cell_write(FR_BYTES as u64, false))
+        * tx_shape.dust_spends;
+    // Dust Merkle roots lookup
+    application += model.time_filter_map_lookup() * 2u64 * tx_shape.intents;
 
     let total = validation + application;
     CostDuration::max(total.compute_time, total.read_time)
@@ -1006,6 +1036,24 @@ pub type TranscriptPair<D> = (Option<Transcript<D>>, Option<Transcript<D>>);
 pub fn partition_transcripts<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, None)
+}
+
+/// Splits each call's transcript into its guaranteed and fallible parts,
+/// reserving the cost of `expected_tx_shape`'s parts from the guaranteed budget.
+pub fn partition_transcripts_with_tx_shape<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    expected_tx_shape: &TransactionShape,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, Some(expected_tx_shape))
+}
+
+fn partition_transcripts_inner<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    expected_tx_shape: Option<&TransactionShape>,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     let n = calls.len();
     // Step 1: Generate a call graph between `calls`. Assert that this is a forest (no cycles,
@@ -1101,7 +1149,10 @@ pub fn partition_transcripts<D: DB>(
     // Reserve budget for per-transaction costs (validation baseline, zswap
     // proofs, pedersen, replay protection, unshielded UTXO processing, dust).
     // These don't scale per-call and are not included in the per-call heuristic.
-    let tx_reserve = per_tx_cost_reserve(&full_runs, &params.cost_model);
+    let tx_shape = expected_tx_shape.cloned().unwrap_or_else(|| {
+        TransactionShape::for_effects(full_runs.iter().map(|run| &run.context.effects))
+    });
+    let tx_reserve = per_tx_cost_reserve(&tx_shape, &params.cost_model);
     let spare_min_time_to_dismiss =
         params.limits.min_time_to_dismiss - tx_reserve - closure_budgets.iter().copied().sum();
     for budget in closure_budgets.iter_mut() {

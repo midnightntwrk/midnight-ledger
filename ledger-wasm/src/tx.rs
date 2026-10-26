@@ -15,7 +15,7 @@ use crate::conversions::*;
 use crate::events::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
-use crate::transcript::PreTranscript;
+use crate::transcript::{PreTranscript, expected_tx_shape_from_value};
 use crate::zswap_state::whitelist_from_value;
 use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
@@ -27,7 +27,7 @@ use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
 use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
-use ledger::construct::SegmentSpecifier;
+use ledger::construct::{SegmentSpecifier, TransactionShape};
 use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
     ProofVersioned, SignatureKind,
@@ -937,6 +937,7 @@ impl Transaction {
         zswap_inputs: Option<Array>,
         zswap_outputs: Option<Array>,
         zswap_transient: Option<Array>,
+        expected_tx_shape: JsValue,
     ) -> Result<Transaction, JsError> {
         use TransactionTypes::*;
         use ledger::structure::Transaction::Standard;
@@ -953,6 +954,7 @@ impl Transaction {
                 .ok_or_else(|| JsError::new(&format!("expected {}", std::any::type_name::<T>())))
         }
         let calls = array_mapper::<PrePartitionContractCall, _>(calls, |x| Ok(x.0.clone()))?;
+        let expected_tx_shape = expected_tx_shape_from_value(&expected_tx_shape)?;
         let zswap_inputs = zswap_inputs
             .map(|i| {
                 array_mapper::<ZswapInput, _>(i, |x| match &x.0 {
@@ -982,8 +984,8 @@ impl Transaction {
             .unwrap_or_default();
         match &self.0 {
             UnprovenWithSignaturePreBinding(Standard(tx)) => {
-                let tx = tx.add_calls::<ProofPreimage>(
-                    &mut OsRng,
+                let tx = add_calls_with_optional_tx_shape(
+                    tx,
                     segment,
                     &calls,
                     params,
@@ -991,12 +993,13 @@ impl Transaction {
                     &zswap_inputs,
                     &zswap_outputs,
                     &zswap_transient,
+                    expected_tx_shape.as_ref(),
                 )?;
                 Ok(Transaction(UnprovenWithSignaturePreBinding(Standard(tx))))
             }
             UnprovenWithSignatureErasedPreBinding(Standard(tx)) => {
-                let tx = tx.add_calls::<ProofPreimage>(
-                    &mut OsRng,
+                let tx = add_calls_with_optional_tx_shape(
+                    tx,
                     segment,
                     &calls,
                     params,
@@ -1004,6 +1007,7 @@ impl Transaction {
                     &zswap_inputs,
                     &zswap_outputs,
                     &zswap_transient,
+                    expected_tx_shape.as_ref(),
                 )?;
                 Ok(Transaction(UnprovenWithSignatureErasedPreBinding(
                     Standard(tx),
@@ -1150,6 +1154,47 @@ impl Transaction {
 
         Ok(())
     }
+}
+
+/// `add_calls`, or `add_calls_with_tx_shape` when given a shape.
+#[allow(clippy::too_many_arguments)]
+fn add_calls_with_optional_tx_shape<S: SignatureKind<InMemoryDB>>(
+    tx: &ledger::structure::StandardTransaction<S, ProofPreimageMarker, PreBinding, InMemoryDB>,
+    segment: SegmentSpecifier,
+    calls: &[ledger::construct::PrePartitionContractCall<InMemoryDB>],
+    params: &ledger::structure::LedgerParameters,
+    ttl: Timestamp,
+    zswap_inputs: &[zswap::Input<ProofPreimage, InMemoryDB>],
+    zswap_outputs: &[zswap::Output<ProofPreimage, InMemoryDB>],
+    zswap_transients: &[zswap::Transient<ProofPreimage, InMemoryDB>],
+    expected_tx_shape: Option<&TransactionShape>,
+) -> Result<
+    ledger::structure::StandardTransaction<S, ProofPreimageMarker, PreBinding, InMemoryDB>,
+    JsError,
+> {
+    Ok(match expected_tx_shape {
+        Some(expected_tx_shape) => tx.add_calls_with_tx_shape::<ProofPreimage>(
+            &mut OsRng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            expected_tx_shape,
+        )?,
+        None => tx.add_calls::<ProofPreimage>(
+            &mut OsRng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+        )?,
+    })
 }
 
 trait ClaimRewardable {
