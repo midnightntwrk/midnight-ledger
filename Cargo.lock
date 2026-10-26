@@ -3405,7 +3405,6 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.11.0",
- "signature",
  "subtle",
  "tracing",
  "tracing-subscriber",
