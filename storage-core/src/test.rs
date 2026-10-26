@@ -20,9 +20,9 @@ thread_local! {
     static DEREFS: Cell<u64> = const { Cell::new(0) };
 }
 
-/// The number of `Sp` dereferences made on this thread so far. Every walk of
-/// a storage DAG dereferences each node it visits, so this measures walking
-/// work deterministically.
+/// The number of `Sp` dereferences and arena node loads made on this thread
+/// so far. Every walk of a storage DAG does one of these per node it visits,
+/// so this measures walking work deterministically.
 pub fn derefs() -> u64 {
     DEREFS.with(Cell::get)
 }

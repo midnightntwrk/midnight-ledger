@@ -1811,6 +1811,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     }
 
     fn node_at(arena: &Arena<D>, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
         match key {
             ArenaKey::Ref(key) => arena
                 .lock_backend()

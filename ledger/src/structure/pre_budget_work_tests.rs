@@ -18,6 +18,8 @@
 use super::cost_equivalence_tests::{recipe, transaction};
 use super::*;
 use crate::dust::DustRegistration;
+use crate::verify::WellFormedStrictness;
+use base_crypto::fab::AlignedValue;
 use coin_structure::coin::Nullifier;
 use onchain_runtime::state::StateValue;
 use onchain_runtime::transcript::Transcript;
@@ -25,7 +27,7 @@ use onchain_vm::ops::Op;
 use proptest::prelude::*;
 use serialize::{tagged_deserialize, tagged_serialize};
 use storage::db::InMemoryDB;
-use storage::storage::Array;
+use storage::storage::{Array, HashMap};
 use storage_core::test::derefs;
 
 type D = InMemoryDB;
@@ -42,7 +44,9 @@ struct Sharing {
 }
 
 fn sharing() -> impl Strategy<Value = Sharing> {
-    (0u32..13, 0u32..13, 0u32..13, 0u32..13, 0u32..13).prop_map(|(a, u, r, z, p)| Sharing {
+    // Mostly unshared, so that some transactions are within budget.
+    let level = || prop_oneof![3 => Just(0u32), 1 => 1u32..13];
+    (level(), level(), level(), level(), level()).prop_map(|(a, u, r, z, p)| Sharing {
         actions: a,
         unshielded_inputs: u,
         registrations: r,
@@ -128,39 +132,299 @@ fn apply(tx: Tx, s: &Sharing) -> Tx {
     Transaction::Standard(stx)
 }
 
-/// Bytes, and `Sp` dereferences to decode then price the decoded transaction,
-/// plus to price `tx` itself, so pricing is measured even where decoding
-/// rejects. Measured on a fresh thread so a regression fails by timeout
-/// instead of hanging.
-fn measure(tx: &Tx) -> (u64, u64) {
+/// Bytes, and the `Sp` dereferences and time to decode the transaction then
+/// check and price it, plus to price `tx` itself, so pricing is measured even
+/// where decoding rejects. Measured on a fresh thread so a regression fails by
+/// timeout instead of hanging. Also whether the decoded transaction is within
+/// its fee budget, so that both outcomes are known to be covered.
+fn measure(tx: &Tx) -> Measured {
     let mut bytes = Vec::new();
     tagged_serialize(tx, &mut bytes).unwrap();
     let len = bytes.len() as u64;
     let tx = tx.clone();
-    let work = storage::test_utilities::assert_completes_within(
+    storage::test_utilities::assert_completes_within(
         std::time::Duration::from_secs(20),
         move || {
+            let start = std::time::Instant::now();
             let before = derefs();
+            let mut priced = false;
             if let Ok(decoded) = tagged_deserialize::<Tx>(&mut &bytes[..]) {
-                let _ = decoded.fees(&INITIAL_PARAMETERS, false);
+                let state = LedgerState::<D>::new("local-test");
+                let _ = decoded.well_formed(
+                    &state,
+                    WellFormedStrictness::default(),
+                    Timestamp::from_secs(0),
+                );
+                priced = decoded.fees(&INITIAL_PARAMETERS, true).is_ok();
             }
             let _ = tx.fees(&INITIAL_PARAMETERS, false);
-            derefs() - before
+            Measured {
+                len,
+                derefs: derefs() - before,
+                time: start.elapsed(),
+                priced,
+            }
         },
-    );
-    (len, work)
+    )
+}
+
+struct Measured {
+    len: u64,
+    derefs: u64,
+    time: std::time::Duration,
+    priced: bool,
+}
+
+impl Measured {
+    fn check(&self) -> Result<(), TestCaseError> {
+        let Measured {
+            len, derefs, time, ..
+        } = *self;
+        prop_assert!(
+            derefs <= DEREFS_PER_BYTE * len,
+            "{derefs} dereferences for {len} bytes"
+        );
+        let limit = MIN_TIME.max(TIME_PER_BYTE * len as u32);
+        prop_assert!(time <= limit, "{time:?} for {len} bytes");
+        Ok(())
+    }
 }
 
 // Linear work stays within a few dereferences per byte; a walk over shared
 // entries exceeds any constant, or the time limit, by orders of magnitude.
 const DEREFS_PER_BYTE: u64 = 32;
+// Dereferences miss work over large values, such as copying entry points, so
+// time is bounded too, loosely: tests run unoptimized, with slow hashing.
+const TIME_PER_BYTE: std::time::Duration = std::time::Duration::from_micros(100);
+const MIN_TIME: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Known super-linear shapes: one intent in many segments, distinct actions
+/// sharing an array of updates, deploys sharing a state of maps that share a
+/// trie, and calls with large entry points in a shared intent.
+#[derive(Debug, Clone)]
+enum Shape {
+    SharedIntent {
+        segments: u16,
+        actions: u32,
+        updates: u32,
+    },
+    SharedState {
+        deploys: u32,
+        maps: u32,
+        entries: u32,
+    },
+    EntryPoints {
+        segments: u16,
+        calls: u32,
+        len: usize,
+    },
+}
+
+impl Shape {
+    fn scaled(&self, k: u32) -> Shape {
+        match *self {
+            Shape::SharedIntent {
+                segments,
+                actions,
+                updates,
+            } => Shape::SharedIntent {
+                segments: segments * k as u16,
+                actions: actions * k,
+                updates: updates * k,
+            },
+            Shape::SharedState {
+                deploys,
+                maps,
+                entries,
+            } => Shape::SharedState {
+                deploys: deploys * k,
+                maps: maps * k,
+                entries: entries * k,
+            },
+            Shape::EntryPoints {
+                segments,
+                calls,
+                len,
+            } => Shape::EntryPoints {
+                segments: segments * k as u16,
+                calls: calls * k,
+                len: len * k as usize,
+            },
+        }
+    }
+}
+
+fn shape() -> impl Strategy<Value = Shape> {
+    prop_oneof![
+        (1u16..6, 1u32..6, 1u32..6).prop_map(|(segments, actions, updates)| {
+            Shape::SharedIntent {
+                segments,
+                actions,
+                updates,
+            }
+        }),
+        (1u32..4, 1u32..4, 1u32..8).prop_map(|(deploys, maps, entries)| {
+            Shape::SharedState {
+                deploys,
+                maps,
+                entries,
+            }
+        }),
+        (1u16..6, 1u32..2, 1usize..256).prop_map(|(segments, calls, len)| {
+            Shape::EntryPoints {
+                segments,
+                calls,
+                len,
+            }
+        }),
+    ]
+}
+
+fn in_segments(segments: u16, actions: Vec<ContractAction<(), D>>) -> Tx {
+    let intent = Intent::<(), (), Pedersen, D> {
+        guaranteed_unshielded_offer: None,
+        fallible_unshielded_offer: None,
+        actions: actions.into(),
+        dust_actions: None,
+        ttl: Timestamp::from_secs(0),
+        binding_commitment: Default::default(),
+    };
+    Transaction::Standard(StandardTransaction {
+        network_id: "local-test".into(),
+        intents: (1..=segments).fold(HashMap::new(), |m, seg| m.insert(seg, intent.clone())),
+        guaranteed_coins: None,
+        fallible_coins: HashMap::new(),
+        binding_randomness: Default::default(),
+    })
+}
+
+fn build(shape: &Shape) -> Tx {
+    match *shape {
+        Shape::SharedIntent {
+            segments,
+            actions,
+            updates,
+        } => {
+            let updates: Array<SingleUpdate, D> = (0..updates)
+                .map(|i| {
+                    SingleUpdate::VerifierKeyRemove(
+                        EntryPointBuf(i.to_le_bytes().to_vec()),
+                        ContractOperationVersion::V3,
+                    )
+                })
+                .collect();
+            let actions = (0..actions)
+                .map(|counter| {
+                    ContractAction::Maintain(MaintenanceUpdate {
+                        address: Default::default(),
+                        updates: updates.clone(),
+                        counter,
+                        signatures: Array::new(),
+                    })
+                })
+                .collect();
+            in_segments(segments, actions)
+        }
+        Shape::SharedState {
+            deploys,
+            maps,
+            entries,
+        } => {
+            type M = HashMap<AlignedValue, StateValue<D>, D>;
+            let base: M = (0..entries).fold(HashMap::new(), |m, i| {
+                m.insert(AlignedValue::from(i), StateValue::Null)
+            });
+            let outer: M = (0..maps).fold(HashMap::new(), |m, j| {
+                let map = base.insert(AlignedValue::from(entries + j), StateValue::Null);
+                m.insert(AlignedValue::from(j), StateValue::Map(map))
+            });
+            let state = ContractState::new(
+                StateValue::Map(outer),
+                HashMap::new(),
+                ContractMaintenanceAuthority::default(),
+            );
+            let actions = (0..deploys)
+                .map(|nonce| {
+                    ContractAction::Deploy(Sp::new(ContractDeploy {
+                        initial_state: state.clone(),
+                        nonce: HashOutput([nonce as u8; 32]),
+                    }))
+                })
+                .collect();
+            in_segments(1, actions)
+        }
+        Shape::EntryPoints {
+            segments,
+            calls,
+            len,
+        } => {
+            let transcript = Sp::new(Transcript {
+                gas: RunningCost::ZERO,
+                effects: Default::default(),
+                program: vec![Op::Noop { n: 1 }].into(),
+                version: None,
+            });
+            let actions = (0..calls)
+                .map(|i| {
+                    let mut ep = vec![0xaa; len];
+                    ep.extend(i.to_le_bytes());
+                    ContractAction::Call(Sp::new(ContractCall {
+                        address: Default::default(),
+                        entry_point: EntryPointBuf(ep),
+                        guaranteed_transcript: None,
+                        fallible_transcript: Some(transcript.clone()),
+                        communication_commitment: Default::default(),
+                        proof: (),
+                    }))
+                })
+                .collect();
+            in_segments(segments, actions)
+        }
+    }
+}
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
     fn pre_budget_work_is_linear_in_encoding(r in recipe(), s in sharing()) {
-        let (len, work) = measure(&apply(transaction(&r), &s));
-        prop_assert!(work <= DEREFS_PER_BYTE * len, "{work} dereferences for {len} bytes");
+        measure(&apply(transaction(&r), &s)).check()?;
     }
+
+    // Linear work keeps its rate per byte as a shape grows, while a walk
+    // repeated over shared structure multiplies it. A quadratic walk across
+    // maps sharing a trie is too small to see at this scale next to decoding;
+    // `storage` bounds that one directly.
+    #[test]
+    fn pre_budget_work_per_byte_does_not_grow_with_known_shapes(shape in shape()) {
+        let small = measure(&build(&shape));
+        let large = measure(&build(&shape.scaled(8)));
+        small.check()?;
+        large.check()?;
+        prop_assert!(
+            large.derefs * small.len <= 3 * small.derefs * large.len,
+            "{} dereferences for {} bytes, then {} for {}",
+            small.derefs,
+            small.len,
+            large.derefs,
+            large.len
+        );
+    }
+}
+
+// Work after the fee check is paid for, so the property above only binds if
+// some generated transactions reach it.
+#[test]
+fn generated_transactions_include_some_within_budget() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+    let mut runner = TestRunner::deterministic();
+    let priced = (0..64)
+        .filter(|_| {
+            let r = recipe().new_tree(&mut runner).unwrap().current();
+            let s = sharing().new_tree(&mut runner).unwrap().current();
+            measure(&apply(transaction(&r), &s)).priced
+        })
+        .count();
+    assert!(priced > 0, "no generated transaction was within budget");
 }
