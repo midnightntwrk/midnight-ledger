@@ -53,7 +53,6 @@ use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::hash_to_curve;
 use transient_crypto::merkle_tree::MerkleTreeDigest;
 use transient_crypto::repr::FieldRepr;
-use zswap::Transient;
 
 pub trait ContractStateExt<D: DB> {
     #[allow(clippy::result_large_err)]
@@ -644,6 +643,10 @@ where
                     stx.ttl_check_weak(tblock, params.global_ttl)
                         .map_err(MalformedTransaction::TransactionApplicationError)
                 })?;
+                // Entries that may not repeat are rejected first: with none
+                // repeated, entries that fees join against each other are
+                // distinct nodes, so pricing is linear in the encoding.
+                ref_state.stateless_check(|| stx.disjoint_check())?;
                 // Fees first: they cost the transaction in time linear in its
                 // encoding, and an over-limit transaction is rejected before
                 // checks whose work grows with its entries.
@@ -680,7 +683,6 @@ where
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
                     }
-                    stx.disjoint_check()?;
                     stx.effects_check()?;
                     stx.sequencing_check()?;
                     stx.pedersen_check()
@@ -1224,10 +1226,18 @@ impl<
 > StandardTransaction<S, P, B, D>
 {
     #[allow(clippy::mutable_key_type)]
+    /// Rejects entries that a valid transaction cannot repeat: shielded inputs
+    /// and outputs across offers, unshielded inputs anywhere, and dust
+    /// registrations anywhere, since each is signed for one intent and segment.
+    ///
+    /// Runs before fees, so it inserts each distinct entry into one set per
+    /// kind and stops at the first repeat: its work is linear in the encoding
+    /// however the entries' nodes are shared.
     fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = BTreeSet::new();
         let mut shielded_outputs = BTreeSet::new();
         let mut unshielded_inputs = BTreeSet::new();
+        let mut registrations = std::collections::HashSet::new();
         let shielded_offers = self
             .guaranteed_coins
             .clone()
@@ -1236,11 +1246,22 @@ impl<
             .chain(self.fallible_coins.values());
 
         for offer in shielded_offers {
-            let mut inputs: BTreeSet<_> = offer.inputs.iter_deref().cloned().collect();
-            inputs.extend(offer.transient.iter_deref().map(Transient::as_input));
+            let mut inputs: BTreeSet<_> = offer
+                .inputs
+                .distinct_values()
+                .into_iter()
+                .map(|(input, _)| (*input).clone())
+                .collect();
+            let transients = offer.transient.distinct_values();
+            inputs.extend(transients.iter().map(|(t, _)| t.as_input()));
 
-            let mut outputs: BTreeSet<_> = offer.outputs.iter_deref().cloned().collect();
-            outputs.extend(offer.transient.iter_deref().map(Transient::as_output));
+            let mut outputs: BTreeSet<_> = offer
+                .outputs
+                .distinct_values()
+                .into_iter()
+                .map(|(output, _)| (*output).clone())
+                .collect();
+            outputs.extend(transients.iter().map(|(t, _)| t.as_output()));
 
             if !(shielded_inputs.is_disjoint(&inputs)) {
                 return Err(MalformedTransaction::DisjointCheckFailure(
@@ -1266,32 +1287,48 @@ impl<
                 ));
             }
 
-            shielded_inputs = shielded_inputs.union(&inputs).cloned().collect();
-            shielded_outputs = shielded_outputs.union(&outputs).cloned().collect();
+            shielded_inputs.extend(inputs);
+            shielded_outputs.extend(outputs);
         }
 
-        let intents = self.intents();
-
-        let unshielded_offers = intents.flat_map(|(_, intent)| {
-            [
-                intent.guaranteed_unshielded_offer.clone(),
-                intent.fallible_unshielded_offer.clone(),
-            ]
-            .into_iter()
-        });
-        for offer in unshielded_offers {
-            let inputs = offer
-                .map(|o| o.inputs.iter_deref().cloned().collect())
-                .unwrap_or(BTreeSet::new());
-            if !(unshielded_inputs.is_disjoint(&inputs)) {
-                return Err(MalformedTransaction::<D>::DisjointCheckFailure(
-                    DisjointCheckError::UnshieldedInputsDisjointFailure {
-                        unshielded_inputs,
-                        offer_inputs: inputs,
-                    },
-                ));
+        for (_, intent) in self.intents() {
+            let offers = [
+                intent.guaranteed_unshielded_offer.as_ref(),
+                intent.fallible_unshielded_offer.as_ref(),
+            ];
+            for offer in offers.into_iter().flatten() {
+                let distinct = offer.inputs.distinct_values();
+                let repeated: Vec<_> = distinct
+                    .iter()
+                    .filter(|(_, n)| *n > 1)
+                    .map(|(input, _)| (**input).clone())
+                    .collect();
+                if !repeated.is_empty() {
+                    return Err(MalformedTransaction::DuplicateInputs(repeated));
+                }
+                let inputs: BTreeSet<_> = distinct
+                    .into_iter()
+                    .map(|(input, _)| (*input).clone())
+                    .collect();
+                if !(unshielded_inputs.is_disjoint(&inputs)) {
+                    return Err(MalformedTransaction::<D>::DisjointCheckFailure(
+                        DisjointCheckError::UnshieldedInputsDisjointFailure {
+                            unshielded_inputs,
+                            offer_inputs: inputs,
+                        },
+                    ));
+                }
+                unshielded_inputs.extend(inputs);
             }
-            unshielded_inputs = unshielded_inputs.union(&inputs).cloned().collect();
+            for dust_actions in intent.dust_actions.iter() {
+                for (reg, n) in dust_actions.registrations.distinct_values() {
+                    if n > 1 || !registrations.insert(reg.hash()) {
+                        return Err(MalformedTransaction::MultipleDustRegistrationsForKey {
+                            key: reg.night_key.clone(),
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -2561,6 +2598,9 @@ mod well_formed_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod disjoint_tests;
 
 #[cfg(feature = "proving")]
 #[cfg(test)]

@@ -3498,7 +3498,7 @@ impl<T: Deserializable> serde::de::Visitor<'_> for BorshVisitor<T> {
 pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
-mod cost_equivalence_tests;
+pub(crate) mod cost_equivalence_tests;
 #[cfg(test)]
 mod pre_budget_work_tests;
 

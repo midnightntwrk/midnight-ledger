@@ -1046,7 +1046,7 @@ impl<D: DB> Display for MalformedTransaction<D> {
             ),
             MultipleDustRegistrationsForKey { key } => write!(
                 formatter,
-                "multiple dust registrations for key in the same intent: {key:?}"
+                "multiple dust registrations for key in the same intent, or one registration in several: {key:?}"
             ),
             InsufficientDustForRegistrationFee {
                 registration,

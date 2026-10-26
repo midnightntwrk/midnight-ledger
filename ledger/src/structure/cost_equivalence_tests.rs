@@ -413,7 +413,7 @@ fn old_estimated_tx_size(tx: &Tx) -> usize {
 type Entries = Vec<(u8, u8)>;
 
 #[derive(Debug, Clone)]
-pub(super) struct Recipe {
+pub(crate) struct Recipe {
     seed: u64,
     // Per intent: actions, unshielded inputs, outputs and registrations, as
     // (kind, pick) pairs; an even kind repeats the entry at `pick`, if any.
@@ -426,7 +426,7 @@ fn entries() -> impl Strategy<Value = Entries> {
     prop::collection::vec((0u8..6, 0u8..4), 0..6)
 }
 
-pub(super) fn recipe() -> impl Strategy<Value = Recipe> {
+pub(crate) fn recipe() -> impl Strategy<Value = Recipe> {
     (
         any::<u64>(),
         prop::collection::vec((entries(), entries(), entries(), entries()), 1..3),
@@ -439,7 +439,7 @@ pub(super) fn recipe() -> impl Strategy<Value = Recipe> {
         })
 }
 
-fn build<T: Clone>(kinds: &[(u8, u8)], mut make: impl FnMut(u8) -> T) -> Vec<T> {
+pub(crate) fn build<T: Clone>(kinds: &[(u8, u8)], mut make: impl FnMut(u8) -> T) -> Vec<T> {
     let mut out: Vec<T> = Vec::new();
     for (kind, pick) in kinds {
         let next = match out.get(*pick as usize) {
@@ -451,7 +451,7 @@ fn build<T: Clone>(kinds: &[(u8, u8)], mut make: impl FnMut(u8) -> T) -> Vec<T> 
     out
 }
 
-pub(super) fn transaction(r: &Recipe) -> Tx {
+pub(crate) fn transaction(r: &Recipe) -> Tx {
     let mut rng = StdRng::seed_from_u64(r.seed);
     let keys: Vec<SignatureVerifyingKey> = (0..3)
         .map(|_| SignatureVerifyingKey::Schnorr(rng.r#gen()))
