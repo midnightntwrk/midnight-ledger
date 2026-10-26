@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
-use storage::{Storable, arena::ArenaKey, arena::Sp, db::DB, storable::Loader};
+use storage::{Storable, arena::ArenaHash, arena::ArenaKey, arena::Sp, db::DB, storable::Loader};
 use transient_crypto::curve::FR_BYTES;
 
 /// A cost model for gas pricing of VM operations.
@@ -258,6 +258,26 @@ impl CostModel {
                 n.data.len() as u64 + n.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64
             })
             .sum::<u64>();
+        RunningCost {
+            read_time: CostDuration::ZERO,
+            compute_time: CostDuration::ZERO,
+            bytes_written,
+            bytes_deleted: 0,
+        }
+    }
+    /// As [`Self::tree_copy`], charging only nodes not in `seen` and adding
+    /// them to it, so values copied together pay once for nodes they share.
+    pub fn tree_copy_unseen<T: Storable<D>, D: DB>(
+        &self,
+        value: &Sp<T, D>,
+        seen: &mut std::collections::HashSet<ArenaHash<D::Hasher>>,
+    ) -> RunningCost {
+        let mut bytes_written = 0u64;
+        value.visit_unseen_nodes(seen, |data, children| {
+            bytes_written = bytes_written
+                .saturating_add(data.len() as u64)
+                .saturating_add(children as u64 * PERSISTENT_HASH_BYTES as u64);
+        });
         RunningCost {
             read_time: CostDuration::ZERO,
             compute_time: CostDuration::ZERO,

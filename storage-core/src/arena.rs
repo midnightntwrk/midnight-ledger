@@ -1810,6 +1810,43 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         self.data.get().unwrap()
     }
 
+    fn node_at(arena: &Arena<D>, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
+        match key {
+            ArenaKey::Ref(key) => arena
+                .lock_backend()
+                .borrow_mut()
+                .get(key)
+                .expect("Arena should contain current serialization target")
+                .clone(),
+            ArenaKey::Direct(d) => OnDiskObject {
+                data: d.data.as_ref().clone(),
+                #[cfg(not(feature = "layout-v2"))]
+                ref_count: 0,
+                children: d.children.as_ref().clone(),
+            },
+        }
+    }
+
+    /// Calls `f` with the data and child count of each node of this
+    /// sub-graph that is not in `seen`, adding each to `seen`. Values that
+    /// share one `seen` are visited once per node they share, so the walk is
+    /// linear in their distinct nodes.
+    pub fn visit_unseen_nodes(
+        &self,
+        seen: &mut std::collections::HashSet<ArenaHash<D::Hasher>>,
+        mut f: impl FnMut(&[u8], usize),
+    ) {
+        let mut frontier = vec![self.child_repr.clone()];
+        while let Some(key) = frontier.pop() {
+            if !seen.insert(key.hash().clone()) {
+                continue;
+            }
+            let node = Self::node_at(&self.arena, &key);
+            f(&node.data, node.children.len());
+            frontier.extend(node.children.iter().cloned());
+        }
+    }
+
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
     /// This will force and load all nodes in this sub-graph.
@@ -1844,20 +1881,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if disk_objects.contains_key(child.hash()) {
                 continue;
             }
-            let node = match child {
-                ArenaKey::Ref(ref key) => arena
-                    .lock_backend()
-                    .borrow_mut()
-                    .get(key)
-                    .expect("Arena should contain current serialization target")
-                    .clone(),
-                ArenaKey::Direct(ref d) => OnDiskObject {
-                    data: d.data.as_ref().clone(),
-                    #[cfg(not(feature = "layout-v2"))]
-                    ref_count: 0,
-                    children: d.children.as_ref().clone(),
-                },
-            };
+            let node = Self::node_at(&arena, &child);
             for child in node.children.iter() {
                 *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());
