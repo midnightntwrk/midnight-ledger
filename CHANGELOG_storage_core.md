@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
 - fix: `Sp::into_inner` no longer leaks an `sp_cache` entry each time it consumes the last reference to a value, and no longer races a concurrent load of the same key into a panic in `increment_ref_locked`.
 
 ## Version `1.2.1`

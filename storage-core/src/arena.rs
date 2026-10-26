@@ -1426,9 +1426,8 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr {
-            self.arena.increment_ref(&self.root);
-        }
+        // Cast before taking the metadata reference: a failed cast returns no
+        // `Sp`, so nothing would ever release it.
         let data: OnceLock<Arc<T>> = match self.data.get() {
             Some(arc) => {
                 let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
@@ -1436,6 +1435,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
             }
             None => OnceLock::new(),
         };
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
         Some(Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
@@ -2338,6 +2340,27 @@ mod tests {
                 "the weak reference should be gone after unloading sp2"
             );
         }
+    }
+
+    // A failed `Sp::downcast` must not leave the metadata reference count
+    // for its root incremented: nothing is returned, so no `Sp` drop ever
+    // decrements it, and the key can never be collected.
+    #[test]
+    fn metadata_downcast_failure() {
+        let arena = &new_arena();
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let dyn_sp = sp.upcast();
+        assert_eq!(arena.size(), 1);
+
+        assert!(dyn_sp.downcast::<u64>().is_none());
+
+        drop(sp);
+        drop(dyn_sp);
+        assert_eq!(
+            arena.size(),
+            0,
+            "metadata entry should be gone once every Sp for it is dropped"
+        );
     }
 
     type BigValue = [u8; SMALL_OBJECT_LIMIT];
