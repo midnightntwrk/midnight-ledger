@@ -599,7 +599,6 @@ impl<D: DB> ProofKind<D> for () {
         let Transaction::Standard(stx) = tx else {
             return tx.serialized_size();
         };
-        let sum = |counts: &mut dyn Iterator<Item = usize>| counts.fold(0, usize::saturating_add);
         // Counted once per distinct intent and action, as fees are.
         let calls = stx
             .intents
@@ -610,7 +609,7 @@ impl<D: DB> ProofKind<D> for () {
                     })
                 })
             });
-        let dust_spends = sum(&mut stx.intents.values().map(|intent| {
+        let dust_spends = count_sum(stx.intents.values().map(|intent| {
             intent
                 .dust_actions
                 .as_ref()
@@ -623,17 +622,16 @@ impl<D: DB> ProofKind<D> for () {
                 .map(|o| (**o).clone())
                 .chain(stx.fallible_coins.values())
         };
-        let transients = sum(&mut offers().map(|o| o.transient.len()));
-        let zswap_inputs = sum(&mut offers().map(|o| o.inputs.len())).saturating_add(transients);
-        let zswap_outputs = sum(&mut offers().map(|o| o.outputs.len())).saturating_add(transients);
-        sum(&mut [
+        let transients = count_sum(offers().map(|o| o.transient.len()));
+        let zswap_inputs = count_sum(offers().map(|o| o.inputs.len())).saturating_add(transients);
+        let zswap_outputs = count_sum(offers().map(|o| o.outputs.len())).saturating_add(transients);
+        count_sum([
             tx.serialized_size(),
             calls.saturating_mul(PROOF_SIZE),
             zswap_inputs.saturating_mul(zswap::INPUT_PROOF_SIZE),
             zswap_outputs.saturating_mul(zswap::OUTPUT_PROOF_SIZE),
             dust_spends.saturating_mul(DUST_SPEND_PROOF_SIZE),
-        ]
-        .into_iter())
+        ])
     }
     fn proof_version_to_operation_version(_: &Self::Proof) -> Option<ContractOperationVersion> {
         None
@@ -1232,7 +1230,8 @@ impl TransactionCostModel {
             .map(|(n, key_len)| {
                 self.runtime_cost_model.ins_map_constant
                     + self.runtime_cost_model.ins_map_coeff_container_log_size
-                        * n.next_power_of_two().ilog2() as u64
+                        * n.checked_next_power_of_two()
+                            .map_or(usize::BITS, |p| p.ilog2()) as u64
                     + self.runtime_cost_model.ins_map_coeff_key_size * *key_len
             })
             .sum();
@@ -1938,6 +1937,13 @@ fn distinct<V: Storable<D>, D: DB>(
         .map(|(v, n)| (v, u64::try_from(n).unwrap_or(u64::MAX)))
 }
 
+/// The sum of entry counts, saturating. Counts come from size annotations,
+/// which a shared encoding can push towards `usize::MAX`; a wrapped sum would
+/// price a huge transaction as a small one.
+fn count_sum(counts: impl IntoIterator<Item = usize>) -> usize {
+    counts.into_iter().fold(0, usize::saturating_add)
+}
+
 /// A cost summed over every path to shared nodes, saturating as
 /// `RunningCost`'s own arithmetic does.
 #[derive(Clone, Copy)]
@@ -2277,14 +2283,16 @@ where
                     .map(|o| (**o).clone())
                     .chain(stx.fallible_coins.values())
                     .collect::<Vec<_>>();
-                let zswap_inputs = offers
-                    .iter()
-                    .map(|offer| offer.inputs.len() + offer.transient.len())
-                    .sum::<usize>();
-                let zswap_outputs = offers
-                    .iter()
-                    .map(|offer| offer.outputs.len() + offer.transient.len())
-                    .sum::<usize>();
+                let zswap_inputs = count_sum(
+                    offers
+                        .iter()
+                        .flat_map(|offer| [offer.inputs.len(), offer.transient.len()]),
+                );
+                let zswap_outputs = count_sum(
+                    offers
+                        .iter()
+                        .flat_map(|offer| [offer.outputs.len(), offer.transient.len()]),
+                );
                 cost += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
                 cost += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
                 // Each distinct intent and action is priced once and counted once
@@ -2297,13 +2305,14 @@ where
                             // Binding commitment check
                             cost.compute_time += model.runtime_cost_model.pedersen_valid;
                             // Unshielded offer validation
-                            cost.compute_time += intent
-                                .guaranteed_unshielded_offer
-                                .iter()
-                                .chain(intent.fallible_unshielded_offer.iter())
-                                .map(|o| o.signatures.len())
-                                .sum::<usize>()
-                                * model.runtime_cost_model.signature_verify_constant;
+                            cost.compute_time +=
+                                count_sum(
+                                    intent
+                                        .guaranteed_unshielded_offer
+                                        .iter()
+                                        .chain(intent.fallible_unshielded_offer.iter())
+                                        .map(|o| o.signatures.len()),
+                                ) * model.runtime_cost_model.signature_verify_constant;
                             cost += intent
                                 .actions
                                 .fold(memo, |memo, action| {
@@ -2349,7 +2358,7 @@ where
                     cost += per_call_vk_read(address, entry_point, version.clone());
                 }
                 // Compute time for Pedersen check
-                cost.compute_time += offers.iter().map(|o| o.deltas.len()).sum::<usize>()
+                cost.compute_time += count_sum(offers.iter().map(|o| o.deltas.len()))
                     * (model.runtime_cost_model.hash_to_curve + model.runtime_cost_model.ec_mul);
                 cost.compute_time += model.runtime_cost_model.ec_mul;
                 let mut res = SyntheticCost::from(cost);
@@ -2466,8 +2475,8 @@ where
                     );
                 for (segment, offer) in offers {
                     let mut offer_cost = RunningCost::ZERO;
-                    let inputs = offer.inputs.len() + offer.transient.len();
-                    let outputs = offer.outputs.len() + offer.transient.len();
+                    let inputs = offer.inputs.len().saturating_add(offer.transient.len());
+                    let outputs = offer.outputs.len().saturating_add(offer.transient.len());
                     // Roots set test
                     offer_cost += model.map_index(EXPECTED_TIME_FILTER_MAP_DEPTH) * inputs;
                     // Nullifier set test
@@ -3628,6 +3637,8 @@ pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
 pub(crate) mod cost_equivalence_tests;
+#[cfg(test)]
+mod count_saturation_tests;
 #[cfg(test)]
 mod pre_budget_work_tests;
 

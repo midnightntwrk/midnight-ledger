@@ -100,6 +100,35 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
     }
 }
 
+impl<V: Storable<D>, D: DB> Array<V, D> {
+    /// An array of `c * 16^(k-1)` copies of `value`, built from `O(k)`
+    /// distinct nodes. Below `2^64` while `k < 16`, or `k == 16` and `c < 16`.
+    pub fn shared_dense_scaled(k: u32, c: u32, value: V) -> Self {
+        assert!(k >= 2 && (2..=16).contains(&c));
+        let value = Sp::new(value);
+        let short = all_paths_up_to(k - 2, &value);
+        let long = all_paths_up_to(k - 1, &value);
+        // Index 0 is the root's own value; the root's children cover indices
+        // with first nibble 1.., one nibble longer below `c`.
+        let children: [Sp<N<V, D>, D>; 16] = std::array::from_fn(|i| {
+            if i == 0 {
+                Sp::new(Node::Empty)
+            } else if (i as u32) < c {
+                long.clone()
+            } else {
+                short.clone()
+            }
+        });
+        let child = Sp::new(branch(children));
+        let root = Node::MidBranchLeaf {
+            ann: SizeAnn(size(&child).wrapping_add(1)),
+            value,
+            child,
+        };
+        Array(Sp::new(MerklePatriciaTrie(Sp::new(root))))
+    }
+}
+
 impl<K: Serializable, V: Storable<D>, D: DB> Map<K, V, D> {
     /// A map with `value` at every key whose nibble path is `prefix` followed
     /// by `free` arbitrary nibbles, built from `O(free)` distinct nodes.
