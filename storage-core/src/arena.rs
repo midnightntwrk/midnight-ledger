@@ -1532,6 +1532,8 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
     /// Access the inner data, forcing initialization if necessary.
     fn deref(&self) -> &Self::Target {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
         self.force_as_arc()
     }
 }

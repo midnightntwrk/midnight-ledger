@@ -13,7 +13,23 @@
 
 //! Testing helpers
 
+use std::cell::Cell;
 use std::time::Instant;
+
+thread_local! {
+    static DEREFS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The number of `Sp` dereferences made on this thread so far. Every walk of
+/// a storage DAG dereferences each node it visits, so this measures walking
+/// work deterministically.
+pub fn derefs() -> u64 {
+    DEREFS.with(Cell::get)
+}
+
+pub(crate) fn count_deref() {
+    DEREFS.with(|n| n.set(n.get() + 1));
+}
 
 /// Helper for printing time elapsed between chunks of code.
 pub struct Timer {
