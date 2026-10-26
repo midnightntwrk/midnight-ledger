@@ -125,7 +125,7 @@ fn declared_compute_at_sign_boundary_is_not_priced_as_zero() {
             );
             if let Segment::Guaranteed = segment {
                 assert!(
-                    tx.time_to_dismiss(&params.cost_model)
+                    tx.time_to_dismiss(&params.cost_model).unwrap()
                         >= CostDuration::from_picoseconds(declared.min(SIGN_BOUNDARY - 1)),
                     "guaranteed compute dropped from time to dismiss for {declared} ps"
                 );

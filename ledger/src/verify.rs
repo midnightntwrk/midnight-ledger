@@ -1218,13 +1218,7 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
     Ok(callers_for_addr)
 }
 
-impl<
-    S: SignatureKind<D>,
-    P: ProofKind<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
-    D: DB,
-> StandardTransaction<S, P, B, D>
-{
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransaction<S, P, B, D> {
     #[allow(clippy::mutable_key_type)]
     /// Rejects entries that a valid transaction cannot repeat: shielded inputs
     /// and outputs across offers, unshielded inputs anywhere, and dust
@@ -1233,7 +1227,7 @@ impl<
     /// Runs before fees, so it inserts each distinct entry into one set per
     /// kind and stops at the first repeat: its work is linear in the encoding
     /// however the entries' nodes are shared.
-    fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
+    pub(crate) fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = BTreeSet::new();
         let mut shielded_outputs = BTreeSet::new();
         let mut unshielded_inputs = BTreeSet::new();
@@ -1291,7 +1285,8 @@ impl<
             shielded_outputs.extend(outputs);
         }
 
-        for (_, intent) in self.intents() {
+        for entry in self.intents.iter() {
+            let intent = &*entry.1;
             let offers = [
                 intent.guaranteed_unshielded_offer.as_ref(),
                 intent.fallible_unshielded_offer.as_ref(),
@@ -1332,7 +1327,15 @@ impl<
         }
         Ok(())
     }
+}
 
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    D: DB,
+> StandardTransaction<S, P, B, D>
+{
     pub fn sequencing_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut adjacencies: std::collections::BTreeMap<CallNode, Vec<CallNode>> =
             std::collections::BTreeMap::new();

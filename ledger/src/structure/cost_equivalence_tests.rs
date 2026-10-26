@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Transaction costs are computed per distinct array element and scaled by
-//! multiplicity; these tests compare them against the per-element loops they
-//! replaced.
+//! Transaction costs are computed per distinct node and counted once per
+//! path to it; these tests compare them against the per-element loops they
+//! replaced. Deployed states are the exception: they are charged once per
+//! distinct node in the transaction, not once per deploy.
 
 #![allow(deprecated)]
 
@@ -123,9 +124,39 @@ fn old_validation_cost_impl(
     result
 }
 
+/// The bytes of every distinct node of `states`, identifying nodes by their
+/// contents and children rather than by hash.
+fn union_tree_copy(states: &[Sp<ContractState<D>, D>]) -> RunningCost {
+    let mut ids = std::collections::HashMap::new();
+    let mut bytes_written = 0u64;
+    for state in states {
+        let nodes = state.serialize_to_node_list().nodes;
+        let mut node_ids: Vec<usize> = Vec::with_capacity(nodes.len());
+        for node in &nodes {
+            let children: Vec<usize> = node
+                .child_indices
+                .iter()
+                .map(|&c| node_ids[c as usize])
+                .collect();
+            let fresh = ids.len();
+            let id = *ids.entry((node.data.clone(), children)).or_insert_with(|| {
+                bytes_written += node.data.len() as u64
+                    + node.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64;
+                fresh
+            });
+            node_ids.push(id);
+        }
+    }
+    RunningCost {
+        bytes_written,
+        ..RunningCost::ZERO
+    }
+}
+
 fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
     let mut g_cost = model.baseline_cost;
     let mut f_cost = RunningCost::ZERO;
+    let mut deployed = Vec::new();
     for (_, intent) in tx.intents() {
         // Replay protection state update
         g_cost += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
@@ -270,8 +301,8 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                     // Contract exists check
                     f_cost += model.map_index(EXPECTED_CONTRACT_DEPTH);
                     // Contract insert
-                    f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false)
-                        + model.tree_copy(Sp::new(deploy.initial_state.clone()));
+                    f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false);
+                    deployed.push(Sp::new(deploy.initial_state.clone()));
                 }
                 ContractAction::Maintain(upd) => {
                     // Contract state fetch
@@ -377,6 +408,7 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
             g_cost += model.map_insert(EXPECTED_UTXO_DEPTH, false);
         }
     }
+    f_cost += union_tree_copy(&deployed);
     g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
     f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
     (g_cost.into(), (g_cost + f_cost).into())
@@ -587,10 +619,50 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
     })
 }
 
+/// `tx` without the entries `disjoint_check` rejects repeating: each
+/// intent's inputs and registrations are made distinct and unique to it, and
+/// the fallible offer stops sharing the guaranteed offer's inputs. Actions,
+/// outputs and their sharing are kept.
+fn without_repeats(tx: &Tx) -> Tx {
+    let Transaction::Standard(mut stx) = tx.clone() else {
+        unreachable!()
+    };
+    for (segment, mut intent) in tx.intents() {
+        if let Some(offer) = &intent.guaranteed_unshielded_offer {
+            let mut offer = (**offer).clone();
+            offer.inputs = distinct(&offer.inputs)
+                .map(|(input, _)| UtxoSpend {
+                    output_no: input.output_no + 1000 * u32::from(segment),
+                    ..(*input).clone()
+                })
+                .collect();
+            intent.guaranteed_unshielded_offer = Some(Sp::new(offer));
+        }
+        if let Some(offer) = &intent.fallible_unshielded_offer {
+            let mut offer = (**offer).clone();
+            offer.inputs = Array::new();
+            intent.fallible_unshielded_offer = Some(Sp::new(offer));
+        }
+        if let Some(dust) = &intent.dust_actions {
+            let mut dust = (**dust).clone();
+            dust.registrations = distinct(&dust.registrations)
+                .map(|(reg, _)| DustRegistration {
+                    allow_fee_payment: u128::from(segment),
+                    ..(*reg).clone()
+                })
+                .collect();
+            intent.dust_actions = Some(Sp::new(dust));
+        }
+        stx.intents = stx.intents.insert(segment, intent);
+    }
+    Transaction::Standard(stx)
+}
+
 proptest! {
     #[test]
-    fn costs_match_per_element_loops(r in recipe()) {
+    fn costs_match_per_element_loops(r in recipe(), repeats in any::<bool>()) {
         let tx = transaction(&r);
+        let tx = if repeats { tx } else { without_repeats(&tx) };
         let model = &INITIAL_PARAMETERS.cost_model;
         let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
             + model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -599,7 +671,12 @@ proptest! {
             tx.validation_cost(model),
             old_validation_cost_impl(&tx, model, |_, _, _| per_call)
         );
-        prop_assert_eq!(tx.application_cost(model), old_application_cost(&tx, model));
+        let Transaction::Standard(stx) = &tx else { unreachable!() };
+        if stx.disjoint_check().is_ok() {
+            prop_assert_eq!(tx.application_cost(model), Ok(old_application_cost(&tx, model)));
+        } else {
+            prop_assert_eq!(tx.application_cost(model), Err(FeeCalculationError::RepeatedEntries));
+        }
         prop_assert_eq!(tx.est_size(), old_estimated_tx_size(&tx));
     }
 }

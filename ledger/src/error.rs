@@ -420,6 +420,10 @@ pub enum FeeCalculationError {
         size: u64,
     },
     BlockLimitExceeded,
+    /// The transaction repeats an entry that no valid transaction repeats,
+    /// which `well_formed` reports in detail; priced, it would cost time
+    /// quadratic in its size.
+    RepeatedEntries,
 }
 
 impl Display for FeeCalculationError {
@@ -428,6 +432,10 @@ impl Display for FeeCalculationError {
             FeeCalculationError::BlockLimitExceeded => write!(
                 formatter,
                 "exceeded block limit in transaction fee computation"
+            ),
+            FeeCalculationError::RepeatedEntries => write!(
+                formatter,
+                "transaction repeats an input, output or registration, so has no fee"
             ),
             FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss,

@@ -66,7 +66,7 @@ use storage::arena::{ArenaHash, ArenaKey, Sp};
 use storage::dag_memo::DagMemo;
 use storage::db::DB;
 use storage::db::InMemoryDB;
-use storage::merkle_patricia_trie::Annotation;
+use storage::merkle_patricia_trie::{Annotation, Monoid, Semigroup};
 use storage::storable::Loader;
 use storage::storage::Map;
 use storage::storage::{HashMap, HashSet, TimeFilterMap};
@@ -600,12 +600,16 @@ impl<D: DB> ProofKind<D> for () {
             return tx.serialized_size();
         };
         let sum = |counts: &mut dyn Iterator<Item = usize>| counts.fold(0, usize::saturating_add);
-        let calls = sum(&mut stx.intents.values().flat_map(|intent| {
-            distinct(&intent.actions)
-                .filter(|(action, _)| matches!(**action, ContractAction::Call(_)))
-                .map(|(_, n)| usize::try_from(n).unwrap_or(usize::MAX))
-                .collect::<Vec<_>>()
-        }));
+        // Counted once per distinct intent and action, as fees are.
+        let calls = stx
+            .intents
+            .fold(&mut DagMemo::<usize, D>::new(), |memo, _, intent| {
+                memo.get_or_compute(intent, |memo, intent| {
+                    intent.actions.fold(memo, |_, action| {
+                        usize::from(matches!(**action, ContractAction::Call(_)))
+                    })
+                })
+            });
         let dust_spends = sum(&mut stx.intents.values().map(|intent| {
             intent
                 .dust_actions
@@ -1934,6 +1938,288 @@ fn distinct<V: Storable<D>, D: DB>(
         .map(|(v, n)| (v, u64::try_from(n).unwrap_or(u64::MAX)))
 }
 
+/// A cost summed over every path to shared nodes, saturating as
+/// `RunningCost`'s own arithmetic does.
+#[derive(Clone, Copy)]
+struct CostSum(RunningCost);
+
+impl Semigroup for CostSum {
+    fn append(&self, other: &Self) -> Self {
+        CostSum(self.0 + other.0)
+    }
+}
+
+impl Monoid for CostSum {
+    fn empty() -> Self {
+        CostSum(RunningCost::ZERO)
+    }
+}
+
+/// Guaranteed and fallible application costs, summed as [`CostSum`] is.
+#[derive(Clone, Copy)]
+struct SegmentCosts {
+    guaranteed: RunningCost,
+    fallible: RunningCost,
+}
+
+impl Semigroup for SegmentCosts {
+    fn append(&self, other: &Self) -> Self {
+        SegmentCosts {
+            guaranteed: self.guaranteed + other.guaranteed,
+            fallible: self.fallible + other.fallible,
+        }
+    }
+}
+
+impl Monoid for SegmentCosts {
+    fn empty() -> Self {
+        SegmentCosts {
+            guaranteed: RunningCost::ZERO,
+            fallible: RunningCost::ZERO,
+        }
+    }
+}
+
+/// An intent's application costs, other than its contract actions'.
+fn intent_application_cost<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+    D: DB,
+>(
+    model: &TransactionCostModel,
+    intent: &Intent<S, P, B, D>,
+    night: &mut DagMemo<u64, D>,
+) -> SegmentCosts {
+    let mut g = RunningCost::ZERO;
+    let mut f = RunningCost::ZERO;
+    // Replay protection state update
+    g += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
+    g +=
+        model.time_filter_map_insert(false) + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
+    // utxo processing
+    for (cost, offer) in [
+        (&mut g, intent.guaranteed_unshielded_offer.as_ref()),
+        (&mut f, intent.fallible_unshielded_offer.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(c, o)| o.map(|o| (c, o)))
+    {
+        let inputs = offer.inputs.len();
+        let outputs = offer.outputs.len();
+        // UTXO membership test
+        *cost += model.map_index(EXPECTED_UTXO_DEPTH) * inputs;
+        // UTXO removal
+        *cost += (model.map_remove(EXPECTED_UTXO_DEPTH, true)
+            + model.cell_delete(UTXO_SIZE as u64))
+            * inputs;
+        // UTXO insertion
+        *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
+            + model.cell_write(UTXO_SIZE as u64, false))
+            * outputs;
+        let night_inputs = offer.inputs.fold(night, |_, i| u64::from(i.type_ == NIGHT));
+        let night_outputs = offer
+            .outputs
+            .fold(night, |_, o| u64::from(o.type_ == NIGHT));
+        // Generating dtime update
+        *cost += (model.merkle_tree_insert_unamortized(32, false)
+            + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+            * night_inputs;
+        // Night generates Dust address table read
+        *cost += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64))
+            * night_outputs;
+        // Generation tree insertion & first-free update
+        *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+        *cost += (model.merkle_tree_insert_amortized(32, false)
+            + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+            * night_outputs;
+        // Night indicies insertion
+        *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(8, false))
+            * night_outputs;
+        // Commitment merkle tree insertion & first-free update
+        *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+        *cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+            + model.cell_write(FR_BYTES as u64, false))
+            * night_outputs;
+        // Commitment computation
+        *cost += RunningCost::compute(
+            model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
+        );
+    }
+    let dust_spends = intent
+        .dust_actions
+        .as_ref()
+        .map(|a| a.spends.len())
+        .unwrap_or(0);
+    // Nullifier membership test
+    g += model.map_index(32) * dust_spends;
+    // Nullifier set insertion
+    g += (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(FR_BYTES as u64, false))
+        * dust_spends;
+    // Commitment merkle tree insertion & first-free update
+    g += (model.cell_read(8) + model.cell_write(8, true)) * dust_spends;
+    g += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(FR_BYTES as u64, false))
+        * dust_spends;
+    // Dust Merkle roots lookup
+    g += model.time_filter_map_lookup() * 2u64;
+    // Guaranteed night inputs per owner, for registrations to look up.
+    let mut night_inputs_by_owner = std::collections::BTreeMap::new();
+    for (i, n) in intent
+        .guaranteed_unshielded_offer
+        .iter()
+        .flat_map(|o| distinct(&o.inputs))
+        .filter(|(i, _)| i.type_ == NIGHT)
+    {
+        let count = night_inputs_by_owner.entry(i.owner.clone()).or_insert(0u64);
+        *count = count.saturating_add(n);
+    }
+    for (reg, n) in intent
+        .dust_actions
+        .iter()
+        .flat_map(|a| distinct(&a.registrations))
+    {
+        let mut reg_cost = RunningCost::ZERO;
+        // Update the dust address registration table
+        if reg.dust_address.is_some() {
+            reg_cost += model.map_insert(EXPECTED_GENERATION_DEPTH, false)
+                + model.cell_write(FR_BYTES as u64, false);
+        } else {
+            reg_cost += model.map_remove(EXPECTED_GENERATION_DEPTH, true)
+                + model.cell_delete(FR_BYTES as u64);
+        }
+        // For each guaranteed night input with a matching address in
+        // the intent, we read its ctime, and check it in the
+        // generation indicies table.
+        if reg.dust_address.is_some() {
+            let night_inputs = night_inputs_by_owner
+                .get(&reg.night_key)
+                .copied()
+                .unwrap_or(0);
+            // Night indicies set check
+            reg_cost += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(8)) * night_inputs;
+            // Generation tree index
+            reg_cost += (model.merkle_tree_index(EXPECTED_UTXO_DEPTH)
+                + model.cell_read(DUST_GENERATION_INFO_SIZE as u64))
+                * night_inputs;
+        }
+        g += reg_cost * n;
+    }
+    SegmentCosts {
+        guaranteed: g,
+        fallible: f,
+    }
+}
+
+/// A contract action's application costs. Deployed states are passed to
+/// `on_deploy` instead, to be charged once per transaction.
+fn action_application_cost<P: ProofKind<D>, D: DB>(
+    model: &TransactionCostModel,
+    action: &ContractAction<P, D>,
+    memo: &mut DagMemo<SegmentCosts, D>,
+    on_deploy: &mut impl FnMut(&ContractState<D>),
+) -> SegmentCosts {
+    let (mut g, mut f) = (RunningCost::ZERO, RunningCost::ZERO);
+    match action {
+        ContractAction::Call(call) => {
+            let base_cost = if call.guaranteed_transcript.is_some() {
+                &mut g
+            } else {
+                &mut f
+            };
+            // Fetch / store state
+            *base_cost += model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_insert(EXPECTED_CONTRACT_DEPTH, true)
+                + model.map_index(1)
+                + model.map_insert(1, true);
+            // Declared transcript costs
+            //
+            // NOTE: This is taken at face-value here. During
+            // execution, the declared cost (A `RunningCost`) is
+            // checked against the real cost at each operation, and
+            // aborted if it exceeds it (with the exception of
+            // `bytes_deleted`, which is checked after completion,
+            // and must be *at least* as declared).
+            for (cost, transcript) in [
+                (&mut g, call.guaranteed_transcript.as_ref()),
+                (&mut f, call.fallible_transcript.as_ref()),
+            ]
+            .into_iter()
+            .filter_map(|(c, t)| t.map(|t| (c, t)))
+            {
+                *cost += transcript.gas;
+                // VM stack setup / destroy cost
+                // Left out of scope here to avoid going to deep into
+                // stack structure.
+                *cost += model.stack_setup_cost_for_effects(&transcript.effects);
+            }
+        }
+        ContractAction::Deploy(deploy) => {
+            // Contract exists check
+            f += model.map_index(EXPECTED_CONTRACT_DEPTH);
+            // Contract insert
+            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, false);
+            on_deploy(&deploy.initial_state);
+        }
+        ContractAction::Maintain(upd) => {
+            // Contract state fetch
+            f += model.map_index(EXPECTED_CONTRACT_DEPTH);
+            // Maintainance update counter update
+            f += model.map_index(1) * 2u64
+                + model.map_insert(1, true) * 2u64
+                + model.cell_read(8)
+                + model.cell_write(8, true);
+            // Carrying out the updates
+            f += upd
+                .updates
+                .fold(memo, |memo, part| {
+                    memo.get_or_compute(part, |_, part| SegmentCosts {
+                        guaranteed: RunningCost::ZERO,
+                        fallible: update_application_cost::<D>(model, part),
+                    })
+                })
+                .fallible;
+            // Inserting the new state
+            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, true);
+        }
+    }
+    SegmentCosts {
+        guaranteed: g,
+        fallible: f,
+    }
+}
+
+fn update_application_cost<D: DB>(
+    model: &TransactionCostModel,
+    part: &SingleUpdate,
+) -> RunningCost {
+    match part {
+        SingleUpdate::ReplaceAuthority(auth) => {
+            model.tree_copy::<_, D>(Sp::new(auth.clone())) + model.map_insert(1, true)
+        }
+        SingleUpdate::VerifierKeyRemove(..) => {
+            model.map_remove(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_delete(VERIFIER_KEY_SIZE as u64)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::VerifierKeyInsert(ep, vk) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, false)
+                + model.cell_write((ep.serialized_size() + vk.serialized_size()) as u64, false)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::IrRemove(ep) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_delete(ep.serialized_size() as u64)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::IrInsert(ep, ir) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_write((ep.serialized_size() + ir.serialized_size()) as u64, false)
+                + model.map_insert(1, true)
+        }
+    }
+}
+
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D>,
@@ -1981,7 +2267,8 @@ where
     ) -> SyntheticCost {
         let mut result = match self {
             Transaction::Standard(stx) => {
-                let mut memo = DagMemo::new();
+                let mut public_inputs = DagMemo::new();
+                let mut memo = DagMemo::<CostSum, D>::new();
                 let mut unique_calls = BTreeSet::new();
                 let mut cost = model.baseline_cost;
                 let offers = stx
@@ -2000,46 +2287,64 @@ where
                     .sum::<usize>();
                 cost += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
                 cost += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
-                for intent in stx.intents.values() {
-                    // Binding commitment check
-                    cost.compute_time += model.runtime_cost_model.pedersen_valid;
-                    // Unshielded offer validation
-                    cost.compute_time += intent
-                        .guaranteed_unshielded_offer
-                        .iter()
-                        .chain(intent.fallible_unshielded_offer.iter())
-                        .map(|o| o.signatures.len())
-                        .sum::<usize>()
-                        * model.runtime_cost_model.signature_verify_constant;
-                    for (action, n) in distinct(&intent.actions) {
-                        match &*action {
-                            ContractAction::Call(call) => {
-                                unique_calls.insert((
-                                    call.address,
-                                    call.entry_point.clone(),
-                                    P::proof_version_to_operation_version(&call.proof),
-                                ));
-                                cost.compute_time +=
-                                    model.runtime_cost_model.verifier_key_load * n;
-                                cost += model
-                                    .proof_verify(call.public_inputs_len_memoized(&mut memo))
-                                    * n;
-                            }
-                            ContractAction::Maintain(upd) => {
+                // Each distinct intent and action is priced once and counted once
+                // per path to it; each distinct call is collected once.
+                cost += stx
+                    .intents
+                    .fold(&mut memo, |memo, _, intent| {
+                        memo.get_or_compute(intent, |memo, intent| {
+                            let mut cost = RunningCost::ZERO;
+                            // Binding commitment check
+                            cost.compute_time += model.runtime_cost_model.pedersen_valid;
+                            // Unshielded offer validation
+                            cost.compute_time += intent
+                                .guaranteed_unshielded_offer
+                                .iter()
+                                .chain(intent.fallible_unshielded_offer.iter())
+                                .map(|o| o.signatures.len())
+                                .sum::<usize>()
+                                * model.runtime_cost_model.signature_verify_constant;
+                            cost += intent
+                                .actions
+                                .fold(memo, |memo, action| {
+                                    memo.get_or_compute(action, |_, action| {
+                                        CostSum(match action {
+                                            ContractAction::Call(call) => {
+                                                unique_calls.insert((
+                                                    call.address,
+                                                    call.entry_point.clone(),
+                                                    P::proof_version_to_operation_version(
+                                                        &call.proof,
+                                                    ),
+                                                ));
+                                                RunningCost::compute(
+                                                    model.runtime_cost_model.verifier_key_load,
+                                                ) + model.proof_verify(
+                                                    call.public_inputs_len_memoized(
+                                                        &mut public_inputs,
+                                                    ),
+                                                )
+                                            }
+                                            ContractAction::Maintain(upd) => RunningCost::compute(
+                                                model.runtime_cost_model.signature_verify_constant
+                                                    * upd.signatures.len(),
+                                            ),
+                                            _ => RunningCost::ZERO,
+                                        })
+                                    })
+                                })
+                                .0;
+                            if let Some(dust_actions) = intent.dust_actions.as_ref() {
+                                cost +=
+                                    model.proof_verify(DUST_SPEND_PIS) * dust_actions.spends.len();
                                 cost.compute_time +=
                                     model.runtime_cost_model.signature_verify_constant
-                                        * upd.signatures.len()
-                                        * n;
+                                        * dust_actions.registrations.len();
                             }
-                            _ => {}
-                        }
-                    }
-                    if let Some(dust_actions) = intent.dust_actions {
-                        cost += model.proof_verify(DUST_SPEND_PIS) * dust_actions.spends.len();
-                        cost.compute_time += model.runtime_cost_model.signature_verify_constant
-                            * dust_actions.registrations.len();
-                    }
-                }
+                            CostSum(cost)
+                        })
+                    })
+                    .0;
                 for (address, entry_point, version) in &unique_calls {
                     cost += per_call_vk_read(address, entry_point, version.clone());
                 }
@@ -2109,226 +2414,44 @@ where
         P::estimated_tx_size(self)
     }
 
-    pub fn application_cost(&self, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
+    /// The guaranteed and total costs of applying the transaction.
+    ///
+    /// Pricing joins each intent's registrations against its inputs, which
+    /// is linear only if no entry repeats, so a transaction repeating one is
+    /// rejected first.
+    pub fn application_cost(
+        &self,
+        model: &TransactionCostModel,
+    ) -> Result<(SyntheticCost, SyntheticCost), FeeCalculationError> {
         let mut g_cost = model.baseline_cost;
         let mut f_cost = RunningCost::ZERO;
-        for (_, intent) in self.intents() {
-            // Replay protection state update
-            g_cost +=
-                model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
-            g_cost += model.time_filter_map_insert(false)
-                + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
-            // utxo processing
-            for (cost, offer) in [
-                (&mut g_cost, intent.guaranteed_unshielded_offer.as_ref()),
-                (&mut f_cost, intent.fallible_unshielded_offer.as_ref()),
-            ]
-            .into_iter()
-            .filter_map(|(c, o)| o.map(|o| (c, o)))
-            {
-                let inputs = offer.inputs.len();
-                let outputs = offer.outputs.len();
-                // UTXO membership test
-                *cost += model.map_index(EXPECTED_UTXO_DEPTH) * inputs;
-                // UTXO removal
-                *cost += (model.map_remove(EXPECTED_UTXO_DEPTH, true)
-                    + model.cell_delete(UTXO_SIZE as u64))
-                    * inputs;
-                // UTXO insertion
-                *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(UTXO_SIZE as u64, false))
-                    * outputs;
-                let night_inputs = distinct(&offer.inputs)
-                    .filter(|(i, _)| i.type_ == NIGHT)
-                    .fold(0u64, |acc, (_, n)| acc.saturating_add(n));
-                let night_outputs = distinct(&offer.outputs)
-                    .filter(|(o, _)| o.type_ == NIGHT)
-                    .fold(0u64, |acc, (_, n)| acc.saturating_add(n));
-                // Generating dtime update
-                *cost += (model.merkle_tree_insert_unamortized(32, false)
-                    + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-                    * night_inputs;
-                // Night generates Dust address table read
-                *cost += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64))
-                    * night_outputs;
-                // Generation tree insertion & first-free update
-                *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-                *cost += (model.merkle_tree_insert_amortized(32, false)
-                    + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-                    * night_outputs;
-                // Night indicies insertion
-                *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(8, false))
-                    * night_outputs;
-                // Commitment merkle tree insertion & first-free update
-                *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-                *cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(FR_BYTES as u64, false))
-                    * night_outputs;
-                // Commitment computation
-                *cost += RunningCost::compute(
-                    model.runtime_cost_model.transient_hash
-                        * FRESH_DUST_COMMITMENT_HASHES
-                        * night_outputs,
-                );
-            }
-            let dust_spends = intent
-                .dust_actions
-                .as_ref()
-                .map(|a| a.spends.len())
-                .unwrap_or(0);
-            // Nullifier membership test
-            g_cost += model.map_index(32) * dust_spends;
-            // Nullifier set insertion
-            g_cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                + model.cell_write(FR_BYTES as u64, false))
-                * dust_spends;
-            // Commitment merkle tree insertion & first-free update
-            g_cost += (model.cell_read(8) + model.cell_write(8, true)) * dust_spends;
-            g_cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-                + model.cell_write(FR_BYTES as u64, false))
-                * dust_spends;
-            // Dust Merkle roots lookup
-            g_cost += model.time_filter_map_lookup() * 2u64;
-            // Guaranteed night inputs per owner, for registrations to look up.
-            let mut night_inputs_by_owner = std::collections::BTreeMap::new();
-            for (i, n) in intent
-                .guaranteed_unshielded_offer
-                .iter()
-                .flat_map(|o| distinct(&o.inputs))
-                .filter(|(i, _)| i.type_ == NIGHT)
-            {
-                let count = night_inputs_by_owner.entry(i.owner.clone()).or_insert(0u64);
-                *count = count.saturating_add(n);
-            }
-            for (reg, n) in intent
-                .dust_actions
-                .iter()
-                .flat_map(|a| distinct(&a.registrations))
-            {
-                let mut reg_cost = RunningCost::ZERO;
-                // Update the dust address registration table
-                if reg.dust_address.is_some() {
-                    reg_cost += model.map_insert(EXPECTED_GENERATION_DEPTH, false)
-                        + model.cell_write(FR_BYTES as u64, false);
-                } else {
-                    reg_cost += model.map_remove(EXPECTED_GENERATION_DEPTH, true)
-                        + model.cell_delete(FR_BYTES as u64);
-                }
-                // For each guaranteed night input with a matching address in
-                // the intent, we read its ctime, and check it in the
-                // generation indicies table.
-                if reg.dust_address.is_some() {
-                    let night_inputs = night_inputs_by_owner
-                        .get(&reg.night_key)
-                        .copied()
-                        .unwrap_or(0);
-                    // Night indicies set check
-                    reg_cost +=
-                        (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(8)) * night_inputs;
-                    // Generation tree index
-                    reg_cost += (model.merkle_tree_index(EXPECTED_UTXO_DEPTH)
-                        + model.cell_read(DUST_GENERATION_INFO_SIZE as u64))
-                        * night_inputs;
-                }
-                g_cost += reg_cost * n;
-            }
-            // Contract actions
-            for (action, n) in distinct(&intent.actions) {
-                let (mut g, mut f) = (RunningCost::ZERO, RunningCost::ZERO);
-                match &*action {
-                    ContractAction::Call(call) => {
-                        let base_cost = if call.guaranteed_transcript.is_some() {
-                            &mut g
-                        } else {
-                            &mut f
-                        };
-                        // Fetch / store state
-                        *base_cost += model.map_index(EXPECTED_CONTRACT_DEPTH)
-                            + model.map_insert(EXPECTED_CONTRACT_DEPTH, true)
-                            + model.map_index(1)
-                            + model.map_insert(1, true);
-                        // Declared transcript costs
-                        //
-                        // NOTE: This is taken at face-value here. During
-                        // execution, the declared cost (A `RunningCost`) is
-                        // checked against the real cost at each operation, and
-                        // aborted if it exceeds it (with the exception of
-                        // `bytes_deleted`, which is checked after completion,
-                        // and must be *at least* as declared).
-                        for (cost, transcript) in [
-                            (&mut g, call.guaranteed_transcript.as_ref()),
-                            (&mut f, call.fallible_transcript.as_ref()),
-                        ]
-                        .into_iter()
-                        .filter_map(|(c, t)| t.map(|t| (c, t)))
-                        {
-                            *cost += transcript.gas;
-                            // VM stack setup / destroy cost
-                            // Left out of scope here to avoid going to deep into
-                            // stack structure.
-                            *cost += model.stack_setup_cost_for_effects(&transcript.effects);
-                        }
-                    }
-                    ContractAction::Deploy(deploy) => {
-                        // Contract exists check
-                        f += model.map_index(EXPECTED_CONTRACT_DEPTH);
-                        // Contract insert
-                        f += model.map_insert(EXPECTED_CONTRACT_DEPTH, false)
-                            + model.tree_copy(Sp::new(deploy.initial_state.clone()));
-                    }
-                    ContractAction::Maintain(upd) => {
-                        // Contract state fetch
-                        f += model.map_index(EXPECTED_CONTRACT_DEPTH);
-                        // Maintainance update counter update
-                        f += model.map_index(1) * 2u64
-                            + model.map_insert(1, true) * 2u64
-                            + model.cell_read(8)
-                            + model.cell_write(8, true);
-                        // Carrying out the updates
-                        for (part, m) in distinct(&upd.updates) {
-                            let mut part_cost = RunningCost::ZERO;
-                            match &*part {
-                                SingleUpdate::ReplaceAuthority(auth) => {
-                                    part_cost += model.tree_copy::<_, D>(Sp::new(auth.clone()))
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::VerifierKeyRemove(..) => {
-                                    part_cost += model.map_remove(EXPECTED_OPERATIONS_DEPTH, true)
-                                        + model.cell_delete(VERIFIER_KEY_SIZE as u64)
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::VerifierKeyInsert(ep, vk) => {
-                                    part_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, false)
-                                        + model.cell_write(
-                                            (ep.serialized_size() + vk.serialized_size()) as u64,
-                                            false,
-                                        )
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::IrRemove(ep) => {
-                                    part_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
-                                        + model.cell_delete(ep.serialized_size() as u64)
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::IrInsert(ep, ir) => {
-                                    part_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
-                                        + model.cell_write(
-                                            (ep.serialized_size() + ir.serialized_size()) as u64,
-                                            false,
-                                        )
-                                        + model.map_insert(1, true)
-                                }
-                            }
-                            f += part_cost * m;
-                        }
-                        // Inserting the new state
-                        f += model.map_insert(EXPECTED_CONTRACT_DEPTH, true);
-                    }
-                }
-                g_cost += g * n;
-                f_cost += f * n;
-            }
+        if let Transaction::Standard(stx) = self {
+            stx.disjoint_check()
+                .map_err(|_| FeeCalculationError::RepeatedEntries)?;
+            let mut memo = DagMemo::<SegmentCosts, D>::new();
+            let mut night = DagMemo::<u64, D>::new();
+            // Deployed states are copied into one deduplicating store, so a
+            // node shared between them is charged once per transaction.
+            let mut deployed = std::collections::HashSet::new();
+            let mut deploy_copies = RunningCost::ZERO;
+            let intents = stx.intents.fold(&mut memo, |memo, _, intent| {
+                memo.get_or_compute(intent, |memo, intent| {
+                    let mut costs = intent_application_cost(model, intent, &mut night);
+                    // Contract actions
+                    costs = costs.append(&intent.actions.fold(memo, |memo, action| {
+                        memo.get_or_compute(action, |memo, action| {
+                            action_application_cost(model, action, memo, &mut |state| {
+                                deploy_copies += model
+                                    .runtime_cost_model
+                                    .tree_copy_unseen(&Sp::new(state.clone()), &mut deployed);
+                            })
+                        })
+                    }));
+                    costs
+                })
+            });
+            g_cost += intents.guaranteed;
+            f_cost += intents.fallible + deploy_copies;
         }
         match self {
             Transaction::Standard(stx) => {
@@ -2387,14 +2510,20 @@ where
         }
         g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
         f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
-        (g_cost.into(), (g_cost + f_cost).into())
+        Ok((g_cost.into(), (g_cost + f_cost).into()))
     }
 
-    pub fn time_to_dismiss(&self, model: &TransactionCostModel) -> CostDuration {
+    pub fn time_to_dismiss(
+        &self,
+        model: &TransactionCostModel,
+    ) -> Result<CostDuration, FeeCalculationError> {
         let validation_cost = self.validation_cost(model);
-        let guaranteed_cost = self.application_cost(model).0;
+        let guaranteed_cost = self.application_cost(model)?.0;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
-        CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time)
+        Ok(CostDuration::max(
+            cost_to_dismiss.compute_time,
+            cost_to_dismiss.read_time,
+        ))
     }
 
     pub fn cost(
@@ -2403,7 +2532,7 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost(&params.cost_model);
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
+        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
@@ -2426,7 +2555,7 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
+        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
@@ -2469,7 +2598,7 @@ where
                 + model.map_index(EXPECTED_CONTRACT_DEPTH)
                 + model.map_index(EXPECTED_OPERATIONS_DEPTH)
         });
-        let (guaranteed_cost, application_cost) = self.application_cost(model);
+        let (guaranteed_cost, application_cost) = self.application_cost(model)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
