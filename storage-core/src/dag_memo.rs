@@ -20,8 +20,9 @@
 use crate::Storable;
 use crate::arena::{ArenaHash, Sp};
 use crate::db::DB;
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::marker::PhantomData;
 
 /// Caches a function's result per distinct node.
 ///
@@ -70,6 +71,38 @@ impl<R: Clone, D: DB> DagMemo<R, D> {
     /// Whether no node has been computed yet.
     pub fn is_empty(&self) -> bool {
         self.results.is_empty()
+    }
+}
+
+/// One [`DagMemo`] per invariant check, shared by every check made during a
+/// single decode, so checks that walk shared children walk each once.
+pub struct InvariantMemos<D: DB> {
+    memos: HashMap<TypeId, Box<dyn Any>>,
+    _db: PhantomData<D>,
+}
+
+impl<D: DB> Default for InvariantMemos<D> {
+    fn default() -> Self {
+        InvariantMemos {
+            memos: HashMap::new(),
+            _db: PhantomData,
+        }
+    }
+}
+
+impl<D: DB> InvariantMemos<D> {
+    /// Creates an empty set of memos.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The memo for the check named by the marker type `C`.
+    pub fn memo<C: 'static, R: Clone + 'static>(&mut self) -> &mut DagMemo<R, D> {
+        self.memos
+            .entry(TypeId::of::<C>())
+            .or_insert_with(|| Box::new(DagMemo::<R, D>::new()))
+            .downcast_mut()
+            .expect("a check's memo always holds results of one type")
     }
 }
 

@@ -20,6 +20,7 @@
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
+use crate::dag_memo::InvariantMemos;
 use crate::storable::{Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{
@@ -925,6 +926,7 @@ impl<D: DB> Arena<D> {
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1120,6 +1122,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
     inlined: InlineMemo<D>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
+    invariant_memos: Rc<RefCell<InvariantMemos<D>>>,
 }
 
 #[cfg(test)]
@@ -1137,6 +1140,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
     }
 }
@@ -1170,6 +1174,7 @@ impl<D: DB> IrLoader<'_, D> {
             visited: self.visited.clone(),
             inlined: self.inlined.clone(),
             key_to_child_repr: self.key_to_child_repr.clone(),
+            invariant_memos: self.invariant_memos.clone(),
         })
     }
 
@@ -1188,6 +1193,10 @@ impl<D: DB> IrLoader<'_, D> {
 
 impl<D: DB> Loader<D> for IrLoader<'_, D> {
     const CHECK_INVARIANTS: bool = true;
+
+    fn invariant_memos(&self) -> Option<&RefCell<InvariantMemos<D>>> {
+        Some(&self.invariant_memos)
+    }
 
     /// Always forces deserialization of each key the first time we see it, so
     /// that `Sp` deserialization does not depend on the `Arena` state before
@@ -2053,6 +2062,13 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         T::check_invariant(self)
+    }
+
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        T::check_invariant_memoized(self, memos)
     }
 }
 

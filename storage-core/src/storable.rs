@@ -14,6 +14,7 @@
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::arena::{ArenaKey, DirectChildNode, Opaque, Sp, hash};
+use crate::dag_memo::InvariantMemos;
 use crate::db::DB;
 use base_crypto::schnorr::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -32,6 +33,7 @@ use proptest::{
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::any::Any;
+use std::cell::RefCell;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -66,10 +68,18 @@ pub trait Loader<D: DB> {
     /// `Deserializable::deserialize`.
     fn get_recursion_depth(&self) -> u32;
 
+    /// The memos shared by invariant checks in this load, if it shares any.
+    fn invariant_memos(&self) -> Option<&RefCell<InvariantMemos<D>>> {
+        None
+    }
+
     /// Does a check iff `CHECK_INVARIANTS` is true.
     fn do_check<T: Storable<D>>(&self, obj: T) -> std::io::Result<T> {
         if Self::CHECK_INVARIANTS {
-            obj.check_invariant()?;
+            match self.invariant_memos() {
+                Some(memos) => obj.check_invariant_memoized(&mut memos.borrow_mut())?,
+                None => obj.check_invariant()?,
+            }
         }
         Ok(obj)
     }
@@ -118,6 +128,16 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     /// An invariant to check on deserialization. Should be invoked from within `from_binary_repr`.
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         Ok(())
+    }
+
+    /// As [`Self::check_invariant`], sharing `memos` with every other check in
+    /// the same decode.
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        let _ = memos;
+        self.check_invariant()
     }
 
     /// Represents self as a `ArenaKey`

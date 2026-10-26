@@ -15,10 +15,10 @@
 
 use crate as storage;
 use crate::arena::{ArenaHash, ArenaKey, Sp};
-use crate::dag_memo::DagMemo;
+use crate::dag_memo::{DagMemo, InvariantMemos};
 use crate::db::{DB, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
-use crate::merkle_patricia_trie::MerklePatriciaTrie;
+use crate::merkle_patricia_trie::{MerklePatriciaTrie, Node};
 use crate::merkle_patricia_trie::{Monoid, Semigroup};
 use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
@@ -41,6 +41,8 @@ use std::sync::Arc;
 
 pub use storage_core::storage::*;
 
+#[cfg(test)]
+mod array_invariant_tests;
 #[cfg(any(test, feature = "test-utilities"))]
 mod shared_structure;
 
@@ -589,10 +591,60 @@ where
     }
 }
 
+/// The largest key in a subtrie, read as the array index its nibbles spell
+/// below the subtrie's root.
+///
+/// Keys without leading zeroes compare as indices do: by length, then
+/// lexicographically.
+#[derive(Clone)]
+enum MaxIndex {
+    None,
+    Some { len: usize, value: u64 },
+    TooLong,
+}
+
+impl MaxIndex {
+    fn under(path: &[u8], r: Self) -> Self {
+        match r {
+            MaxIndex::Some { len, value } if len + path.len() <= 16 => {
+                let prefix = path.iter().fold(0u64, |acc, n| (acc << 4) | *n as u64);
+                MaxIndex::Some {
+                    len: len + path.len(),
+                    value: prefix.checked_shl(4 * len as u32).unwrap_or(0) | value,
+                }
+            }
+            MaxIndex::Some { .. } => MaxIndex::TooLong,
+            other => other,
+        }
+    }
+}
+
+impl Semigroup for MaxIndex {
+    fn append(&self, other: &Self) -> Self {
+        match (self, other) {
+            (MaxIndex::TooLong, _) | (_, MaxIndex::TooLong) => MaxIndex::TooLong,
+            (MaxIndex::None, x) | (x, MaxIndex::None) => x.clone(),
+            (MaxIndex::Some { len: a, value: x }, MaxIndex::Some { len: b, value: y }) => {
+                if (a, x) >= (b, y) {
+                    self.clone()
+                } else {
+                    other.clone()
+                }
+            }
+        }
+    }
+}
+
+impl Monoid for MaxIndex {
+    fn empty() -> Self {
+        MaxIndex::None
+    }
+}
+
 /// An array built from a `MerklePatriciaTrie`
 #[derive_where(Clone; V)]
 #[derive(Storable)]
-#[storable(db = D, invariant = Array::invariant)]
+#[storable(db = D, invariant_memoized = Array::invariant)]
 #[tag = "mpt-array[v1]"]
 pub struct Array<V: Storable<D>, D: DB = DefaultDB>(
     // Array wraps MPT in an Sp to guarantee it only has one child
@@ -719,40 +771,36 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         nibbles.into_iter().skip_while(|x| *x == 0).collect()
     }
 
-    fn nibbles_to_index(raw_nibbles: &[u8]) -> Result<u64, std::io::Error> {
-        if raw_nibbles.first() == Some(&0) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "nibbles in array should not have leading zeroes",
-            ));
+    fn invariant(&self, memos: &mut InvariantMemos<D>) -> Result<(), std::io::Error> {
+        let err = |msg: &str| Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
+        // A key's first nibble is the first step below the root, or below a
+        // value stored at the root.
+        let mut node = &(self.0).0;
+        let leading_zero = loop {
+            match node.deref() {
+                Node::MidBranchLeaf { child, .. } => node = child,
+                Node::Branch { children, .. } => break !matches!(*children[0], Node::Empty),
+                Node::Extension {
+                    compressed_path, ..
+                } => break compressed_path.first() == Some(&0),
+                Node::Empty | Node::Leaf { .. } => break false,
+            }
+        };
+        if leading_zero {
+            return err("nibbles in array should not have leading zeroes");
         }
-        let mut nibbles = [0u8; 16];
-        if raw_nibbles.len() > 16 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "too long key for index in array",
-            ));
+        let max = self.0.fold_paths(
+            memos.memo::<MaxIndex, MaxIndex>(),
+            |_, _| MaxIndex::Some { len: 0, value: 0 },
+            &MaxIndex::under,
+        );
+        match max {
+            MaxIndex::TooLong => err("too long key for index in array"),
+            MaxIndex::Some { value, .. } if value >= self.len() as u64 => {
+                err("index out of range for array on deserialization")
+            }
+            MaxIndex::None | MaxIndex::Some { .. } => Ok(()),
         }
-        nibbles[(16 - raw_nibbles.len())..].copy_from_slice(raw_nibbles);
-        let val: BigEndianU64 = from_nibbles(&nibbles)?;
-        Ok(val.0)
-    }
-
-    fn invariant(&self) -> Result<(), std::io::Error> {
-        let len = self.len() as u64;
-        self.0
-            .iter()
-            .map(|(k, _)| Self::nibbles_to_index(&k))
-            .try_for_each(|n| {
-                if n? >= len {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "index out of range for array on deserialization",
-                    ))
-                } else {
-                    Ok(())
-                }
-            })
     }
 
     /// Construct an empty new array

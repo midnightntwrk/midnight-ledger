@@ -175,7 +175,6 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
 
     /// As [`Self::fold`], with `under(path, r)` applied to the result `r` of
     /// each subtree reached from its parent by the nibbles `path`.
-    #[allow(dead_code)]
     pub(crate) fn fold_paths<R: Monoid + Clone>(
         &self,
         memo: &mut DagMemo<R, D>,
