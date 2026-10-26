@@ -47,6 +47,8 @@ pub use storage_core::storage::*;
 #[cfg(test)]
 mod array_invariant_tests;
 #[cfg(test)]
+mod hashmap_invariant_tests;
+#[cfg(test)]
 mod map_key_tests;
 #[cfg(test)]
 mod time_filter_map_tests;
@@ -59,7 +61,7 @@ pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
 /// A map from key hashes to values
 #[derive(Storable)]
 #[derive_where(Clone, Eq, PartialEq; V, A)]
-#[storable(db = D, invariant = HashMap::invariant)]
+#[storable(db = D, invariant_memoized = HashMap::invariant)]
 pub struct HashMap<
     K: Serializable + Storable<D>,
     V: Storable<D>,
@@ -276,18 +278,16 @@ impl<
         ))
     }
 
-    fn invariant(&self) -> Result<(), std::io::Error> {
-        for (hash, v) in self.0.iter() {
-            let key = &*v.0;
-            let hash2 = Self::gen_key(key);
-            if hash != hash2 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "hashmap key doesn't match serialized hash",
-                ));
-            }
+    fn invariant(&self, memos: &mut InvariantMemos<D>) -> Result<(), std::io::Error> {
+        let memo = memos.memo::<HashMapKeys, Anchor>();
+        if stored_under_own_keys(&self.0.mpt, memo, |kv| to_nibbles(&Self::gen_key(&kv.0))) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "hashmap key doesn't match serialized hash",
+            ))
         }
-        Ok(())
     }
 
     /// Get object keyed by the hash of object key
@@ -1480,48 +1480,90 @@ impl<K: EncodingShape + 'static, V: Storable<D>, D: DB, A: Storable<D> + Annotat
 impl<K: Serializable, V: Storable<D> + HoldsKey<K>, D: DB, A: Storable<D> + Annotation<V>>
     KeyCheck<K, V, D, A> for ByValue
 {
-    /// Each value pins its key to one path, so a node reached twice is
-    /// misplaced on at least one of its paths; this visits each node once.
-    fn keys_valid(root: &Sp<Node<V, D, A>, D>, _: &mut InvariantMemos<D>) -> bool {
-        fn go<K: Serializable, V: Storable<D> + HoldsKey<K>, D: DB, A: Storable<D> + Annotation<V>>(
-            sp: &Sp<Node<V, D, A>, D>,
-            path: &mut std::vec::Vec<u8>,
-            seen: &mut std::collections::HashSet<ArenaHash<D::Hasher>>,
-        ) -> bool {
-            if matches!(sp.deref(), Node::Empty) {
-                return true;
-            }
-            if !seen.insert(sp.hash()) {
-                return false;
-            }
-            let at_own_key = |value: &Sp<V, D>, path: &[u8]| to_nibbles(value.key()) == path;
-            match sp.deref() {
-                Node::Empty => true,
-                Node::Leaf { value, .. } => at_own_key(value, path),
-                Node::Branch { children, .. } => children.iter().enumerate().all(|(i, child)| {
-                    path.push(i as u8);
-                    let ok = go(child, path, seen);
-                    path.pop();
-                    ok
-                }),
-                Node::Extension {
-                    compressed_path,
-                    child,
-                    ..
-                } => {
-                    let len = path.len();
-                    path.extend_from_slice(compressed_path);
-                    let ok = go(child, path, seen);
-                    path.truncate(len);
-                    ok
-                }
-                Node::MidBranchLeaf { value, child, .. } => {
-                    at_own_key(value, path) && go(child, path, seen)
-                }
-            }
-        }
-        go(root, &mut std::vec::Vec::new(), &mut std::collections::HashSet::new())
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool {
+        let memo = memos.memo::<HeldKeys, Anchor>();
+        stored_under_own_keys(&MerklePatriciaTrie(root.clone()), memo, |v| {
+            to_nibbles(v.key())
+        })
     }
+}
+
+/// Marks the memo of [`stored_under_own_keys`] for keys held by values.
+struct HeldKeys;
+
+/// Marks the memo of [`stored_under_own_keys`] for `HashMap` keys.
+struct HashMapKeys;
+
+/// Where the keys below a trie node place it. A value's key fixes the path
+/// it must be stored under, so this depends only on the node, and is
+/// computed once however many tries share it.
+#[derive(Clone)]
+enum Anchor {
+    /// No value below.
+    None,
+    /// Every key below agrees with `key` on its first `depth` nibbles, and
+    /// on the rest with the path from this node to the key's value.
+    At { key: Rc<[u8]>, depth: usize },
+    /// Some value below is stored under a path other than its key.
+    Misplaced,
+}
+
+impl Anchor {
+    fn under(path: &[u8], anchor: Anchor) -> Anchor {
+        match anchor {
+            Anchor::At { key, depth }
+                if depth >= path.len() && key[depth - path.len()..depth] == *path =>
+            {
+                Anchor::At {
+                    key,
+                    depth: depth - path.len(),
+                }
+            }
+            Anchor::None => Anchor::None,
+            _ => Anchor::Misplaced,
+        }
+    }
+}
+
+impl Semigroup for Anchor {
+    fn append(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Anchor::None, anchor) | (anchor, Anchor::None) => anchor.clone(),
+            (Anchor::At { key: a, depth: da }, Anchor::At { key: b, depth: db })
+                if da == db && a[..*da] == b[..*db] =>
+            {
+                self.clone()
+            }
+            _ => Anchor::Misplaced,
+        }
+    }
+}
+
+impl Monoid for Anchor {
+    fn empty() -> Self {
+        Anchor::None
+    }
+}
+
+/// Whether every value in `trie` is stored under the path `key_of` gives it,
+/// in time linear in the distinct nodes of every trie checked with `memo`.
+fn stored_under_own_keys<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+    trie: &MerklePatriciaTrie<V, D, A>,
+    memo: &mut DagMemo<Anchor, D>,
+    key_of: impl Fn(&V) -> std::vec::Vec<u8>,
+) -> bool {
+    let anchor = trie.fold_paths(
+        memo,
+        |_, value| {
+            let key: Rc<[u8]> = key_of(value).into();
+            Anchor::At {
+                depth: key.len(),
+                key,
+            }
+        },
+        &Anchor::under,
+    );
+    matches!(anchor, Anchor::None | Anchor::At { depth: 0, .. })
 }
 
 /// A position within a `Map` key's encoding: its shape's state, and the high
