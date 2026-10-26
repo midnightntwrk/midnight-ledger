@@ -11,27 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod mock_tx;
 mod tx_shape;
 
+use mock_tx::{mock_calls, mock_tx};
 pub use tx_shape::TransactionShape;
 
-use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
+use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
-    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind,
-    SignaturesValue, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
-    UnshieldedOffer,
+    MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
 use crate::structure::{
-    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
-    FRESH_DUST_COMMITMENT_HASHES, SegIntent, UTXO_SIZE, VERIFIER_KEY_SIZE,
+    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::AlignedValue;
-use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::schnorr::Signature;
 use base_crypto::schnorr::SigningKey;
 use base_crypto::time::Timestamp;
@@ -52,7 +51,7 @@ use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
 use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::curve::{FR_BYTES, Fr};
+use transient_crypto::curve::Fr;
 use transient_crypto::fab::{AlignedValueExt, ValueReprAlignedValue};
 use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
@@ -811,17 +810,6 @@ impl<D: DB> PreTranscript<D> {
             .query(&prog, None, &params.cost_model.runtime_cost_model)
     }
 
-    fn guaranteed_budget(&self, params: &LedgerParameters) -> CostDuration {
-        let est_size = MIN_PROOF_SIZE
-            + Serializable::serialized_size(&(
-                ContractAddress::default(),
-                Effects::<D>::default(),
-                &self.program.iter().collect::<Vec<_>>(),
-                &self.comm_comm,
-            ));
-        params.limits.time_to_dismiss_per_byte * est_size as u64
-    }
-
     // 1-indexed!
     #[allow(clippy::type_complexity)]
     fn split_at(
@@ -882,17 +870,10 @@ trait QueryResultsExt {
     ) -> RunningCost;
 }
 
-// gas_heuristic and per_tx_cost_reserve together approximate
-// Transaction::cost() (= validation_cost + application_cost, defined in
-// structure.rs) for use during transcript partitioning, before the final
-// Transaction exists. They must be kept in sync when validation_cost or
-// application_cost change.
-//
-// The costs are split into per-call (in gas_heuristic, summed across calls)
-// and per-transaction (in per_tx_cost_reserve, subtracted from the budget
-// once) to avoid double-counting in multi-call transactions.
-//
-// gas_heuristic covers:
+// gas_heuristic and the reserve, `mock_tx(&[], tx_shape).time_to_dismiss`,
+// together approximate Transaction::cost for use during transcript
+// partitioning, before the final Transaction exists. The reserve covers the
+// parts the TransactionShape counts; gas_heuristic covers, per call:
 //   From validation_cost: VK reads (cell_read + map_index for contract and
 //     operations depth, once per unique call), and ContractAction::Call proof
 //     verification (proof_verify + verifier_key_load). Parallelism is applied
@@ -900,17 +881,6 @@ trait QueryResultsExt {
 //   From application_cost: ContractAction::Call state fetch/store (map_index
 //     + map_insert for contract depth and sequence number) and
 //     stack_setup_cost for the call's effects.
-//
-// per_tx_cost_reserve covers, with counts from expected TransactionShape:
-//   From validation_cost: baseline_cost, zswap input/output proof
-//     verifications, Pedersen binding check + final ec_mul (deltas assumed
-//     balanced), unshielded offer signature verifications, and dust spend
-//     proofs. Parallelism applied.
-//   From application_cost: baseline_cost, replay protection and Dust roots
-//     lookups, unshielded UTXO membership/removal/insertion, NIGHT-specific
-//     dust generation costs (dtime update, address table, generation tree,
-//     night indices, commitment tree, commitment hash), and dust spends'
-//     nullifier + commitment processing.
 
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
     fn gas_heuristic(
@@ -946,84 +916,6 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
     }
 }
 
-/// Estimates the non-call costs of a transaction of shape `tx_shape`.
-/// Subtracted from the partition budget.
-fn per_tx_cost_reserve(tx_shape: &TransactionShape, model: &TransactionCostModel) -> CostDuration {
-    let zswap_inputs = tx_shape.zswap_inputs;
-    let zswap_outputs = tx_shape.zswap_outputs;
-    let unshielded_inputs = tx_shape.night_spends + tx_shape.non_night_unshielded_spends;
-    let unshielded_outputs = tx_shape.night_outputs + tx_shape.non_night_unshielded_outputs;
-    let night_inputs = tx_shape.night_spends;
-    let night_outputs = tx_shape.night_outputs;
-
-    // === Validation cost (parallelized) ===
-    let mut validation = model.baseline_cost;
-    // Zswap proof verifications
-    validation += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
-    validation += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
-    // Pedersen binding commitment check
-    if zswap_inputs + zswap_outputs > 0 {
-        validation.compute_time += model.runtime_cost_model.pedersen_valid;
-        validation.compute_time += model.runtime_cost_model.ec_mul;
-    }
-    // Unshielded offer signature verifications
-    validation.compute_time +=
-        model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
-    // Dust spend proof verifications
-    validation += model.proof_verify(crate::dust::DUST_SPEND_PIS) * tx_shape.dust_spends;
-    validation.compute_time = validation.compute_time / model.parallelism_factor;
-
-    // === Application cost ===
-    let mut application = model.baseline_cost;
-    // Replay protection
-    application += (model.time_filter_map_lookup()
-        + model.cell_read(PERSISTENT_HASH_BYTES as u64)
-        + model.time_filter_map_insert(false)
-        + model.cell_write(PERSISTENT_HASH_BYTES as u64, false))
-        * tx_shape.intents;
-    // Unshielded UTXO processing
-    application += (model.map_index(EXPECTED_UTXO_DEPTH)
-        + model.map_remove(EXPECTED_UTXO_DEPTH, true)
-        + model.cell_delete(UTXO_SIZE as u64))
-        * unshielded_inputs;
-    application += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(UTXO_SIZE as u64, false))
-        * unshielded_outputs;
-    // NIGHT-specific dust generation costs
-    application += (model.merkle_tree_insert_unamortized(32, false)
-        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-        * night_inputs;
-    application +=
-        (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64)) * night_outputs;
-    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-    application += (model.merkle_tree_insert_amortized(32, false)
-        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-        * night_outputs;
-    application +=
-        (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(8, false)) * night_outputs;
-    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-    application += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false))
-        * night_outputs;
-    application += RunningCost::compute(
-        model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
-    );
-    // Dust spend application costs
-    application += (model.map_index(32)
-        + model.map_insert(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false)
-        + model.cell_read(8)
-        + model.cell_write(8, true)
-        + model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false))
-        * tx_shape.dust_spends;
-    // Dust Merkle roots lookup
-    application += model.time_filter_map_lookup() * 2u64 * tx_shape.intents;
-
-    let total = validation + application;
-    CostDuration::max(total.compute_time, total.read_time)
-}
-
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
     transient_commit(
         &ValueReprAlignedValue(AlignedValue::concat([&input, &output])),
@@ -1040,8 +932,9 @@ pub fn partition_transcripts<D: DB>(
     partition_transcripts_inner(calls, params, None)
 }
 
-/// Splits each call's transcript into its guaranteed and fallible parts,
-/// reserving the cost of `expected_tx_shape`'s parts from the guaranteed budget.
+/// Splits each call's transcript into its guaranteed and fallible parts.
+/// `expected_tx_shape`'s parts add their bytes to the time-to-dismiss allowance
+/// and their cost is reserved from it.
 pub fn partition_transcripts_with_tx_shape<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
@@ -1055,6 +948,9 @@ fn partition_transcripts_inner<D: DB>(
     params: &LedgerParameters,
     expected_tx_shape: Option<&TransactionShape>,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    if calls.is_empty() {
+        return Ok(Vec::new());
+    }
     let n = calls.len();
     // Step 1: Generate a call graph between `calls`. Assert that this is a forest (no cycles,
     //      no multiple parents).
@@ -1137,27 +1033,30 @@ fn partition_transcripts_inner<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let mut closure_budgets = closures
-        .iter()
-        .map(|closure| {
-            closure
-                .iter()
-                .map(|i| calls[*i].guaranteed_budget(params))
-                .sum::<CostDuration>()
-        })
-        .collect::<Vec<_>>();
-    // Reserve budget for per-transaction costs (validation baseline, zswap
-    // proofs, pedersen, replay protection, unshielded UTXO processing, dust).
-    // These don't scale per-call and are not included in the per-call heuristic.
     let tx_shape = expected_tx_shape.cloned().unwrap_or_else(|| {
         TransactionShape::for_effects(full_runs.iter().map(|run| &run.context.effects))
     });
-    let tx_reserve = per_tx_cost_reserve(&tx_shape, &params.cost_model);
-    let spare_min_time_to_dismiss =
-        params.limits.min_time_to_dismiss - tx_reserve - closure_budgets.iter().copied().sum();
-    for budget in closure_budgets.iter_mut() {
-        *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
+    let reserve = mock_tx::<D>(&[], &tx_shape).time_to_dismiss(&params.cost_model);
+    let allowance = CostDuration::max(
+        params.limits.time_to_dismiss_per_byte * mock_tx(calls, &tx_shape).serialized_size() as u64,
+        params.limits.min_time_to_dismiss,
+    );
+    if reserve >= allowance {
+        return Ok(calls
+            .iter()
+            .map(|call| call.split_at(0, params))
+            .collect::<Result<Vec<_>, _>>()?);
     }
+    let calls_budget = allowance - reserve;
+    let closure_sizes = closures
+        .iter()
+        .map(|closure| mock_calls(closure.iter().map(|i| &calls[*i])).serialized_size())
+        .collect::<Vec<_>>();
+    let total_size = closure_sizes.iter().sum::<usize>() as f64;
+    let closure_budgets = closure_sizes
+        .iter()
+        .map(|size| calls_budget * (*size as f64 / total_size))
+        .collect::<Vec<_>>();
 
     // Step 4: Partition the root nodes:
     //      4a: Split root nodes on `ckpt`s.
