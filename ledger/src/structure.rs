@@ -3461,6 +3461,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fees_of_shared_actions_are_computed_quickly() {
+        use onchain_runtime::transcript::Transcript;
+        use onchain_vm::ops::Op;
+        use std::time::Duration;
+        use storage::test_utilities::assert_completes_within;
+
+        // A fee calculation error ranks above every fee.
+        let mut previous = 0u128;
+        for log16_len in 1..=12 {
+            let res = assert_completes_within(Duration::from_secs(10), move || {
+                let call = ContractCall::<(), InMemoryDB> {
+                    address: Default::default(),
+                    entry_point: EntryPointBuf(b"count".to_vec()),
+                    guaranteed_transcript: None,
+                    fallible_transcript: Some(Sp::new(Transcript {
+                        gas: Default::default(),
+                        effects: Default::default(),
+                        program: vec![Op::Noop { n: 1 }].into(),
+                        version: None,
+                    })),
+                    communication_commitment: Default::default(),
+                    proof: (),
+                };
+                let intent: ErasedIntent<InMemoryDB> = Intent {
+                    guaranteed_unshielded_offer: None,
+                    fallible_unshielded_offer: None,
+                    actions: storage::storage::Array::shared_dense(
+                        log16_len,
+                        ContractAction::Call(Sp::new(call)),
+                    ),
+                    dust_actions: None,
+                    ttl: Timestamp::from_secs(0),
+                    binding_commitment: Default::default(),
+                };
+                let tx =
+                    Transaction::<(), (), Pedersen, InMemoryDB>::Standard(StandardTransaction {
+                        network_id: "local-test".into(),
+                        intents: HashMap::new().insert(1, intent),
+                        guaranteed_coins: None,
+                        fallible_coins: HashMap::new(),
+                        binding_randomness: Default::default(),
+                    });
+                tx.fees(&INITIAL_PARAMETERS, false).unwrap_or(u128::MAX)
+            });
+            assert!(res >= previous, "16^{log16_len} calls cost less than fewer");
+            previous = res;
+        }
+        assert_eq!(previous, u128::MAX, "16^12 calls fit in a block");
+    }
+
+    #[test]
     fn test_max_price_adjustment() {
         let adj = f64::from(INITIAL_PARAMETERS.max_price_adjustment());
         assert!(1.045 <= adj);

@@ -40,6 +40,9 @@ use std::sync::Arc;
 
 pub use storage_core::storage::*;
 
+#[cfg(any(test, feature = "test-utilities"))]
+mod shared_structure;
+
 /// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
 

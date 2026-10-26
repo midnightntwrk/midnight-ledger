@@ -14,6 +14,7 @@ stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion", "dep:serde_json"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
+test-utilities = ["storage-core/test-utilities"]
 
 [dependencies]
 storage-core = { version = "1.2.3", path = "../storage-core", package = "midnight-storage-core" }
@@ -37,6 +38,7 @@ criterion = { version = "^0.5.1", optional = true }
 sysinfo = "0.39.1"
 
 [dev-dependencies]
+midnight-storage = { path = ".", features = ["test-utilities"] }
 pastey = "0.2.1"
 rayon = "^1.10.0"
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }

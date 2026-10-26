@@ -14,6 +14,8 @@
 pub mod delta_tracking;
 pub mod merkle_patricia_trie;
 pub mod storage;
+#[cfg(any(test, feature = "test-utilities"))]
+pub mod test_utilities;
 
 pub use storage_core::*;
 

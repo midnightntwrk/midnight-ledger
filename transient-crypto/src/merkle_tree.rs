@@ -1138,6 +1138,25 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         self.0.root().map(MerkleTreeDigest)
     }
 
+    /// A rehashed tree of the given height whose every leaf is `hash`, built
+    /// from `height + 1` distinct nodes.
+    #[cfg(any(test, feature = "test-utilities"))]
+    pub fn shared_full(height: u8, hash: HashOutput, aux: A) -> Self {
+        let mut node = Sp::new(MerkleTreeNode::Leaf { hash, aux });
+        for h in 1..=height {
+            node = Sp::new(
+                MerkleTreeNode::Node {
+                    hash: None,
+                    left: node.clone(),
+                    right: node,
+                    height: h,
+                }
+                .rehash(),
+            );
+        }
+        MerkleTree(node)
+    }
+
     /// Rehashes the Merkle tree, computing the new root and intermediate hashes.
     /// This is a separate operation as it amortizes costs across sequential
     /// insertions to `O(n + h)` instead of `O(nh)`.

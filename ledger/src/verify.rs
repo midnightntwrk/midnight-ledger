@@ -2389,6 +2389,61 @@ mod well_formed_tests {
     }
 
     #[test]
+    fn contract_call_with_shared_push_is_rejected_quickly() {
+        use onchain_runtime::state::{AlignedValueChecked, StateValue};
+        use std::time::Duration;
+        use storage::test_utilities::assert_completes_within;
+
+        // Each level is a 16-wide array whose entries all share one child, so
+        // the value stays a few hundred bytes while its tree grows 16-fold.
+        let mut value = StateValue::<InMemoryDB, AlignedValueChecked>::Null;
+        for depth in 1..=12 {
+            value = StateValue::Array(vec![value; 16].into());
+            if depth < 4 {
+                continue;
+            }
+            let value = value.clone();
+            let res = assert_completes_within(Duration::from_secs(10), move || {
+                let parent: ErasedIntent<InMemoryDB> = Intent {
+                    guaranteed_unshielded_offer: None,
+                    fallible_unshielded_offer: None,
+                    actions: storage::storage::Array::new(),
+                    dust_actions: None,
+                    ttl: Timestamp::from_secs(0),
+                    binding_commitment: Default::default(),
+                };
+                let state = LedgerState::<InMemoryDB>::new("local-test");
+                let strictness = WellFormedStrictness {
+                    verify_contract_proofs: false,
+                    ..WellFormedStrictness::default()
+                };
+                let call = ContractCall::<(), InMemoryDB> {
+                    address: ContractAddress::default(),
+                    entry_point: EntryPointBuf(b"count".to_vec()),
+                    guaranteed_transcript: None,
+                    fallible_transcript: Some(Sp::new(Transcript {
+                        gas: Default::default(),
+                        effects: Default::default(),
+                        program: vec![Op::Push {
+                            storage: false,
+                            value,
+                        }]
+                        .into(),
+                        version: None,
+                    })),
+                    communication_commitment: Fr::from(0u64),
+                    proof: (),
+                };
+                call.well_formed(&state, strictness, &parent)
+            });
+            assert!(
+                matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
+                "depth {depth}: {res:?}"
+            );
+        }
+    }
+
+    #[test]
     fn contract_call_rejects_dust_transfer() {
         let parent: ErasedIntent<InMemoryDB> = Intent {
             guaranteed_unshielded_offer: None,

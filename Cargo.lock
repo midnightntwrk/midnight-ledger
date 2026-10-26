@@ -3448,6 +3448,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
+ "midnight-storage",
  "midnight-storage-core 1.2.3",
  "os_pipe",
  "parking_lot",

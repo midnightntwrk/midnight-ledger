@@ -18,6 +18,7 @@ proptest = [
 ]
 mock-verify = []
 public-internal-structure = []
+test-utilities = []
 
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
