@@ -22,7 +22,9 @@
 
 pub mod arena;
 pub mod backend;
+pub mod dag_memo;
 pub mod db;
+pub mod monoid;
 pub mod storable;
 pub mod storage;
 
