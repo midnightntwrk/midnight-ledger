@@ -2,8 +2,15 @@
 # inferno 0.12 dropped quick-xml, but pprof 0.15 (latest) pins inferno 0.11 and
 # cargo [patch] can't cross semver boundaries for pre-1.0 crates.
 # These are not exploitable in our context as they only affect benchmark flamegraph generation.
+#
+# crypto-bigint 0.5 is pulled in via k256 0.13 -> elliptic-curve 0.13. Besides our own
+# crates, k256 0.13 is required by midnight-curves 0.3 and the pinned
+# transient-crypto-2.2.0-rc.1 git dependency, so it cannot be lifted here; the fix
+# (crypto-bigint >= 0.7.6) needs the k256 0.14 / elliptic-curve 0.14 migration upstream.
+# TODO: drop once midnight-curves and our crates move to k256 0.14.
 [advisories]
 ignore = [
     "RUSTSEC-2026-0194", # quick-xml: quadratic duplicate attribute check
     "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
+    "RUSTSEC-2026-0387", # crypto-bigint 0.5: timing variability in constant-time ops
 ]
