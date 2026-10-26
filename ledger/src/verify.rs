@@ -644,6 +644,25 @@ where
                     stx.ttl_check_weak(tblock, params.global_ttl)
                         .map_err(MalformedTransaction::TransactionApplicationError)
                 })?;
+                // Fees first: they cost the transaction in time linear in its
+                // encoding, and an over-limit transaction is rejected before
+                // checks whose work grows with its entries.
+                let mut fees = 0;
+                ref_state.param_check(true, |params| {
+                    ref_state.fees_check(|get_op| {
+                        fees = match self.fees_with_impl(params, get_op, true) {
+                            Ok(fees) => fees,
+                            Err(e) => {
+                                if strictness.enforce_balancing {
+                                    return Err(MalformedTransaction::FeeCalculation(e));
+                                } else {
+                                    0
+                                }
+                            }
+                        };
+                        Ok(())
+                    })
+                })?;
                 ref_state.stateless_check(|| {
                     stx.guaranteed_coins
                         .as_ref()
@@ -667,21 +686,8 @@ where
                     stx.pedersen_check()
                 })?;
 
-                let mut fees = 0;
-                ref_state.param_check(true, |params| {
-                    ref_state.fees_check(|get_op| {
-                        fees = match self.fees_with_impl(params, get_op, true) {
-                            Ok(fees) => fees,
-                            Err(e) => {
-                                if strictness.enforce_balancing {
-                                    return Err(MalformedTransaction::FeeCalculation(e));
-                                } else {
-                                    0
-                                }
-                            }
-                        };
-                        stx.balancing_check(strictness, fees)
-                    })
+                ref_state.param_check(true, |_| {
+                    ref_state.fees_check(|_| stx.balancing_check(strictness, fees))
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
@@ -2445,6 +2451,46 @@ mod well_formed_tests {
                 "depth {depth}: {res:?}"
             );
         }
+    }
+
+    #[test]
+    fn shared_zswap_inputs_are_rejected_before_per_input_checks() {
+        use coin_structure::coin::Nullifier;
+        use std::time::Duration;
+        use storage::storage::{Array, HashMap};
+        use storage::test_utilities::assert_completes_within;
+
+        // 16^12 copies of one input: priced per copy, the transaction is
+        // over every limit, and walking the copies would never finish.
+        let res = assert_completes_within(Duration::from_secs(10), || {
+            let input = zswap::Input::<(), InMemoryDB> {
+                nullifier: Nullifier(HashOutput([1; 32])),
+                value_commitment: Default::default(),
+                contract_address: None,
+                merkle_tree_root: Default::default(),
+                proof: std::sync::Arc::new(()),
+            };
+            let offer = zswap::Offer {
+                inputs: Array::shared_dense(12, input),
+                outputs: Array::new(),
+                transient: Array::new(),
+                deltas: Array::new(),
+            };
+            let tx = Transaction::<(), (), Pedersen, InMemoryDB>::Standard(StandardTransaction {
+                network_id: "local-test".into(),
+                intents: HashMap::new(),
+                guaranteed_coins: Some(Sp::new(offer)),
+                fallible_coins: HashMap::new(),
+                binding_randomness: Default::default(),
+            });
+            let state = LedgerState::<InMemoryDB>::new("local-test");
+            tx.well_formed(&state, WellFormedStrictness::default(), Timestamp::from_secs(0))
+                .err()
+        });
+        assert!(
+            matches!(res, Some(MalformedTransaction::FeeCalculation(_))),
+            "{res:?}"
+        );
     }
 
     #[test]
