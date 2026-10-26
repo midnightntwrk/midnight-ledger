@@ -75,3 +75,55 @@ fn shared_merkle_tree() {
         assert_eq!(size as u128, 1 + (per_leaf << height), "height {height}");
     }
 }
+
+/// The tree walk `field_size` replaced.
+fn naive(value: &SV) -> u128 {
+    1 + match value {
+        StateValue::Null => 0,
+        StateValue::Cell(v) => v.field_size() as u128,
+        StateValue::Map(m) => m
+            .iter()
+            .map(|kv| kv.0.field_size() as u128 + naive(&kv.1))
+            .sum(),
+        StateValue::Array(arr) => arr.iter().map(|v| naive(&v)).sum(),
+        StateValue::BoundedMerkleTree(t) => t.iter().map(|(_, h)| 1 + h.field_size() as u128).sum(),
+        _ => unreachable!(),
+    }
+}
+
+mod properties {
+    use super::*;
+    use proptest::prelude::*;
+    use proptest::sample::Index;
+
+    // Each value draws its entries from those before it, so values share
+    // children arbitrarily.
+    fn dag() -> impl Strategy<Value = SV> {
+        let node = (0u8..5, prop::collection::vec(any::<Index>(), 0..4), 0u8..4);
+        (any::<SV>(), prop::collection::vec(node, 1..10)).prop_map(|(seed, nodes)| {
+            let mut values = vec![seed];
+            for (kind, picks, n) in nodes {
+                let picked: Vec<SV> = picks.iter().map(|i| i.get(&values).clone()).collect();
+                let value = match kind {
+                    0 => StateValue::Array(picked.into()),
+                    1 => StateValue::Map(picked.into_iter().enumerate().fold(
+                        storage::storage::HashMap::new(),
+                        |m, (i, v)| m.insert(AlignedValue::from(i as u8), v),
+                    )),
+                    2 => StateValue::BoundedMerkleTree(MerkleTree::shared_full(n, HashOutput([n; 32]), ())),
+                    3 => StateValue::from(AlignedValue::from(n)),
+                    _ => StateValue::Null,
+                };
+                values.push(value);
+            }
+            values.pop().unwrap()
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn field_size_matches_naive(value in prop_oneof![any::<SV>(), dag()]) {
+            prop_assert_eq!(value.field_size() as u128, naive(&value));
+        }
+    }
+}
