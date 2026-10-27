@@ -37,14 +37,14 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Bound, Deref, RangeBounds, RangeInclusive};
 use storage_core as storage;
-use storage_core::dag_memo::DagMemo;
-use storage_core::monoid::Monoid;
 use storage_core::DefaultDB;
 use storage_core::Storable;
 use storage_core::arena::{ArenaKey, Sp};
+use storage_core::dag_memo::DagMemo;
 use storage_core::db::DB;
 #[cfg(test)]
 use storage_core::db::InMemoryDB;
+use storage_core::monoid::Monoid;
 use storage_core::storable::Loader;
 
 /// A `Storable` wrapper around `HashOutput`

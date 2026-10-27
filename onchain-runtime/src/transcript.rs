@@ -110,8 +110,8 @@ impl<D: DB> Transcript<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use transient_crypto::repr::FieldRepr;
     use storage::db::InMemoryDB;
+    use transient_crypto::repr::FieldRepr;
 
     fn transcript(program: Vec<Op<ResultModeVerify, InMemoryDB>>) -> Transcript<InMemoryDB> {
         Transcript {

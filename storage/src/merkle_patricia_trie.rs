@@ -190,7 +190,10 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
                     order.push(node);
                 } else if seen.insert(node.hash()) {
                     stack.push((node.clone(), true));
-                    stack.extend(node.non_empty_children().map(|child| (child.clone(), false)));
+                    stack.extend(
+                        node.non_empty_children()
+                            .map(|child| (child.clone(), false)),
+                    );
                 }
             }
         }
@@ -937,7 +940,9 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                 std::slice::from_ref(child)
             }
         };
-        children.iter().filter(|child| !matches!(***child, Node::Empty))
+        children
+            .iter()
+            .filter(|child| !matches!(***child, Node::Empty))
     }
 
     /// Return the annotation of the `Node`

@@ -16,8 +16,8 @@
 use crate as storage;
 use crate::arena::{ArenaHash, ArenaKey, Sp};
 use crate::dag_memo::{DagMemo, InvariantMemos};
-use crate::map_key::{ByShape, ByValue, HoldsKey, MapKey};
 use crate::db::{DB, InMemoryDB};
+use crate::map_key::{ByShape, ByValue, HoldsKey, MapKey};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::{MerklePatriciaTrie, Node};
 use crate::merkle_patricia_trie::{Monoid, Semigroup};
@@ -32,13 +32,13 @@ use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;
 use serialize::{Deserializable, EncodingShape, Serializable, Tagged, tag_enforcement_test};
-use std::rc::Rc;
 use sha2::Sha256;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub use storage_core::storage::*;
@@ -49,10 +49,10 @@ mod array_invariant_tests;
 mod hashmap_invariant_tests;
 #[cfg(test)]
 mod map_key_tests;
-#[cfg(test)]
-mod time_filter_map_tests;
 #[cfg(any(test, feature = "test-utilities"))]
 mod shared_structure;
+#[cfg(test)]
+mod time_filter_map_tests;
 
 /// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
@@ -1259,7 +1259,10 @@ where
                 .iter()
                 .all(|(item, count)| self.set.count(item) as u128 == *count);
         if !matches {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "TimeFilterMap decoded with mismatching set/map representations"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "TimeFilterMap decoded with mismatching set/map representations",
+            ))
         } else {
             Ok(())
         }

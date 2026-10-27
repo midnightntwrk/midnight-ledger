@@ -451,9 +451,13 @@ impl<D: DB, V: AlignedValueKind<D>> StateValue<D, V> {
         1usize.saturating_add(match self {
             Null => 0,
             Cell(v) => v.field_size(),
-            Map(m) => m.fold(memo, |memo, k, v| k.field_size().saturating_add(child(memo, v))),
+            Map(m) => m.fold(memo, |memo, k, v| {
+                k.field_size().saturating_add(child(memo, v))
+            }),
             Array(arr) => arr.fold(memo, child),
-            BoundedMerkleTree(t) => t.fold(memo, |_, hash, _| 1usize.saturating_add(hash.field_size())),
+            BoundedMerkleTree(t) => {
+                t.fold(memo, |_, hash, _| 1usize.saturating_add(hash.field_size()))
+            }
         })
     }
 }

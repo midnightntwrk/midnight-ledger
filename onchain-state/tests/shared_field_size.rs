@@ -106,11 +106,19 @@ mod properties {
                 let picked: Vec<SV> = picks.iter().map(|i| i.get(&values).clone()).collect();
                 let value = match kind {
                     0 => StateValue::Array(picked.into()),
-                    1 => StateValue::Map(picked.into_iter().enumerate().fold(
-                        storage::storage::HashMap::new(),
-                        |m, (i, v)| m.insert(AlignedValue::from(i as u8), v),
+                    1 => StateValue::Map(
+                        picked
+                            .into_iter()
+                            .enumerate()
+                            .fold(storage::storage::HashMap::new(), |m, (i, v)| {
+                                m.insert(AlignedValue::from(i as u8), v)
+                            }),
+                    ),
+                    2 => StateValue::BoundedMerkleTree(MerkleTree::shared_full(
+                        n,
+                        HashOutput([n; 32]),
+                        (),
                     )),
-                    2 => StateValue::BoundedMerkleTree(MerkleTree::shared_full(n, HashOutput([n; 32]), ())),
                     3 => StateValue::from(AlignedValue::from(n)),
                     _ => StateValue::Null,
                 };
