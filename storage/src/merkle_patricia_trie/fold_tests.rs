@@ -90,13 +90,38 @@ proptest! {
     }
 
     #[test]
-    fn distinct_values_count_entries(mpt in trie()) {
-        let mut expected = std::collections::BTreeMap::<u64, u128>::new();
-        for (_, v) in mpt.iter() {
-            *expected.entry(*v).or_default() += 1;
+    fn distinct_values_count_entries_across_tries(
+        base in trie(),
+        tries in prop::collection::vec(
+            (0u8..3, prop::collection::vec((nibbles(5), 0u64..3), 0..4), 0u128..3),
+            0..5,
+        ),
+    ) {
+        // Tries extending `base` share its subtrees, and a subtree of `base`
+        // is a root reached again from inside another trie.
+        let subtree = match &*base.0 {
+            Node::Branch { children, .. } => children.iter().find(|c| !matches!(***c, Node::Empty)).cloned(),
+            Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => Some(child.clone()),
+            _ => None,
         }
+        .map_or_else(Mpt::new, MerklePatriciaTrie);
+        let tries: Vec<(Mpt, u128)> = tries
+            .into_iter()
+            .map(|(kind, entries, weight)| match kind {
+                0 => (base.clone(), weight),
+                1 => (insert_all(base.clone(), &entries), weight),
+                _ => (subtree.clone(), weight),
+            })
+            .collect();
+        let mut expected = std::collections::BTreeMap::<u64, u128>::new();
+        for (mpt, weight) in &tries {
+            for (_, v) in mpt.iter() {
+                *expected.entry(*v).or_default() += weight;
+            }
+        }
+        expected.retain(|_, n| *n > 0);
         let mut actual = std::collections::BTreeMap::<u64, u128>::new();
-        for (v, n) in mpt.distinct_values() {
+        for (v, n) in Mpt::distinct_values_across(tries.iter().map(|(t, w)| (t, *w))) {
             prop_assert!(actual.insert(*v, n).is_none(), "value listed twice");
         }
         prop_assert_eq!(actual, expected);

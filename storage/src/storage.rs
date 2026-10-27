@@ -885,6 +885,17 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         self.0.distinct_values()
     }
 
+    /// As [`Self::distinct_values`] over several arrays, each counted `weight`
+    /// times; see [`MerklePatriciaTrie::distinct_values_across`].
+    pub fn distinct_values_across<'a>(
+        arrays: impl IntoIterator<Item = (&'a Self, u128)>,
+    ) -> std::vec::Vec<(Sp<V, D>, u128)>
+    where
+        Self: 'a,
+    {
+        MerklePatriciaTrie::distinct_values_across(arrays.into_iter().map(|(a, n)| (&*a.0, n)))
+    }
+
     /// Iterate over the elements in the array as `Sp<V>`s
     pub fn iter(&self) -> ArrayIter<'_, V, D> {
         ArrayIter::new(self)

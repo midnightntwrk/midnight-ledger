@@ -177,6 +177,18 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     /// in an unspecified but deterministic order. Linear in the trie's distinct nodes, however
     /// many entries they stand for.
     pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
+        Self::distinct_values_across([(self, 1)])
+    }
+
+    /// As [`Self::distinct_values`] over several tries, each counted `weight`
+    /// times. Linear in the distinct nodes of all of them together, so tries
+    /// sharing subtrees cost no more than one holding them all.
+    pub fn distinct_values_across<'a>(
+        tries: impl IntoIterator<Item = (&'a Self, u128)>,
+    ) -> std::vec::Vec<(Sp<V, D>, u128)>
+    where
+        Self: 'a,
+    {
         type Key<D> = crate::arena::ArenaHash<<D as DB>::Hasher>;
         fn children<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
             node: &Node<V, D, A>,
@@ -190,20 +202,23 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
                 .into_iter()
                 .filter(|child| !matches!(***child, Node::Empty))
         }
+        let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
         // Reverse post-order visits every node after all of its parents.
         let mut order = std::vec::Vec::new();
         let mut seen = std::collections::HashSet::<Key<D>>::new();
-        let mut stack = vec![(self.0.clone(), false)];
-        while let Some((node, expanded)) = stack.pop() {
-            if expanded {
-                order.push(node);
-            } else if seen.insert(node.hash()) {
-                stack.push((node.clone(), true));
-                stack.extend(children(&node).map(|child| (child.clone(), false)));
+        for (trie, weight) in tries.into_iter().filter(|(_, weight)| *weight > 0) {
+            let count = paths.entry(trie.0.hash()).or_insert(0);
+            *count = count.saturating_add(weight);
+            let mut stack = vec![(trie.0.clone(), false)];
+            while let Some((node, expanded)) = stack.pop() {
+                if expanded {
+                    order.push(node);
+                } else if seen.insert(node.hash()) {
+                    stack.push((node.clone(), true));
+                    stack.extend(children(&node).map(|child| (child.clone(), false)));
+                }
             }
         }
-        let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
-        paths.insert(self.0.hash(), 1);
         let mut index = std::collections::HashMap::<Key<D>, usize>::new();
         let mut values = std::vec::Vec::<(Sp<V, D>, u128)>::new();
         for node in order.iter().rev() {
