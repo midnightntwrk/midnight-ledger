@@ -24,7 +24,7 @@ use crate::structure::{
     MaintenanceUpdate, PedersenDowngradeable, ProofKind, Signature, SignatureVerifyingKey,
     SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
-use crate::structure::{SignatureKind, VerifiedTransaction};
+use crate::structure::{MAX_CONTRACT_OPERATIONS, SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
@@ -1840,6 +1840,15 @@ impl<D: DB> ContractDeploy<D> {
         &self,
         ref_state: &impl StateReference<D>,
     ) -> Result<(), MalformedTransaction<D>> {
+        let operations = self.initial_state.operations.size() as u64;
+        if operations > MAX_CONTRACT_OPERATIONS {
+            return Err(MalformedTransaction::MalformedContractDeploy(
+                MalformedContractDeploy::TooManyOperations {
+                    operations,
+                    limit: MAX_CONTRACT_OPERATIONS,
+                },
+            ));
+        }
         self.initial_state.well_formed(self.address())?;
 
         // Or we could change the types. Current (pre-this-ticket) ContractState could be renamed to

@@ -1918,6 +1918,9 @@ pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
 // should be an upper bound.
 pub(crate) const VERIFIER_KEY_SIZE: usize = 2875;
 pub(crate) const EXPECTED_CONTRACT_DEPTH: usize = 32;
+/// Most operations a contract may have. Maintenance checks walk all of them,
+/// at a cost pricing doesn't count.
+pub const MAX_CONTRACT_OPERATIONS: u64 = 256;
 pub(crate) const EXPECTED_UTXO_DEPTH: usize = 32;
 pub(crate) const EXPECTED_GENERATION_DEPTH: usize = 32;
 pub(crate) const EXPECTED_OPERATIONS_DEPTH: usize = 8;

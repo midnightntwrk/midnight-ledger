@@ -246,6 +246,11 @@ pub enum TransactionInvalid<D: DB> {
         size: u64,
         limit: u64,
     },
+    ContractTooManyOperations {
+        address: ContractAddress,
+        operations: u64,
+        limit: u64,
+    },
     IrNotFound(EntryPointBuf),
     IrAlreadyPresent(EntryPointBuf),
 }
@@ -361,6 +366,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
+            ContractTooManyOperations {
+                address,
+                operations,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} would have {operations} operations, more than the limit of {limit}"
+            ),
             IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
             IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
         }
@@ -465,6 +478,10 @@ pub enum MalformedContractDeploy {
         size: u64,
         limit: u64,
     },
+    TooManyOperations {
+        operations: u64,
+        limit: u64,
+    },
 }
 
 impl Display for MalformedContractDeploy {
@@ -495,6 +512,10 @@ impl Display for MalformedContractDeploy {
             AuthorityMetadataTooLarge { size, limit } => write!(
                 formatter,
                 "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            TooManyOperations { operations, limit } => write!(
+                formatter,
+                "contract deployment has {operations} operations, more than the limit of {limit}"
             ),
         }
     }
