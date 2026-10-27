@@ -792,20 +792,17 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
         }
     }
 
-    pub(crate) fn well_formed(
+    pub(crate) fn well_formed<'d>(
         &self,
-        segment_id: u16,
-        parent: &ErasedIntent<D>,
+        data_to_sign: impl FnOnce() -> &'d [u8],
         strictness: WellFormedStrictness,
     ) -> Result<(), MalformedTransaction<D>> {
         if !strictness.verify_signatures
-            || self.signature.as_ref().map(|sig| {
-                S::signature_verify(
-                    &parent.data_to_sign(segment_id),
-                    self.night_key.clone(),
-                    sig,
-                )
-            }) == Some(true)
+            || self
+                .signature
+                .as_ref()
+                .map(|sig| S::signature_verify(data_to_sign(), self.night_key.clone(), sig))
+                == Some(true)
         {
             Ok(())
         } else {
@@ -902,8 +899,15 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
         for spend in self.spends.iter() {
             spend.well_formed(ref_state, segment_id, binding, strictness, self.ctime)?;
         }
+        // Every registration signs the whole intent, so it is serialized once.
+        let data_to_sign = std::cell::OnceCell::new();
         for reg in self.registrations.iter() {
-            ref_state.stateless_check(|| reg.well_formed(segment_id, parent, strictness))?;
+            ref_state.stateless_check(|| {
+                reg.well_formed(
+                    || data_to_sign.get_or_init(|| parent.data_to_sign(segment_id)),
+                    strictness,
+                )
+            })?;
         }
         ref_state.param_check(true, |params| if self.ctime > tblock || self.ctime + params.dust.dust_grace_period < tblock {
             warn!(ctime = ?self.ctime, ?tblock, grace_period = ?params.dust.dust_grace_period, "dust actions out of TTL range");
