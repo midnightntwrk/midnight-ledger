@@ -474,7 +474,22 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
                             bytes_written: rng.gen_range(0..100),
                             bytes_deleted: rng.gen_range(0..100),
                         },
-                        effects: Effects::default(),
+                        effects: Effects {
+                            shielded_mints: (0..rng.gen_range(0..4u8))
+                                .fold(HashMap::new(), |m, i| m.insert(HashOutput([i; 32]), 1)),
+                            unshielded_outputs: (0..rng.gen_range(0..3u8)).fold(
+                                HashMap::new(),
+                                |m, i| {
+                                    m.insert(
+                                        TokenType::Unshielded(UnshieldedTokenType(HashOutput(
+                                            [i; 32],
+                                        ))),
+                                        1,
+                                    )
+                                },
+                            ),
+                            ..Effects::default()
+                        },
                         program: vec![
                             Op::Noop {
                                 n: rng.gen_range(1..5),
@@ -588,6 +603,38 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
     })
 }
 
+/// Every call's effect entries, counted on every path to the call.
+fn old_effects_check_cost(tx: &Tx, model: &TransactionCostModel) -> SyntheticCost {
+    let mut entries = 0u64;
+    for (_, intent) in tx.intents() {
+        for call in intent.calls() {
+            for t in call
+                .guaranteed_transcript
+                .iter()
+                .chain(call.fallible_transcript.iter())
+            {
+                let e = &t.effects;
+                entries += [
+                    e.claimed_nullifiers.size(),
+                    e.claimed_shielded_receives.size(),
+                    e.claimed_shielded_spends.size(),
+                    e.claimed_contract_calls.size(),
+                    e.shielded_mints.size(),
+                    e.unshielded_mints.size(),
+                    e.unshielded_inputs.size(),
+                    e.unshielded_outputs.size(),
+                    e.claimed_unshielded_spends.size(),
+                ]
+                .iter()
+                .sum::<usize>() as u64;
+            }
+        }
+    }
+    let mut cost = RunningCost::compute(model.runtime_cost_model.ins_map_constant * entries);
+    cost.compute_time = cost.compute_time * model.validation_factor;
+    cost.into()
+}
+
 /// `tx` without the entries `disjoint_check` rejects repeating: each
 /// intent's inputs and registrations are made distinct and unique to it, the
 /// fallible offer stops sharing the guaranteed offer's inputs, and committee
@@ -658,9 +705,28 @@ proptest! {
             tx.validation_cost(model),
             old_validation_cost_impl(&tx, model, |_, _, _| per_call)
         );
+        prop_assert_eq!(tx.effects_check_cost(model), old_effects_check_cost(&tx, model));
         let Transaction::Standard(stx) = &tx else { unreachable!() };
         if stx.disjoint_check().is_ok() {
+            let (guaranteed, _) = old_application_cost(&tx, model);
             prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Ok(old_application_cost(&tx, model)));
+            let dismiss = guaranteed
+                + old_validation_cost_impl(&tx, model, |_, _, _| per_call)
+                + old_effects_check_cost(&tx, model);
+            prop_assert_eq!(tx.time_to_dismiss(&INITIAL_PARAMETERS), Ok(dismiss.max_time()));
+            // Each pricing entry point dismisses against the same time.
+            let state = LedgerState::<D>::new("local-test");
+            for (allowed, ok) in [(dismiss.max_time(), true), (dismiss.max_time() - CostDuration::from_picoseconds(1), false)] {
+                let mut params = INITIAL_PARAMETERS;
+                params.limits.time_to_dismiss_per_byte = CostDuration::ZERO;
+                params.limits.min_time_to_dismiss = allowed;
+                let dismissed = |r: Result<_, FeeCalculationError>| {
+                    !matches!(r, Err(FeeCalculationError::OutsideTimeToDismiss { .. }))
+                };
+                prop_assert_eq!(dismissed(tx.cost(&params, true).map(|_| ())), ok);
+                prop_assert_eq!(dismissed(tx.cost_with_state(&params, &state, true).map(|_| ())), ok);
+                prop_assert_eq!(dismissed(tx.fees_with_impl(&params, |_, _| None, true).map(|_| ())), ok);
+            }
         } else {
             prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Err(FeeCalculationError::RepeatedEntries));
         }

@@ -2374,6 +2374,52 @@ where
         result
     }
 
+    /// Time to walk every call's effects once per path, as the checks after the
+    /// fee do, at a map insertion per entry. Counts towards dismissal, not the fee.
+    fn effects_check_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+        let Transaction::Standard(stx) = self else {
+            return SyntheticCost::ZERO;
+        };
+        let per_entry = model.runtime_cost_model.ins_map_constant;
+        let mut memo = DagMemo::<CostSum, D>::new();
+        let mut cost = stx
+            .intents
+            .fold(&mut memo, |memo, _, intent| {
+                memo.get_or_compute(intent, |memo, intent| {
+                    intent.actions.fold(memo, |memo, action| {
+                        memo.get_or_compute(action, |_, action| {
+                            let ContractAction::Call(call) = action else {
+                                return CostSum(RunningCost::ZERO);
+                            };
+                            let entries = count_sum(
+                                call.guaranteed_transcript
+                                    .iter()
+                                    .chain(call.fallible_transcript.iter())
+                                    .flat_map(|t| {
+                                        let e = &t.effects;
+                                        [
+                                            e.claimed_nullifiers.size(),
+                                            e.claimed_shielded_receives.size(),
+                                            e.claimed_shielded_spends.size(),
+                                            e.claimed_contract_calls.size(),
+                                            e.shielded_mints.size(),
+                                            e.unshielded_mints.size(),
+                                            e.unshielded_inputs.size(),
+                                            e.unshielded_outputs.size(),
+                                            e.claimed_unshielded_spends.size(),
+                                        ]
+                                    }),
+                            );
+                            CostSum(RunningCost::compute(per_entry * entries as u64))
+                        })
+                    })
+                })
+            })
+            .0;
+        cost.compute_time = cost.compute_time * model.validation_factor;
+        cost.into()
+    }
+
     pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
         let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
             + model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -2548,7 +2594,8 @@ where
     ) -> Result<CostDuration, FeeCalculationError> {
         let validation_cost = self.validation_cost(&params.cost_model);
         let guaranteed_cost = self.application_cost(params)?.0;
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let cost_to_dismiss =
+            guaranteed_cost + validation_cost + self.effects_check_cost(&params.cost_model);
         Ok(CostDuration::max(
             cost_to_dismiss.compute_time,
             cost_to_dismiss.read_time,
@@ -2562,7 +2609,8 @@ where
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost(&params.cost_model);
         let (guaranteed_cost, application_cost) = self.application_cost(params)?;
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let cost_to_dismiss =
+            guaranteed_cost + validation_cost + self.effects_check_cost(&params.cost_model);
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
@@ -2585,7 +2633,8 @@ where
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
         let (guaranteed_cost, application_cost) = self.application_cost(params)?;
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let cost_to_dismiss =
+            guaranteed_cost + validation_cost + self.effects_check_cost(&params.cost_model);
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
@@ -2628,7 +2677,8 @@ where
                 + model.map_index(EXPECTED_OPERATIONS_DEPTH)
         });
         let (guaranteed_cost, application_cost) = self.application_cost(params)?;
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let cost_to_dismiss =
+            guaranteed_cost + validation_cost + self.effects_check_cost(&params.cost_model);
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
