@@ -1829,24 +1829,23 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         }
     }
 
-    /// Calls `f` with the data and child count of each node of this
-    /// sub-graph that is not in `seen`, adding each to `seen`. Values that
-    /// share one `seen` are visited once per node they share, so the walk is
-    /// linear in their distinct nodes.
-    pub fn visit_unseen_nodes(
-        &self,
-        seen: &mut std::collections::HashSet<ArenaHash<D::Hasher>>,
-        mut f: impl FnMut(&[u8], usize),
-    ) {
+    /// Calls `f` with the data and child count of each distinct node of this
+    /// sub-graph, stopping as soon as `f` returns `false`. Returns whether
+    /// every node was visited.
+    pub fn try_visit_nodes(&self, mut f: impl FnMut(&[u8], usize) -> bool) -> bool {
+        let mut seen = std::collections::HashSet::new();
         let mut frontier = vec![self.child_repr.clone()];
         while let Some(key) = frontier.pop() {
             if !seen.insert(key.hash().clone()) {
                 continue;
             }
             let node = Self::node_at(&self.arena, &key);
-            f(&node.data, node.children.len());
+            if !f(&node.data, node.children.len()) {
+                return false;
+            }
             frontier.extend(node.children.iter().cloned());
         }
+        true
     }
 
     /// Topologically sort a sub-graph of storage into a sequence of nodes.

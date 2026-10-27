@@ -13,13 +13,13 @@
 
 //! Transaction costs are computed per distinct node and counted once per
 //! path to it; these tests compare them against the per-element loops they
-//! replaced. Deployed states are the exception: they are charged once per
-//! distinct node in the transaction, not once per deploy.
+//! replaced.
 
 #![allow(deprecated)]
 
 use super::*;
 use crate::dust::{DustActions, DustPublicKey, DustRegistration};
+use base_crypto::fab::AlignedValue;
 use onchain_runtime::context::Effects;
 use onchain_runtime::state::{
     ContractMaintenanceAuthority, ContractState, EntryPointBuf, StateValue,
@@ -124,39 +124,9 @@ fn old_validation_cost_impl(
     result
 }
 
-/// The bytes of every distinct node of `states`, identifying nodes by their
-/// contents and children rather than by hash.
-fn union_tree_copy(states: &[Sp<ContractState<D>, D>]) -> RunningCost {
-    let mut ids = std::collections::HashMap::new();
-    let mut bytes_written = 0u64;
-    for state in states {
-        let nodes = state.serialize_to_node_list().nodes;
-        let mut node_ids: Vec<usize> = Vec::with_capacity(nodes.len());
-        for node in &nodes {
-            let children: Vec<usize> = node
-                .child_indices
-                .iter()
-                .map(|&c| node_ids[c as usize])
-                .collect();
-            let fresh = ids.len();
-            let id = *ids.entry((node.data.clone(), children)).or_insert_with(|| {
-                bytes_written += node.data.len() as u64
-                    + node.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64;
-                fresh
-            });
-            node_ids.push(id);
-        }
-    }
-    RunningCost {
-        bytes_written,
-        ..RunningCost::ZERO
-    }
-}
-
 fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
     let mut g_cost = model.baseline_cost;
     let mut f_cost = RunningCost::ZERO;
-    let mut deployed = Vec::new();
     for (_, intent) in tx.intents() {
         // Replay protection state update
         g_cost += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
@@ -301,8 +271,8 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                     // Contract exists check
                     f_cost += model.map_index(EXPECTED_CONTRACT_DEPTH);
                     // Contract insert
-                    f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false);
-                    deployed.push(Sp::new(deploy.initial_state.clone()));
+                    f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false)
+                        + model.tree_copy(Sp::new(deploy.initial_state.clone()));
                 }
                 ContractAction::Maintain(upd) => {
                     // Contract state fetch
@@ -408,7 +378,6 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
             g_cost += model.map_insert(EXPECTED_UTXO_DEPTH, false);
         }
     }
-    f_cost += union_tree_copy(&deployed);
     g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
     f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
     (g_cost.into(), (g_cost + f_cost).into())
@@ -673,10 +642,119 @@ proptest! {
         );
         let Transaction::Standard(stx) = &tx else { unreachable!() };
         if stx.disjoint_check().is_ok() {
-            prop_assert_eq!(tx.application_cost(model), Ok(old_application_cost(&tx, model)));
+            prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Ok(old_application_cost(&tx, model)));
         } else {
-            prop_assert_eq!(tx.application_cost(model), Err(FeeCalculationError::RepeatedEntries));
+            prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Err(FeeCalculationError::RepeatedEntries));
         }
         prop_assert_eq!(tx.est_size(), old_estimated_tx_size(&tx));
+    }
+}
+
+/// Deploys of `states` distinct contract states that share most of their
+/// nodes, each deployed `repeats` times, plus a call declaring `deleted`
+/// bytes deleted.
+fn deploys(states: u32, entries: u32, repeats: u32, deleted: u64) -> Tx {
+    type M = HashMap<AlignedValue, StateValue<D>, D>;
+    let base: M = (0..entries).fold(HashMap::new(), |m, i| {
+        m.insert(AlignedValue::from(i), StateValue::Null)
+    });
+    let mut actions: Vec<ContractAction<(), D>> = (0..states)
+        .flat_map(|i| {
+            let deploy = ContractAction::Deploy(Sp::new(ContractDeploy {
+                initial_state: ContractState::new(
+                    StateValue::Map(base.insert(AlignedValue::from(entries + i), StateValue::Null)),
+                    HashMap::new(),
+                    ContractMaintenanceAuthority::default(),
+                ),
+                nonce: HashOutput([i as u8; 32]),
+            }));
+            std::iter::repeat_n(deploy, repeats as usize)
+        })
+        .collect();
+    actions.push(ContractAction::Call(Sp::new(ContractCall {
+        address: Default::default(),
+        entry_point: EntryPointBuf(vec![]),
+        guaranteed_transcript: None,
+        fallible_transcript: Some(Sp::new(Transcript {
+            gas: RunningCost {
+                bytes_deleted: deleted,
+                ..RunningCost::ZERO
+            },
+            effects: Effects::default(),
+            program: vec![Op::Noop { n: 1 }].into(),
+            version: None,
+        })),
+        communication_commitment: Fr::from(0u64),
+        proof: (),
+    })));
+    let intent = Intent {
+        guaranteed_unshielded_offer: None,
+        fallible_unshielded_offer: None,
+        actions: actions.into(),
+        dust_actions: None,
+        ttl: Timestamp::from_secs(0),
+        binding_commitment: Default::default(),
+    };
+    Transaction::Standard(StandardTransaction {
+        network_id: "local-test".into(),
+        intents: HashMap::new().insert(1, intent),
+        guaranteed_coins: None,
+        fallible_coins: HashMap::new(),
+        binding_randomness: Default::default(),
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    // Pricing stops copying deployed states once the bytes charged are
+    // certain to fail the block limits; it must accept exactly the
+    // transactions full pricing accepts, at the same fee.
+    #[test]
+    fn capped_copies_price_as_exact_copies_do(
+        states in 1u32..5,
+        entries in 1u32..200,
+        repeats in 1u32..4,
+        deleted in prop_oneof![1 => Just(0u64), 1 => 0u64..20_000, 2 => Just(u64::MAX)],
+        limits in prop_oneof![
+            1 => (-2_000i64..2_000, -2_000i64..2_000).prop_map(|(w, c)| Limits::Near(w, c)),
+            2 => (0u64..=120, 0u64..=120).prop_map(|(w, c)| Limits::Share(w, c)),
+        ],
+    ) {
+        let tx = deploys(states, entries, repeats, deleted);
+        let model = &INITIAL_PARAMETERS.cost_model;
+        let exact = tx.validation_cost(model) + old_application_cost(&tx, model).1;
+        let mut params = INITIAL_PARAMETERS.clone();
+        let (written, churned) = limits.around(exact.bytes_written, exact.bytes_churned);
+        params.limits.block_limits.bytes_written = written;
+        params.limits.block_limits.bytes_churned = churned;
+        let exact_fee = exact
+            .normalize(params.limits.block_limits)
+            .map(|cost| params.fee_prices.overall_cost(&cost).into_atomic_units(SPECKS_PER_DUST));
+        prop_assert_eq!(tx.fees(&params, false).ok(), exact_fee);
+    }
+}
+
+/// Block limits for bytes written and churned, relative to a transaction's
+/// own: within a few KB of them, where the block limits decide, or a share of
+/// them, where pricing's copy budget runs out first.
+#[derive(Debug, Clone)]
+enum Limits {
+    Near(i64, i64),
+    Share(u64, u64),
+}
+
+impl Limits {
+    fn around(&self, written: u64, churned: u64) -> (u64, u64) {
+        match *self {
+            Limits::Near(w, c) => (
+                written.saturating_add_signed(w),
+                churned.saturating_add_signed(c),
+            ),
+            Limits::Share(w, c) => (
+                written.saturating_mul(w) / 100,
+                churned.saturating_mul(c) / 100,
+            ),
+        }
     }
 }

@@ -2117,13 +2117,13 @@ fn intent_application_cost<
     }
 }
 
-/// A contract action's application costs. Deployed states are passed to
-/// `on_deploy` instead, to be charged once per transaction.
+/// A contract action's application costs, with deployed states' copies priced
+/// by `copy`.
 fn action_application_cost<P: ProofKind<D>, D: DB>(
     model: &TransactionCostModel,
     action: &ContractAction<P, D>,
     memo: &mut DagMemo<SegmentCosts, D>,
-    on_deploy: &mut impl FnMut(&ContractState<D>),
+    copy: &mut impl FnMut(&ContractState<D>) -> RunningCost,
 ) -> SegmentCosts {
     let (mut g, mut f) = (RunningCost::ZERO, RunningCost::ZERO);
     match action {
@@ -2164,8 +2164,7 @@ fn action_application_cost<P: ProofKind<D>, D: DB>(
             // Contract exists check
             f += model.map_index(EXPECTED_CONTRACT_DEPTH);
             // Contract insert
-            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, false);
-            on_deploy(&deploy.initial_state);
+            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, false) + copy(&deploy.initial_state);
         }
         ContractAction::Maintain(upd) => {
             // Contract state fetch
@@ -2430,8 +2429,9 @@ where
     /// rejected first.
     pub fn application_cost(
         &self,
-        model: &TransactionCostModel,
+        params: &LedgerParameters,
     ) -> Result<(SyntheticCost, SyntheticCost), FeeCalculationError> {
+        let model = &params.cost_model;
         let mut g_cost = model.baseline_cost;
         let mut f_cost = RunningCost::ZERO;
         if let Transaction::Standard(stx) = self {
@@ -2439,28 +2439,48 @@ where
                 .map_err(|_| FeeCalculationError::RepeatedEntries)?;
             let mut memo = DagMemo::<SegmentCosts, D>::new();
             let mut night = DagMemo::<u64, D>::new();
-            // Deployed states are copied into one deduplicating store, so a
-            // node shared between them is charged once per transaction.
-            let mut deployed = std::collections::HashSet::new();
-            let mut deploy_copies = RunningCost::ZERO;
+            // Each deploy's state is charged in full, as checking the deploy
+            // walks it. Once the bytes charged exceed what a block may write
+            // and churn together, the fee check rejects whatever deletions are
+            // declared, so pricing stops walking and saturates.
+            let limits = &params.limits.block_limits;
+            let mut copy_budget = limits.bytes_written.saturating_add(limits.bytes_churned);
+            let mut copies = std::collections::HashMap::new();
+            let mut copy = |state: &ContractState<D>| {
+                let state = Sp::new(state.clone());
+                *copies.entry(state.hash()).or_insert_with(|| {
+                    match model
+                        .runtime_cost_model
+                        .tree_copy_bounded(&state, copy_budget)
+                    {
+                        Some(cost) => {
+                            copy_budget -= cost.bytes_written;
+                            cost
+                        }
+                        None => {
+                            copy_budget = 0;
+                            RunningCost {
+                                bytes_written: u64::MAX,
+                                ..RunningCost::ZERO
+                            }
+                        }
+                    }
+                })
+            };
             let intents = stx.intents.fold(&mut memo, |memo, _, intent| {
                 memo.get_or_compute(intent, |memo, intent| {
                     let mut costs = intent_application_cost(model, intent, &mut night);
                     // Contract actions
                     costs = costs.append(&intent.actions.fold(memo, |memo, action| {
                         memo.get_or_compute(action, |memo, action| {
-                            action_application_cost(model, action, memo, &mut |state| {
-                                deploy_copies += model
-                                    .runtime_cost_model
-                                    .tree_copy_unseen(&Sp::new(state.clone()), &mut deployed);
-                            })
+                            action_application_cost(model, action, memo, &mut copy)
                         })
                     }));
                     costs
                 })
             });
             g_cost += intents.guaranteed;
-            f_cost += intents.fallible + deploy_copies;
+            f_cost += intents.fallible;
         }
         match self {
             Transaction::Standard(stx) => {
@@ -2524,10 +2544,10 @@ where
 
     pub fn time_to_dismiss(
         &self,
-        model: &TransactionCostModel,
+        params: &LedgerParameters,
     ) -> Result<CostDuration, FeeCalculationError> {
-        let validation_cost = self.validation_cost(model);
-        let guaranteed_cost = self.application_cost(model)?.0;
+        let validation_cost = self.validation_cost(&params.cost_model);
+        let guaranteed_cost = self.application_cost(params)?.0;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         Ok(CostDuration::max(
             cost_to_dismiss.compute_time,
@@ -2541,7 +2561,7 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost(&params.cost_model);
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model)?;
+        let (guaranteed_cost, application_cost) = self.application_cost(params)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
@@ -2564,7 +2584,7 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model)?;
+        let (guaranteed_cost, application_cost) = self.application_cost(params)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
@@ -2607,7 +2627,7 @@ where
                 + model.map_index(EXPECTED_CONTRACT_DEPTH)
                 + model.map_index(EXPECTED_OPERATIONS_DEPTH)
         });
-        let (guaranteed_cost, application_cost) = self.application_cost(model)?;
+        let (guaranteed_cost, application_cost) = self.application_cost(params)?;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
