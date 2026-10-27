@@ -1210,7 +1210,6 @@ checksum = "9c035cb64cba03dad2fb921f3e218785e8cf9a41790da5eb3a1400f62fa2be11"
 dependencies = [
  "cpubits",
  "ctutils",
- "getrandom 0.4.2",
  "hybrid-array",
  "num-traits",
  "rand_core 0.10.1",
@@ -1234,7 +1233,6 @@ version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77727bb15fa921304124b128af125e7e3b968275d1b108b379190264f4423710"
 dependencies = [
- "getrandom 0.4.2",
  "hybrid-array",
  "rand_core 0.10.1",
 ]
@@ -4602,7 +4600,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c9f42978c78a00e3d68f69fc03e57a234debae69da4020a4fb588fcdcd07b06"
 dependencies = [
  "elliptic-curve 0.14.3",
- "once_cell",
  "primefield",
  "serdect",
  "wnaf",
