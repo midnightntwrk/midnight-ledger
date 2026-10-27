@@ -2115,7 +2115,8 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     }
 
     /// The number of field elements [`Self::public_inputs`] would produce,
-    /// computed without materializing them.
+    /// computed without materializing them. A program holding `noop 0`, never
+    /// well-formed, counts each op as at least one, so its length is bounded too.
     pub fn public_inputs_len(&self) -> usize {
         self.public_inputs_len_memoized(&mut DagMemo::new())
     }
@@ -2123,11 +2124,12 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     /// As [`Self::public_inputs_len`], visiting each distinct op and pushed
     /// node once across every call sharing `memo`.
     pub fn public_inputs_len_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
-        // The binding input and the communication commitment.
+        // The binding input and the communication commitment. Every op but the
+        // rejected `noop 0` adds an input, so the length bound changes no valid count.
         self.guaranteed_transcript
             .iter()
             .chain(self.fallible_transcript.iter())
-            .map(|t| t.public_inputs_len_memoized(memo))
+            .map(|t| t.public_inputs_len_memoized(memo).max(t.program.len()))
             .fold(2, usize::saturating_add)
     }
 

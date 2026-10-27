@@ -593,7 +593,7 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
 /// fallible offer stops sharing the guaranteed offer's inputs, and committee
 /// signatures, which application ignores, are dropped. Actions, outputs and
 /// their sharing are kept.
-fn without_repeats(tx: &Tx) -> Tx {
+pub(crate) fn without_repeats(tx: &Tx) -> Tx {
     let Transaction::Standard(mut stx) = tx.clone() else {
         unreachable!()
     };

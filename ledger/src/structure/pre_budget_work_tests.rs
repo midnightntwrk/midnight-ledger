@@ -15,7 +15,7 @@
 //! take work linear in its encoding, however much structure the encoding
 //! shares.
 
-use super::cost_equivalence_tests::{recipe, transaction};
+use super::cost_equivalence_tests::{recipe, transaction, without_repeats};
 use super::*;
 use crate::dust::DustRegistration;
 use crate::verify::WellFormedStrictness;
@@ -149,13 +149,15 @@ fn measure(tx: &Tx) -> Measured {
             let before = derefs();
             let mut priced = false;
             if let Ok(decoded) = tagged_deserialize::<Tx>(&mut &bytes[..]) {
-                let state = LedgerState::<D>::new("local-test");
-                let _ = decoded.well_formed(
-                    &state,
-                    WellFormedStrictness::default(),
-                    Timestamp::from_secs(0),
-                );
                 priced = decoded.fees(&INITIAL_PARAMETERS, true).is_ok();
+                // An attacker funds any fee it can pass, so those transactions
+                // reach the checks after balancing.
+                let strictness = WellFormedStrictness {
+                    enforce_balancing: !priced,
+                    ..Default::default()
+                };
+                let state = LedgerState::<D>::new("local-test");
+                let _ = decoded.well_formed(&state, strictness, Timestamp::from_secs(0));
             }
             let _ = tx.fees(&INITIAL_PARAMETERS, false);
             Measured {
@@ -200,7 +202,8 @@ const MIN_TIME: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Known super-linear shapes: one intent in many segments, distinct actions
 /// sharing an array of updates, deploys sharing a state of maps that share a
-/// trie, and calls with large entry points in a shared intent.
+/// trie, calls with large entry points in a shared intent, and a program of
+/// `noop 0`, which adds no public inputs, shared `levels` deep.
 #[derive(Debug, Clone)]
 enum Shape {
     SharedIntent {
@@ -217,6 +220,9 @@ enum Shape {
         segments: u16,
         calls: u32,
         len: usize,
+    },
+    Noops {
+        levels: u32,
     },
 }
 
@@ -250,6 +256,7 @@ impl Shape {
                 calls: calls * k,
                 len: len * k as usize,
             },
+            Shape::Noops { levels } => Shape::Noops { levels: levels * k },
         }
     }
 }
@@ -277,6 +284,8 @@ fn shape() -> impl Strategy<Value = Shape> {
                 len,
             }
         }),
+        // Scaled 8×, it holds 16^8 ops.
+        Just(Shape::Noops { levels: 1 }),
     ]
 }
 
@@ -380,6 +389,23 @@ fn build(shape: &Shape) -> Tx {
                 .collect();
             in_segments(segments, actions)
         }
+        Shape::Noops { levels } => {
+            let transcript = Sp::new(Transcript {
+                gas: RunningCost::ZERO,
+                effects: Default::default(),
+                program: Array::shared_dense(levels, Op::Noop { n: 0 }),
+                version: None,
+            });
+            let call = ContractAction::Call(Sp::new(ContractCall {
+                address: Default::default(),
+                entry_point: EntryPointBuf(b"noops".to_vec()),
+                guaranteed_transcript: None,
+                fallible_transcript: Some(transcript),
+                communication_commitment: Default::default(),
+                proof: (),
+            }));
+            in_segments(1, vec![call])
+        }
     }
 }
 
@@ -387,8 +413,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
-    fn pre_budget_work_is_linear_in_encoding(r in recipe(), s in sharing()) {
-        measure(&apply(transaction(&r), &s)).check()?;
+    fn pre_budget_work_is_linear_in_encoding(r in recipe(), s in sharing(), repeats in any::<bool>()) {
+        measure(&apply(generated(&r, repeats), &s)).check()?;
     }
 
     // Linear work keeps its rate per byte as a shape grows, while a walk
@@ -412,6 +438,13 @@ proptest! {
     }
 }
 
+// Repeated entries are rejected before fees, so without them more transactions
+// reach the work after the fee check.
+fn generated(r: &super::cost_equivalence_tests::Recipe, repeats: bool) -> Tx {
+    let tx = transaction(r);
+    if repeats { tx } else { without_repeats(&tx) }
+}
+
 // Work after the fee check is paid for, so the property above only binds if
 // some generated transactions reach it.
 #[test]
@@ -423,7 +456,7 @@ fn generated_transactions_include_some_within_budget() {
         .filter(|_| {
             let r = recipe().new_tree(&mut runner).unwrap().current();
             let s = sharing().new_tree(&mut runner).unwrap().current();
-            measure(&apply(transaction(&r), &s)).priced
+            measure(&apply(generated(&r, false), &s)).priced
         })
         .count();
     assert!(priced > 0, "no generated transaction was within budget");
