@@ -14,7 +14,7 @@
 use crate::dust::{DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
-use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
+use crate::structure::{MAX_SUPPLY, Signature, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
@@ -584,6 +584,9 @@ pub enum MalformedTransaction<D: DB> {
     MultipleDustRegistrationsForKey {
         key: SignatureVerifyingKey,
     },
+    RepeatedCommitteeSignature {
+        signature: Signature,
+    },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
         available_dust: u128,
@@ -1055,6 +1058,10 @@ impl<D: DB> Display for MalformedTransaction<D> {
             MultipleDustRegistrationsForKey { key } => write!(
                 formatter,
                 "multiple dust registrations for key in the same intent, or one registration in several: {key:?}"
+            ),
+            RepeatedCommitteeSignature { signature } => write!(
+                formatter,
+                "committee signature used more than once in the transaction: {signature:?}"
             ),
             InsufficientDustForRegistrationFee {
                 registration,

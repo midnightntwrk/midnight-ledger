@@ -458,6 +458,8 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
         .map(|_| SignatureVerifyingKey::Schnorr(rng.r#gen()))
         .collect();
     let addresses: Vec<ContractAddress> = (0..2).map(|_| rng.r#gen()).collect();
+    // Few enough that committee signatures sometimes repeat.
+    let signatures: Vec<Signature> = (0..8).map(|_| Signature::Schnorr(rng.r#gen())).collect();
     let mut intents = HashMap::new();
     for (segment, (actions, inputs, outputs, regs)) in r.intents.iter().enumerate() {
         let mut action = |kind: u8| -> ContractAction<(), D> {
@@ -520,11 +522,9 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
                         address,
                         updates: updates.into(),
                         counter: 0,
-                        signatures: vec![
-                            SignaturesValue(0, Signature::Schnorr(rng.r#gen()));
-                            kind as usize
-                        ]
-                        .into(),
+                        signatures: (0..kind as u32)
+                            .map(|i| SignaturesValue(i, signatures[rng.gen_range(0..8)].clone()))
+                            .collect(),
                     })
                 }
             }
@@ -589,9 +589,10 @@ pub(crate) fn transaction(r: &Recipe) -> Tx {
 }
 
 /// `tx` without the entries `disjoint_check` rejects repeating: each
-/// intent's inputs and registrations are made distinct and unique to it, and
-/// the fallible offer stops sharing the guaranteed offer's inputs. Actions,
-/// outputs and their sharing are kept.
+/// intent's inputs and registrations are made distinct and unique to it, the
+/// fallible offer stops sharing the guaranteed offer's inputs, and committee
+/// signatures, which application ignores, are dropped. Actions, outputs and
+/// their sharing are kept.
 fn without_repeats(tx: &Tx) -> Tx {
     let Transaction::Standard(mut stx) = tx.clone() else {
         unreachable!()
@@ -611,6 +612,23 @@ fn without_repeats(tx: &Tx) -> Tx {
             let mut offer = (**offer).clone();
             offer.inputs = Array::new();
             intent.fallible_unshielded_offer = Some(Sp::new(offer));
+        }
+        if intent
+            .actions
+            .iter_deref()
+            .any(|action| matches!(action, ContractAction::Maintain(_)))
+        {
+            intent.actions = intent
+                .actions
+                .iter_deref()
+                .map(|action| match action {
+                    ContractAction::Maintain(upd) => ContractAction::Maintain(MaintenanceUpdate {
+                        signatures: Array::new(),
+                        ..upd.clone()
+                    }),
+                    action => action.clone(),
+                })
+                .collect();
         }
         if let Some(dust) = &intent.dust_actions {
             let mut dust = (**dust).clone();

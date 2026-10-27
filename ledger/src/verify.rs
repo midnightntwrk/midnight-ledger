@@ -1221,11 +1221,14 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransaction<S, P, B, D> {
     #[allow(clippy::mutable_key_type)]
     /// Rejects entries that a valid transaction cannot repeat: shielded inputs
-    /// and outputs across offers, unshielded inputs anywhere, and dust
-    /// registrations anywhere, since each is signed for one intent and segment.
+    /// and outputs across offers, unshielded inputs anywhere, dust
+    /// registrations anywhere, since each is signed for one intent and
+    /// segment, and committee signatures anywhere, since a repeated
+    /// maintenance update fails on its counter.
     ///
     /// Runs before fees, so it inserts each distinct entry into one set per
-    /// kind and stops at the first repeat: its work is linear in the encoding
+    /// kind and stops at the first repeat, and counts committee signatures
+    /// in one pass over all actions: its work is linear in the encoding
     /// however the entries' nodes are shared.
     pub(crate) fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = BTreeSet::new();
@@ -1323,6 +1326,30 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
                         });
                     }
                 }
+            }
+        }
+        self.committee_signatures_check()
+    }
+
+    // Each signature is verified once per path to it, so sharing would let
+    // verification work outgrow the bytes paying for it.
+    fn committee_signatures_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let intents: Vec<_> = self.intents.iter().map(|entry| entry.1.clone()).collect();
+        let actions = storage::storage::Array::distinct_values_across(
+            intents.iter().map(|i| (&i.actions, 1)),
+        );
+        let signatures = storage::storage::Array::distinct_values_across(
+            actions.iter().filter_map(|(action, n)| match &**action {
+                ContractAction::Maintain(upd) => Some((&upd.signatures, *n)),
+                _ => None,
+            }),
+        );
+        let mut seen = BTreeSet::new();
+        for (sig, n) in signatures {
+            if n > 1 || !seen.insert(sig.1.clone()) {
+                return Err(MalformedTransaction::RepeatedCommitteeSignature {
+                    signature: sig.1.clone(),
+                });
             }
         }
         Ok(())

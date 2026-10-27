@@ -12,7 +12,8 @@
 // limitations under the License.
 
 //! `disjoint_check` rejects exactly what the per-entry checks it replaces
-//! rejected, plus registrations reached twice, however entries are shared.
+//! rejected, plus registrations and committee signatures reached twice,
+//! however entries are shared.
 
 use super::*;
 use crate::dust::DustActions;
@@ -48,7 +49,7 @@ fn input(kind: u8) -> Input<(), D> {
     }
 }
 
-fn offers(r: &ShieldedRecipe) -> Vec<Offer<(), D>> {
+fn offers(r: &[(Entries, Entries, Entries, u8)]) -> Vec<Offer<(), D>> {
     let mut out: Vec<Offer<(), D>> = Vec::new();
     for (inputs, outputs, transients, sharing) in r {
         let mut inputs: Array<_, D> = build(inputs, input).into();
@@ -99,13 +100,25 @@ enum Intents {
     FirstRepeated,
 }
 
-fn standard(r: &Recipe, shielded: &ShieldedRecipe, intents: Intents) -> Stx {
+/// With `actions_only`, intents keep only their actions, whose committee
+/// signatures are otherwise mostly masked by repeated inputs or
+/// registrations.
+fn standard(r: &Recipe, shielded: &ShieldedRecipe, intents: Intents, actions_only: bool) -> Stx {
     let Transaction::Standard(mut stx) = transaction(r) else {
         unreachable!()
     };
     if let Intents::None = intents {
         stx.intents = HashMap::new();
     }
+    if actions_only {
+        for (segment, mut intent) in stx.intents().collect::<Vec<_>>() {
+            intent.guaranteed_unshielded_offer = None;
+            intent.fallible_unshielded_offer = None;
+            intent.dust_actions = None;
+            stx.intents = stx.intents.insert(segment, intent);
+        }
+    }
+    let shielded = if actions_only { &[][..] } else { &shielded[..] };
     let mut offers = offers(shielded).into_iter();
     stx.guaranteed_coins = offers.next().map(Sp::new);
     for (segment, offer) in (1u16..).zip(offers) {
@@ -119,7 +132,7 @@ fn standard(r: &Recipe, shielded: &ShieldedRecipe, intents: Intents) -> Stx {
 }
 
 /// The checks `disjoint_check` replaces, over every entry as reached, plus
-/// registration uniqueness by node.
+/// registration uniqueness by node and committee signature uniqueness.
 fn accepts_per_entry(stx: &Stx) -> bool {
     let mut shielded_inputs = BTreeSet::new();
     let mut shielded_outputs = BTreeSet::new();
@@ -141,7 +154,13 @@ fn accepts_per_entry(stx: &Stx) -> bool {
     }
     let mut unshielded_inputs = BTreeSet::new();
     let mut registrations = Vec::new();
+    let mut committee_signatures = Vec::new();
     for (_, intent) in stx.intents() {
+        for action in intent.actions.iter_deref() {
+            if let ContractAction::Maintain(upd) = action {
+                committee_signatures.extend(upd.signatures.iter_deref().map(|sig| sig.1.clone()));
+            }
+        }
         let offers = [
             intent.guaranteed_unshielded_offer.clone(),
             intent.fallible_unshielded_offer.clone(),
@@ -161,7 +180,7 @@ fn accepts_per_entry(stx: &Stx) -> bool {
             registrations.extend(dust_actions.registrations.iter().map(|reg| reg.hash()));
         }
     }
-    no_duplicates(&registrations)
+    no_duplicates(&registrations) && no_duplicates(&committee_signatures)
 }
 
 /// Empty arrays hold no entries, so any number of offers and intents may
@@ -201,6 +220,41 @@ fn shared_empty_arrays_are_accepted() {
     assert!(stx.disjoint_check().is_ok());
 }
 
+/// Actions shared by many segments are counted once per distinct node, not
+/// walked once per segment.
+#[test]
+fn actions_shared_by_many_segments_are_checked_quickly() {
+    let actions: Array<ContractAction<(), D>, D> = (0..4000)
+        .map(|counter| {
+            ContractAction::Maintain(MaintenanceUpdate {
+                address: Default::default(),
+                updates: Array::new(),
+                counter,
+                signatures: Array::new(),
+            })
+        })
+        .collect();
+    let intent = Intent::<(), (), Pedersen, D> {
+        guaranteed_unshielded_offer: None,
+        fallible_unshielded_offer: None,
+        actions,
+        dust_actions: None,
+        ttl: Timestamp::from_secs(0),
+        binding_commitment: Default::default(),
+    };
+    let stx: Stx = StandardTransaction {
+        network_id: "local-test".into(),
+        intents: (1..=4000).fold(HashMap::new(), |m, seg| m.insert(seg, intent.clone())),
+        guaranteed_coins: None,
+        fallible_coins: HashMap::new(),
+        binding_randomness: Default::default(),
+    };
+    storage::test_utilities::assert_completes_within(
+        std::time::Duration::from_secs(5),
+        move || assert!(stx.disjoint_check().is_ok()),
+    );
+}
+
 proptest! {
     #[test]
     fn disjoint_check_matches_per_entry_checks(
@@ -211,8 +265,9 @@ proptest! {
             1 => Just(Intents::Distinct),
             1 => Just(Intents::FirstRepeated),
         ],
+        actions_only in any::<bool>(),
     ) {
-        let stx = standard(&r, &s, intents);
+        let stx = standard(&r, &s, intents, actions_only);
         prop_assert_eq!(stx.disjoint_check().is_ok(), accepts_per_entry(&stx));
     }
 }
