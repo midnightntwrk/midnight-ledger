@@ -18,6 +18,9 @@
 //! [`EncodingShape`], an automaton run once per trie node and automaton state,
 //! or, for keys without a small automaton, against the value stored with
 //! them, which pins every key to one path and so rules out sharing.
+//!
+//! It lives beside `ArenaKey` because the two `MapKey` impls are only disjoint
+//! in the crate defining `ArenaKey`, where it is known to have no `EncodingShape`.
 
 use crate::WellBehavedHasher;
 use crate::arena::ArenaKey;

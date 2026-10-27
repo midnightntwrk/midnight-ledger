@@ -39,23 +39,6 @@ pub trait Semigroup {
 pub trait Monoid: Semigroup {
     /// Returns the identity element
     fn empty() -> Self;
-
-    /// Appends `n` copies of `self`, in `O(log n)` appends.
-    fn times(&self, mut n: u64) -> Self
-    where
-        Self: Sized,
-    {
-        let mut acc = Self::empty();
-        let mut base = Self::empty().append(self);
-        while n > 0 {
-            if n & 1 == 1 {
-                acc = acc.append(&base);
-            }
-            base = base.append(&base);
-            n >>= 1;
-        }
-        acc
-    }
 }
 
 impl Semigroup for () {
@@ -135,56 +118,5 @@ impl Semigroup for usize {
 impl Monoid for usize {
     fn empty() -> Self {
         0
-    }
-}
-
-/// Keeps the leftmost error, so a fold over a fixed order fails deterministically.
-impl<E: Clone> Semigroup for Result<(), E> {
-    fn append(&self, other: &Self) -> Self {
-        match self {
-            Ok(()) => other.clone(),
-            Err(e) => Err(e.clone()),
-        }
-    }
-}
-
-impl<E: Clone> Monoid for Result<(), E> {
-    fn empty() -> Self {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use proptest::prelude::*;
-
-    #[derive(Clone, Debug, PartialEq)]
-    struct Concat(Vec<u8>);
-
-    impl Semigroup for Concat {
-        fn append(&self, other: &Self) -> Self {
-            Concat([&self.0[..], &other.0[..]].concat())
-        }
-    }
-
-    impl Monoid for Concat {
-        fn empty() -> Self {
-            Concat(Vec::new())
-        }
-    }
-
-    proptest! {
-        #[test]
-        fn times_is_repeated_append(v in prop::collection::vec(any::<u8>(), 0..4), n in 0u64..40) {
-            let x = Concat(v);
-            let naive = (0..n).fold(Concat::empty(), |acc, _| acc.append(&x));
-            prop_assert_eq!(x.times(n), naive);
-        }
-
-        #[test]
-        fn times_saturates(x in any::<u64>(), n in any::<u64>()) {
-            prop_assert_eq!(x.times(n), x.saturating_mul(n));
-        }
     }
 }

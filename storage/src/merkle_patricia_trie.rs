@@ -79,30 +79,17 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     /// enforces this by checking each decoded node. This checks a trie built
     /// in memory, visiting each distinct node once.
     pub fn canonicity(&self) -> Result<(), std::io::Error> {
-        fn check<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            sp: &Sp<Node<V, D, A>, D>,
-            memo: &mut DagMemo<Result<(), String>, D>,
-        ) -> Result<(), String> {
-            memo.get_or_compute(sp, |memo, node| {
-                let children: Vec<&Sp<Node<V, D, A>, D>> = match node {
-                    Node::Empty | Node::Leaf { .. } => vec![],
-                    Node::Branch { children, .. } => children.iter().collect(),
-                    Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => {
-                        vec![child]
-                    }
-                };
-                for child in children {
-                    check(child, memo)?;
-                }
-                Storable::<D>::check_invariant(node).map_err(|e| e.to_string())
-            })
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![&self.0];
+        while let Some(sp) = stack.pop() {
+            if seen.insert(sp.hash()) {
+                Storable::<D>::check_invariant(&**sp).map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("canonicity: {e}"))
+                })?;
+                stack.extend(sp.non_empty_children());
+            }
         }
-        check(&self.0, &mut DagMemo::new()).map_err(|msg| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("canonicity: {msg}"),
-            )
-        })
+        Ok(())
     }
 
     /// Whether [`Self::canonicity`] holds.
@@ -190,18 +177,6 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         Self: 'a,
     {
         type Key<D> = crate::arena::ArenaHash<<D as DB>::Hasher>;
-        fn children<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            node: &Node<V, D, A>,
-        ) -> impl Iterator<Item = &Sp<Node<V, D, A>, D>> {
-            let children: std::vec::Vec<_> = match node {
-                Node::Empty | Node::Leaf { .. } => vec![],
-                Node::Branch { children, .. } => children.iter().collect(),
-                Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => vec![child],
-            };
-            children
-                .into_iter()
-                .filter(|child| !matches!(***child, Node::Empty))
-        }
         let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
         // Reverse post-order visits every node after all of its parents.
         let mut order = std::vec::Vec::new();
@@ -215,7 +190,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
                     order.push(node);
                 } else if seen.insert(node.hash()) {
                     stack.push((node.clone(), true));
-                    stack.extend(children(&node).map(|child| (child.clone(), false)));
+                    stack.extend(node.non_empty_children().map(|child| (child.clone(), false)));
                 }
             }
         }
@@ -223,7 +198,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         let mut values = std::vec::Vec::<(Sp<V, D>, u128)>::new();
         for node in order.iter().rev() {
             let n = paths[&node.hash()];
-            for child in children(node) {
+            for child in node.non_empty_children() {
                 let count = paths.entry(child.hash()).or_insert(0);
                 *count = count.saturating_add(n);
             }
@@ -951,6 +926,18 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                 Some((current_path_to_node.to_vec(), value.deref()))
             }
         }
+    }
+
+    /// The node's children, skipping empty ones.
+    pub(crate) fn non_empty_children(&self) -> impl Iterator<Item = &Sp<Node<T, D, A>, D>> {
+        let children: &[Sp<Node<T, D, A>, D>] = match self {
+            Node::Empty | Node::Leaf { .. } => &[],
+            Node::Branch { children, .. } => &children[..],
+            Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => {
+                std::slice::from_ref(child)
+            }
+        };
+        children.iter().filter(|child| !matches!(***child, Node::Empty))
     }
 
     /// Return the annotation of the `Node`

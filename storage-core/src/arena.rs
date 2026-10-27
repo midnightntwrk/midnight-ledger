@@ -501,6 +501,26 @@ type SpCache<D> =
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
+    /// The stored node behind `key`, or its inline contents.
+    fn node_at(&self, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
+        match key {
+            ArenaKey::Ref(key) => self
+                .lock_backend()
+                .borrow_mut()
+                .get(key)
+                .expect("Arena should contain current serialization target")
+                .clone(),
+            ArenaKey::Direct(d) => OnDiskObject {
+                data: d.data.as_ref().clone(),
+                #[cfg(not(feature = "layout-v2"))]
+                ref_count: 0,
+                children: d.children.as_ref().clone(),
+            },
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn lock_metadata(&self) -> MutexGuard<'_, RefCell<MetaData<D>>> {
         self.metadata.lock()
@@ -1207,8 +1227,10 @@ impl<D: DB> IrLoader<'_, D> {
 impl<D: DB> Loader<D> for IrLoader<'_, D> {
     const CHECK_INVARIANTS: bool = true;
 
-    fn invariant_memos(&self) -> Option<&RefCell<InvariantMemos<D>>> {
-        Some(&self.invariant_memos)
+    // Checks in one decode share memos, so shared children are checked once.
+    fn do_check<T: Storable<D>>(&self, obj: T) -> std::io::Result<T> {
+        obj.check_invariant_memoized(&mut self.invariant_memos.borrow_mut())?;
+        Ok(obj)
     }
 
     /// Always forces deserialization of each key the first time we see it, so
@@ -1810,25 +1832,6 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         self.data.get().unwrap()
     }
 
-    fn node_at(arena: &Arena<D>, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
-        #[cfg(feature = "test-utilities")]
-        crate::test::count_deref();
-        match key {
-            ArenaKey::Ref(key) => arena
-                .lock_backend()
-                .borrow_mut()
-                .get(key)
-                .expect("Arena should contain current serialization target")
-                .clone(),
-            ArenaKey::Direct(d) => OnDiskObject {
-                data: d.data.as_ref().clone(),
-                #[cfg(not(feature = "layout-v2"))]
-                ref_count: 0,
-                children: d.children.as_ref().clone(),
-            },
-        }
-    }
-
     /// Calls `f` with the data and child count of each distinct node of this
     /// sub-graph, stopping as soon as `f` returns `false`. Returns whether
     /// every node was visited.
@@ -1839,7 +1842,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if !seen.insert(key.hash().clone()) {
                 continue;
             }
-            let node = Self::node_at(&self.arena, &key);
+            let node = self.arena.node_at(&key);
             if !f(&node.data, node.children.len()) {
                 return false;
             }
@@ -1882,7 +1885,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if disk_objects.contains_key(child.hash()) {
                 continue;
             }
-            let node = Self::node_at(&arena, &child);
+            let node = arena.node_at(&child);
             for child in node.children.iter() {
                 *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());

@@ -33,7 +33,6 @@ use proptest::{
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::any::Any;
-use std::cell::RefCell;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -68,18 +67,10 @@ pub trait Loader<D: DB> {
     /// `Deserializable::deserialize`.
     fn get_recursion_depth(&self) -> u32;
 
-    /// The memos shared by invariant checks in this load, if it shares any.
-    fn invariant_memos(&self) -> Option<&RefCell<InvariantMemos<D>>> {
-        None
-    }
-
     /// Does a check iff `CHECK_INVARIANTS` is true.
     fn do_check<T: Storable<D>>(&self, obj: T) -> std::io::Result<T> {
         if Self::CHECK_INVARIANTS {
-            match self.invariant_memos() {
-                Some(memos) => obj.check_invariant_memoized(&mut memos.borrow_mut())?,
-                None => obj.check_invariant()?,
-            }
+            obj.check_invariant()?;
         }
         Ok(obj)
     }

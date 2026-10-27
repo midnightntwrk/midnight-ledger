@@ -75,7 +75,8 @@ fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generic
 /// `Storable::check_invariant` implementation.
 ///
 /// When `#[storable(invariant_memoized = some_function)]` is set instead, `some_function` also
-/// takes the `InvariantMemos` shared by the checks of one decode, which must be in scope.
+/// takes a `&mut InvariantMemos<D>` shared by every check in one decode; `InvariantMemos` must
+/// be imported where the type derives `Storable`.
 #[proc_macro_derive(Storable, attributes(storable, tag, phantom))]
 pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

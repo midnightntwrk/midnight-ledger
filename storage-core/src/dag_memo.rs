@@ -74,17 +74,17 @@ impl<R: Clone, D: DB> DagMemo<R, D> {
     }
 }
 
-/// One [`DagMemo`] per invariant check, shared by every check made during a
-/// single decode, so checks that walk shared children walk each once.
+/// State per invariant check, usually a [`DagMemo`], shared by every check
+/// made during a single decode, so checks that walk shared children walk each once.
 pub struct InvariantMemos<D: DB> {
-    memos: HashMap<TypeId, Box<dyn Any>>,
+    states: HashMap<TypeId, Box<dyn Any>>,
     _db: PhantomData<D>,
 }
 
 impl<D: DB> Default for InvariantMemos<D> {
     fn default() -> Self {
         InvariantMemos {
-            memos: HashMap::new(),
+            states: HashMap::new(),
             _db: PhantomData,
         }
     }
@@ -96,13 +96,18 @@ impl<D: DB> InvariantMemos<D> {
         Self::default()
     }
 
+    /// The state of type `S` for the check named by the marker type `C`.
+    pub fn get<C: 'static, S: Default + 'static>(&mut self) -> &mut S {
+        self.states
+            .entry(TypeId::of::<(C, S)>())
+            .or_insert_with(|| Box::new(S::default()))
+            .downcast_mut()
+            .expect("keyed by its state's type")
+    }
+
     /// The memo for the check named by the marker type `C`.
     pub fn memo<C: 'static, R: Clone + 'static>(&mut self) -> &mut DagMemo<R, D> {
-        self.memos
-            .entry(TypeId::of::<C>())
-            .or_insert_with(|| Box::new(DagMemo::<R, D>::new()))
-            .downcast_mut()
-            .expect("a check's memo always holds results of one type")
+        self.get::<C, DagMemo<R, D>>()
     }
 }
 

@@ -17,7 +17,6 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::marker::PhantomData;
 
 /// The byte strings that [`crate::Deserializable::deserialize`] reads in full, as a
 /// finite automaton over bytes.
@@ -38,7 +37,8 @@ pub trait EncodingShape {
 }
 
 /// Whether `T`'s shape accepts `bytes`.
-pub fn shape_accepts<T: EncodingShape>(bytes: &[u8]) -> bool {
+#[cfg(any(test, feature = "proptest"))]
+fn shape_accepts<T: EncodingShape>(bytes: &[u8]) -> bool {
     bytes
         .iter()
         .try_fold(T::start(), |state, b| T::step(&state, *b))
@@ -64,10 +64,7 @@ macro_rules! encoding_shape_as {
     };
 }
 
-/// Exactly `N` arbitrary bytes.
-pub struct Fixed<const N: usize>;
-
-impl<const N: usize> EncodingShape for Fixed<N> {
+impl<const N: usize> EncodingShape for [u8; N] {
     type State = usize;
     fn start() -> usize {
         0
@@ -80,10 +77,7 @@ impl<const N: usize> EncodingShape for Fixed<N> {
     }
 }
 
-/// One byte, `0` or `1`.
-pub struct Bool;
-
-impl EncodingShape for Bool {
+impl EncodingShape for bool {
     type State = bool;
     fn start() -> bool {
         false
@@ -96,10 +90,7 @@ impl EncodingShape for Bool {
     }
 }
 
-/// `A`'s encoding followed by `B`'s.
-pub struct Seq<A, B>(PhantomData<(A, B)>);
-
-/// A position in [`Seq`].
+/// A position in a pair's shape.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum SeqState<A, B> {
     /// Inside the first encoding.
@@ -108,23 +99,23 @@ pub enum SeqState<A, B> {
     Second(B),
 }
 
-impl<A: EncodingShape, B: EncodingShape> Seq<A, B> {
-    // Prefix-freedom makes the switch to `B` unambiguous.
-    fn normalize(state: SeqState<A::State, B::State>) -> SeqState<A::State, B::State> {
-        match state {
-            SeqState::First(a) if A::accepts(&a) => SeqState::Second(B::start()),
-            other => other,
-        }
+// Prefix-freedom makes the switch to `B` unambiguous.
+fn seq_normalize<A: EncodingShape, B: EncodingShape>(
+    state: SeqState<A::State, B::State>,
+) -> SeqState<A::State, B::State> {
+    match state {
+        SeqState::First(a) if A::accepts(&a) => SeqState::Second(B::start()),
+        other => other,
     }
 }
 
-impl<A: EncodingShape, B: EncodingShape> EncodingShape for Seq<A, B> {
+impl<A: EncodingShape, B: EncodingShape> EncodingShape for (A, B) {
     type State = SeqState<A::State, B::State>;
     fn start() -> Self::State {
-        Self::normalize(SeqState::First(A::start()))
+        seq_normalize::<A, B>(SeqState::First(A::start()))
     }
     fn step(state: &Self::State, byte: u8) -> Option<Self::State> {
-        Some(Self::normalize(match state {
+        Some(seq_normalize::<A, B>(match state {
             SeqState::First(a) => SeqState::First(A::step(a, byte)?),
             SeqState::Second(b) => SeqState::Second(B::step(b, byte)?),
         }))
@@ -134,11 +125,7 @@ impl<A: EncodingShape, B: EncodingShape> EncodingShape for Seq<A, B> {
     }
 }
 
-/// A canonical SCALE compact integer whose value fits in `M` bytes, as `u32`,
-/// `u64` and `u128` encode.
-pub struct Scale<const M: usize>;
-
-/// A position in [`Scale`].
+/// A position in the shape of a canonical SCALE compact integer.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ScaleState {
     /// Before the first byte.
@@ -154,11 +141,11 @@ pub enum ScaleState {
     NByte { left: u8, n: u8 },
 }
 
-impl<const M: usize> EncodingShape for Scale<M> {
-    type State = ScaleState;
-    fn start() -> ScaleState {
-        ScaleState::Start
-    }
+/// A canonical SCALE compact integer whose value fits in `M` bytes, as `u32`,
+/// `u64` and `u128` encode.
+struct Scale<const M: usize>;
+
+impl<const M: usize> Scale<M> {
     fn step(state: &ScaleState, byte: u8) -> Option<ScaleState> {
         use ScaleState::*;
         match *state {
@@ -167,8 +154,8 @@ impl<const M: usize> EncodingShape for Scale<M> {
                 0b01 => Some(TwoByte),
                 0b10 if M >= 4 => Some(FourByte(3, false)),
                 0b11 => {
+                    // Big-integer mode is n = 4 + (byte >> 2) bytes, which must fit in `M`.
                     let n = (byte >> 2) + 4;
-                    // The last byte must be nonzero, and fall within `M` bytes.
                     (n as usize <= M).then_some(NByte { left: n, n })
                 }
                 _ => None,
@@ -178,53 +165,43 @@ impl<const M: usize> EncodingShape for Scale<M> {
             FourByte(3, _) => Some(FourByte(2, false)),
             FourByte(2, _) => Some(FourByte(1, byte != 0)),
             FourByte(_, third_nonzero) => (third_nonzero || byte != 0).then_some(Done),
+            // Canonical: no zero top byte, and 4-byte big integers only above
+            // 2^30, which the shorter modes cover.
             NByte { left: 1, n } => (byte != 0 && (n != 4 || byte >= 64)).then_some(Done),
             NByte { left, n } => Some(NByte { left: left - 1, n }),
         }
     }
-    fn accepts(state: &ScaleState) -> bool {
-        *state == ScaleState::Done
-    }
 }
 
-impl<const N: usize> EncodingShape for [u8; N] {
-    type State = usize;
-    fn start() -> usize {
-        Fixed::<N>::start()
-    }
-    fn step(state: &usize, byte: u8) -> Option<usize> {
-        Fixed::<N>::step(state, byte)
-    }
-    fn accepts(state: &usize) -> bool {
-        Fixed::<N>::accepts(state)
-    }
+macro_rules! scale_shape {
+    ($ty:ty, $m:literal) => {
+        impl EncodingShape for $ty {
+            type State = ScaleState;
+            fn start() -> ScaleState {
+                ScaleState::Start
+            }
+            fn step(state: &ScaleState, byte: u8) -> Option<ScaleState> {
+                Scale::<$m>::step(state, byte)
+            }
+            fn accepts(state: &ScaleState) -> bool {
+                *state == ScaleState::Done
+            }
+        }
+    };
 }
 
-encoding_shape_as!((), Fixed<0>);
-encoding_shape_as!(bool, Bool);
-encoding_shape_as!(u8, Fixed<1>);
-encoding_shape_as!(u16, Fixed<2>);
-encoding_shape_as!(i8, Fixed<1>);
-encoding_shape_as!(i16, Fixed<2>);
-encoding_shape_as!(i32, Fixed<4>);
-encoding_shape_as!(i64, Fixed<8>);
-encoding_shape_as!(i128, Fixed<16>);
-encoding_shape_as!(u32, Scale<4>);
-encoding_shape_as!(u64, Scale<8>);
-encoding_shape_as!(u128, Scale<16>);
+scale_shape!(u32, 4);
+scale_shape!(u64, 8);
+scale_shape!(u128, 16);
 
-impl<A: EncodingShape, B: EncodingShape> EncodingShape for (A, B) {
-    type State = <Seq<A, B> as EncodingShape>::State;
-    fn start() -> Self::State {
-        Seq::<A, B>::start()
-    }
-    fn step(state: &Self::State, byte: u8) -> Option<Self::State> {
-        Seq::<A, B>::step(state, byte)
-    }
-    fn accepts(state: &Self::State) -> bool {
-        Seq::<A, B>::accepts(state)
-    }
-}
+encoding_shape_as!((), [u8; 0]);
+encoding_shape_as!(u8, [u8; 1]);
+encoding_shape_as!(u16, [u8; 2]);
+encoding_shape_as!(i8, [u8; 1]);
+encoding_shape_as!(i16, [u8; 2]);
+encoding_shape_as!(i32, [u8; 4]);
+encoding_shape_as!(i64, [u8; 8]);
+encoding_shape_as!(i128, [u8; 16]);
 
 /// Checks that `T`'s shape accepts exactly the byte strings `T` decodes from
 /// in full, over encodings of arbitrary values and corruptions of them.

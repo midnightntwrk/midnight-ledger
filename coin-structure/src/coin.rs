@@ -58,7 +58,7 @@ use std::iter::once;
 #[tag = "zswap-nullifier[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Nullifier(pub HashOutput);
-serialize::encoding_shape_as!(Nullifier, serialize::Fixed<32>);
+serialize::encoding_shape_as!(Nullifier, [u8; 32]);
 tag_enforcement_test!(Nullifier);
 
 impl rand::distributions::Distribution<Nullifier> for rand::distributions::Standard {
@@ -91,7 +91,7 @@ randomised_serialization_test!(Nullifier);
 #[tag = "zswap-coin-commitment[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Commitment(pub HashOutput);
-serialize::encoding_shape_as!(Commitment, serialize::Fixed<32>);
+serialize::encoding_shape_as!(Commitment, [u8; 32]);
 tag_enforcement_test!(Commitment);
 
 impl rand::distributions::Distribution<Commitment> for rand::distributions::Standard {
@@ -913,7 +913,7 @@ impl PublicAddress {
 #[storable(base)]
 #[tag = "user-address[v1]"]
 pub struct UserAddress(pub HashOutput);
-serialize::encoding_shape_as!(UserAddress, serialize::Fixed<32>);
+serialize::encoding_shape_as!(UserAddress, [u8; 32]);
 tag_enforcement_test!(UserAddress);
 
 impl rand::distributions::Distribution<UserAddress> for rand::distributions::Standard {

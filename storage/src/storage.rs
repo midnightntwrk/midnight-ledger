@@ -32,7 +32,6 @@ use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;
 use serialize::{Deserializable, EncodingShape, Serializable, Tagged, tag_enforcement_test};
-use std::cell::RefCell;
 use std::rc::Rc;
 use sha2::Sha256;
 use std::borrow::Borrow;
@@ -326,7 +325,7 @@ impl<
         memo: &mut DagMemo<R, D>,
         mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<K, D>, &Sp<V, D>) -> R,
     ) -> R {
-        self.0.fold(memo, |memo, kv| leaf(memo, &kv.0, &kv.1))
+        self.0.mpt.fold(memo, |memo, kv| leaf(memo, &kv.0, &kv.1))
     }
 
     /// Iterate over the key value pairs in the hash map
@@ -497,16 +496,6 @@ impl<V: Storable<D> + Serializable, D: DB, A: Storable<D> + Annotation<(Sp<V, D>
         other
             .iter()
             .fold(self.clone(), |acc, x| acc.insert(x.deref().deref().clone()))
-    }
-
-    /// Combines `leaf` over every element, in [`Self::iter`] order, in time
-    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
-    pub fn fold<R: Monoid + Clone>(
-        &self,
-        memo: &mut DagMemo<R, D>,
-        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
-    ) -> R {
-        self.0.fold(memo, |memo, v, _| leaf(memo, v))
     }
 
     /// Iterate over the key value pairs in the hash set
@@ -782,16 +771,17 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         let err = |msg: &str| Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
         // A key's first nibble is the first step below the root, or below a
         // value stored at the root.
-        let mut node = &(self.0).0;
-        let leading_zero = loop {
-            match node.deref() {
-                Node::MidBranchLeaf { child, .. } => node = child,
-                Node::Branch { children, .. } => break !matches!(*children[0], Node::Empty),
-                Node::Extension {
-                    compressed_path, ..
-                } => break compressed_path.first() == Some(&0),
-                Node::Empty | Node::Leaf { .. } => break false,
-            }
+        let root = &(self.0).0;
+        let below = match root.deref() {
+            Node::MidBranchLeaf { child, .. } => child,
+            _ => root,
+        };
+        let leading_zero = match below.deref() {
+            Node::Branch { children, .. } => !matches!(*children[0], Node::Empty),
+            Node::Extension {
+                compressed_path, ..
+            } => compressed_path.first() == Some(&0),
+            _ => false,
         };
         if leading_zero {
             return err("nibbles in array should not have leading zeroes");
@@ -1008,17 +998,6 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
         }
     }
 
-    /// Combines `leaf` over every element, once per unit of its quantity, in
-    /// time linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
-    pub fn fold<R: Monoid + Clone>(
-        &self,
-        memo: &mut DagMemo<R, D>,
-        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
-    ) -> R {
-        self.elements
-            .fold(memo, |memo, v, count| leaf(memo, v).times(**count as u64))
-    }
-
     /// Insert an element with a quantity of one or, if the element is already in the set, increase its quantity by one
     #[must_use]
     pub fn insert(&self, element: V) -> Self {
@@ -1182,7 +1161,7 @@ pub struct BigEndianU64(u64);
 #[derive(Debug)]
 struct BigEndianU64(u64);
 
-serialize::encoding_shape_as!(BigEndianU64, serialize::Fixed<8>);
+serialize::encoding_shape_as!(BigEndianU64, [u8; 8]);
 
 impl Serializable for BigEndianU64 {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
@@ -1483,8 +1462,8 @@ impl<K: EncodingShape + 'static, V: Storable<D>, D: DB, A: Storable<D> + Annotat
     KeyCheck<K, V, D, A> for ByShape
 {
     fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool {
-        let memo = memos.memo::<MapKeyCheck<K>, KeyTable<K>>();
-        keys_decode::<K, V, D, A>(root, (K::start(), None), memo)
+        let table = memos.get::<MapKeyCheck<K, V, A>, KeyTable<K, D>>();
+        keys_decode::<K, V, D, A>(root, (K::start(), None), table)
     }
 }
 
@@ -1581,12 +1560,13 @@ fn stored_under_own_keys<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
 /// nibble of a byte not yet complete.
 type KeyPosition<K> = (<K as EncodingShape>::State, Option<u8>);
 
-/// Marks the memo of [`keys_decode`] for keys of type `K`.
-struct MapKeyCheck<K>(PhantomData<K>);
+/// Marks the table of [`keys_decode`] for keys of type `K` in tries of `V`.
+struct MapKeyCheck<K, V, A>(PhantomData<(K, V, A)>);
 
-/// Per trie node, whether every key below it decodes from a given position,
-/// filled in as positions are reached.
-type KeyTable<K> = Rc<RefCell<std::collections::HashMap<KeyPosition<K>, bool>>>;
+/// Whether every key below a trie node decodes from a given position, filled
+/// in as nodes are reached at positions.
+type KeyTable<K, D> =
+    std::collections::HashMap<(ArenaHash<<D as DB>::Hasher>, KeyPosition<K>), bool>;
 
 fn key_step<K: EncodingShape>(pos: &KeyPosition<K>, nibble: u8) -> Option<KeyPosition<K>> {
     if nibble > 0x0f {
@@ -1608,10 +1588,9 @@ fn key_accepts<K: EncodingShape>(pos: &KeyPosition<K>) -> bool {
 fn keys_decode<K: EncodingShape, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
     sp: &Sp<Node<V, D, A>, D>,
     pos: KeyPosition<K>,
-    memo: &mut DagMemo<KeyTable<K>, D>,
+    table: &mut KeyTable<K, D>,
 ) -> bool {
-    let table: KeyTable<K> = memo.get_or_compute(sp, |_, _| Rc::default());
-    if let Some(ok) = RefCell::borrow(&table).get(&pos).copied() {
+    if let Some(&ok) = table.get(&(sp.hash(), pos.clone())) {
         return ok;
     }
     let ok = match sp.deref() {
@@ -1622,7 +1601,8 @@ fn keys_decode<K: EncodingShape, V: Storable<D>, D: DB, A: Storable<D> + Annotat
             .enumerate()
             .filter(|(_, child)| !matches!(***child, Node::Empty))
             .all(|(i, child)| {
-                key_step::<K>(&pos, i as u8).is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, memo))
+                key_step::<K>(&pos, i as u8)
+                    .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, table))
             }),
         Node::Extension {
             compressed_path,
@@ -1631,12 +1611,12 @@ fn keys_decode<K: EncodingShape, V: Storable<D>, D: DB, A: Storable<D> + Annotat
         } => compressed_path
             .iter()
             .try_fold(pos.clone(), |pos, n| key_step::<K>(&pos, *n))
-            .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, memo)),
+            .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, table)),
         Node::MidBranchLeaf { child, .. } => {
-            key_accepts::<K>(&pos) && keys_decode::<K, V, D, A>(child, pos.clone(), memo)
+            key_accepts::<K>(&pos) && keys_decode::<K, V, D, A>(child, pos.clone(), table)
         }
     };
-    table.borrow_mut().insert(pos, ok);
+    table.insert((sp.hash(), pos), ok);
     ok
 }
 
@@ -1847,16 +1827,6 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         Sp::into_inner(self.mpt)
             .into_iter()
             .flat_map(MerklePatriciaTrie::into_inner_for_drop)
-    }
-
-    /// Combines `leaf` over every value, in [`Self::iter`] order, in time
-    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
-    pub fn fold<R: Monoid + Clone>(
-        &self,
-        memo: &mut DagMemo<R, D>,
-        leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
-    ) -> R {
-        self.mpt.fold(memo, leaf)
     }
 
     /// Iterate over the key-value pairs in the map in a deterministic, but unspecified order.
