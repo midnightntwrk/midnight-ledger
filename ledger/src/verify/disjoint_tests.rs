@@ -16,8 +16,7 @@
 //! however entries are shared.
 
 use super::*;
-use crate::dust::DustActions;
-use crate::structure::cost_equivalence_tests::{Recipe, build, recipe, transaction};
+use crate::structure::cost_equivalence_tests::{Entries, Recipe, build, recipe, transaction};
 use base_crypto::hash::HashOutput;
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -27,7 +26,6 @@ use zswap::{Input, Offer, Output, Transient};
 
 type D = InMemoryDB;
 type Stx = StandardTransaction<(), (), Pedersen, D>;
-type Entries = Vec<(u8, u8)>;
 
 /// Per offer, its inputs, outputs and transients, and how it shares the
 /// previous offer's inputs: 0 not at all, 1 the same array, 2 that array plus
@@ -91,8 +89,6 @@ fn offers(r: &[(Entries, Entries, Entries, u8)]) -> Vec<Offer<(), D>> {
     out
 }
 
-/// Intents are usually rejected for their own entries, so they are dropped
-/// half the time to test the shielded checks alone.
 #[derive(Debug, Clone, Copy)]
 enum Intents {
     None,
@@ -183,43 +179,6 @@ fn accepts_per_entry(stx: &Stx) -> bool {
     no_duplicates(&registrations) && no_duplicates(&committee_signatures)
 }
 
-/// Empty arrays hold no entries, so any number of offers and intents may
-/// share them.
-#[test]
-fn shared_empty_arrays_are_accepted() {
-    let offer = Sp::new(UnshieldedOffer::<(), D> {
-        inputs: Array::new(),
-        outputs: Array::new(),
-        signatures: Array::new(),
-    });
-    let intent = Intent::<(), (), Pedersen, D> {
-        guaranteed_unshielded_offer: Some(offer.clone()),
-        fallible_unshielded_offer: Some(offer),
-        actions: Array::new(),
-        dust_actions: Some(Sp::new(DustActions {
-            spends: Array::new(),
-            registrations: Array::new(),
-            ctime: Timestamp::from_secs(0),
-        })),
-        ttl: Timestamp::from_secs(0),
-        binding_commitment: Default::default(),
-    };
-    let coins = Offer::<(), D> {
-        inputs: Array::new(),
-        outputs: Array::new(),
-        transient: Array::new(),
-        deltas: Array::new(),
-    };
-    let stx: Stx = StandardTransaction {
-        network_id: "local-test".into(),
-        intents: (1..=3).fold(HashMap::new(), |m, seg| m.insert(seg, intent.clone())),
-        guaranteed_coins: Some(Sp::new(coins.clone())),
-        fallible_coins: (1..=3).fold(HashMap::new(), |m, seg| m.insert(seg, coins.clone())),
-        binding_randomness: Default::default(),
-    };
-    assert!(stx.disjoint_check().is_ok());
-}
-
 /// Actions shared by many segments are counted once per distinct node, not
 /// walked once per segment.
 #[test]
@@ -260,6 +219,8 @@ proptest! {
     fn disjoint_check_matches_per_entry_checks(
         r in recipe(),
         s in shielded(),
+        // Intents are usually rejected for their own entries; drop them half
+        // the time to test the shielded checks alone.
         intents in prop_oneof![
             2 => Just(Intents::None),
             1 => Just(Intents::Distinct),

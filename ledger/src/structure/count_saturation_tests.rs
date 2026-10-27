@@ -120,13 +120,7 @@ fn transaction(lens: &[Len; SITES]) -> Tx {
     })
 }
 
-fn times(cost: SyntheticCost) -> (CostDuration, CostDuration) {
-    (cost.compute_time, cost.read_time)
-}
-
-/// Sites pricing sums across the two offers holding them: inputs, outputs,
-/// transients and deltas of the two zswap offers, and the signatures of the
-/// two unshielded offers.
+/// Each site with its counterpart in the other offer.
 const PAIRS: [(usize, usize); 5] = [(0, 4), (1, 5), (2, 6), (3, 7), (8, 9)];
 
 proptest! {
@@ -145,7 +139,10 @@ proptest! {
         lens[b] = second;
         let both = transaction(&lens);
         let model = &INITIAL_PARAMETERS.cost_model;
-        let validation = |tx: &Tx| times(tx.validation_cost(model));
+        let validation = |tx: &Tx| {
+            let cost = tx.validation_cost(model);
+            (cost.compute_time, cost.read_time)
+        };
         // Application costs sum the same counts, but only once
         // `disjoint_check` has ruled out repeated entries, which bounds them.
         prop_assert!(validation(&both) >= validation(&one));

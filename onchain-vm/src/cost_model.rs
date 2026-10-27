@@ -250,20 +250,8 @@ impl CostModel {
         self.read_cell((FR_BYTES * 3 + 2) as u64, sync) * log_size as u64
     }
     pub fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
-        let topo_nodes = value.serialize_to_node_list();
-        let bytes_written = topo_nodes
-            .nodes
-            .iter()
-            .map(|n| {
-                n.data.len() as u64 + n.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64
-            })
-            .sum::<u64>();
-        RunningCost {
-            read_time: CostDuration::ZERO,
-            compute_time: CostDuration::ZERO,
-            bytes_written,
-            bytes_deleted: 0,
-        }
+        self.tree_copy_bounded(&value, u64::MAX)
+            .expect("no copy writes more than u64::MAX bytes")
     }
     /// As [`Self::tree_copy`], or `None` once the bytes written exceed
     /// `limit`, having walked only the nodes counted so far.

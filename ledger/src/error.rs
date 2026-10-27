@@ -448,7 +448,7 @@ impl Display for FeeCalculationError {
             ),
             FeeCalculationError::RepeatedEntries => write!(
                 formatter,
-                "transaction repeats an input, output or registration, so has no fee"
+                "transaction repeats an entry no valid transaction repeats, so has no fee"
             ),
             FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss,
@@ -607,6 +607,9 @@ pub enum MalformedTransaction<D: DB> {
     },
     RepeatedCommitteeSignature {
         signature: Signature,
+    },
+    RepeatedDustRegistration {
+        registration: Box<DustRegistration<(), D>>,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -1078,11 +1081,15 @@ impl<D: DB> Display for MalformedTransaction<D> {
             ),
             MultipleDustRegistrationsForKey { key } => write!(
                 formatter,
-                "multiple dust registrations for key in the same intent, or one registration in several: {key:?}"
+                "multiple dust registrations for key in the same intent: {key:?}"
             ),
             RepeatedCommitteeSignature { signature } => write!(
                 formatter,
                 "committee signature used more than once in the transaction: {signature:?}"
+            ),
+            RepeatedDustRegistration { registration } => write!(
+                formatter,
+                "dust registration used more than once in the transaction: {registration:?}"
             ),
             InsufficientDustForRegistrationFee {
                 registration,

@@ -371,9 +371,8 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
 
 impl<D: DB> Offer<Proof, D> {
     #[instrument(skip(self))]
-    /// Repeated entries carry the same proof and statement, so each distinct
-    /// entry is verified once.
     pub fn well_formed(&self, segment: u16) -> Result<Pedersen, MalformedOffer> {
+        // Repeats share proof and statement, so each distinct entry is verified once.
         self.inputs
             .distinct_values()
             .iter()

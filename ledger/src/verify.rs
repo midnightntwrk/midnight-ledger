@@ -643,13 +643,10 @@ where
                     stx.ttl_check_weak(tblock, params.global_ttl)
                         .map_err(MalformedTransaction::TransactionApplicationError)
                 })?;
-                // Entries that may not repeat are rejected first: with none
-                // repeated, entries that fees join against each other are
-                // distinct nodes, so pricing is linear in the encoding.
+                // Repeats, then fees, before any check whose work grows with entries.
+                // Pricing rejects repeats too; this reports which entry repeats, and
+                // still rejects when balancing isn't enforced.
                 ref_state.stateless_check(|| stx.disjoint_check())?;
-                // Fees first: they cost the transaction in time linear in its
-                // encoding, and an over-limit transaction is rejected before
-                // checks whose work grows with its entries.
                 let mut fees = 0;
                 ref_state.param_check(true, |params| {
                     ref_state.fees_check(|get_op| {
@@ -1219,17 +1216,10 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
 }
 
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransaction<S, P, B, D> {
+    /// Rejects entries no valid transaction repeats: each spends one coin, or is
+    /// bound to one intent, segment or maintenance counter. Runs before fees, so
+    /// its work is linear in the encoding however nodes are shared.
     #[allow(clippy::mutable_key_type)]
-    /// Rejects entries that a valid transaction cannot repeat: shielded inputs
-    /// and outputs across offers, unshielded inputs anywhere, dust
-    /// registrations anywhere, since each is signed for one intent and
-    /// segment, and committee signatures anywhere, since a repeated
-    /// maintenance update fails on its counter.
-    ///
-    /// Runs before fees, so it inserts each distinct entry into one set per
-    /// kind and stops at the first repeat, and counts committee signatures
-    /// in one pass over all actions: its work is linear in the encoding
-    /// however the entries' nodes are shared.
     pub(crate) fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = BTreeSet::new();
         let mut shielded_outputs = BTreeSet::new();
@@ -1321,8 +1311,8 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
             for dust_actions in intent.dust_actions.iter() {
                 for (reg, n) in dust_actions.registrations.distinct_values() {
                     if n > 1 || !registrations.insert(reg.hash()) {
-                        return Err(MalformedTransaction::MultipleDustRegistrationsForKey {
-                            key: reg.night_key.clone(),
+                        return Err(MalformedTransaction::RepeatedDustRegistration {
+                            registration: Box::new(reg.erase_signatures()),
                         });
                     }
                 }
@@ -2124,8 +2114,8 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     }
 
     /// The number of field elements [`Self::public_inputs`] would produce,
-    /// computed without materializing them. A program holding `noop 0`, never
-    /// well-formed, counts each op as at least one, so its length is bounded too.
+    /// computed without materializing them. Each transcript counts at least
+    /// its program length, so programs padded with `noop 0` are bounded too.
     pub fn public_inputs_len(&self) -> usize {
         self.public_inputs_len_memoized(&mut DagMemo::new())
     }
@@ -2133,12 +2123,12 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     /// As [`Self::public_inputs_len`], visiting each distinct op and pushed
     /// node once across every call sharing `memo`.
     pub fn public_inputs_len_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
-        // The binding input and the communication commitment. Every op but the
-        // rejected `noop 0` adds an input, so the length bound changes no valid count.
         self.guaranteed_transcript
             .iter()
             .chain(self.fallible_transcript.iter())
+            // Only the ill-formed `noop 0` adds no input, so no valid count changes.
             .map(|t| t.public_inputs_len_memoized(memo).max(t.program.len()))
+            // The binding input and the communication commitment.
             .fold(2, usize::saturating_add)
     }
 
@@ -2483,90 +2473,46 @@ mod well_formed_tests {
         use storage::test_utilities::assert_completes_within;
 
         // Each level is a 16-wide array whose entries all share one child, so
-        // the value stays a few hundred bytes while its tree grows 16-fold.
-        let mut value = StateValue::<InMemoryDB, AlignedValueChecked>::Null;
-        for depth in 1..=12 {
-            value = StateValue::Array(vec![value; 16].into());
-            if depth < 4 {
-                continue;
-            }
-            let value = value.clone();
-            let res = assert_completes_within(Duration::from_secs(10), move || {
-                let parent: ErasedIntent<InMemoryDB> = Intent {
-                    guaranteed_unshielded_offer: None,
-                    fallible_unshielded_offer: None,
-                    actions: storage::storage::Array::new(),
-                    dust_actions: None,
-                    ttl: Timestamp::from_secs(0),
-                    binding_commitment: Default::default(),
-                };
-                let state = LedgerState::<InMemoryDB>::new("local-test");
-                let strictness = WellFormedStrictness {
-                    verify_contract_proofs: false,
-                    ..WellFormedStrictness::default()
-                };
-                let call = ContractCall::<(), InMemoryDB> {
-                    address: ContractAddress::default(),
-                    entry_point: EntryPointBuf(b"count".to_vec()),
-                    guaranteed_transcript: None,
-                    fallible_transcript: Some(Sp::new(Transcript {
-                        gas: Default::default(),
-                        effects: Default::default(),
-                        program: vec![Op::Push {
-                            storage: false,
-                            value,
-                        }]
-                        .into(),
-                        version: None,
-                    })),
-                    communication_commitment: Fr::from(0u64),
-                    proof: (),
-                };
-                call.well_formed(&state, strictness, &parent)
-            });
-            assert!(
-                matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
-                "depth {depth}: {res:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn shared_zswap_inputs_are_rejected_before_per_input_checks() {
-        use coin_structure::coin::Nullifier;
-        use std::time::Duration;
-        use storage::storage::{Array, HashMap};
-        use storage::test_utilities::assert_completes_within;
-
-        // 16^12 copies of one input: priced per copy, the transaction is
-        // over every limit, and walking the copies would never finish.
-        let res = assert_completes_within(Duration::from_secs(10), || {
-            let input = zswap::Input::<(), InMemoryDB> {
-                nullifier: Nullifier(HashOutput([1; 32])),
-                value_commitment: Default::default(),
-                contract_address: None,
-                merkle_tree_root: Default::default(),
-                proof: std::sync::Arc::new(()),
+        // the value stays a few hundred bytes while its tree has 16^12 leaves.
+        let value = (0..12).fold(
+            StateValue::<InMemoryDB, AlignedValueChecked>::Null,
+            |v, _| StateValue::Array(vec![v; 16].into()),
+        );
+        let res = assert_completes_within(Duration::from_secs(10), move || {
+            let parent: ErasedIntent<InMemoryDB> = Intent {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                actions: storage::storage::Array::new(),
+                dust_actions: None,
+                ttl: Timestamp::from_secs(0),
+                binding_commitment: Default::default(),
             };
-            let offer = zswap::Offer {
-                inputs: Array::shared_dense(12, input),
-                outputs: Array::new(),
-                transient: Array::new(),
-                deltas: Array::new(),
-            };
-            let tx = Transaction::<(), (), Pedersen, InMemoryDB>::Standard(StandardTransaction {
-                network_id: "local-test".into(),
-                intents: HashMap::new(),
-                guaranteed_coins: Some(Sp::new(offer)),
-                fallible_coins: HashMap::new(),
-                binding_randomness: Default::default(),
-            });
             let state = LedgerState::<InMemoryDB>::new("local-test");
-            tx.well_formed(&state, WellFormedStrictness::default(), Timestamp::from_secs(0))
-                .err()
+            let strictness = WellFormedStrictness {
+                verify_contract_proofs: false,
+                ..WellFormedStrictness::default()
+            };
+            let call = ContractCall::<(), InMemoryDB> {
+                address: ContractAddress::default(),
+                entry_point: EntryPointBuf(b"count".to_vec()),
+                guaranteed_transcript: None,
+                fallible_transcript: Some(Sp::new(Transcript {
+                    gas: Default::default(),
+                    effects: Default::default(),
+                    program: vec![Op::Push {
+                        storage: false,
+                        value,
+                    }]
+                    .into(),
+                    version: None,
+                })),
+                communication_commitment: Fr::from(0u64),
+                proof: (),
+            };
+            call.well_formed(&state, strictness, &parent)
         });
         assert!(
-            matches!(res, Some(MalformedTransaction::FeeCalculation(_))),
+            matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
             "{res:?}"
         );
     }

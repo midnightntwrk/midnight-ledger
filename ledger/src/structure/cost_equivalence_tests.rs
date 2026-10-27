@@ -35,15 +35,10 @@ use transient_crypto::curve::Fr;
 type D = InMemoryDB;
 type Tx = Transaction<(), (), Pedersen, D>;
 
-fn old_validation_cost_impl(
-    tx: &Tx,
-    model: &TransactionCostModel,
-    per_call_vk_read: impl Fn(
-        &ContractAddress,
-        &EntryPointBuf,
-        Option<ContractOperationVersion>,
-    ) -> RunningCost,
-) -> SyntheticCost {
+fn old_validation_cost(tx: &Tx, model: &TransactionCostModel) -> SyntheticCost {
+    let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
+        + model.map_index(EXPECTED_CONTRACT_DEPTH)
+        + model.map_index(EXPECTED_OPERATIONS_DEPTH);
     let mut result = match tx {
         Transaction::Standard(stx) => {
             let unique_calls = tx
@@ -57,9 +52,7 @@ fn old_validation_cost_impl(
                 })
                 .collect::<BTreeSet<_>>();
             let mut cost = model.baseline_cost;
-            for (address, entry_point, version) in &unique_calls {
-                cost += per_call_vk_read(address, entry_point, version.clone());
-            }
+            cost += per_call * unique_calls.len();
             let offers = stx
                 .guaranteed_coins
                 .iter()
@@ -122,6 +115,21 @@ fn old_validation_cost_impl(
     };
     result.compute_time = result.compute_time * model.validation_factor;
     result
+}
+
+/// The bytes a deploy copies: every distinct node of its state, with its
+/// child references.
+fn old_tree_copy<T: Storable<D>>(value: Sp<T, D>) -> RunningCost {
+    let bytes_written = value
+        .serialize_to_node_list()
+        .nodes
+        .iter()
+        .map(|n| n.data.len() as u64 + n.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64)
+        .sum::<u64>();
+    RunningCost {
+        bytes_written,
+        ..RunningCost::ZERO
+    }
 }
 
 fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
@@ -272,7 +280,7 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                     f_cost += model.map_index(EXPECTED_CONTRACT_DEPTH);
                     // Contract insert
                     f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false)
-                        + model.tree_copy(Sp::new(deploy.initial_state.clone()));
+                        + old_tree_copy(Sp::new(deploy.initial_state.clone()));
                 }
                 ContractAction::Maintain(upd) => {
                     // Contract state fetch
@@ -286,8 +294,8 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                     for part in upd.updates.iter() {
                         match &*part {
                             SingleUpdate::ReplaceAuthority(auth) => {
-                                f_cost += model.tree_copy::<_, D>(Sp::new(auth.clone()))
-                                    + model.map_insert(1, true)
+                                f_cost +=
+                                    old_tree_copy(Sp::new(auth.clone())) + model.map_insert(1, true)
                             }
                             SingleUpdate::VerifierKeyRemove(..) => {
                                 f_cost += model.map_remove(EXPECTED_OPERATIONS_DEPTH, true)
@@ -411,7 +419,7 @@ fn old_estimated_tx_size(tx: &Tx) -> usize {
         + dust_spends * DUST_SPEND_PROOF_SIZE
 }
 
-type Entries = Vec<(u8, u8)>;
+pub(crate) type Entries = Vec<(u8, u8)>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Recipe {
@@ -635,19 +643,30 @@ fn old_effects_check_cost(tx: &Tx, model: &TransactionCostModel) -> SyntheticCos
     cost.into()
 }
 
+/// The transaction `r` describes, with repeats if `repeats`. Repeated entries
+/// are rejected before fees, so without them more transactions reach the work
+/// after the fee check.
+pub(crate) fn generated(r: &Recipe, repeats: bool) -> Tx {
+    let tx = transaction(r);
+    if repeats { tx } else { without_repeats(&tx) }
+}
+
 /// `tx` without the entries `disjoint_check` rejects repeating: each
 /// intent's inputs and registrations are made distinct and unique to it, the
 /// fallible offer stops sharing the guaranteed offer's inputs, and committee
 /// signatures, which application ignores, are dropped. Actions, outputs and
 /// their sharing are kept.
-pub(crate) fn without_repeats(tx: &Tx) -> Tx {
+fn without_repeats(tx: &Tx) -> Tx {
     let Transaction::Standard(mut stx) = tx.clone() else {
         unreachable!()
     };
     for (segment, mut intent) in tx.intents() {
         if let Some(offer) = &intent.guaranteed_unshielded_offer {
             let mut offer = (**offer).clone();
-            offer.inputs = distinct(&offer.inputs)
+            offer.inputs = offer
+                .inputs
+                .distinct_values()
+                .into_iter()
                 .map(|(input, _)| UtxoSpend {
                     output_no: input.output_no + 1000 * u32::from(segment),
                     ..(*input).clone()
@@ -679,7 +698,10 @@ pub(crate) fn without_repeats(tx: &Tx) -> Tx {
         }
         if let Some(dust) = &intent.dust_actions {
             let mut dust = (**dust).clone();
-            dust.registrations = distinct(&dust.registrations)
+            dust.registrations = dust
+                .registrations
+                .distinct_values()
+                .into_iter()
                 .map(|(reg, _)| DustRegistration {
                     allow_fee_payment: u128::from(segment),
                     ..(*reg).clone()
@@ -695,37 +717,30 @@ pub(crate) fn without_repeats(tx: &Tx) -> Tx {
 proptest! {
     #[test]
     fn costs_match_per_element_loops(r in recipe(), repeats in any::<bool>()) {
-        let tx = transaction(&r);
-        let tx = if repeats { tx } else { without_repeats(&tx) };
+        let tx = generated(&r, repeats);
         let model = &INITIAL_PARAMETERS.cost_model;
-        let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
-            + model.map_index(EXPECTED_CONTRACT_DEPTH)
-            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
-        prop_assert_eq!(
-            tx.validation_cost(model),
-            old_validation_cost_impl(&tx, model, |_, _, _| per_call)
-        );
-        prop_assert_eq!(tx.effects_check_cost(model), old_effects_check_cost(&tx, model));
+        let validation = old_validation_cost(&tx, model);
+        prop_assert_eq!(tx.validation_cost(model), validation);
+        let effects = old_effects_check_cost(&tx, model);
+        prop_assert_eq!(tx.effects_check_cost(model), effects);
         let Transaction::Standard(stx) = &tx else { unreachable!() };
         if stx.disjoint_check().is_ok() {
-            let (guaranteed, _) = old_application_cost(&tx, model);
-            prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Ok(old_application_cost(&tx, model)));
-            let dismiss = guaranteed
-                + old_validation_cost_impl(&tx, model, |_, _, _| per_call)
-                + old_effects_check_cost(&tx, model);
+            let application = old_application_cost(&tx, model);
+            prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Ok(application));
+            let dismiss = application.0 + validation + effects;
             prop_assert_eq!(tx.time_to_dismiss(&INITIAL_PARAMETERS), Ok(dismiss.max_time()));
             // Each pricing entry point dismisses against the same time.
             let state = LedgerState::<D>::new("local-test");
-            for (allowed, ok) in [(dismiss.max_time(), true), (dismiss.max_time() - CostDuration::from_picoseconds(1), false)] {
+            for (allowed, within) in [(dismiss.max_time(), true), (dismiss.max_time() - CostDuration::from_picoseconds(1), false)] {
                 let mut params = INITIAL_PARAMETERS;
                 params.limits.time_to_dismiss_per_byte = CostDuration::ZERO;
                 params.limits.min_time_to_dismiss = allowed;
-                let dismissed = |r: Result<_, FeeCalculationError>| {
+                let within_time = |r: Result<_, FeeCalculationError>| {
                     !matches!(r, Err(FeeCalculationError::OutsideTimeToDismiss { .. }))
                 };
-                prop_assert_eq!(dismissed(tx.cost(&params, true).map(|_| ())), ok);
-                prop_assert_eq!(dismissed(tx.cost_with_state(&params, &state, true).map(|_| ())), ok);
-                prop_assert_eq!(dismissed(tx.fees_with_impl(&params, |_, _| None, true).map(|_| ())), ok);
+                prop_assert_eq!(within_time(tx.cost(&params, true).map(|_| ())), within);
+                prop_assert_eq!(within_time(tx.cost_with_state(&params, &state, true).map(|_| ())), within);
+                prop_assert_eq!(within_time(tx.fees_with_impl(&params, |_, _| None, true).map(|_| ())), within);
             }
         } else {
             prop_assert_eq!(tx.application_cost(&INITIAL_PARAMETERS), Err(FeeCalculationError::RepeatedEntries));

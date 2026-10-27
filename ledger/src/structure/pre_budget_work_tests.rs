@@ -15,9 +15,8 @@
 //! take work linear in its encoding, however much structure the encoding
 //! shares.
 
-use super::cost_equivalence_tests::{recipe, transaction, without_repeats};
+use super::cost_equivalence_tests::{generated, recipe};
 use super::*;
-use crate::dust::DustRegistration;
 use crate::verify::WellFormedStrictness;
 use base_crypto::fab::AlignedValue;
 use coin_structure::coin::Nullifier;
@@ -62,17 +61,16 @@ fn shared<V: Storable<D>>(arr: &Array<V, D>, k: u32) -> Array<V, D> {
     }
 }
 
-fn apply(tx: Tx, s: &Sharing) -> Tx {
+fn with_sharing(tx: Tx, s: &Sharing) -> Tx {
     let Transaction::Standard(mut stx) = tx else {
         unreachable!()
     };
-    let (segment, intent) = stx
+    let (segment, mut intent) = stx
         .intents
         .iter()
         .next()
         .map(|e| (*e.0, (*e.1).clone()))
         .unwrap();
-    let mut intent = intent;
     let mut value = StateValue::<D, _>::Null;
     for _ in 0..s.pushed_depth {
         value = StateValue::Array(vec![value; 16].into());
@@ -109,8 +107,7 @@ fn apply(tx: Tx, s: &Sharing) -> Tx {
     }
     if let Some(dust) = &intent.dust_actions {
         let mut dust = (**dust).clone();
-        let regs: Array<DustRegistration<(), D>, D> = shared(&dust.registrations, s.registrations);
-        dust.registrations = regs;
+        dust.registrations = shared(&dust.registrations, s.registrations);
         intent.dust_actions = Some(Sp::new(dust));
     }
     stx.intents = stx.intents.insert(segment, intent);
@@ -132,11 +129,8 @@ fn apply(tx: Tx, s: &Sharing) -> Tx {
     Transaction::Standard(stx)
 }
 
-/// Bytes, and the `Sp` dereferences and time to decode the transaction then
-/// check and price it, plus to price `tx` itself, so pricing is measured even
-/// where decoding rejects. Measured on a fresh thread so a regression fails by
-/// timeout instead of hanging. Also whether the decoded transaction is within
-/// its fee budget, so that both outcomes are known to be covered.
+/// Decodes, checks and prices `tx`'s encoding, and prices `tx` itself in case
+/// decoding rejects it; on a fresh thread, so a regression fails by timeout.
 fn measure(tx: &Tx) -> Measured {
     let mut bytes = Vec::new();
     tagged_serialize(tx, &mut bytes).unwrap();
@@ -174,6 +168,7 @@ struct Measured {
     len: u64,
     derefs: u64,
     time: std::time::Duration,
+    /// Within its fee budget, so the checks after balancing ran too.
     priced: bool,
 }
 
@@ -200,7 +195,8 @@ const DEREFS_PER_BYTE: u64 = 32;
 const TIME_PER_BYTE: std::time::Duration = std::time::Duration::from_micros(100);
 const MIN_TIME: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// Known super-linear shapes: one intent in many segments, distinct actions
+/// Shapes that make a walk treating shared nodes as a tree super-linear: one
+/// intent in many segments, distinct actions
 /// sharing an array of updates, deploys sharing a state of maps that share a
 /// trie, calls with large entry points in a shared intent, and a program of
 /// `noop 0`, which adds no public inputs, shared `levels` deep.
@@ -307,104 +303,106 @@ fn in_segments(segments: u16, actions: Vec<ContractAction<(), D>>) -> Tx {
     })
 }
 
-fn build(shape: &Shape) -> Tx {
-    match *shape {
-        Shape::SharedIntent {
-            segments,
-            actions,
-            updates,
-        } => {
-            let updates: Array<SingleUpdate, D> = (0..updates)
-                .map(|i| {
-                    SingleUpdate::VerifierKeyRemove(
-                        EntryPointBuf(i.to_le_bytes().to_vec()),
-                        ContractOperationVersion::V3,
-                    )
-                })
-                .collect();
-            let actions = (0..actions)
-                .map(|counter| {
-                    ContractAction::Maintain(MaintenanceUpdate {
-                        address: Default::default(),
-                        updates: updates.clone(),
-                        counter,
-                        signatures: Array::new(),
+impl Shape {
+    fn transaction(&self) -> Tx {
+        match *self {
+            Shape::SharedIntent {
+                segments,
+                actions,
+                updates,
+            } => {
+                let updates: Array<SingleUpdate, D> = (0..updates)
+                    .map(|i| {
+                        SingleUpdate::VerifierKeyRemove(
+                            EntryPointBuf(i.to_le_bytes().to_vec()),
+                            ContractOperationVersion::V3,
+                        )
                     })
-                })
-                .collect();
-            in_segments(segments, actions)
-        }
-        Shape::SharedState {
-            deploys,
-            maps,
-            entries,
-        } => {
-            type M = HashMap<AlignedValue, StateValue<D>, D>;
-            let base: M = (0..entries).fold(HashMap::new(), |m, i| {
-                m.insert(AlignedValue::from(i), StateValue::Null)
-            });
-            let outer: M = (0..maps).fold(HashMap::new(), |m, j| {
-                let map = base.insert(AlignedValue::from(entries + j), StateValue::Null);
-                m.insert(AlignedValue::from(j), StateValue::Map(map))
-            });
-            let state = ContractState::new(
-                StateValue::Map(outer),
-                HashMap::new(),
-                ContractMaintenanceAuthority::default(),
-            );
-            let actions = (0..deploys)
-                .map(|nonce| {
-                    ContractAction::Deploy(Sp::new(ContractDeploy {
-                        initial_state: state.clone(),
-                        nonce: HashOutput([nonce as u8; 32]),
-                    }))
-                })
-                .collect();
-            in_segments(1, actions)
-        }
-        Shape::EntryPoints {
-            segments,
-            calls,
-            len,
-        } => {
-            let transcript = Sp::new(Transcript {
-                gas: RunningCost::ZERO,
-                effects: Default::default(),
-                program: vec![Op::Noop { n: 1 }].into(),
-                version: None,
-            });
-            let actions = (0..calls)
-                .map(|i| {
-                    let mut ep = vec![0xaa; len];
-                    ep.extend(i.to_le_bytes());
-                    ContractAction::Call(Sp::new(ContractCall {
-                        address: Default::default(),
-                        entry_point: EntryPointBuf(ep),
-                        guaranteed_transcript: None,
-                        fallible_transcript: Some(transcript.clone()),
-                        communication_commitment: Default::default(),
-                        proof: (),
-                    }))
-                })
-                .collect();
-            in_segments(segments, actions)
-        }
-        Shape::Noops { levels } => {
-            let transcript = Sp::new(Transcript {
-                gas: RunningCost::ZERO,
-                effects: Default::default(),
-                program: Array::shared_dense(levels, Op::Noop { n: 0 }),
-                version: None,
-            });
-            let call = ContractAction::Call(Sp::new(ContractCall {
-                address: Default::default(),
-                entry_point: EntryPointBuf(b"noops".to_vec()),
-                guaranteed_transcript: None,
-                fallible_transcript: Some(transcript),
-                communication_commitment: Default::default(),
-                proof: (),
-            }));
-            in_segments(1, vec![call])
+                    .collect();
+                let actions = (0..actions)
+                    .map(|counter| {
+                        ContractAction::Maintain(MaintenanceUpdate {
+                            address: Default::default(),
+                            updates: updates.clone(),
+                            counter,
+                            signatures: Array::new(),
+                        })
+                    })
+                    .collect();
+                in_segments(segments, actions)
+            }
+            Shape::SharedState {
+                deploys,
+                maps,
+                entries,
+            } => {
+                type M = HashMap<AlignedValue, StateValue<D>, D>;
+                let base: M = (0..entries).fold(HashMap::new(), |m, i| {
+                    m.insert(AlignedValue::from(i), StateValue::Null)
+                });
+                let outer: M = (0..maps).fold(HashMap::new(), |m, j| {
+                    let map = base.insert(AlignedValue::from(entries + j), StateValue::Null);
+                    m.insert(AlignedValue::from(j), StateValue::Map(map))
+                });
+                let state = ContractState::new(
+                    StateValue::Map(outer),
+                    HashMap::new(),
+                    ContractMaintenanceAuthority::default(),
+                );
+                let actions = (0..deploys)
+                    .map(|nonce| {
+                        ContractAction::Deploy(Sp::new(ContractDeploy {
+                            initial_state: state.clone(),
+                            nonce: HashOutput([nonce as u8; 32]),
+                        }))
+                    })
+                    .collect();
+                in_segments(1, actions)
+            }
+            Shape::EntryPoints {
+                segments,
+                calls,
+                len,
+            } => {
+                let transcript = Sp::new(Transcript {
+                    gas: RunningCost::ZERO,
+                    effects: Default::default(),
+                    program: vec![Op::Noop { n: 1 }].into(),
+                    version: None,
+                });
+                let actions = (0..calls)
+                    .map(|i| {
+                        let mut ep = vec![0xaa; len];
+                        ep.extend(i.to_le_bytes());
+                        ContractAction::Call(Sp::new(ContractCall {
+                            address: Default::default(),
+                            entry_point: EntryPointBuf(ep),
+                            guaranteed_transcript: None,
+                            fallible_transcript: Some(transcript.clone()),
+                            communication_commitment: Default::default(),
+                            proof: (),
+                        }))
+                    })
+                    .collect();
+                in_segments(segments, actions)
+            }
+            Shape::Noops { levels } => {
+                let transcript = Sp::new(Transcript {
+                    gas: RunningCost::ZERO,
+                    effects: Default::default(),
+                    program: Array::shared_dense(levels, Op::Noop { n: 0 }),
+                    version: None,
+                });
+                let call = ContractAction::Call(Sp::new(ContractCall {
+                    address: Default::default(),
+                    entry_point: EntryPointBuf(b"noops".to_vec()),
+                    guaranteed_transcript: None,
+                    fallible_transcript: Some(transcript),
+                    communication_commitment: Default::default(),
+                    proof: (),
+                }));
+                in_segments(1, vec![call])
+            }
         }
     }
 }
@@ -414,7 +412,7 @@ proptest! {
 
     #[test]
     fn pre_budget_work_is_linear_in_encoding(r in recipe(), s in sharing(), repeats in any::<bool>()) {
-        measure(&apply(generated(&r, repeats), &s)).check()?;
+        measure(&with_sharing(generated(&r, repeats), &s)).check()?;
     }
 
     // Linear work keeps its rate per byte as a shape grows, while a walk
@@ -423,8 +421,8 @@ proptest! {
     // `storage` bounds that one directly.
     #[test]
     fn pre_budget_work_per_byte_does_not_grow_with_known_shapes(shape in shape()) {
-        let small = measure(&build(&shape));
-        let large = measure(&build(&shape.scaled(8)));
+        let small = measure(&shape.transaction());
+        let large = measure(&shape.scaled(8).transaction());
         small.check()?;
         large.check()?;
         prop_assert!(
@@ -438,13 +436,6 @@ proptest! {
     }
 }
 
-// Repeated entries are rejected before fees, so without them more transactions
-// reach the work after the fee check.
-fn generated(r: &super::cost_equivalence_tests::Recipe, repeats: bool) -> Tx {
-    let tx = transaction(r);
-    if repeats { tx } else { without_repeats(&tx) }
-}
-
 // Work after the fee check is paid for, so the property above only binds if
 // some generated transactions reach it.
 #[test]
@@ -456,7 +447,7 @@ fn generated_transactions_include_some_within_budget() {
         .filter(|_| {
             let r = recipe().new_tree(&mut runner).unwrap().current();
             let s = sharing().new_tree(&mut runner).unwrap().current();
-            measure(&apply(generated(&r, false), &s)).priced
+            measure(&with_sharing(generated(&r, false), &s)).priced
         })
         .count();
     assert!(priced > 0, "no generated transaction was within budget");
