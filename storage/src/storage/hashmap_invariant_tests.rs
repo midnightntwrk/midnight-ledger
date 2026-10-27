@@ -23,8 +23,8 @@ use proptest::prelude::*;
 type D = InMemoryDB;
 type H = HashMap<u64, u64, D>;
 
-/// The checks decoding used to run: every path decodes as a hash, and is
-/// the hash of the entry's key.
+/// A naive check: every path decodes as a hash, and is the hash of the
+/// entry's key.
 fn naive_check(map: &H) -> bool {
     map.0.mpt.iter().all(|(path, kv)| {
         from_nibbles::<ArenaHash<<D as DB>::Hasher>>(&path).is_ok_and(|h| h == H::gen_key(&kv.0))

@@ -21,7 +21,7 @@ use proptest::prelude::*;
 
 type D = InMemoryDB;
 
-/// The check decoding used to run, over every key of the array.
+/// A naive check over every key of the array.
 fn naive_invariant(arr: &Array<u64, D>) -> bool {
     fn nibbles_to_index(raw_nibbles: &[u8]) -> Option<u64> {
         if raw_nibbles.first() == Some(&0) || raw_nibbles.len() > 16 {

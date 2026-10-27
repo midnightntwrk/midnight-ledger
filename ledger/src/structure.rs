@@ -2304,8 +2304,7 @@ where
                 );
                 cost += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
                 cost += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
-                // Each distinct intent and action is priced once and counted once
-                // per path to it; each distinct call is collected once.
+                // Filled inside the memo, so each distinct call is collected once.
                 cost += stx
                     .fold_intents(
                         &mut DagMemo::new(),

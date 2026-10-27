@@ -196,10 +196,10 @@ const TIME_PER_BYTE: std::time::Duration = std::time::Duration::from_micros(100)
 const MIN_TIME: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Shapes that make a walk treating shared nodes as a tree super-linear: one
-/// intent in many segments, distinct actions
-/// sharing an array of updates, deploys sharing a state of maps that share a
-/// trie, calls with large entry points in a shared intent, and a program of
-/// `noop 0`, which adds no public inputs, shared `levels` deep.
+/// intent in many segments, distinct actions sharing an array of updates,
+/// deploys sharing a state of maps that share a trie, calls with large entry
+/// points in a shared intent, and a program of `noop 0`, which adds no public
+/// inputs, shared `levels` deep.
 #[derive(Debug, Clone)]
 enum Shape {
     SharedIntent {

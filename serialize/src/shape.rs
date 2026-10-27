@@ -141,35 +141,31 @@ pub enum ScaleState {
     NByte { left: u8, n: u8 },
 }
 
-/// A canonical SCALE compact integer whose value fits in `M` bytes, as `u32`,
-/// `u64` and `u128` encode.
-struct Scale<const M: usize>;
-
-impl<const M: usize> Scale<M> {
-    fn step(state: &ScaleState, byte: u8) -> Option<ScaleState> {
-        use ScaleState::*;
-        match *state {
-            Start => match byte & 0b11 {
-                0b00 => Some(Done),
-                0b01 => Some(TwoByte),
-                0b10 if M >= 4 => Some(FourByte(3, false)),
-                0b11 => {
-                    // Big-integer mode is n = 4 + (byte >> 2) bytes, which must fit in `M`.
-                    let n = (byte >> 2) + 4;
-                    (n as usize <= M).then_some(NByte { left: n, n })
-                }
-                _ => None,
-            },
-            Done => None,
-            TwoByte => (byte != 0).then_some(Done),
-            FourByte(3, _) => Some(FourByte(2, false)),
-            FourByte(2, _) => Some(FourByte(1, byte != 0)),
-            FourByte(_, third_nonzero) => (third_nonzero || byte != 0).then_some(Done),
-            // Canonical: no zero top byte, and 4-byte big integers only above
-            // 2^30, which the shorter modes cover.
-            NByte { left: 1, n } => (byte != 0 && (n != 4 || byte >= 64)).then_some(Done),
-            NByte { left, n } => Some(NByte { left: left - 1, n }),
-        }
+/// One step of a canonical SCALE compact integer whose value fits in `M`
+/// bytes, as `u32`, `u64` and `u128` encode.
+fn scale_step<const M: usize>(state: &ScaleState, byte: u8) -> Option<ScaleState> {
+    use ScaleState::*;
+    match *state {
+        Start => match byte & 0b11 {
+            0b00 => Some(Done),
+            0b01 => Some(TwoByte),
+            0b10 if M >= 4 => Some(FourByte(3, false)),
+            0b11 => {
+                // Big-integer mode is n = 4 + (byte >> 2) bytes, which must fit in `M`.
+                let n = (byte >> 2) + 4;
+                (n as usize <= M).then_some(NByte { left: n, n })
+            }
+            _ => None,
+        },
+        Done => None,
+        TwoByte => (byte != 0).then_some(Done),
+        FourByte(3, _) => Some(FourByte(2, false)),
+        FourByte(2, _) => Some(FourByte(1, byte != 0)),
+        FourByte(_, third_nonzero) => (third_nonzero || byte != 0).then_some(Done),
+        // Canonical: no zero top byte, and 4-byte big integers only above
+        // 2^30, which the shorter modes cover.
+        NByte { left: 1, n } => (byte != 0 && (n != 4 || byte >= 64)).then_some(Done),
+        NByte { left, n } => Some(NByte { left: left - 1, n }),
     }
 }
 
@@ -181,7 +177,7 @@ macro_rules! scale_shape {
                 ScaleState::Start
             }
             fn step(state: &ScaleState, byte: u8) -> Option<ScaleState> {
-                Scale::<$m>::step(state, byte)
+                scale_step::<$m>(state, byte)
             }
             fn accepts(state: &ScaleState) -> bool {
                 *state == ScaleState::Done

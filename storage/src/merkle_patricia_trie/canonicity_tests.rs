@@ -137,7 +137,7 @@ fn naive_node_check(node: &N) -> bool {
     }
 }
 
-/// The whole-trie canonicity check that decoding used to run on every trie.
+/// A naive whole-trie canonicity check.
 fn naive_canonicity(node: &N) -> bool {
     fn structure(node: &N) -> bool {
         match node {

@@ -22,7 +22,7 @@ use proptest::prelude::*;
 
 type D = InMemoryDB;
 
-/// The check decoding used to run: every path decodes as a `K`.
+/// A naive check: every path decodes as a `K`.
 fn naive_check<K: Deserializable, V: Storable<D>>(mpt: &MerklePatriciaTrie<V, D>) -> bool {
     mpt.iter().all(|(path, _)| from_nibbles::<K>(&path).is_ok())
 }
