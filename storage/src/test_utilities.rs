@@ -13,8 +13,19 @@
 
 //! Helpers for tests in this and downstream crates.
 
+use crate::arena::Sp;
+use crate::db::DB;
+use crate::storable::Storable;
+use serialize::{Deserializable, Serializable};
 use std::sync::mpsc;
 use std::time::Duration;
+
+/// `value` encoded as an `Sp` and decoded again, running every decode check.
+pub fn round_trip<T: Storable<D> + Serializable, D: DB>(value: &T) -> std::io::Result<Sp<T, D>> {
+    let mut bytes = Vec::new();
+    Sp::<T, D>::new(value.clone()).serialize(&mut bytes)?;
+    Sp::<T, D>::deserialize(&mut &bytes[..], 0)
+}
 
 /// Runs `f` on a separate thread, panicking if it does not finish within
 /// `limit`, so a regression to super-linear work fails instead of hanging.

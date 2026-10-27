@@ -11,25 +11,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Decoding checks `Map` keys per trie node; these tests compare it against
-//! the per-key check it replaced.
+//! Decoding checks `Map` keys per trie node; these tests compare it against a
+//! naive per-key check.
 
 use super::*;
 use crate::db::InMemoryDB;
 use crate::delta_tracking::ChildRef;
+use crate::test_utilities::round_trip;
 use proptest::prelude::*;
 
 type D = InMemoryDB;
 
 /// The check decoding used to run: every path decodes as a `K`.
-fn old_check<K: Deserializable, V: Storable<D>>(mpt: &MerklePatriciaTrie<V, D>) -> bool {
+fn naive_check<K: Deserializable, V: Storable<D>>(mpt: &MerklePatriciaTrie<V, D>) -> bool {
     mpt.iter().all(|(path, _)| from_nibbles::<K>(&path).is_ok())
-}
-
-fn decodes<T: Storable<D> + Serializable>(value: &T) -> bool {
-    let mut bytes = Vec::new();
-    Sp::new(value.clone()).serialize(&mut bytes).unwrap();
-    Sp::<T, D>::deserialize(&mut &bytes[..], 0).is_ok()
 }
 
 fn insert_paths(mpt: MerklePatriciaTrie<u64, D>, paths: &[Vec<u8>]) -> MerklePatriciaTrie<u64, D> {
@@ -65,13 +60,13 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
 
     #[test]
-    fn shape_keys_accepted_exactly_as_before_u64(map in shape_map(any::<u64>(), 9)) {
-        prop_assert_eq!(decodes(&map), old_check::<u64, u64>(&map.mpt));
+    fn shape_keys_agree_with_naive_check_u64(map in shape_map(any::<u64>(), 9)) {
+        prop_assert_eq!(round_trip::<_, D>(&map).is_ok(), naive_check::<u64, u64>(&map.mpt));
     }
 
     #[test]
-    fn shape_keys_accepted_exactly_as_before_pair(map in shape_map(any::<[u8; 2]>(), 2)) {
-        prop_assert_eq!(decodes(&map), old_check::<[u8; 2], u64>(&map.mpt));
+    fn shape_keys_agree_with_naive_check_pair(map in shape_map(any::<[u8; 2]>(), 2)) {
+        prop_assert_eq!(round_trip::<_, D>(&map).is_ok(), naive_check::<[u8; 2], u64>(&map.mpt));
     }
 }
 
@@ -135,7 +130,7 @@ proptest! {
             from_nibbles::<ArenaKey<<D as DB>::Hasher>>(&path).is_ok()
                 && to_nibbles(&v.child) == path
         });
-        prop_assert_eq!(decodes(&map), expected);
+        prop_assert_eq!(round_trip::<_, D>(&map).is_ok(), expected);
     }
 
     #[test]
@@ -159,7 +154,7 @@ proptest! {
             }))),
             key_type: PhantomData,
         };
-        prop_assert!(!decodes(&grafted));
+        prop_assert!(round_trip::<_, D>(&grafted).is_err());
     }
 }
 

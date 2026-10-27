@@ -12,30 +12,24 @@
 // limitations under the License.
 
 //! Decoding checks a `TimeFilterMap`'s set against its time map by counting
-//! each distinct container once; these tests compare it against the full
-//! reconstruction it replaced.
+//! each distinct container once; these tests compare it against a naive
+//! full reconstruction.
 
 use super::*;
 use crate::db::InMemoryDB;
-use crate::test_utilities::assert_completes_within;
+use crate::test_utilities::{assert_completes_within, round_trip};
 use proptest::prelude::*;
 
 type D = InMemoryDB;
 type Tfm = TimeFilterMap<Identity<u64>, D>;
 
-fn old_invariant(tfm: &Tfm) -> bool {
+fn naive_invariant(tfm: &Tfm) -> bool {
     let reconstructed = tfm
         .time_map
         .iter()
         .flat_map(|e| Container::<D>::iter_items(*e.1.deref()))
         .fold(MultiSet::new(), |s, i| s.insert(i));
     reconstructed == tfm.set
-}
-
-fn decodes(tfm: &Tfm) -> bool {
-    let mut bytes = Vec::new();
-    Sp::new(tfm.clone()).serialize(&mut bytes).unwrap();
-    Sp::<Tfm, D>::deserialize(&mut &bytes[..], 0).is_ok()
 }
 
 // Honest maps, some over a shared time map, with the set then perturbed.
@@ -71,8 +65,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn decode_accepts_exactly_what_the_old_check_accepted(tfm in tfm()) {
-        prop_assert_eq!(decodes(&tfm), old_invariant(&tfm));
+    fn decode_agrees_with_naive_check(tfm in tfm()) {
+        prop_assert_eq!(round_trip::<_, D>(&tfm).is_ok(), naive_invariant(&tfm));
     }
 }
 
@@ -84,7 +78,8 @@ fn shared_time_map_decodes_quickly() {
     };
     let mut bytes = Vec::new();
     Sp::new(tfm).serialize(&mut bytes).unwrap();
+    // The set holds one 7 where the time map holds 16^12 of them.
     assert_completes_within(std::time::Duration::from_secs(10), move || {
-        Sp::<Tfm, D>::deserialize(&mut &bytes[..], 0).is_ok()
+        assert!(Sp::<Tfm, D>::deserialize(&mut &bytes[..], 0).is_err())
     });
 }

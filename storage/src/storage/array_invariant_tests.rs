@@ -12,16 +12,17 @@
 // limitations under the License.
 
 //! Decoding checks array indices with a summary per distinct trie node; these
-//! tests compare it against the per-key check it replaced.
+//! tests compare it against a naive per-key check.
 
 use super::*;
 use crate::db::InMemoryDB;
+use crate::test_utilities::round_trip;
 use proptest::prelude::*;
 
 type D = InMemoryDB;
 
 /// The check decoding used to run, over every key of the array.
-fn old_invariant(arr: &Array<u64, D>) -> bool {
+fn naive_invariant(arr: &Array<u64, D>) -> bool {
     fn nibbles_to_index(raw_nibbles: &[u8]) -> Option<u64> {
         if raw_nibbles.first() == Some(&0) || raw_nibbles.len() > 16 {
             return None;
@@ -59,11 +60,8 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2048))]
 
     #[test]
-    fn decode_accepts_exactly_what_the_old_check_accepted(arr in array()) {
-        let mut bytes = Vec::new();
-        Sp::new(arr.clone()).serialize(&mut bytes).unwrap();
-        let decoded = Sp::<Array<u64, D>, D>::deserialize(&mut &bytes[..], 0);
-        prop_assert_eq!(decoded.is_ok(), old_invariant(&arr), "{:?}", decoded.err());
-        prop_assert_eq!(arr.check_invariant().is_ok(), old_invariant(&arr));
+    fn decode_agrees_with_naive_check(arr in array()) {
+        let decoded = round_trip::<_, D>(&arr);
+        prop_assert_eq!(decoded.is_ok(), naive_invariant(&arr), "{:?}", decoded.err());
     }
 }

@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Decoding checks canonicity node by node; these tests compare it against
-//! the whole-trie check it replaced, on arbitrary and often malformed tries.
+//! Decoding checks canonicity node by node; these tests compare it against a
+//! naive whole-trie check, on arbitrary and often malformed tries.
 
 use super::*;
 use crate::db::InMemoryDB;
@@ -104,9 +104,9 @@ fn build(specs: &[Spec]) -> Sp<N, D> {
     nodes.pop().unwrap()
 }
 
-/// The per-node check as it stood before canonicity moved into it, except
-/// that a size overflowing `u64` is rejected rather than wrapping or panicking.
-fn old_node_check(node: &N) -> bool {
+/// A naive per-node check, in which a size overflowing `u64` is rejected
+/// rather than wrapping or panicking.
+fn naive_node_check(node: &N) -> bool {
     match node {
         Node::Empty | Node::Leaf { .. } => true,
         Node::Branch { ann, children } => {
@@ -138,7 +138,7 @@ fn old_node_check(node: &N) -> bool {
 }
 
 /// The whole-trie canonicity check that decoding used to run on every trie.
-fn old_canonicity(node: &N) -> bool {
+fn naive_canonicity(node: &N) -> bool {
     fn structure(node: &N) -> bool {
         match node {
             Node::Empty | Node::Leaf { .. } => true,
@@ -185,14 +185,14 @@ fn old_canonicity(node: &N) -> bool {
     structure(node) && sum_ann(node).is_some()
 }
 
-fn old_decode_accepts(root: &Sp<N, D>) -> bool {
+fn naive_decode_accepts(root: &Sp<N, D>) -> bool {
     let mut seen = HashSet::new();
     let mut frontier = vec![root.clone()];
     while let Some(node) = frontier.pop() {
         if !seen.insert(node.hash()) {
             continue;
         }
-        if !old_node_check(&node) {
+        if !naive_node_check(&node) {
             return false;
         }
         match &*node {
@@ -203,7 +203,7 @@ fn old_decode_accepts(root: &Sp<N, D>) -> bool {
             }
         }
     }
-    old_canonicity(root)
+    naive_canonicity(root)
 }
 
 // Non-nibbles and paths longer than 255 have no wire encoding: serializing
@@ -232,13 +232,13 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2048))]
 
     #[test]
-    fn checks_accept_exactly_what_the_old_checks_accepted(
+    fn checks_agree_with_naive_checks(
         (root, representable) in prop_oneof![
             prop::collection::vec(spec(), 1..12).prop_map(|specs| (build(&specs), representable(&specs))),
             honest().prop_map(|root| (root, true)),
         ],
     ) {
-        let expected = old_decode_accepts(&root);
+        let expected = naive_decode_accepts(&root);
         let mpt = Sp::new(MerklePatriciaTrie::<u64, D>(root));
         prop_assert_eq!(mpt.canonicity().is_ok(), expected);
         if representable {

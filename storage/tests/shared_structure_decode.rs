@@ -32,24 +32,20 @@ fn encode<T: serialize::Serializable + serialize::Tagged>(value: &T) -> Vec<u8> 
 #[test]
 fn shared_array() {
     let bytes = encode(&Array::<u64>::shared_dense(12, 7));
-    let res = assert_completes_within(LIMIT, move || {
+    let len = assert_completes_within(LIMIT, move || {
         tagged_deserialize::<Array<u64>>(&mut &bytes[..]).map(|arr| arr.len())
     });
-    if let Ok(len) = res {
-        assert_eq!(len, 16usize.pow(12));
-    }
+    assert_eq!(len.unwrap(), 16usize.pow(12));
 }
 
 #[test]
 fn shared_map() {
     let prefix = [0u8; 64 - 12];
     let bytes = encode(&Map::<[u8; 32], u64>::shared_full(&prefix, 12, 7));
-    let res = assert_completes_within(LIMIT, move || {
+    let size = assert_completes_within(LIMIT, move || {
         tagged_deserialize::<Map<[u8; 32], u64>>(&mut &bytes[..]).map(|map| map.size())
     });
-    if let Ok(size) = res {
-        assert_eq!(size, 16usize.pow(12));
-    }
+    assert_eq!(size.unwrap(), 16usize.pow(12));
 }
 
 #[test]

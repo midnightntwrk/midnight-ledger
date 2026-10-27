@@ -27,21 +27,11 @@ use std::marker::PhantomData;
 
 type N<V, D> = Node<V, D, SizeAnn>;
 
-fn size<V: Storable<D>, D: DB>(node: &N<V, D>) -> u64 {
-    match node {
-        Node::Empty => 0,
-        Node::Leaf { .. } => 1,
-        Node::Branch { ann, .. }
-        | Node::Extension { ann, .. }
-        | Node::MidBranchLeaf { ann, .. } => ann.0,
-    }
-}
-
 fn branch<V: Storable<D>, D: DB>(children: [Sp<N<V, D>, D>; 16]) -> N<V, D> {
     let ann = SizeAnn(
         children
             .iter()
-            .fold(0u64, |acc, child| acc.wrapping_add(size(child))),
+            .fold(0u64, |acc, child| acc.wrapping_add(Node::ann(child).0)),
     );
     Node::Branch {
         ann,
@@ -58,7 +48,7 @@ fn all_paths_up_to<V: Storable<D>, D: DB>(depth: u32, value: &Sp<V, D>) -> Sp<N<
     for _ in 0..depth {
         let child = Sp::new(branch(std::array::from_fn(|_| node.clone())));
         node = Sp::new(Node::MidBranchLeaf {
-            ann: SizeAnn(size(&child).wrapping_add(1)),
+            ann: SizeAnn(Node::ann(&child).0.wrapping_add(1)),
             value: value.clone(),
             child,
         });
@@ -82,46 +72,27 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
     /// An array of `16^log16_len` copies of `value`, built from
     /// `O(log16_len)` distinct nodes.
     pub fn shared_dense(log16_len: u32, value: V) -> Self {
-        assert!(log16_len >= 1);
-        let value = Sp::new(value);
-        // Array indices are nibble strings without leading zeroes: the empty
-        // path is index 0, and below each nonzero first nibble lie all paths
-        // of length `0..log16_len`.
-        let sub = all_paths_up_to(log16_len - 1, &value);
-        let mut children: [Sp<N<V, D>, D>; 16] = std::array::from_fn(|_| sub.clone());
-        children[0] = Sp::new(Node::Empty);
-        let child = Sp::new(branch(children));
-        let root = Node::MidBranchLeaf {
-            ann: SizeAnn(size(&child).wrapping_add(1)),
-            value,
-            child,
-        };
-        Array(Sp::new(MerklePatriciaTrie(Sp::new(root))))
+        Self::shared_dense_scaled(log16_len, 16, value)
     }
-}
 
-impl<V: Storable<D>, D: DB> Array<V, D> {
     /// An array of `c * 16^(k-1)` copies of `value`, built from `O(k)`
     /// distinct nodes. Below `2^64` while `k < 16`, or `k == 16` and `c < 16`.
     pub fn shared_dense_scaled(k: u32, c: u32, value: V) -> Self {
-        assert!(k >= 2 && (2..=16).contains(&c));
+        assert!(k >= 1 && (2..=16).contains(&c) && (k >= 2 || c == 16));
         let value = Sp::new(value);
-        let short = all_paths_up_to(k - 2, &value);
+        // Array indices are nibble strings without leading zeroes: index 0 is
+        // the root's own value, and below each nonzero first nibble lie all
+        // paths of length `0..k`, one nibble shorter from `c` on.
         let long = all_paths_up_to(k - 1, &value);
-        // Index 0 is the root's own value; the root's children cover indices
-        // with first nibble 1.., one nibble longer below `c`.
-        let children: [Sp<N<V, D>, D>; 16] = std::array::from_fn(|i| {
-            if i == 0 {
-                Sp::new(Node::Empty)
-            } else if (i as u32) < c {
-                long.clone()
-            } else {
-                short.clone()
-            }
+        let short = (c < 16).then(|| all_paths_up_to(k - 2, &value));
+        let children: [Sp<N<V, D>, D>; 16] = std::array::from_fn(|i| match i {
+            0 => Sp::new(Node::Empty),
+            i if (i as u32) < c => long.clone(),
+            _ => short.clone().expect("c < 16"),
         });
         let child = Sp::new(branch(children));
         let root = Node::MidBranchLeaf {
-            ann: SizeAnn(size(&child).wrapping_add(1)),
+            ann: SizeAnn(Node::ann(&child).0.wrapping_add(1)),
             value,
             child,
         };
@@ -140,7 +111,7 @@ impl<K: Serializable, V: Storable<D>, D: DB> Map<K, V, D> {
         let mut node = all_paths_of(free, &Sp::new(value));
         if !prefix.is_empty() {
             node = Sp::new(Node::Extension {
-                ann: SizeAnn(size(&node)),
+                ann: Node::ann(&node),
                 compressed_path: prefix.to_vec(),
                 child: node,
             });

@@ -13,11 +13,11 @@
 
 //! Decoding checks that `HashMap` entries are stored under their keys'
 //! hashes once per trie node, however many maps share it; these tests compare
-//! it against the per-entry check it replaced.
+//! it against a naive per-entry check.
 
 use super::*;
 use crate::db::InMemoryDB;
-use crate::test_utilities::assert_completes_within;
+use crate::test_utilities::{assert_completes_within, round_trip};
 use proptest::prelude::*;
 
 type D = InMemoryDB;
@@ -25,16 +25,10 @@ type H = HashMap<u64, u64, D>;
 
 /// The checks decoding used to run: every path decodes as a hash, and is
 /// the hash of the entry's key.
-fn old_check(map: &H) -> bool {
+fn naive_check(map: &H) -> bool {
     map.0.mpt.iter().all(|(path, kv)| {
         from_nibbles::<ArenaHash<<D as DB>::Hasher>>(&path).is_ok_and(|h| h == H::gen_key(&kv.0))
     })
-}
-
-fn decodes<T: Storable<D> + Serializable>(value: &T) -> bool {
-    let mut bytes = Vec::new();
-    Sp::new(value.clone()).serialize(&mut bytes).unwrap();
-    Sp::<T, D>::deserialize(&mut &bytes[..], 0).is_ok()
 }
 
 /// A map of entries stored under their key's hash, under another key's
@@ -83,14 +77,14 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(1024))]
 
     #[test]
-    fn entries_accepted_exactly_as_before(map in map()) {
-        prop_assert_eq!(decodes(&map), old_check(&map));
+    fn entries_agree_with_naive_check(map in map()) {
+        prop_assert_eq!(round_trip::<_, D>(&map).is_ok(), naive_check(&map));
     }
 
     // Decoded together, the maps share one memo, so a subtree checked in the
     // first must still be rejected where the second misplaces it.
     #[test]
-    fn maps_sharing_subtrees_accepted_exactly_as_before(
+    fn maps_sharing_subtrees_agree_with_naive_check(
         map in map(),
         extra in any::<u64>(),
         from in 0usize..16,
@@ -99,7 +93,7 @@ proptest! {
         let second = grafted(&map, from, to)
             .unwrap_or_else(|| HashMap(map.0.insert(H::gen_key(&extra), (Sp::new(extra), Sp::new(extra)))));
         let pair: Array<H, D> = vec![map.clone(), second.clone()].into();
-        prop_assert_eq!(decodes(&pair), old_check(&map) && old_check(&second));
+        prop_assert_eq!(round_trip::<_, D>(&pair).is_ok(), naive_check(&map) && naive_check(&second));
     }
 }
 
