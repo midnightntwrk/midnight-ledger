@@ -17,7 +17,7 @@
 
 use super::*;
 use crate::db::InMemoryDB;
-use crate::test_utilities::{assert_completes_within, round_trip};
+use crate::test::{assert_completes_within, round_trip};
 use proptest::prelude::*;
 
 type D = InMemoryDB;

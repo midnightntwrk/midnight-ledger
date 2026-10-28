@@ -401,7 +401,7 @@ pub(crate) mod tests {
     #[test]
     fn shared_charged_keys_decode_quickly() {
         use crate::storage::Map;
-        use crate::test_utilities::assert_completes_within;
+        use crate::test::assert_completes_within;
         use serialize::{tagged_deserialize, tagged_serialize};
         let rc = RcMap::<InMemoryDB> {
             rc_ge_1: Map::shared_full(&[0; 64 - 12], 12, 1),

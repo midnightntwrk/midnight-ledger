@@ -136,7 +136,7 @@ fn measure(tx: &Tx) -> Measured {
     tagged_serialize(tx, &mut bytes).unwrap();
     let len = bytes.len() as u64;
     let tx = tx.clone();
-    storage::test_utilities::assert_completes_within(
+    storage::test::assert_completes_within(
         std::time::Duration::from_secs(20),
         move || {
             let start = std::time::Instant::now();

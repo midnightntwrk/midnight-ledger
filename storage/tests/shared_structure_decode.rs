@@ -15,7 +15,7 @@
 //! tries share subtrees and so stand for exponentially many entries.
 
 use midnight_storage::storage::{Array, Map};
-use midnight_storage::test_utilities::assert_completes_within;
+use midnight_storage::test::assert_completes_within;
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::time::Duration;
 

@@ -2468,7 +2468,7 @@ mod well_formed_tests {
     fn contract_call_with_shared_push_is_rejected_quickly() {
         use onchain_runtime::state::{AlignedValueChecked, StateValue};
         use std::time::Duration;
-        use storage::test_utilities::assert_completes_within;
+        use storage::test::assert_completes_within;
 
         // Each level is a 16-wide array whose entries all share one child, so
         // the value stays a few hundred bytes while its tree has 16^12 leaves.

@@ -17,7 +17,7 @@
 use super::*;
 use crate::db::InMemoryDB;
 use crate::delta_tracking::ChildRef;
-use crate::test_utilities::round_trip;
+use crate::test::round_trip;
 use proptest::prelude::*;
 
 type D = InMemoryDB;

@@ -13,8 +13,13 @@
 
 //! Testing helpers
 
+use crate::Storable;
+use crate::arena::Sp;
+use crate::db::DB;
+use serialize::{Deserializable, Serializable};
 use std::cell::Cell;
-use std::time::Instant;
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 thread_local! {
     static DEREFS: Cell<u64> = const { Cell::new(0) };
@@ -68,5 +73,32 @@ impl Timer {
             msg.as_ref(),
         );
         duration_since_last
+    }
+}
+
+/// `value` encoded as an `Sp` and decoded again, running every decode check.
+pub fn round_trip<T: Storable<D> + Serializable, D: DB>(value: &T) -> std::io::Result<Sp<T, D>> {
+    let mut bytes = Vec::new();
+    Sp::<T, D>::new(value.clone()).serialize(&mut bytes)?;
+    Sp::<T, D>::deserialize(&mut &bytes[..], 0)
+}
+
+/// Runs `f` on a separate thread, panicking if it does not finish within
+/// `limit`, so a regression to super-linear work fails instead of hanging.
+/// A timed-out `f` keeps running until the test process exits.
+pub fn assert_completes_within<T: Send + 'static>(
+    limit: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    match rx.recv_timeout(limit) {
+        Ok(res) => res,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!("did not complete within {limit:?}"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            std::panic::resume_unwind(handle.join().expect_err("sender dropped without sending"))
+        }
     }
 }

@@ -208,7 +208,7 @@ fn actions_shared_by_many_segments_are_checked_quickly() {
         fallible_coins: HashMap::new(),
         binding_randomness: Default::default(),
     };
-    storage::test_utilities::assert_completes_within(
+    storage::test::assert_completes_within(
         std::time::Duration::from_secs(5),
         move || assert!(stx.disjoint_check().is_ok()),
     );

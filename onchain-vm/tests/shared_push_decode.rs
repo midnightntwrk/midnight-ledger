@@ -21,7 +21,7 @@ use serialize::{tagged_deserialize, tagged_serialize};
 use std::time::Duration;
 use storage::db::InMemoryDB;
 use storage::storage::Array;
-use storage::test_utilities::assert_completes_within;
+use storage::test::assert_completes_within;
 
 type D = InMemoryDB;
 

@@ -20,7 +20,7 @@ use base_crypto::hash::HashOutput;
 use midnight_onchain_state::state::StateValue;
 use std::time::Duration;
 use storage::db::InMemoryDB;
-use storage::test_utilities::assert_completes_within;
+use storage::test::assert_completes_within;
 use transient_crypto::merkle_tree::MerkleTree;
 use transient_crypto::repr::FieldRepr;
 

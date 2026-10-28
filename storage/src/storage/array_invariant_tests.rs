@@ -16,7 +16,7 @@
 
 use super::*;
 use crate::db::InMemoryDB;
-use crate::test_utilities::round_trip;
+use crate::test::round_trip;
 use proptest::prelude::*;
 
 type D = InMemoryDB;
