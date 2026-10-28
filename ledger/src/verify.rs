@@ -685,9 +685,7 @@ where
                     stx.pedersen_check()
                 })?;
 
-                ref_state.param_check(true, |_| {
-                    ref_state.fees_check(|_| stx.balancing_check(strictness, fees))
-                })?;
+                stx.balancing_check(strictness, fees)?;
 
                 for segment_intent in stx.intents.sorted_iter() {
                     if *segment_intent.0 == GUARANTEED_SEGMENT {

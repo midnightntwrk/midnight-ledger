@@ -1209,7 +1209,7 @@ impl TransactionCostModel {
         // insert VM operations.
         const EXPECTED_COM_INDICES: usize = 16;
         let time = std::iter::once((EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES))
-            .chain(effect_sets(eff))
+            .chain(effect_set_sizes(eff))
             .map(|(n, key_len)| {
                 self.runtime_cost_model.ins_map_constant
                     + self.runtime_cost_model.ins_map_coeff_container_log_size
@@ -1223,8 +1223,9 @@ impl TransactionCostModel {
 }
 tag_enforcement_test!(TransactionCostModel);
 
-/// Each of a transcript's effect sets, as its number of entries and its key length.
-fn effect_sets<D: DB>(eff: &Effects<D>) -> [(usize, usize); 9] {
+/// The number of entries in each of a transcript's effect sets, with the byte
+/// length of that set's keys.
+fn effect_set_sizes<D: DB>(eff: &Effects<D>) -> [(usize, usize); 9] {
     [
         (eff.claimed_nullifiers.size(), PERSISTENT_HASH_BYTES),
         (eff.claimed_shielded_receives.size(), PERSISTENT_HASH_BYTES),
@@ -2083,7 +2084,8 @@ fn intent_application_cost<
         * dust_spends;
     // Dust Merkle roots lookup
     g += model.time_filter_map_lookup() * 2u64;
-    // Guaranteed night inputs per owner, for registrations to look up.
+    // Guaranteed night inputs per owner, for registrations to look up. These
+    // loops walk per path; `disjoint_check` has already rejected repeats.
     let mut night_inputs_by_owner = std::collections::BTreeMap::new();
     for i in intent
         .guaranteed_unshielded_offer
@@ -2392,7 +2394,7 @@ where
                         call.guaranteed_transcript
                             .iter()
                             .chain(call.fallible_transcript.iter())
-                            .flat_map(|t| effect_sets(&t.effects).map(|(n, _)| n)),
+                            .flat_map(|t| effect_set_sizes(&t.effects).map(|(n, _)| n)),
                     );
                     CostSum(RunningCost::compute(per_entry * entries as u64))
                 },
