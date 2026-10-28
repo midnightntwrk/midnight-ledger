@@ -43,16 +43,8 @@ use std::sync::Arc;
 
 pub use storage_core::storage::*;
 
-#[cfg(test)]
-mod array_invariant_tests;
-#[cfg(test)]
-mod hashmap_invariant_tests;
-#[cfg(test)]
-mod map_key_tests;
 #[cfg(any(test, feature = "test-utilities"))]
 mod shared_structure;
-#[cfg(test)]
-mod time_filter_map_tests;
 
 /// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
@@ -1979,6 +1971,11 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    mod array_invariant;
+    mod hashmap_invariant;
+    mod map_key;
+    mod time_filter_map;
+
     use super::*;
     use crate::storable::SMALL_OBJECT_LIMIT;
 

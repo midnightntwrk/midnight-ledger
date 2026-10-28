@@ -15,8 +15,8 @@
 //! each distinct container once; these tests compare it against a naive
 //! full reconstruction.
 
-use super::*;
 use crate::db::InMemoryDB;
+use crate::storage::*;
 use crate::test::{assert_completes_within, round_trip};
 use proptest::prelude::*;
 

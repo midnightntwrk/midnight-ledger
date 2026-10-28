@@ -1518,12 +1518,10 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
 }
 
 #[cfg(test)]
-mod canonicity_tests;
-#[cfg(test)]
-mod fold_tests;
-
-#[cfg(test)]
 mod tests {
+    mod canonicity;
+    mod fold;
+
     use sha2::Sha256;
 
     use crate::{

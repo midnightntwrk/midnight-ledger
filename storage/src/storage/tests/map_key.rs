@@ -14,9 +14,9 @@
 //! Decoding checks `Map` keys per trie node; these tests compare it against a
 //! naive per-key check.
 
-use super::*;
 use crate::db::InMemoryDB;
 use crate::delta_tracking::ChildRef;
+use crate::storage::*;
 use crate::test::round_trip;
 use proptest::prelude::*;
 

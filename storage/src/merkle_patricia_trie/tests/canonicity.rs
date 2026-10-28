@@ -14,8 +14,8 @@
 //! Decoding checks canonicity node by node; these tests compare it against a
 //! naive whole-trie check, on arbitrary and often malformed tries.
 
-use super::*;
 use crate::db::InMemoryDB;
+use crate::merkle_patricia_trie::*;
 use crate::storage::Map;
 use proptest::prelude::*;
 use proptest::sample::Index;
