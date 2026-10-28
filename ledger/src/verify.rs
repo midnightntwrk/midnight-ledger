@@ -1276,6 +1276,8 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
             shielded_outputs.extend(outputs);
         }
 
+        // Visits a shared intent once per segment. This is linear only because a
+        // `HashMap` pins each entry to its key's hash; a plain `Map` would not.
         for entry in self.intents.iter() {
             let intent = &*entry.1;
             let offers = [
