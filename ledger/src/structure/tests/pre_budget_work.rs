@@ -15,8 +15,8 @@
 //! take work linear in its encoding, however much structure the encoding
 //! shares.
 
-use super::cost_equivalence_tests::{generated, recipe};
-use super::*;
+use super::transactions::{generated, recipe};
+use crate::structure::*;
 use crate::verify::WellFormedStrictness;
 use base_crypto::fab::AlignedValue;
 use coin_structure::coin::Nullifier;
@@ -136,32 +136,29 @@ fn measure(tx: &Tx) -> Measured {
     tagged_serialize(tx, &mut bytes).unwrap();
     let len = bytes.len() as u64;
     let tx = tx.clone();
-    storage::test::assert_completes_within(
-        std::time::Duration::from_secs(20),
-        move || {
-            let start = std::time::Instant::now();
-            let before = derefs();
-            let mut priced = false;
-            if let Ok(decoded) = tagged_deserialize::<Tx>(&mut &bytes[..]) {
-                priced = decoded.fees(&INITIAL_PARAMETERS, true).is_ok();
-                // An attacker funds any fee it can pass, so those transactions
-                // reach the checks after balancing.
-                let strictness = WellFormedStrictness {
-                    enforce_balancing: !priced,
-                    ..Default::default()
-                };
-                let state = LedgerState::<D>::new("local-test");
-                let _ = decoded.well_formed(&state, strictness, Timestamp::from_secs(0));
-            }
-            let _ = tx.fees(&INITIAL_PARAMETERS, false);
-            Measured {
-                len,
-                derefs: derefs() - before,
-                time: start.elapsed(),
-                priced,
-            }
-        },
-    )
+    storage::test::assert_completes_within(std::time::Duration::from_secs(20), move || {
+        let start = std::time::Instant::now();
+        let before = derefs();
+        let mut priced = false;
+        if let Ok(decoded) = tagged_deserialize::<Tx>(&mut &bytes[..]) {
+            priced = decoded.fees(&INITIAL_PARAMETERS, true).is_ok();
+            // An attacker funds any fee it can pass, so those transactions
+            // reach the checks after balancing.
+            let strictness = WellFormedStrictness {
+                enforce_balancing: !priced,
+                ..Default::default()
+            };
+            let state = LedgerState::<D>::new("local-test");
+            let _ = decoded.well_formed(&state, strictness, Timestamp::from_secs(0));
+        }
+        let _ = tx.fees(&INITIAL_PARAMETERS, false);
+        Measured {
+            len,
+            derefs: derefs() - before,
+            time: start.elapsed(),
+            priced,
+        }
+    })
 }
 
 struct Measured {

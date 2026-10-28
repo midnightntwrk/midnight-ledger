@@ -3674,14 +3674,13 @@ impl<T: Deserializable> serde::de::Visitor<'_> for BorshVisitor<T> {
 pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
-pub(crate) mod cost_equivalence_tests;
-#[cfg(test)]
-mod count_saturation_tests;
-#[cfg(test)]
-mod pre_budget_work_tests;
+pub(crate) mod tests {
+    mod copy_cap;
+    mod cost_equivalence;
+    mod count_saturation;
+    mod pre_budget_work;
+    pub(crate) mod transactions;
 
-#[cfg(test)]
-mod tests {
     use storage::db::InMemoryDB;
 
     use super::*;

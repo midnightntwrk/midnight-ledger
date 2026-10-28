@@ -15,7 +15,7 @@
 //! towards `usize::MAX`. Costs must grow with every count, or a wrapped sum
 //! would price a huge transaction as a small one.
 
-use super::*;
+use crate::structure::*;
 use coin_structure::coin::Nullifier;
 use proptest::prelude::*;
 use std::sync::Arc;
