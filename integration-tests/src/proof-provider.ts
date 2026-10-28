@@ -18,8 +18,10 @@ import {
   type PreProof,
   type PreBinding,
   type Proof,
+  type Binding,
   type SignatureEnabled,
   type ProvingKeyMaterial,
+  type ProvingProvider,
   createProvingPayload,
   createCheckPayload,
   parseCheckResult,
@@ -37,6 +39,7 @@ import fetchBuilder from 'fetch-retry';
 import _ from 'lodash';
 import { Worker } from 'worker_threads';
 import { useAxiosForProving, useWasmProving } from './config';
+import { TestResource } from './test-objects';
 
 export const cache = new Cache<string, Transaction<SignatureEnabled, Proof, PreBinding>>(256);
 let proofServerUrl: string = 'not started';
@@ -178,6 +181,20 @@ export const proveTxWithAxios = async (
   return Transaction.deserialize('signature', 'proof', 'pre-binding', result);
 };
 
+// Mock proving only knows the built-in circuits, so the fee cross-check cannot cover test circuits.
+const mockProveIfBuiltin = (
+  tx: Transaction<SignatureEnabled, PreProof, PreBinding>
+): Transaction<SignatureEnabled, Proof, Binding> | undefined => {
+  try {
+    return tx.mockProve();
+  } catch (e) {
+    if (e instanceof Error && e.message.includes('non-builtin circuit')) {
+      return undefined;
+    }
+    throw e;
+  }
+};
+
 export const prove = async (
   tx: Transaction<SignatureEnabled, PreProof, PreBinding>
 ): Promise<Transaction<SignatureEnabled, Proof, PreBinding>> => {
@@ -191,11 +208,6 @@ export const prove = async (
   } else {
     proven = await proofProvider.proveTx(tx);
   }
-  // NOTE: If this starts throwing errors... That's not too surprising, this
-  // *should* error if transactions have contract calls. Those aren't in the
-  // IT-tests today; the only reason this *isn't* behind a `try` block is to
-  // make sure this isn't *always* erroring.
-  const mockProven = tx.mockProve();
   const bound = proven.bind();
   const errToUndefined = <T>(f: () => T): T | undefined => {
     try {
@@ -204,7 +216,8 @@ export const prove = async (
       return undefined;
     }
   };
-  const feesMock = errToUndefined(() => mockProven.fees(LedgerParameters.initialParameters()));
+  const mockProven = mockProveIfBuiltin(tx);
+  const feesMock = errToUndefined(() => mockProven?.fees(LedgerParameters.initialParameters()));
   const feesBound = errToUndefined(() => bound.fees(LedgerParameters.initialParameters()));
   // There may be small amounts of drift because the real transaction's
   // binding commitment might be a byte smaller depending on proof
@@ -334,10 +347,10 @@ const deserializePayload = (arrayBuffer: ArrayBuffer): Transaction<SignatureEnab
 
 const PROVE_TX_PATH = '/prove-tx';
 
-// NOTE: currently assumes that we never need to supply a key :/
-const serverProver = {
+// Built-in keys are resolved by the server itself; only test circuits travel with the request.
+const serverProver: ProvingProvider = {
   check: async (serializedPreimage: Uint8Array, keyLocation: string): Promise<(bigint | undefined)[]> => {
-    const payload = createCheckPayload(serializedPreimage);
+    const payload = createCheckPayload(serializedPreimage, TestResource.circuit(keyLocation)?.ir);
     const result = await proofServerRequest('check', payload);
     return parseCheckResult(result);
   },
@@ -346,10 +359,10 @@ const serverProver = {
     keyLocation: string,
     overwriteBindingInput?: bigint
   ): Promise<Uint8Array> => {
-    const payload = createProvingPayload(serializedPreimage, overwriteBindingInput);
+    const payload = createProvingPayload(serializedPreimage, overwriteBindingInput, TestResource.circuit(keyLocation));
     return proofServerRequest('prove', payload);
   },
-  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => undefined
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => TestResource.circuit(keyLocation)
 };
 
 const callProverWorker = (op: 'check' | 'prove', args: any[]): Promise<any> => {

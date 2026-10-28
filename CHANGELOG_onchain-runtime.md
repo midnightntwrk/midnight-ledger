@@ -11,6 +11,8 @@
   refuses the `[v7]` it took before.
 - feat: `proofDataIntoSerializedPreimage` takes the inner proofs a circuit's
   `verify_proof` instructions consume, and emits a `proof-preimage[v2]`.
+- fix: rejecting a `ContractOperation.verifierKey` of an unsupported version
+  names the offending tag in the error, rather than the literal `{tag}`.
 
 ## Version `4.0.0`
 

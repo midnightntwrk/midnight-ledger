@@ -13,6 +13,7 @@
 
 import { ContractOperation, ContractState } from '@midnightntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
+import { TestResource } from '@/test-objects';
 
 describe('Ledger API - ContractOperation', () => {
   /**
@@ -71,5 +72,67 @@ describe('Ledger API - ContractOperation', () => {
     const operation = contractState.operation(OPERATION_NAME);
 
     assertSerializationSuccess(operation!);
+  });
+
+  describe('verifier key versions', () => {
+    const v6Key = TestResource.operationVerifierKey();
+    const v8Key = TestResource.circuit('noop')!.verifierKey;
+
+    const V6_TAG = 'midnight:verifier-key[v6]:';
+    const retagged = (key: Uint8Array, tag: string): Uint8Array =>
+      Buffer.concat([Buffer.from(`midnight:${tag}:`, 'latin1'), key.subarray(V6_TAG.length)]);
+
+    /**
+     * @given A verifier-key[v8] from a zkir-v3 circuit
+     * @when Setting it as the operation verifier key
+     * @then Should read back the same bytes
+     */
+    test('should accept a verifier-key[v8] and expose it unchanged', () => {
+      const contractOperation = new ContractOperation();
+      contractOperation.verifierKey = v8Key;
+
+      expect(contractOperation.verifierKey).toEqual(v8Key);
+    });
+
+    /**
+     * @given An operation holding a v8 key
+     * @when Setting a v6 key as well
+     * @then Should still expose the v8 key as the latest version
+     */
+    test('should expose the v8 key over a v6 one, whichever was set last', () => {
+      const contractOperation = new ContractOperation();
+      contractOperation.verifierKey = v8Key;
+      contractOperation.verifierKey = v6Key;
+
+      expect(contractOperation.verifierKey).toEqual(v8Key);
+    });
+
+    /**
+     * @given An operation holding a v8 key
+     * @when Serializing and deserializing it
+     * @then Should keep the key and string representation
+     */
+    test('should serialize and deserialize with a v8 key', () => {
+      const contractOperation = new ContractOperation();
+      contractOperation.verifierKey = v8Key;
+
+      const deserialized = ContractOperation.deserialize(contractOperation.serialize());
+
+      expect(deserialized.verifierKey).toEqual(v8Key);
+      expect(deserialized.toString()).toEqual(contractOperation.toString());
+    });
+
+    /**
+     * @given A key retagged as verifier-key[v7]
+     * @when Setting it as the operation verifier key
+     * @then Should throw an error naming the rejected tag
+     */
+    test('should reject the retired verifier-key[v7], naming the tag', () => {
+      const contractOperation = new ContractOperation();
+
+      expect(() => {
+        contractOperation.verifierKey = retagged(v6Key, 'verifier-key[v7]');
+      }).toThrow("unknown verifier key tag: 'verifier-key[v7]'");
+    });
   });
 });

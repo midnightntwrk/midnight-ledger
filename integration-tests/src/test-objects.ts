@@ -28,6 +28,7 @@ import {
   type Nonce,
   type Op,
   type PreBinding,
+  type Proof,
   type PreProof,
   type PublicAddress,
   type QualifiedShieldedCoinInfo,
@@ -54,6 +55,7 @@ import {
 } from '@midnightntwrk/ledger';
 import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import * as path from 'node:path';
 import type { ProvingKeyMaterial } from '@midnightntwrk/zkir-v2';
 import { generateHex, loadBinaryFile } from './test-utils';
@@ -331,6 +333,39 @@ export class Static {
   });
 }
 
+const CIRCUITS_DIR = path.resolve(__dirname, '../resources/circuits');
+
+export class TestResource {
+  static operationVerifierKey = (): Uint8Array => loadBinaryFile('../resources/sample_vk.verifier');
+
+  /**
+   * Key material of a hand-rolled zkir-v3 circuit from `resources/circuits`, keyed with a
+   * `verifier-key[v8]`; `undefined` for a built-in key the prover resolves itself.
+   */
+  static circuit = (name: string): ProvingKeyMaterial | undefined => {
+    if (!existsSync(path.join(CIRCUITS_DIR, `${name}.prover`))) {
+      return undefined;
+    }
+    return {
+      proverKey: loadBinaryFile(`../resources/circuits/${name}.prover`),
+      verifierKey: loadBinaryFile(`../resources/circuits/${name}.verifier`),
+      ir: loadBinaryFile(`../resources/circuits/${name}.bzkir`)
+    };
+  };
+
+  /**
+   * Transactions proven in Rust as `ledger/tests/verify-proof.rs` does, against a contract whose circuit
+   * runs `verify_proof`, so the call's proof carries one deferred accumulator.
+   */
+  static verifyProofTx = (name: 'deploy' | 'call'): Transaction<SignatureEnabled, Proof, PreBinding> =>
+    Transaction.deserialize(
+      'signature',
+      'proof',
+      'pre-binding',
+      loadBinaryFile(`../resources/verify-proof/${name}.tx`)
+    );
+}
+
 export const keyMaterialProvider = new (class {
   // eslint-disable-next-line class-methods-use-this
   async lookupWellKnownKey(type: string, keyLocation: string): Promise<Buffer | undefined> {
@@ -352,6 +387,10 @@ export const keyMaterialProvider = new (class {
   }
 
   async lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined> {
+    const circuit = TestResource.circuit(keyLocation);
+    if (circuit !== undefined) {
+      return circuit;
+    }
     const [proverKey, verifierKey, ir] = await Promise.all([
       this.lookupWellKnownKey('prover', keyLocation),
       this.lookupWellKnownKey('verifier', keyLocation),
@@ -419,9 +458,3 @@ export const getNewUnshieldedOffer = (
     ],
     [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
   );
-
-export class TestResource {
-  static operationVerifierKey = (): Uint8Array => {
-    return loadBinaryFile('../resources/sample_vk.verifier');
-  };
-}

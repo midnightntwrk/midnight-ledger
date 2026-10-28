@@ -32,4 +32,18 @@ describe('Ledger API - VerifierKeyInsert', () => {
     expect(verifierKeyInsert.vk.toString()).toEqual(verifierKey.toString());
     expect(verifierKeyInsert.toString()).toEqual(operation);
   });
+
+  /**
+   * @given An operation name and a v4 versioned verifier key
+   * @when Creating a VerifierKeyInsert
+   * @then Should store the v4 key
+   */
+  test('should construct with a v4 verifier key', () => {
+    const verifierKey = new ContractOperationVersionedVerifierKey('v4', TestResource.circuit('noop')!.verifierKey);
+
+    const verifierKeyInsert = new VerifierKeyInsert('operation', verifierKey);
+
+    expect(verifierKeyInsert.vk.version).toEqual('v4');
+    expect(verifierKeyInsert.vk.rawVk).toEqual(verifierKey.rawVk);
+  });
 });
