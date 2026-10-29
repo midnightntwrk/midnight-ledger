@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- breaking: `Map` requires its keys to implement `serialize::EncodingShape`
+  (through `MapKey`), so that decoding checks keys once per trie node. This is
+  a major version so that `ledger-8`, whose keys lack the trait, keeps
+  `storage` 2.x.
+- security: decoding checks `Array` indices, `Map` and `HashMap` keys,
+  `TimeFilterMap` consistency and `MerklePatriciaTrie` canonicity in time
+  linear in the distinct nodes, rather than once per path through shared
+  nodes. They accept the same encodings as before.
+- feat: `fold` on `MerklePatriciaTrie`, `Array` and `HashMap`, combining
+  entries in time linear in the distinct nodes, and `distinct_values` and
+  `distinct_values_across` on `MerklePatriciaTrie` and `Array`, counting the
+  paths to each distinct value.
 - security: `MerklePatriciaTrie` node deserialization threads the loader's
   recursion depth through, rather than restarting it at every node boundary.
 
