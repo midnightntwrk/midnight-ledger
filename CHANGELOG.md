@@ -17,6 +17,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: ZKIR's `Instruction` tag moves to `ir-instruction[v4]` for the two new variants.
 - feat: `IrMinorVersion::V1` marks an `IrSource` carrying `verify_proof_vks`, and is now the default. `IrSource`'s `Serializable` is hand-written and branches on it, so `V0` blobs keep their exact byte layout and still load; serializing a `V0` that carries key material is an error rather than a silent drop.
 - fix: `zkir-wasm`'s `prove` and `check` converted a preimage for the v1 pipeline by re-deserializing the raw request bytes as `transient_crypto_old::proofs::ProofPreimage`.
+- fix: applying an unshielded offer rehashed the Dust generation tree once per Night input and discarded the result, so each later `dtime` update re-walked every path dirtied before it — quadratic, rather than the single rehashed path `merkle_tree_insert_unamortized` charges for. An offer's updates are now replayed against a tree that keeps its rehashes, and only when the events are materialized, so the evidence is unchanged and the validation path pays nothing for it.
 
 ## Ledger 9.1.0.0-rc.3
 

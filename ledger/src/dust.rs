@@ -51,9 +51,11 @@ use onchain_runtime::{
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use std::cell::OnceCell;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::marker::PhantomData;
+use std::rc::Rc;
 #[cfg(test)]
 use storage::db::InMemoryDB;
 use storage::{
@@ -74,7 +76,7 @@ use transient_crypto::{
     curve::Fr,
     hash::{transient_hash, upgrade_from_transient},
     merkle_tree,
-    merkle_tree::{MerkleTree, MerkleTreeDigest},
+    merkle_tree::{MerkleTree, MerkleTreeDigest, TreeInsertionPath},
     proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
     repr::FieldRepr,
 };
@@ -1023,6 +1025,65 @@ pub struct DustState<D: DB> {
 }
 tag_enforcement_test!(DustState<InMemoryDB>);
 
+/// A batch of generation-tree `dtime` updates whose insertion evidence is computed on demand.
+///
+/// Each event carries the hashes along its updated path, so the tree must be rehashed after every
+/// update. Rehashing is memoised in the tree, so replaying the batch against a tree we keep costs
+/// one path per update, where rehashing a discarded snapshot per event costs every path dirtied so
+/// far and grows quadratically in the offer's Night inputs.
+///
+/// Replaying reproduces each update's own evidence exactly, because `rehash` only fills hashes in
+/// and cannot change them. It runs inside the event closures, so the validation path, which drops
+/// them, pays nothing.
+struct DtimeUpdateBatch<D: DB> {
+    /// The generation tree as it was before any of the batch's updates.
+    tree: MerkleTree<DustGenerationInfo, D>,
+    /// The updates, in the order they were applied, as `(index, new leaf)`.
+    updates: Vec<(u64, DustGenerationInfo)>,
+    evidence: OnceCell<Vec<TreeInsertionPath<DustGenerationInfo>>>,
+}
+
+impl<D: DB> DtimeUpdateBatch<D> {
+    fn new(tree: MerkleTree<DustGenerationInfo, D>) -> Self {
+        DtimeUpdateBatch {
+            tree,
+            updates: Vec::new(),
+            evidence: OnceCell::new(),
+        }
+    }
+
+    fn push(&mut self, index: u64, leaf: DustGenerationInfo) {
+        self.updates.push((index, leaf));
+    }
+
+    fn len(&self) -> usize {
+        self.updates.len()
+    }
+
+    /// The insertion evidence for the `update_no`th update, replaying the whole batch if it has
+    /// not been replayed yet.
+    fn evidence(&self, update_no: usize) -> TreeInsertionPath<DustGenerationInfo> {
+        self.evidence
+            .get_or_init(|| {
+                let mut tree = self.tree.clone();
+                self.updates
+                    .iter()
+                    .map(|(index, leaf)| {
+                        tree = tree
+                            .try_update_hash(*index, leaf.merkle_hash(), *leaf)
+                            .expect("replayed update must apply, it already did once")
+                            .rehash();
+                        tree.insertion_evidence(*index)
+                            .expect("must be able to produce evidence for updated path")
+                    })
+                    .collect()
+            })
+            .get(update_no)
+            .expect("batch must hold evidence for each of its updates")
+            .clone()
+    }
+}
+
 impl<D: DB> DustState<D> {
     pub(crate) fn apply_spend<P: ProofKind<D>>(
         &self,
@@ -1282,6 +1343,7 @@ impl<D: DB> DustState<D> {
         mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<Self, TransactionInvalid<D>> {
         let mut state = self.clone();
+        let mut dtime_updates = DtimeUpdateBatch::new(state.generation.generating_tree.clone());
         for input in offer.inputs.iter_deref().filter(|i| i.type_ == NIGHT) {
             let Some(idx) = state.generation.night_indices.get(&input.initial_nonce()) else {
                 continue;
@@ -1302,17 +1364,16 @@ impl<D: DB> DustState<D> {
                 .generating_tree
                 .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
                 .map_err(TransactionInvalid::MerkleTreeError)?;
-            let tree_snapshot = state.generation.generating_tree.clone();
-            let idx = *idx;
-            let block_time = context.block_context.tblock;
+            dtime_updates.push(*idx, gen_info);
+        }
+        // Emitted after the loop so the batch is complete; the loop emits nothing else, so the
+        // event order is unchanged.
+        let block_time = context.block_context.tblock;
+        let dtime_updates = Rc::new(dtime_updates);
+        for update_no in 0..dtime_updates.len() {
+            let dtime_updates = dtime_updates.clone();
             event_push(Box::new(move || EventDetails::DustGenerationDtimeUpdate {
-                // TODO: We maybe can do better than immediately rehashing here... But not much,
-                // because anything in the insertion evidence in the event *will* need to be
-                // computed here.
-                update: tree_snapshot
-                    .rehash()
-                    .insertion_evidence(idx)
-                    .expect("must be able to produce evidence for updated path"),
+                update: dtime_updates.evidence(update_no),
                 block_time,
             }));
         }
@@ -2181,6 +2242,78 @@ mod tests {
     use serde::de::{Error, Unexpected};
     use serde::{Deserialize, Deserializer};
     use std::fs;
+
+    /// A batch of `dtime` updates must produce exactly the evidence each update would have
+    /// produced on its own, i.e. against a tree holding that update and all the ones before it,
+    /// and nothing after.
+    #[test]
+    fn dtime_update_batch_matches_per_update_evidence() {
+        use super::{
+            DUST_GENERATION_TREE_DEPTH, DtimeUpdateBatch, DustGenerationInfo, DustPublicKey,
+            InitialNonce,
+        };
+        use base_crypto::hash::HashOutput;
+        use base_crypto::time::Timestamp;
+        use storage::db::InMemoryDB;
+        use transient_crypto::merkle_tree::MerkleTree;
+
+        let leaf = |i: u64, dtime: Timestamp| DustGenerationInfo {
+            value: 1_000 + i as u128,
+            owner: DustPublicKey(transient_crypto::curve::Fr::from(i)),
+            nonce: InitialNonce(HashOutput([i as u8; 32])),
+            dtime,
+        };
+
+        // Scattered indices, so the updated paths only share their topmost levels, and one
+        // index left untouched to keep part of the tree clean.
+        let indices = [0u64, 1, 7, 64, 65, 4096, 1 << 20];
+        let mut tree =
+            MerkleTree::<DustGenerationInfo, InMemoryDB>::blank(DUST_GENERATION_TREE_DEPTH);
+        for idx in indices.iter().chain([&(1u64 << 21)]) {
+            let info = leaf(*idx, Timestamp::MAX);
+            tree = tree
+                .try_update_hash(*idx, info.merkle_hash(), info)
+                .expect("populating the tree must succeed");
+        }
+
+        // The old shape: apply each update to the tree, then rehash a snapshot of it and read the
+        // evidence off that. The updates carry forward but the rehashes do not, which is the
+        // discarded-rehash behaviour this batching replaced.
+        let tblock = Timestamp::from_secs(1_000);
+        let mut per_update = Vec::new();
+        let mut unbatched = tree.clone();
+        for idx in indices.iter() {
+            let info = leaf(*idx, tblock);
+            unbatched = unbatched
+                .try_update_hash(*idx, info.merkle_hash(), info)
+                .expect("update must succeed");
+            per_update.push(
+                unbatched
+                    .rehash()
+                    .insertion_evidence(*idx)
+                    .expect("evidence must be producible"),
+            );
+        }
+
+        let mut batch = DtimeUpdateBatch::new(tree);
+        for idx in indices.iter() {
+            batch.push(*idx, leaf(*idx, tblock));
+        }
+
+        assert_eq!(batch.len(), per_update.len());
+        for (update_no, expected) in per_update.iter().enumerate() {
+            assert!(
+                expected.path.iter().all(|entry| entry.hash.is_some()),
+                "evidence for update {update_no} must be fully hashed, or a consumer that \
+                 collapsed this subtree cannot replay it"
+            );
+            assert_eq!(
+                &batch.evidence(update_no),
+                expected,
+                "batched evidence for update {update_no} differs from the per-update evidence"
+            );
+        }
+    }
 
     #[cfg(feature = "proving")]
     #[tokio::test]
