@@ -14,13 +14,13 @@
 //! The zswap spend circuit, written directly against zk-stdlib (v1).
 //!
 //! This is a hand-written replacement for interpreting
-//! `zswap/static/spend.zkir` through the generic [`IrSource`](crate::IrSource)
-//! relation. It is *verifier-key compatible* with the shipped
-//! `zswap/static/spend.verifier`: synthesis performs exactly the same standard
-//! library calls, in exactly the same order, as the IR interpreter does when
-//! executing the spend IR, so key generation produces a byte-for-byte
-//! identical verifier key. This equality is asserted in
-//! `zkir/tests/zswap_spend.rs`; any change to this module that alters the
+//! `zswap/static/spend.zkir` through the generic
+//! [`IrSource`](zkir_v2::IrSource) relation. It is *verifier-key compatible*
+//! with the shipped `zswap/static/spend.verifier`: synthesis performs exactly
+//! the same standard library calls, in exactly the same order, as the IR
+//! interpreter does when executing the spend IR, so key generation produces a
+//! byte-for-byte identical verifier key. This equality is asserted in
+//! `zswap/tests/spend_circuit.rs`; any change to this module that alters the
 //! constraint system will trip that test.
 //!
 //! # Statement
@@ -71,7 +71,7 @@ use midnight_zk_stdlib_v1::{Relation, ZkStdLib, ZkStdLibArch};
 use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::{hash_to_curve, transient_hash};
 
-use crate::ir_v1::{
+use zkir_v2::ir_v1::{
     OldEmbeddedAffine, OldEmbeddedAffineExt, OldScalar, cvt, v1_assemble_bytes, v1_ecc_from_parts,
     v1_fab_decode_to_bytes,
 };

@@ -198,34 +198,20 @@ impl TryFrom<&ValueSlice> for Recipient {
 
 const SPEND_RULE_EMPTY_TAG: u8 = 0;
 const SPEND_RULE_GATE_CIRCUIT_TAG: u8 = 1;
-const SPEND_RULE_GATE_CONTRACT_TAG: u8 = 2;
 
 impl Aligned for SpendRule {
     fn alignment() -> Alignment {
-        Alignment::concat([
-            &u8::alignment(),
-            &<[u8; 32]>::alignment(),
-            &ContractAddress::alignment(),
-            &<[u8; 32]>::alignment(),
-        ])
+        Alignment::concat([&u8::alignment(), &<[u8; 32]>::alignment()])
     }
 }
 
 impl From<SpendRule> for Value {
     fn from(rule: SpendRule) -> Value {
         Value(match rule {
-            SpendRule::Empty => vec![SPEND_RULE_EMPTY_TAG.into(), ().into(), ().into(), ().into()],
+            SpendRule::Empty => vec![SPEND_RULE_EMPTY_TAG.into(), ().into()],
             SpendRule::GateCircuit(vk_hash) => vec![
                 SPEND_RULE_GATE_CIRCUIT_TAG.into(),
                 ValueAtom(vk_hash.0.to_vec()).normalize(),
-                ().into(),
-                ().into(),
-            ],
-            SpendRule::GateContract(addr, ep_hash) => vec![
-                SPEND_RULE_GATE_CONTRACT_TAG.into(),
-                ().into(),
-                addr.into(),
-                ValueAtom(ep_hash.0.to_vec()).normalize(),
             ],
         })
     }
@@ -244,27 +230,14 @@ impl TryFrom<&ValueSlice> for SpendRule {
                 Err(InvalidBuiltinDecode("SpendRule"))
             }
         }
-        if value.0.len() == 4 {
+        if value.0.len() == 2 {
             let tag: u8 = (&value.0[0]).try_into()?;
             match tag {
                 SPEND_RULE_EMPTY_TAG => {
                     <()>::try_from(&value.0[1])?;
-                    <()>::try_from(&value.0[2])?;
-                    <()>::try_from(&value.0[3])?;
                     Ok(SpendRule::Empty)
                 }
-                SPEND_RULE_GATE_CIRCUIT_TAG => {
-                    <()>::try_from(&value.0[2])?;
-                    <()>::try_from(&value.0[3])?;
-                    Ok(SpendRule::GateCircuit(hash_from(&value.0[1])?))
-                }
-                SPEND_RULE_GATE_CONTRACT_TAG => {
-                    <()>::try_from(&value.0[1])?;
-                    Ok(SpendRule::GateContract(
-                        (&value.0[2]).try_into()?,
-                        hash_from(&value.0[3])?,
-                    ))
-                }
+                SPEND_RULE_GATE_CIRCUIT_TAG => Ok(SpendRule::GateCircuit(hash_from(&value.0[1])?)),
                 _ => Err(InvalidBuiltinDecode("SpendRule")),
             }
         } else {

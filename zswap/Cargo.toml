@@ -8,7 +8,13 @@ description = "Implementation of the Zswap shielded token atomic swap mechanism.
 
 [features]
 default = ["proof-verifying"]
-proof-verifying = ["dep:zkir_v2"]
+proof-verifying = [
+  "dep:zkir_v2",
+  "dep:group",
+  "dep:midnight-zk-stdlib-v1",
+  "dep:midnight-proofs-v1",
+  "dep:midnight-circuits-v1",
+]
 
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
@@ -32,6 +38,12 @@ zeroize = "^1.8.0"
 
 zkir_v2 = { path = "../zkir", version = "2.2.0", package = "midnight-zkir", optional = true }
 
+# Pinned pre-zk-stdlib-v2 versions, matching the shipped (v1) zswap verifier keys.
+midnight-zk-stdlib-v1 = { package = "midnight-zk-stdlib", version = "^1.2.1", optional = true }
+midnight-proofs-v1 = { package = "midnight-proofs", version = "^0.7.2", optional = true }
+midnight-circuits-v1 = { package = "midnight-circuits", version = "^6.2.1", optional = true }
+group = { version = "^0.13.0", optional = true }
+
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }
 serde = { version = "^1.0.219", features = ["derive"] }
@@ -45,6 +57,7 @@ criterion = "0.5"
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 tracing-subscriber = "^0.3.19"
 rayon = "^1.10.0"
+rand_chacha = "^0.3.1"
 serde = { version = "^1.0.219", features = ["derive"] }
 serde_json = "^1.0.140"
 hex = "^0.4.3"

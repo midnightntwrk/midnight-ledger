@@ -41,6 +41,8 @@ pub mod keys;
 pub mod ledger;
 pub mod local;
 pub mod prove;
+#[cfg(feature = "proof-verifying")]
+pub mod spend_circuit;
 mod structure;
 pub mod verify;
 

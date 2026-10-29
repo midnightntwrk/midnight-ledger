@@ -16,8 +16,9 @@
 //! identical public input layout, and proofs that verify against the shipped
 //! verifier key.
 
-use midnight_zkir::IrSource;
-use midnight_zkir::zswap_spend::{
+#![cfg(feature = "proof-verifying")]
+
+use midnight_zswap::spend_circuit::{
     NUM_PUBLIC_INPUTS, SpendWitness, ZSWAP_TREE_HEIGHT, ZswapSpend, split_bytes32,
 };
 use rand::{Rng, SeedableRng};
@@ -27,9 +28,10 @@ use std::fs::File;
 use std::io::BufReader;
 use transient_crypto::curve::{EmbeddedFr, Fr};
 use transient_crypto_old::proofs::{ParamsProver, VerifierKey};
+use zkir_v2::IrSource;
 
 const PARAMS_DIR: &str = env!("MIDNIGHT_PP");
-const ZSWAP_STATIC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../zswap/static");
+const ZSWAP_STATIC: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/static");
 
 fn params(k: u8) -> ParamsProver {
     ParamsProver::read(BufReader::new(
@@ -116,6 +118,7 @@ fn vk_is_byte_identical_to_shipped_spend_verifier() {
     let relation = ZswapSpend;
     let circuit = midnight_zk_stdlib_v1::MidnightCircuit::from_relation(&relation);
     let k = circuit.min_k() as u8;
+    println!("k={k}");
     let vk = midnight_zk_stdlib_v1::setup_vk(params(k).as_ref(), &relation);
     let vk = VerifierKey::from(vk);
     let mut bytes = Vec::new();

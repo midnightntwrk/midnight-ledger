@@ -19,7 +19,6 @@
 //! itself never appears on-chain; only the token type derived from its
 //! [`descriptor_hash`](SpendRule::descriptor_hash) does.
 
-use crate::contract::ContractAddress;
 use base_crypto::hash::persistent_hash;
 use fake::Dummy;
 #[cfg(feature = "proptest")]
@@ -49,12 +48,8 @@ pub enum SpendRule {
     #[default]
     Empty,
     /// Spending additionally requires satisfying the circuit whose verifier
-    /// key hashes (via `persistent_hash` of its canonical serialization) to
-    /// the contained value.
+    /// key hashes to the contained value.
     GateCircuit(HashOutput),
-    /// Spending additionally requires a call, within the same transaction, to
-    /// the given contract entry point (identified by its `ep_hash`).
-    GateContract(ContractAddress, HashOutput),
 }
 tag_enforcement_test!(SpendRule);
 
@@ -83,10 +78,9 @@ impl SpendRule {
 
 impl rand::distributions::Distribution<SpendRule> for rand::distributions::Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SpendRule {
-        match rng.gen_range(0..3u8) {
+        match rng.gen_range(0..2u8) {
             0 => SpendRule::Empty,
-            1 => SpendRule::GateCircuit(rng.r#gen()),
-            _ => SpendRule::GateContract(ContractAddress(rng.r#gen()), rng.r#gen()),
+            _ => SpendRule::GateCircuit(rng.r#gen()),
         }
     }
 }
@@ -94,6 +88,7 @@ impl rand::distributions::Distribution<SpendRule> for rand::distributions::Stand
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::contract::ContractAddress;
     use base_crypto::hash::persistent_commit;
 
     #[test]
@@ -122,11 +117,10 @@ mod tests {
             SpendRule::Empty,
             SpendRule::GateCircuit(HashOutput([3u8; 32])),
             SpendRule::GateCircuit(HashOutput([4u8; 32])),
-            SpendRule::GateContract(addr, HashOutput([3u8; 32])),
         ]
         .iter()
         .map(|rule| addr.custom_shielded_token_type(domain_sep, rule))
         .collect::<std::collections::HashSet<_>>();
-        assert_eq!(types.len(), 4);
+        assert_eq!(types.len(), 3);
     }
 }

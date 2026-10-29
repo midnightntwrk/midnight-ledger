@@ -632,10 +632,10 @@ impl TryFrom<&ValueSlice> for ShieldedMintKey {
     type Error = InvalidBuiltinDecode;
 
     fn try_from(value: &ValueSlice) -> Result<ShieldedMintKey, InvalidBuiltinDecode> {
-        if value.0.len() == 5 {
+        if value.0.len() == 3 {
             Ok(ShieldedMintKey(
                 (&value[0..1]).try_into()?,
-                (&value[1..5]).try_into()?,
+                (&value[1..3]).try_into()?,
             ))
         } else {
             Err(InvalidBuiltinDecode("ShieldedMintKey"))
@@ -1129,16 +1129,6 @@ mod shielded_mint_key_tests {
                         SpendRule::GateCircuit(HashOutput([3u8; 32])),
                     ),
                     7u64,
-                ),
-                (
-                    ShieldedMintKey(
-                        HashOutput([4u8; 32]),
-                        SpendRule::GateContract(
-                            ContractAddress(HashOutput([5u8; 32])),
-                            HashOutput([6u8; 32]),
-                        ),
-                    ),
-                    9u64,
                 ),
             ]
             .into_iter()
