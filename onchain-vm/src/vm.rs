@@ -71,6 +71,26 @@ impl Cache {
         }
     }
 
+    /// Whether `key` has been visited, without recording a visit.
+    fn contains(&self, key: &CacheKey) -> bool {
+        let Some((n, path)) = &key.0 else {
+            return true;
+        };
+        let Some(mut cache) = self.0.get(*n) else {
+            return false;
+        };
+        for key in path.iter() {
+            match cache {
+                InnerCache(None) => return true,
+                InnerCache(Some(map)) => match map.get(key) {
+                    Some(child) => cache = child,
+                    None => return false,
+                },
+            }
+        }
+        true
+    }
+
     /// The cached parts of the value at `key`, without recording a visit.
     fn get(&self, key: &CacheKey) -> InnerCache {
         let Some((n, path)) = &key.0 else {
@@ -796,7 +816,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         },
                     )?;
                 }
-                let cache_hit = cache.visit(&container.1.push_key(&key));
+                // Checked without visiting: `rem` never reads the old value, and
+                // copies of the container on the stack share its cache root.
+                let cache_hit = cache.contains(&container.1.push_key(&key));
                 if *cached && !cache_hit {
                     return Err(OnchainProgramError::CacheMiss);
                 }
@@ -1016,7 +1038,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         strength: container_str,
                         value: container_val,
                     } = container.0;
-                    let cache_hit = cache.visit(&container.1.push_key(key_cell));
+                    // Checked without visiting: `ins` never reads the old value, and
+                    // copies of the container on the stack share its cache root.
+                    let cache_hit = cache.contains(&container.1.push_key(key_cell));
                     if *cached && !cache_hit {
                         if let StateValue::Array(_) = &container_val {
                             // The miss is okay. We're overwriting an array cell, we never need to read it.

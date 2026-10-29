@@ -1992,11 +1992,37 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
         mut action: impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
     ) -> R {
         self.intents.fold(memo, |memo, _, intent| {
-            memo.get_or_compute(intent, |memo, intent| {
-                own(intent).append(&intent.actions.fold(memo, |memo, a| {
-                    memo.get_or_compute(a, |memo, a| action(memo, a))
-                }))
+            Self::fold_intent(memo, intent, &mut own, &mut action)
+        })
+    }
+
+    /// [`Self::fold_intents`]'s result per segment. Linear, as decoding pins
+    /// each of the `HashMap`'s entries to its key's hash, so segments are leaves.
+    fn fold_intents_by_segment<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut own: impl FnMut(&Intent<S, P, B, D>) -> R,
+        mut action: impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
+    ) -> Vec<(Segment, R)> {
+        self.intents
+            .iter()
+            .map(|entry| {
+                let cost = Self::fold_intent(memo, &entry.1, &mut own, &mut action);
+                (*entry.0, cost)
             })
+            .collect()
+    }
+
+    fn fold_intent<R: Monoid + Clone>(
+        memo: &mut DagMemo<R, D>,
+        intent: &Sp<Intent<S, P, B, D>, D>,
+        own: &mut impl FnMut(&Intent<S, P, B, D>) -> R,
+        action: &mut impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
+    ) -> R {
+        memo.get_or_compute(intent, |memo, intent| {
+            own(intent).append(&intent.actions.fold(memo, |memo, a| {
+                memo.get_or_compute(a, |memo, a| action(memo, a))
+            }))
         })
     }
 }
@@ -2463,7 +2489,9 @@ where
     ) -> Result<(SyntheticCost, SyntheticCost), FeeCalculationError> {
         let model = &params.cost_model;
         let mut g_cost = model.baseline_cost;
-        let mut f_cost = RunningCost::ZERO;
+        // Each fallible segment commits or fails on its own, so its writes are
+        // netted only against its own deletions, never another segment's.
+        let mut f_costs = std::collections::BTreeMap::<Segment, RunningCost>::new();
         if let Transaction::Standard(stx) = self {
             stx.disjoint_check()
                 .map_err(|_| FeeCalculationError::RepeatedEntries)?;
@@ -2498,13 +2526,15 @@ where
                     }
                 })
             };
-            let intents = stx.fold_intents(
+            let intents = stx.fold_intents_by_segment(
                 &mut DagMemo::new(),
                 |intent| intent_application_cost(model, intent, &mut night),
                 |memo, action| action_application_cost(model, action, memo, &mut copy),
             );
-            g_cost += intents.guaranteed;
-            f_cost += intents.fallible;
+            for (segment, cost) in intents {
+                g_cost += cost.guaranteed;
+                *f_costs.entry(segment).or_default() += cost.fallible;
+            }
         }
         match self {
             Transaction::Standard(stx) => {
@@ -2541,7 +2571,7 @@ where
                     if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
-                        f_cost += offer_cost;
+                        *f_costs.entry(segment).or_default() += offer_cost;
                         // Because we also try to apply it in the guaranteed segment.
                         g_cost.compute_time += offer_cost.compute_time;
                     }
@@ -2562,8 +2592,12 @@ where
             }
         }
         g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
-        f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
-        Ok((g_cost.into(), (g_cost + f_cost).into()))
+        let g_cost = SyntheticCost::from(g_cost);
+        let total_cost = f_costs.into_values().fold(g_cost, |total, mut f_cost| {
+            f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
+            total + SyntheticCost::from(f_cost)
+        });
+        Ok((g_cost, total_cost))
     }
 
     pub fn time_to_dismiss(
@@ -3690,6 +3724,17 @@ pub(crate) mod tests {
         let adj = f64::from(INITIAL_PARAMETERS.max_price_adjustment());
         assert!(1.045 <= adj);
         assert!(adj <= 1.047);
+    }
+
+    #[test]
+    fn min_claimable_rewards_does_not_collapse_with_extreme_parameters() {
+        let mut params = INITIAL_PARAMETERS;
+        // A claim that cannot fit the block prices at `FixedPoint::MAX`; dividing
+        // that by a night/dust ratio between 0.5 and 1 used to wrap negative.
+        params.limits.block_limits.compute_time = CostDuration::from_picoseconds(1);
+        params.limits.block_limits.read_time = CostDuration::from_picoseconds(1);
+        params.dust.night_dust_ratio = 3 * (SPECKS_PER_DUST / STARS_PER_NIGHT) as u64 / 4;
+        assert!(params.min_claimable_rewards() > u64::MAX as u128);
     }
 
     #[test]

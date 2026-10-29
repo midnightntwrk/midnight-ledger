@@ -128,8 +128,9 @@ fn old_tree_copy<T: Storable<D>>(value: Sp<T, D>) -> RunningCost {
 
 fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
     let mut g_cost = model.baseline_cost;
-    let mut f_cost = RunningCost::ZERO;
-    for (_, intent) in tx.intents() {
+    let mut f_costs = std::collections::BTreeMap::<Segment, RunningCost>::new();
+    for (segment, intent) in tx.intents() {
+        let mut f_cost = RunningCost::ZERO;
         // Replay protection state update
         g_cost += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
         g_cost += model.time_filter_map_insert(false)
@@ -324,6 +325,7 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                 }
             }
         }
+        *f_costs.entry(segment).or_default() += f_cost;
     }
     match tx {
         Transaction::Standard(stx) => {
@@ -360,7 +362,7 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
                 if segment == GUARANTEED_SEGMENT {
                     g_cost += offer_cost;
                 } else {
-                    f_cost += offer_cost;
+                    *f_costs.entry(segment).or_default() += offer_cost;
                     // Because we also try to apply it in the guaranteed segment.
                     g_cost.compute_time += offer_cost.compute_time;
                 }
@@ -381,8 +383,12 @@ fn old_application_cost(tx: &Tx, model: &TransactionCostModel) -> (SyntheticCost
         }
     }
     g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
-    f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
-    (g_cost.into(), (g_cost + f_cost).into())
+    let g_cost = SyntheticCost::from(g_cost);
+    let total_cost = f_costs.into_values().fold(g_cost, |total, mut f_cost| {
+        f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
+        total + SyntheticCost::from(f_cost)
+    });
+    (g_cost, total_cost)
 }
 
 fn old_estimated_tx_size(tx: &Tx) -> usize {
