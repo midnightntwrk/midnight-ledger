@@ -25,7 +25,6 @@ use crate::curve::{EmbeddedFr, EmbeddedGroupAffine, embedded};
 use crate::curve::{FR_BYTES, Fr};
 use crate::hash::transient_hash;
 use crate::repr::{FieldRepr, FromFieldRepr};
-use k256::elliptic_curve::subtle::CtOption;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::distributions::Standard;
@@ -40,6 +39,7 @@ use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
+use subtle::CtOption;
 use zeroize::Zeroize;
 
 /// A public key, consisting of a group element `g^x`
