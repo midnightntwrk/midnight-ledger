@@ -41,8 +41,7 @@ lazy_static = "^1.5.0"
 tracing = { version = "^0.1.41" }
 const-hex = "^1.14.1"
 sha2 = "^0.11.0"
-k256 = "^0.13.4"
-signature = "^2.2.0"
+subtle = "^2.6.1"
 zeroize = "^1.8.0"
 
 derive-where = "^1.6.1"
