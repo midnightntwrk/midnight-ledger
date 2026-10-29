@@ -426,6 +426,7 @@ impl From<DustStateError> for SystemTransactionError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FeeCalculationError {
     OutsideTimeToDismiss {
         time_to_dismiss: CostDuration,

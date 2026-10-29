@@ -1310,9 +1310,12 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
             }
             for dust_actions in intent.dust_actions.iter() {
                 for (reg, n) in dust_actions.registrations.distinct_values() {
-                    if n > 1 || !registrations.insert(reg.hash()) {
+                    // Keyed without the signature, so pricing an erased transaction
+                    // agrees with checking the signed one.
+                    let erased = Sp::<_, D>::new(reg.erase_signatures());
+                    if n > 1 || !registrations.insert(erased.hash()) {
                         return Err(MalformedTransaction::RepeatedDustRegistration {
-                            registration: Box::new(reg.erase_signatures()),
+                            registration: Box::new((*erased).clone()),
                         });
                     }
                 }
@@ -2794,6 +2797,50 @@ mod disjoint_tests {
         storage::test::assert_completes_within(std::time::Duration::from_secs(5), move || {
             assert!(stx.disjoint_check().is_ok())
         });
+    }
+
+    /// Erasing signatures, as pricing a verified transaction does, must not
+    /// turn an accepted transaction into one with repeats.
+    #[test]
+    fn registrations_differing_only_in_signature_repeat() {
+        use crate::dust::{DustActions, DustRegistration};
+        use crate::structure::{Signature, SigningKey};
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let key = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut rng));
+        let mut stx: StandardTransaction<Signature, (), Pedersen, D> = StandardTransaction {
+            network_id: String::new(),
+            intents: HashMap::new(),
+            guaranteed_coins: None,
+            fallible_coins: HashMap::new(),
+            binding_randomness: Default::default(),
+        };
+        for segment in [1u16, 2] {
+            let registration = DustRegistration {
+                night_key: key.verifying_key(),
+                dust_address: None,
+                allow_fee_payment: 0,
+                signature: Some(Sp::new(key.sign(&mut rng, &segment.to_le_bytes()))),
+            };
+            let dust_actions = DustActions {
+                spends: Array::new(),
+                registrations: vec![registration].into(),
+                ctime: Timestamp::from_secs(0),
+            };
+            let intent = Intent {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                actions: Array::new(),
+                dust_actions: Some(Sp::new(dust_actions)),
+                ttl: Timestamp::from_secs(0),
+                binding_commitment: Pedersen::default(),
+            };
+            stx.intents = stx.intents.insert(segment, intent);
+        }
+        assert!(matches!(
+            stx.disjoint_check(),
+            Err(MalformedTransaction::RepeatedDustRegistration { .. })
+        ));
     }
 
     proptest! {

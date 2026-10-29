@@ -28,7 +28,8 @@ use std::marker::PhantomData;
 ///
 /// Results must depend only on the node's subtree, never on where it is
 /// reached from. Nodes are keyed by type as well as hash, as two types may
-/// share an encoding.
+/// share an encoding. The function is not part of the key: use one memo per
+/// function, or a second fold reads the first's results.
 pub struct DagMemo<R, D: DB> {
     results: HashMap<(TypeId, ArenaHash<D::Hasher>), R>,
 }
