@@ -2088,8 +2088,11 @@ where
 
     pub fn application_cost(&self, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
         let mut g_cost = model.baseline_cost;
-        let mut f_cost = RunningCost::ZERO;
-        for (_, intent) in self.intents() {
+        // Each fallible segment commits or fails on its own, so its writes are
+        // netted only against its own deletions, never another segment's.
+        let mut f_costs = std::collections::BTreeMap::<Segment, RunningCost>::new();
+        for (segment, intent) in self.intents() {
+            let mut f_cost = RunningCost::ZERO;
             // Replay protection state update
             g_cost +=
                 model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
@@ -2286,6 +2289,7 @@ where
                     }
                 }
             }
+            *f_costs.entry(segment).or_default() += f_cost;
         }
         match self {
             Transaction::Standard(stx) => {
@@ -2322,7 +2326,7 @@ where
                     if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
-                        f_cost += offer_cost;
+                        *f_costs.entry(segment).or_default() += offer_cost;
                         // Because we also try to apply it in the guaranteed segment.
                         g_cost.compute_time += offer_cost.compute_time;
                     }
@@ -2343,8 +2347,12 @@ where
             }
         }
         g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
-        f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
-        (g_cost.into(), (g_cost + f_cost).into())
+        let g_cost = SyntheticCost::from(g_cost);
+        let total_cost = f_costs.into_values().fold(g_cost, |total, mut f_cost| {
+            f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
+            total + SyntheticCost::from(f_cost)
+        });
+        (g_cost, total_cost)
     }
 
     pub fn time_to_dismiss(&self, model: &TransactionCostModel) -> CostDuration {

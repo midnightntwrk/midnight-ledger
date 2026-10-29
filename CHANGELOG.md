@@ -6,6 +6,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- security: price each segment's writes separately. Previously, the guaranteed
+  and all fallible costs were summed before netting bytes written against bytes
+  deleted, so a fallible transcript declaring deletions it never performs could
+  offset the writes of segments that commit, lowering their fees and bypassing
+  the block limit on net bytes written.
 - fix: reject contract calls declaring more than `MAX_CALL_PUBLIC_INPUTS` public inputs, 
   bounding the allocation on paths where fee enforcement is disabled.
 - breaking: `ContractCall::public_inputs` returns a `Result`, failing with
