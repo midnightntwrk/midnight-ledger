@@ -1059,4 +1059,89 @@ mod tests {
             }
         }
     }
+
+    // `ins` and `rem` replace a slot without reading it, so they must not mark
+    // it as read: a copy of the container left on the stack still holds the
+    // old value, and a cached `idx` on it would read that value for free.
+    mod overwrite_does_not_mark_read {
+        use super::*;
+
+        type D = InMemoryDB;
+
+        fn array(v: StateValue<D>) -> StateValue<D> {
+            StateValue::Array(vec![v].into())
+        }
+
+        fn map(k: u64, v: u64) -> StateValue<D> {
+            StateValue::Map(HashMap::new().insert(AlignedValue::from(k), StateValue::from(v)))
+        }
+
+        fn run(state: StateValue<D>, ops: &[Op<ResultModeGather, D>]) -> OnchainProgramError<D> {
+            run_program::<D, ResultModeGather>(
+                &[VmValue::new(ValueStrength::Strong, state)],
+                ops,
+            )
+            .unwrap_err()
+        }
+
+        fn insc_then_read_copy() -> Vec<Op<ResultModeGather, D>> {
+            ops![
+                dup 0;
+                push ((0u8));
+                push ((7u64));
+                insc 1;
+                pop;
+                idxc [(AlignedValue::from(0u8))]
+            ]
+        }
+
+        #[test]
+        fn cold_read_misses() {
+            let ops = ops![idxc [(AlignedValue::from(0u8))]];
+            assert_eq!(
+                run(array(StateValue::from(42u64)), &ops),
+                OnchainProgramError::CacheMiss
+            );
+        }
+
+        #[test]
+        fn cached_ins_into_array() {
+            assert_eq!(
+                run(array(StateValue::from(42u64)), &insc_then_read_copy()),
+                OnchainProgramError::CacheMiss
+            );
+        }
+
+        #[test]
+        fn cached_ins_walk_through_nested_arrays() {
+            let state = array(array(array(StateValue::from(42u64))));
+            let ops: Vec<_> = (0..3).flat_map(|_| insc_then_read_copy()).collect();
+            assert_eq!(run(state, &ops), OnchainProgramError::CacheMiss);
+        }
+
+        #[test]
+        fn ins_into_map() {
+            let ops = ops![
+                dup 0;
+                push ((1u64));
+                push ((7u64));
+                ins 1;
+                pop;
+                idxc [(AlignedValue::from(1u64))]
+            ];
+            assert_eq!(run(map(1, 42), &ops), OnchainProgramError::CacheMiss);
+        }
+
+        #[test]
+        fn rem_from_map() {
+            let ops = ops![
+                dup 0;
+                push ((1u64));
+                rem;
+                pop;
+                idxc [(AlignedValue::from(1u64))]
+            ];
+            assert_eq!(run(map(1, 42), &ops), OnchainProgramError::CacheMiss);
+        }
+    }
 }
