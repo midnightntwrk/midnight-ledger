@@ -94,7 +94,7 @@ pub fn with_outputs<
 }
 
 #[cfg(any(test, feature = "proof-verifying"))]
-const CADDR_OP_LEN: u32 = 12;
+pub(crate) const CADDR_OP_LEN: u32 = 12;
 
 #[cfg(test)]
 #[test]

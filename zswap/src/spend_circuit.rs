@@ -13,15 +13,12 @@
 
 //! The zswap spend circuit, written directly against zk-stdlib (v1).
 //!
-//! This is a hand-written replacement for interpreting
-//! `zswap/static/spend.zkir` through the generic
-//! [`IrSource`](zkir_v2::IrSource) relation. It is *verifier-key compatible*
-//! with the shipped `zswap/static/spend.verifier`: synthesis performs exactly
-//! the same standard library calls, in exactly the same order, as the IR
-//! interpreter does when executing the spend IR, so key generation produces a
-//! byte-for-byte identical verifier key. This equality is asserted in
-//! `zswap/tests/spend_circuit.rs`; any change to this module that alters the
-//! constraint system will trip that test.
+//! This is a hand-written counterpart of the `spend` circuit in
+//! `zswap/zswap.compact` (compiled to `zswap/static/spend.zkir`). It proves the
+//! same statement and exposes the same public inputs, which
+//! `zswap/tests/spend_circuit.rs` checks against the IR virtual machine. It is
+//! *not* constrained to synthesise the same constraint system, so its verifier
+//! key differs from the shipped `zswap/static/spend.verifier`.
 //!
 //! # Statement
 //!
@@ -43,10 +40,14 @@
 //! 5. *Value commitment*: the declared Pedersen commitment is
 //!    `value * hash_to_curve(type, segment) + rc * G` over the embedded curve.
 //!
-//! The public input vector additionally carries the field representation of
-//! the Impact VM operations that the ledger replays against the zswap
-//! contract state (root check, nullifier set insert, optional contract
-//! address write, segment read, value commitment write).
+//! # Public transcript
+//!
+//! The public inputs are the binding input followed by the field
+//! representation of the Impact program the ledger replays against the zswap
+//! contract state. That program is defined once, as a [`SpendTranscript`],
+//! using the same program fragments the ledger uses to verify spends; the
+//! circuit derives its public-input layout from that definition rather than
+//! spelling out opcodes and indices (see `spend_layout`).
 //!
 //! # 32-byte values in the witness
 //!
@@ -55,26 +56,35 @@
 //! elements: the final byte (`hi`), then the first 31 bytes interpreted
 //! little-endian (`lo`). [`split_bytes32`] implements this split.
 
-use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
+use base_crypto::fab::AlignedValue;
+use base_crypto::hash::{HashOutput, persistent_hash};
+use coin_structure::{coin::Nullifier, contract::ContractAddress};
 use group::Group;
 use midnight_circuits_v1::instructions::{
-    AssignmentInstructions, ControlFlowInstructions, ConversionInstructions,
-    DecompositionInstructions, EccInstructions, EqualityInstructions, PublicInputInstructions,
-    ZeroInstructions,
+    ArithInstructions, AssignmentInstructions, ControlFlowInstructions, ConversionInstructions,
+    DecompositionInstructions, EccInstructions, PublicInputInstructions,
 };
-use midnight_circuits_v1::types::{AssignedBit, AssignedNative};
+use midnight_circuits_v1::types::{AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint};
+use midnight_onchain_runtime::{
+    ops::{Key, Op},
+    program_fragments::*,
+    result_mode::ResultModeGather,
+    state::StateValue,
+};
 use midnight_proofs_v1::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
 use midnight_zk_stdlib_v1::{Relation, ZkStdLib, ZkStdLibArch};
+use std::collections::{HashMap, hash_map::Entry};
+use std::sync::OnceLock;
+use storage::{arena::Sp, db::InMemoryDB};
 use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::{hash_to_curve, transient_hash};
+use transient_crypto::repr::FieldRepr;
+use zkir_v2::ir_v1::{OldEmbeddedAffine, OldEmbeddedAffineExt, OldScalar, cvt};
 
-use zkir_v2::ir_v1::{
-    OldEmbeddedAffine, OldEmbeddedAffineExt, OldScalar, cvt, v1_assemble_bytes, v1_ecc_from_parts,
-    v1_fab_decode_to_bytes,
-};
+use crate::verify::{CADDR_OP_LEN, with_outputs};
 
 /// The height of the zswap coin commitment Merkle tree.
 pub const ZSWAP_TREE_HEIGHT: usize = 32;
@@ -93,19 +103,6 @@ pub const CC_DOMAIN_SEP: &[u8; 21] = b"midnight:zswap-cc[v1]";
 /// Domain separator for coin nullifiers.
 pub const CN_DOMAIN_SEP: &[u8; 21] = b"midnight:zswap-cn[v1]";
 
-// Impact VM opcodes appearing (as field elements) in the spend transcript.
-// See `Op::field_repr` in `onchain-vm`.
-const OP_DUP_0: u64 = 0x30; // Dup { n: 0 }
-const OP_IDX_1: u64 = 0x50; // Idx { cached: false, push_path: false, 1-entry path }
-const OP_IDX_PP_1: u64 = 0x70; // Idx { cached: false, push_path: true, 1-entry path }
-const OP_PUSH: u64 = 0x10; // Push { storage: false }
-const OP_PUSH_S: u64 = 0x11; // Push { storage: true }
-const OP_MEMBER: u64 = 0x18; // Member
-const OP_POPEQ: u64 = 0x0C; // Popeq { cached: false }
-const OP_POPEQ_C: u64 = 0x0D; // Popeq { cached: true }
-const OP_INS_1: u64 = 0x91; // Ins { cached: false, n: 1 }
-const OP_INS_C_1: u64 = 0xA1; // Ins { cached: true, n: 1 }
-
 /// Splits a 32-byte value into its circuit field representation:
 /// `[bytes[31], LE(bytes[0..31])]`, mirroring `FieldRepr` for `[u8; 32]`.
 pub fn split_bytes32(bytes: &[u8; 32]) -> [Fr; 2] {
@@ -121,6 +118,175 @@ pub fn join_bytes32(halves: &[Fr; 2]) -> [u8; 32] {
     out[..31].copy_from_slice(&halves[1].as_le_bytes()[..31]);
     out[31] = halves[0].as_le_bytes()[0];
     out
+}
+
+/// `SHA256(parts[0] || parts[1] || ...)`, split per [`split_bytes32`].
+fn hash_parts(parts: &[&[u8]]) -> [Fr; 2] {
+    split_bytes32(&persistent_hash(&parts.concat()).0)
+}
+
+/// The public transcript of a spend: the Impact program that the ledger
+/// replays against the zswap contract state, together with the outputs it is
+/// expected to produce.
+///
+/// This is the same program `Input::well_formed` builds to verify a spend. The
+/// state slots (`0` merkle tree, `1` nullifiers, `2` value commitment,
+/// `3` contract address, `5` segment) are those of the `zswap.compact` ledger.
+#[derive(Clone, Debug)]
+pub struct SpendTranscript {
+    /// The Merkle tree root the spent commitment is a member of.
+    pub merkle_root: Fr,
+    /// The result of the historic root membership check; `true` for any valid
+    /// spend.
+    pub root_check_passed: bool,
+    /// The coin nullifier.
+    pub nullifier: [u8; 32],
+    /// The owning contract, for contract-owned coins.
+    pub contract_address: Option<[u8; 32]>,
+    /// The Pedersen value commitment, as (x, y).
+    pub value_commitment: (Fr, Fr),
+    /// The transaction segment, read back from the contract state.
+    pub segment: u16,
+}
+
+impl SpendTranscript {
+    /// The field representation of the transcript, excluding the binding
+    /// input.
+    pub fn to_field_elements(&self) -> Vec<Fr> {
+        let mut prog = Vec::new();
+        prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
+            [Key::Value(0u8.into())],
+            false,
+            32,
+            Fr,
+            self.merkle_root
+        ));
+        prog.extend(Set_insert!(
+            [Key::Value(1u8.into())],
+            false,
+            [u8; 32],
+            Nullifier(HashOutput(self.nullifier))
+        ));
+        match self.contract_address {
+            Some(addr) => prog.extend(Cell_write!(
+                [Key::Value(3u8.into())],
+                false,
+                ContractAddress,
+                ContractAddress(HashOutput(addr))
+            )),
+            None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
+        }
+        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_write!(
+            [Key::Value(2u8.into())],
+            false,
+            (Fr, Fr),
+            self.value_commitment
+        ));
+
+        let outputs = [self.root_check_passed.into(), self.segment.into()];
+        let mut elements = Vec::new();
+        for op in with_outputs(prog.into_iter(), outputs.into_iter()) {
+            op.field_repr(&mut elements);
+        }
+        elements
+    }
+}
+
+/// How one public input (after the binding input) is obtained in-circuit.
+#[derive(Clone, Copy, Debug)]
+enum PI {
+    /// Fixed by the shape of the program (opcodes, paths, alignments).
+    Const(Fr),
+    /// `c` for contract-owned spends, `0` for user-owned spends.
+    IfContract(Fr),
+    MerkleRoot,
+    RootCheck,
+    /// Half of the nullifier, in `split_bytes32` order.
+    Nullifier(usize),
+    /// Half of the contract address, in `split_bytes32` order; zero for user
+    /// spends.
+    Address(usize),
+    ValueCommitment(usize),
+    Segment,
+}
+
+/// Derives the circuit's public-input layout from [`SpendTranscript`].
+///
+/// A position is a *variable* if it changes when exactly that field of the
+/// transcript changes, *contract-guarded* if it only differs between a
+/// contract-owned and a user-owned spend, and a constant otherwise.
+fn spend_layout() -> &'static [PI] {
+    // A transcript field: how to copy it between transcripts, and how the
+    // circuit refers to the `k`th element it occupies.
+    type Field = (fn(&mut SpendTranscript, &SpendTranscript), fn(usize) -> PI);
+    const FIELDS: [Field; 6] = [
+        (|t, s| t.merkle_root = s.merkle_root, |_| PI::MerkleRoot),
+        (
+            |t, s| t.root_check_passed = s.root_check_passed,
+            |_| PI::RootCheck,
+        ),
+        (|t, s| t.nullifier = s.nullifier, PI::Nullifier),
+        (|t, s| t.contract_address = s.contract_address, PI::Address),
+        (
+            |t, s| t.value_commitment = s.value_commitment,
+            PI::ValueCommitment,
+        ),
+        (|t, s| t.segment = s.segment, |_| PI::Segment),
+    ];
+
+    static LAYOUT: OnceLock<Vec<PI>> = OnceLock::new();
+    LAYOUT.get_or_init(|| {
+        // Two contract-owned transcripts that differ in every field.
+        let sample = |seed: u8| SpendTranscript {
+            merkle_root: Fr::from(100 + seed as u64),
+            root_check_passed: seed != 0,
+            nullifier: [1 + seed; 32],
+            contract_address: Some([3 + seed; 32]),
+            value_commitment: (Fr::from(200 + seed as u64), Fr::from(300 + seed as u64)),
+            segment: seed as u16,
+        };
+        let (a, b) = (sample(0), sample(1));
+        let contract = a.to_field_elements();
+        let user = SpendTranscript {
+            contract_address: None,
+            ..a.clone()
+        }
+        .to_field_elements();
+
+        let mut layout: Vec<_> = contract
+            .iter()
+            .zip(&user)
+            .map(|(c, u)| {
+                if c == u {
+                    PI::Const(*c)
+                } else {
+                    PI::IfContract(*c)
+                }
+            })
+            .collect();
+        for (copy_field, pi) in FIELDS {
+            let mut probe = a.clone();
+            copy_field(&mut probe, &b);
+            let probed = probe.to_field_elements();
+            let changed = (0..layout.len()).filter(|&i| probed[i] != contract[i]);
+            for (k, i) in changed.enumerate() {
+                assert!(
+                    matches!(layout[i], PI::Const(_) | PI::IfContract(_)),
+                    "transcript fields overlap"
+                );
+                layout[i] = pi(k);
+            }
+        }
+
+        // The contract guard must zero exactly the contract-address write.
+        for (i, pi) in layout.iter().enumerate() {
+            let guarded = matches!(pi, PI::IfContract(_) | PI::Address(_));
+            let expected = if guarded { Fr::from(0u64) } else { contract[i] };
+            assert!(user[i] == expected, "unexpected contract guard");
+        }
+        layout
+    })
 }
 
 /// The private inputs to a zswap spend.
@@ -151,28 +317,22 @@ pub struct SpendWitness {
     /// The binding input committing to the rest of the transaction.
     pub binding_input: Fr,
     /// The result of the transcript's historic root membership check, read
-    /// from the public transcript outputs. `1` for any valid spend.
-    pub check_root_result: Fr,
+    /// from the public transcript outputs. `true` for any valid spend.
+    pub check_root_result: bool,
     /// The transaction segment, read from the public transcript outputs.
-    pub segment: Fr,
+    pub segment: u16,
 }
 
 impl SpendWitness {
     /// The primary input vector, in IR memory order.
     pub fn flatten(&self) -> Vec<Fr> {
-        let mut inputs = Vec::with_capacity(NUM_INPUTS);
-        inputs.push((self.is_user as u64).into()); // v0
-        inputs.extend(self.sk); // v1, v2
-        inputs.extend(self.contract_address); // v3, v4
-        inputs.extend(self.commitment); // v5, v6
+        let mut inputs = vec![Fr::from(self.is_user as u64)];
+        inputs.extend([self.sk, self.contract_address, self.commitment].concat());
         for (sibling, goes_left) in &self.path {
-            inputs.push(*sibling); // v7, v9, ..., v69
-            inputs.push((*goes_left as u64).into()); // v8, v10, ..., v70
+            inputs.extend([*sibling, Fr::from(*goes_left as u64)]);
         }
-        inputs.extend(self.nonce); // v71, v72
-        inputs.extend(self.token_type); // v73, v74
-        inputs.push(self.value); // v75
-        inputs.push(self.rc); // v76
+        inputs.extend([self.nonce, self.token_type].concat());
+        inputs.extend([self.value, self.rc]);
         debug_assert_eq!(inputs.len(), NUM_INPUTS);
         inputs
     }
@@ -190,33 +350,23 @@ impl SpendWitness {
             })
     }
 
-    /// The hash preimage shared by the commitment and nullifier, minus the
-    /// domain separator and trailing key material.
-    fn coin_bytes(&self) -> Vec<u8> {
-        let mut data = Vec::with_capacity(32 + 32 + 16 + 1);
-        data.extend(join_bytes32(&self.nonce));
-        data.extend(join_bytes32(&self.token_type));
-        data.extend(&self.value.as_le_bytes()[..16]);
-        data.push(self.is_user as u8);
-        data
-    }
-
+    /// `SHA256(domain_sep || nonce || type || value || is_user || key)`.
     fn keyed_coin_hash(&self, domain_sep: &[u8; 21], key: &[Fr; 2]) -> [Fr; 2] {
-        let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
-        data.extend(domain_sep);
-        data.extend(self.coin_bytes());
-        data.extend(join_bytes32(key));
-        split_bytes32(&base_crypto::hash::persistent_hash(&data).0)
+        hash_parts(&[
+            domain_sep,
+            &join_bytes32(&self.nonce),
+            &join_bytes32(&self.token_type),
+            &self.value.as_le_bytes()[..16],
+            &[self.is_user as u8],
+            &join_bytes32(key),
+        ])
     }
 
     /// The commitment target: the coin public key for user-owned coins, or
     /// the contract address.
     pub fn target(&self) -> [Fr; 2] {
         if self.is_user {
-            let mut data = Vec::with_capacity(21 + 32);
-            data.extend(PK_DOMAIN_SEP);
-            data.extend(join_bytes32(&self.sk));
-            split_bytes32(&base_crypto::hash::persistent_hash(&data).0)
+            hash_parts(&[PK_DOMAIN_SEP, &join_bytes32(&self.sk)])
         } else {
             self.contract_address
         }
@@ -232,76 +382,53 @@ impl SpendWitness {
     /// The coin nullifier, split per [`split_bytes32`].
     pub fn nullifier(&self) -> [Fr; 2] {
         let sender = if self.is_user {
-            self.sk
+            &self.sk
         } else {
-            self.contract_address
+            &self.contract_address
         };
-        self.keyed_coin_hash(CN_DOMAIN_SEP, &sender)
+        self.keyed_coin_hash(CN_DOMAIN_SEP, sender)
     }
 
     /// The Pedersen value commitment
     /// `value * hash_to_curve(type, segment) + rc * G`, as (x, y).
     pub fn value_commitment(&self) -> [Fr; 2] {
-        let base = hash_to_curve(&[self.token_type[0], self.token_type[1], self.segment]);
+        let [hi, lo] = self.token_type;
+        let base = hash_to_curve(&[hi, lo, Fr::from(self.segment as u64)]);
         let point = EmbeddedGroupAffine::generator() * self.rc + base * self.value;
         [point.x().unwrap_or(0.into()), point.y().unwrap_or(0.into())]
+    }
+
+    /// The public transcript this witness satisfies.
+    pub fn transcript(&self) -> SpendTranscript {
+        SpendTranscript {
+            merkle_root: self.merkle_root(),
+            root_check_passed: self.check_root_result,
+            nullifier: join_bytes32(&self.nullifier()),
+            contract_address: (!self.is_user).then(|| join_bytes32(&self.contract_address)),
+            value_commitment: self.value_commitment().into(),
+            segment: self.segment,
+        }
     }
 
     /// The full public input vector this witness satisfies, including the
     /// binding input, in circuit order.
     pub fn public_inputs(&self) -> Vec<Fr> {
-        let fr = |v: u64| Fr::from(v);
-        let is_contract: Fr = ((!self.is_user) as u64).into();
-        // `x` if the coin is contract-owned, `0` otherwise.
-        let if_contract = |v: Fr| if self.is_user { 0.into() } else { v };
-        let [cn_hi, cn_lo] = self.nullifier();
-        let [vc_x, vc_y] = self.value_commitment();
-        let neg_two = -Fr::from(2);
-
-        let mut pis = Vec::with_capacity(NUM_PUBLIC_INPUTS);
-        pis.push(self.binding_input);
-        // HistoricMerkleTree_check_root([0], root): Dup 0, Idx [0], Idx [2],
-        // Push root, Member, Popeq(cached) result.
-        pis.push(fr(OP_DUP_0));
-        pis.extend([fr(OP_IDX_1), fr(1), fr(1), fr(0)]);
-        pis.extend([fr(OP_IDX_1), fr(1), fr(1), fr(2)]);
-        pis.extend([fr(OP_PUSH), fr(1), fr(1), neg_two, self.merkle_root()]);
-        pis.push(fr(OP_MEMBER));
-        pis.extend([fr(OP_POPEQ_C), fr(1), fr(1), self.check_root_result]);
-        // Set_insert([1], nullifier): Idx(push_path) [1], Push nullifier,
-        // Push(storage) null, Ins, Ins(cached).
-        pis.extend([fr(OP_IDX_PP_1), fr(1), fr(1), fr(1)]);
-        pis.extend([fr(OP_PUSH), fr(1), fr(1), fr(0x20), cn_hi, cn_lo]);
-        pis.extend([fr(OP_PUSH_S), fr(0)]);
-        pis.push(fr(OP_INS_1));
-        pis.push(fr(OP_INS_C_1));
-        // Cell_write([3], contract_address), active for contract-owned coins
-        // only; inactive spends zero the block (its guard is part of the
-        // statement).
-        pis.extend([
-            if_contract(fr(OP_PUSH)),
-            is_contract,
-            is_contract,
-            is_contract,
-            if_contract(fr(3)),
-            if_contract(fr(OP_PUSH_S)),
-            is_contract,
-            is_contract,
-            if_contract(fr(0x20)),
-            if_contract(self.contract_address[0]),
-            if_contract(self.contract_address[1]),
-            if_contract(fr(OP_INS_1)),
-        ]);
-        // Cell_read([5], segment): Dup 0, Idx [5], Popeq result.
-        pis.push(fr(OP_DUP_0));
-        pis.extend([fr(OP_IDX_1), fr(1), fr(1), fr(5)]);
-        pis.extend([fr(OP_POPEQ), fr(1), fr(2), self.segment]);
-        // Cell_write([2], value_commitment): Idx [2]? encoded as Push ... Ins.
-        pis.extend([fr(OP_PUSH), fr(1), fr(1), fr(1), fr(2)]);
-        pis.extend([fr(OP_PUSH_S), fr(1), fr(2), neg_two, neg_two, vc_x, vc_y]);
-        pis.push(fr(OP_INS_1));
-        debug_assert_eq!(pis.len(), NUM_PUBLIC_INPUTS);
+        let mut pis = vec![self.binding_input];
+        pis.extend(self.transcript().to_field_elements());
         pis
+    }
+
+    /// The public transcript inputs of the proof preimage: the declared public
+    /// inputs minus the binding input, with the contract-address block removed
+    /// when it is skipped (user-owned spends).
+    pub fn public_transcript_inputs(&self) -> Vec<Fr> {
+        self.transcript()
+            .to_field_elements()
+            .into_iter()
+            .zip(spend_layout())
+            .filter(|(_, pi)| !self.is_user || !matches!(pi, PI::IfContract(_) | PI::Address(_)))
+            .map(|(element, _)| element)
+            .collect()
     }
 }
 
@@ -310,44 +437,127 @@ impl SpendWitness {
 pub struct ZswapSpend;
 
 type Assigned = AssignedNative<OldScalar>;
+type Bit = AssignedBit<OldScalar>;
+type Byte = AssignedByte<OldScalar>;
+/// A 32-byte value split per [`split_bytes32`], in-circuit.
+type Pair = [Assigned; 2];
 
-/// Mirrors the IR interpreter's lowering of `cond_select`:
-/// `bit != 0 ? a : b`.
-fn cond_select(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<OldScalar>,
-    bit: &Assigned,
-    a: &Assigned,
-    b: &Assigned,
-) -> Result<Assigned, Error> {
-    let bit_is_zero = std.is_zero(layouter, bit)?;
-    std.select(layouter, &bit_is_zero, b, a)
+/// The coin fields shared by the commitment and the nullifier, decoded once.
+struct Coin {
+    /// `nonce || type || value || is_user`, as hashed.
+    bytes: Vec<Byte>,
+    /// The 16 little-endian bytes of `value`, a sub-slice of `bytes`.
+    value: Vec<Byte>,
 }
 
-/// Mirrors the IR interpreter's lowering of `persistent_hash`: decode the
-/// field-aligned inputs to bytes, SHA256 them, and return the result split as
-/// (last byte, first 31 bytes).
-fn persistent_hash(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<OldScalar>,
-    alignment: &Alignment,
-    inputs: &[Assigned],
-) -> Result<(Assigned, Assigned), Error> {
-    let bytes = v1_fab_decode_to_bytes(std, layouter, alignment, inputs)?;
-    let res_bytes = std.sha2_256(layouter, &bytes)?;
-    let hi = std.convert(layouter, &res_bytes[31])?;
-    let lo = v1_assemble_bytes(std, layouter, &res_bytes[..31])?;
-    Ok((hi, lo))
+/// The standard library and layouter that gadgets are built with.
+struct Gadgets<'a, L> {
+    std: &'a ZkStdLib,
+    layouter: &'a mut L,
 }
 
-/// The alignment of a sequence of plain byte strings.
-fn bytes_alignment(lengths: &[u32]) -> Alignment {
-    Alignment(
-        lengths
+impl<L: Layouter<OldScalar>> Gadgets<'_, L> {
+    fn assign(&mut self, value: Value<Fr>) -> Result<Assigned, Error> {
+        self.std.assign(self.layouter, value.map(|f| cvt(f.0)))
+    }
+
+    fn fixed(&mut self, constant: Fr) -> Result<Assigned, Error> {
+        self.std.assign_fixed(self.layouter, cvt(constant.0))
+    }
+
+    /// Constrains `x` to be a bit.
+    fn bit(&mut self, x: &Assigned) -> Result<Bit, Error> {
+        self.std.convert(self.layouter, x)
+    }
+
+    /// `bit ? a : b`.
+    fn select(&mut self, bit: &Bit, a: &Assigned, b: &Assigned) -> Result<Assigned, Error> {
+        self.std.select(self.layouter, bit, a, b)
+    }
+
+    fn select_pair(&mut self, bit: &Bit, a: &Pair, b: &Pair) -> Result<Pair, Error> {
+        Ok([
+            self.select(bit, &a[0], &b[0])?,
+            self.select(bit, &a[1], &b[1])?,
+        ])
+    }
+
+    /// The `n` little-endian bytes of `x`. Constrains `x < 2^(8n)`.
+    fn bytes(&mut self, x: &Assigned, n: usize) -> Result<Vec<Byte>, Error> {
+        self.std.assigned_to_le_bytes(self.layouter, x, Some(n))
+    }
+
+    /// The bytes of a [`split_bytes32`] pair, as [`join_bytes32`] orders them.
+    fn bytes32(&mut self, [hi, lo]: &Pair) -> Result<Vec<Byte>, Error> {
+        let mut bytes = self.bytes(lo, 31)?;
+        bytes.extend(self.bytes(hi, 1)?);
+        Ok(bytes)
+    }
+
+    /// `SHA256(parts[0] || parts[1] || ...)`, split per [`split_bytes32`].
+    fn sha256(&mut self, parts: &[&[Byte]]) -> Result<Pair, Error> {
+        let digest = self.std.sha2_256(self.layouter, &parts.concat())?;
+        Ok([
+            self.std.convert(self.layouter, &digest[31])?,
+            self.std
+                .assigned_from_le_bytes(self.layouter, &digest[..31])?,
+        ])
+    }
+
+    fn domain_sep(&mut self, domain_sep: &[u8; 21]) -> Result<Vec<Byte>, Error> {
+        domain_sep
             .iter()
-            .map(|length| AlignmentSegment::Atom(AlignmentAtom::Bytes { length: *length }))
-            .collect(),
-    )
+            .map(|byte| self.std.assign_fixed(self.layouter, *byte))
+            .collect()
+    }
+
+    /// `SHA256(domain_sep || nonce || type || value || is_user || key)`.
+    fn coin_hash(&mut self, domain_sep: &[u8; 21], coin: &Coin, key: &Pair) -> Result<Pair, Error> {
+        let domain_sep = self.domain_sep(domain_sep)?;
+        let key = self.bytes32(key)?;
+        self.sha256(&[&domain_sep, &coin.bytes, &key])
+    }
+
+    /// Poseidon-hashes the leaf up the Merkle path, each level ordered by the
+    /// direction bit.
+    fn merkle_root(
+        &mut self,
+        leaf: &Assigned,
+        path: &[(Assigned, Bit)],
+    ) -> Result<Assigned, Error> {
+        path.iter()
+            .try_fold(leaf.clone(), |node, (sibling, goes_left)| {
+                let left = self.select(goes_left, &node, sibling)?;
+                let right = self.select(goes_left, sibling, &node)?;
+                self.std.poseidon(self.layouter, &[left, right])
+            })
+    }
+
+    /// `value * hash_to_curve(type, segment) + rc * G`, as (x, y).
+    fn value_commitment(
+        &mut self,
+        token_type: &Pair,
+        coin: &Coin,
+        segment: &Assigned,
+        rc: &Assigned,
+    ) -> Result<Pair, Error> {
+        let jubjub = self.std.jubjub();
+        let [hi, lo] = token_type.clone();
+        let base = self
+            .std
+            .hash_to_curve(self.layouter, &[hi, lo, segment.clone()])?;
+        let generator: AssignedNativePoint<OldEmbeddedAffineExt> =
+            jubjub.assign_fixed(self.layouter, OldEmbeddedAffine::generator())?;
+        let rc = jubjub.convert(self.layouter, rc)?;
+        // Built from the hashed value bytes, not from `convert(value)`: this
+        // gives 128 bits, not 255, and ties the committed value to the hashed
+        // one. `value < 2^128 < r_J`, so no reduction occurs.
+        let value = jubjub.scalar_from_le_bytes(self.layouter, &coin.value)?;
+        let blinding = jubjub.msm(self.layouter, &[rc], &[generator])?;
+        let committed = jubjub.msm(self.layouter, &[value], &[base])?;
+        let sum = jubjub.add(self.layouter, &blinding, &committed)?;
+        Ok([jubjub.x_coordinate(&sum), jubjub.y_coordinate(&sum)])
+    }
 }
 
 impl Relation for ZswapSpend {
@@ -359,9 +569,6 @@ impl Relation for ZswapSpend {
         Ok(instance.clone())
     }
 
-    // IR variable indices (vNNN) refer to `zswap/static/spend.zkir`, and
-    // pi[N] to positions in the public input vector; they are cited so this
-    // implementation can be audited against the IR side-by-side.
     fn circuit(
         &self,
         std: &ZkStdLib,
@@ -369,256 +576,108 @@ impl Relation for ZswapSpend {
         _instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
-        let fixed = |layouter: &mut _, v: u64| -> Result<Assigned, Error> {
-            std.assign_fixed(layouter, OldScalar::from(v))
-        };
+        let mut g = Gadgets { std, layouter };
 
-        // Primary inputs (v0..v76), assigned as one batch.
-        let input_values = witness.as_ref().map(|w| {
+        // The primary inputs, in `SpendWitness::flatten` order.
+        let inputs = witness.as_ref().map(|w| {
             w.flatten()
                 .into_iter()
                 .map(|f| cvt(f.0))
                 .collect::<Vec<_>>()
         });
-        let memory = std.assign_many(layouter, &input_values.transpose_vec(NUM_INPUTS))?;
+        let mut cells = std
+            .assign_many(g.layouter, &inputs.transpose_vec(NUM_INPUTS))?
+            .into_iter();
+        let mut next = || cells.next().expect("one cell per witness input");
+        let is_user = next();
+        let sk = [next(), next()];
+        let contract_address = [next(), next()];
+        // Unused: the Merkle leaf is the commitment computed below, so this
+        // witness would only be constrained to equal it.
+        let _commitment = [next(), next()];
+        let path: Vec<_> = (0..ZSWAP_TREE_HEIGHT).map(|_| (next(), next())).collect();
+        let nonce = [next(), next()];
+        let token_type = [next(), next()];
+        let value = next();
+        let rc = next();
 
-        let is_user = &memory[0];
-        let sk = [&memory[1], &memory[2]];
-        let contract_address = [&memory[3], &memory[4]];
-        let commitment = [&memory[5], &memory[6]];
-        let path = (0..ZSWAP_TREE_HEIGHT)
-            .map(|i| (&memory[7 + 2 * i], &memory[8 + 2 * i]))
-            .collect::<Vec<_>>();
-        let nonce = [&memory[71], &memory[72]];
-        let token_type = [&memory[73], &memory[74]];
-        let value = &memory[75];
-        let rc = &memory[76];
-
-        let binding_input =
-            std.assign(layouter, witness.as_ref().map(|w| cvt(w.binding_input.0)))?;
-        let mut pis = vec![binding_input]; // pi[0]
-
-        // Range constraints on the primary inputs.
-        let _: AssignedBit<_> = std.convert(layouter, is_user)?;
-        for [hi, lo] in [sk, contract_address, commitment] {
-            drop(std.assigned_to_le_bits(layouter, hi, Some(8), false)?);
-            drop(std.assigned_to_le_bits(layouter, lo, Some(248), false)?);
-        }
-        for (_, goes_left) in &path {
-            let _: AssignedBit<_> = std.convert(layouter, *goes_left)?;
-        }
-        for [hi, lo] in [nonce, token_type] {
-            drop(std.assigned_to_le_bits(layouter, hi, Some(8), false)?);
-            drop(std.assigned_to_le_bits(layouter, lo, Some(248), false)?);
-        }
-        drop(std.assigned_to_le_bits(layouter, value, Some(128), false)?);
-
-        let one = fixed(layouter, 1)?; // v77
-
-        // Merkle path ascent: the leaf is the low half of the commitment;
-        // each level Poseidon-hashes the running node with its sibling,
-        // ordered by the direction bit.
-        let mut node = commitment[1].clone();
-        for (sibling, goes_left) in &path {
-            let left = cond_select(std, layouter, goes_left, &node, sibling)?;
-            let right = cond_select(std, layouter, goes_left, sibling, &node)?;
-            node = std.poseidon(layouter, &[left, right])?;
-        }
-        let root = node; // v173
-
-        // Transcript: HistoricMerkleTree_check_root([0], root).
-        let op_dup_0 = fixed(layouter, OP_DUP_0)?; // v174
-        pis.push(op_dup_0.clone()); // pi[1]
-        let op_idx_1 = fixed(layouter, OP_IDX_1)?; // v175
-        let zero = fixed(layouter, 0)?; // v176
-        pis.extend([op_idx_1.clone(), one.clone(), one.clone(), zero.clone()]); // pi[2..6]
-        let two = fixed(layouter, 2)?; // v177
-        pis.extend([op_idx_1.clone(), one.clone(), one.clone(), two.clone()]); // pi[6..10]
-        let op_push = fixed(layouter, OP_PUSH)?; // v178
-        let neg_two: Assigned = std.assign_fixed(layouter, -OldScalar::from(2))?; // v179
-        pis.extend([
-            op_push.clone(),
-            one.clone(),
-            one.clone(),
-            neg_two.clone(),
-            root,
-        ]); // pi[10..15]
-        let op_member = fixed(layouter, OP_MEMBER)?; // v180
-        pis.push(op_member); // pi[15]
-        let check_root_result = std.assign(
-            layouter,
-            witness.as_ref().map(|w| cvt(w.check_root_result.0)),
-        )?; // v181
-        let op_popeq_c = fixed(layouter, OP_POPEQ_C)?; // v182
-        pis.extend([op_popeq_c, one.clone(), one.clone(), check_root_result]); // pi[16..20]
-
-        // Commitment opening: derive the coin public key from the secret key,
-        // select the commitment target, and check the commitment equals the
-        // Merkle leaf.
-        let ds_pk = std.assign_fixed(
-            layouter,
-            cvt(Fr::from_le_bytes(PK_DOMAIN_SEP)
-                .expect("21 bytes fit in Fr")
-                .0),
-        )?; // v183
-        let (pk_hi, pk_lo) = persistent_hash(
-            std,
-            layouter,
-            &bytes_alignment(&[21, 32]),
-            &[ds_pk, sk[0].clone(), sk[1].clone()],
-        )?; // v184, v185
-        let is_contract = cond_select(std, layouter, is_user, &zero, &one)?; // v186
-        let target_hi = cond_select(std, layouter, is_user, &pk_hi, contract_address[0])?; // v187
-        let target_lo = cond_select(std, layouter, is_user, &pk_lo, contract_address[1])?; // v188
-        let ds_cc = std.assign_fixed(
-            layouter,
-            cvt(Fr::from_le_bytes(CC_DOMAIN_SEP)
-                .expect("21 bytes fit in Fr")
-                .0),
-        )?; // v189
-        let coin_alignment = bytes_alignment(&[21, 32, 32, 16, 1, 32]);
-        let (cc_hi, cc_lo) = persistent_hash(
-            std,
-            layouter,
-            &coin_alignment,
-            &[
-                ds_cc,
-                nonce[0].clone(),
-                nonce[1].clone(),
-                token_type[0].clone(),
-                token_type[1].clone(),
-                value.clone(),
-                is_user.clone(),
-                target_hi,
-                target_lo,
-            ],
-        )?; // v190, v191
-        let eq_hi = {
-            let bit = std.is_equal(layouter, &cc_hi, commitment[0])?;
-            std.convert(layouter, &bit)?
-        }; // v192
-        let eq_lo = {
-            let bit = std.is_equal(layouter, &cc_lo, commitment[1])?;
-            std.convert(layouter, &bit)?
-        }; // v193
-        let eq_both = cond_select(std, layouter, &eq_hi, &eq_lo, &zero)?; // v194
-        std.assert_non_zero(layouter, &eq_both)?;
-
-        // Nullifier: as the commitment, but keyed with the sender evidence
-        // (the secret key itself for user-owned coins).
-        let sender_hi = cond_select(std, layouter, is_user, sk[0], contract_address[0])?; // v195
-        let sender_lo = cond_select(std, layouter, is_user, sk[1], contract_address[1])?; // v196
-        let ds_cn = std.assign_fixed(
-            layouter,
-            cvt(Fr::from_le_bytes(CN_DOMAIN_SEP)
-                .expect("21 bytes fit in Fr")
-                .0),
-        )?; // v197
-        let (cn_hi, cn_lo) = persistent_hash(
-            std,
-            layouter,
-            &coin_alignment,
-            &[
-                ds_cn,
-                nonce[0].clone(),
-                nonce[1].clone(),
-                token_type[0].clone(),
-                token_type[1].clone(),
-                value.clone(),
-                is_user.clone(),
-                sender_hi,
-                sender_lo,
-            ],
-        )?; // v198, v199
-
-        // Transcript: Set_insert([1], nullifier).
-        let op_idx_pp_1 = fixed(layouter, OP_IDX_PP_1)?; // v200
-        pis.extend([op_idx_pp_1, one.clone(), one.clone(), one.clone()]); // pi[20..24]
-        let bytes32_len = fixed(layouter, 0x20)?; // v201
-        pis.extend([
-            op_push.clone(),
-            one.clone(),
-            one.clone(),
-            bytes32_len.clone(),
-            cn_hi,
-            cn_lo,
-        ]); // pi[24..30]
-        let op_push_s = fixed(layouter, OP_PUSH_S)?; // v202
-        pis.extend([op_push_s.clone(), zero.clone()]); // pi[30..32]
-        let op_ins_1 = fixed(layouter, OP_INS_1)?; // v203
-        pis.push(op_ins_1.clone()); // pi[32]
-        let op_ins_c_1 = fixed(layouter, OP_INS_C_1)?; // v204
-        pis.push(op_ins_c_1); // pi[33]
-
-        // Transcript: Cell_write([3], contract_address), guarded by
-        // `is_contract`; user spends zero the whole block.
-        let three = fixed(layouter, 3)?; // v205
-        let select_contract =
-            |std: &ZkStdLib, layouter: &mut _, var: &Assigned| -> Result<Assigned, Error> {
-                cond_select(std, layouter, &is_contract, var, &zero)
-            };
-        let g_push = select_contract(std, layouter, &op_push)?; // v206
-        pis.extend([
-            g_push,
-            is_contract.clone(),
-            is_contract.clone(),
-            is_contract.clone(),
-        ]); // pi[34..38]
-        let g_three = select_contract(std, layouter, &three)?; // v207
-        pis.push(g_three); // pi[38]
-        let g_push_s = select_contract(std, layouter, &op_push_s)?; // v208
-        pis.extend([g_push_s, is_contract.clone(), is_contract.clone()]); // pi[39..42]
-        let g_bytes32_len = select_contract(std, layouter, &bytes32_len)?; // v209
-        pis.push(g_bytes32_len); // pi[42]
-        let g_addr_hi = select_contract(std, layouter, contract_address[0])?; // v210
-        pis.push(g_addr_hi); // pi[43]
-        let g_addr_lo = select_contract(std, layouter, contract_address[1])?; // v211
-        pis.push(g_addr_lo); // pi[44]
-        let g_ins = select_contract(std, layouter, &op_ins_1)?; // v212
-        pis.push(g_ins); // pi[45]
-
-        // Transcript: Cell_read([5], segment).
-        pis.push(op_dup_0); // pi[46]
-        let five = fixed(layouter, 5)?; // v213
-        pis.extend([op_idx_1, one.clone(), one.clone(), five]); // pi[47..51]
-        let segment: Assigned = std.assign(layouter, witness.as_ref().map(|w| cvt(w.segment.0)))?; // v214
-        let op_popeq = fixed(layouter, OP_POPEQ)?; // v215
-        pis.extend([op_popeq, one.clone(), two.clone(), segment.clone()]); // pi[51..55]
-
-        // Pedersen value commitment:
-        // value * hash_to_curve(type, segment) + rc * G.
-        let base_point = std.hash_to_curve(
-            layouter,
-            &[token_type[0].clone(), token_type[1].clone(), segment],
+        // The values only the public transcript carries.
+        let binding_input = g.assign(witness.as_ref().map(|w| w.binding_input))?;
+        let root_check_passed = g.assign(
+            witness
+                .as_ref()
+                .map(|w| Fr::from(w.check_root_result as u64)),
         )?;
-        let base_x = std.jubjub().x_coordinate(&base_point); // v216
-        let base_y = std.jubjub().y_coordinate(&base_point); // v217
-        let generator: midnight_circuits_v1::types::AssignedNativePoint<OldEmbeddedAffineExt> = std
-            .jubjub()
-            .assign_fixed(layouter, OldEmbeddedAffine::generator())?;
-        let rc_scalar = std.jubjub().convert(layouter, rc)?;
-        let blind = std.jubjub().msm(layouter, &[rc_scalar], &[generator])?;
-        let blind_x = std.jubjub().x_coordinate(&blind); // v218
-        let blind_y = std.jubjub().y_coordinate(&blind); // v219
-        let base = v1_ecc_from_parts(std, layouter, &base_x, &base_y)?;
-        let value_scalar = std.jubjub().convert(layouter, value)?;
-        let committed = std.jubjub().msm(layouter, &[value_scalar], &[base])?;
-        let committed_x = std.jubjub().x_coordinate(&committed); // v220
-        let committed_y = std.jubjub().y_coordinate(&committed); // v221
-        let blind_pt = v1_ecc_from_parts(std, layouter, &blind_x, &blind_y)?;
-        let committed_pt = v1_ecc_from_parts(std, layouter, &committed_x, &committed_y)?;
-        let vc = std.jubjub().add(layouter, &blind_pt, &committed_pt)?;
-        let vc_x = std.jubjub().x_coordinate(&vc); // v222
-        let vc_y = std.jubjub().y_coordinate(&vc); // v223
+        let segment = g.assign(witness.as_ref().map(|w| Fr::from(w.segment as u64)))?;
 
-        // Transcript: Cell_write([2], value_commitment).
-        pis.extend([op_push, one.clone(), one.clone(), one.clone(), two.clone()]); // pi[55..60]
-        pis.extend([op_push_s, one, two, neg_two.clone(), neg_two, vc_x, vc_y]); // pi[60..67]
-        pis.push(op_ins_1); // pi[67]
+        let is_user_bit = g.bit(&is_user)?;
+        let path = path
+            .into_iter()
+            .map(|(sibling, goes_left)| Ok((sibling, g.bit(&goes_left)?)))
+            .collect::<Result<Vec<_>, Error>>()?;
 
+        // The byte decompositions in this function are the only range checks
+        // on `sk`, `nonce`, `token_type` and `value`, and on `contract_address`
+        // through the selected target and sender. For user spends
+        // `contract_address` stays unchecked, but its only use is in public
+        // inputs that are multiplied by `is_contract = 0`.
+        let mut coin_bytes = g.bytes32(&nonce)?;
+        coin_bytes.extend(g.bytes32(&token_type)?);
+        let value_bytes = g.bytes(&value, 16)?;
+        coin_bytes.extend(value_bytes.iter().cloned());
+        coin_bytes.extend(g.bytes(&is_user, 1)?);
+        let coin = Coin {
+            bytes: coin_bytes,
+            value: value_bytes,
+        };
+
+        // Commitment opening: the coin's commitment, with its target (the
+        // public key for users, the contract address otherwise), is the leaf.
+        let ds_pk = g.domain_sep(PK_DOMAIN_SEP)?;
+        let sk_bytes = g.bytes32(&sk)?;
+        let public_key = g.sha256(&[&ds_pk, &sk_bytes])?;
+        let target = g.select_pair(&is_user_bit, &public_key, &contract_address)?;
+        let commitment = g.coin_hash(CC_DOMAIN_SEP, &coin, &target)?;
+
+        // Membership: the leaf is the low half of the commitment.
+        let merkle_root = g.merkle_root(&commitment[1], &path)?;
+
+        // Nullifier: keyed with the sender (the secret key for users).
+        let sender = g.select_pair(&is_user_bit, &sk, &contract_address)?;
+        let nullifier = g.coin_hash(CN_DOMAIN_SEP, &coin, &sender)?;
+
+        let value_commitment = g.value_commitment(&token_type, &coin, &segment, &rc)?;
+
+        // Public transcript: its shape comes from `SpendTranscript`; here we
+        // only say where each variable comes from.
+        let is_contract = std.linear_combination(
+            g.layouter,
+            &[(-OldScalar::from(1u64), is_user)],
+            OldScalar::from(1u64),
+        )?;
+        let mut constants: HashMap<Vec<u8>, Assigned> = HashMap::new();
+        let mut pis = vec![binding_input];
+        for pi in spend_layout() {
+            pis.push(match *pi {
+                PI::Const(c) => match constants.entry(c.as_le_bytes().to_vec()) {
+                    Entry::Occupied(cell) => cell.get().clone(),
+                    Entry::Vacant(slot) => slot.insert(g.fixed(c)?).clone(),
+                },
+                PI::IfContract(c) if c == Fr::from(1u64) => is_contract.clone(),
+                PI::IfContract(c) => std.mul_by_constant(g.layouter, &is_contract, cvt(c.0))?,
+                PI::MerkleRoot => merkle_root.clone(),
+                PI::RootCheck => root_check_passed.clone(),
+                PI::Nullifier(half) => nullifier[half].clone(),
+                PI::Address(half) => {
+                    std.mul(g.layouter, &is_contract, &contract_address[half], None)?
+                }
+                PI::ValueCommitment(coord) => value_commitment[coord].clone(),
+                PI::Segment => segment.clone(),
+            });
+        }
         debug_assert_eq!(pis.len(), NUM_PUBLIC_INPUTS);
         pis.iter()
-            .try_for_each(|pi| std.constrain_as_public_input(layouter, pi))
+            .try_for_each(|pi| std.constrain_as_public_input(g.layouter, pi))
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
@@ -626,15 +685,7 @@ impl Relation for ZswapSpend {
             jubjub: true,
             poseidon: true,
             sha2_256: true,
-            sha2_512: false,
-            sha3_256: false,
-            keccak_256: false,
-            blake2b: false,
-            nr_pow2range_cols: 1,
-            secp256k1: false,
-            bls12_381: false,
-            base64: false,
-            automaton: false,
+            ..ZkStdLibArch::default()
         }
     }
 
@@ -644,5 +695,26 @@ impl Relation for ZswapSpend {
 
     fn read_relation<R: std::io::Read>(_reader: &mut R) -> std::io::Result<Self> {
         Ok(ZswapSpend)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_shape() {
+        let layout = spend_layout();
+        let count = |f: fn(&PI) -> bool| layout.iter().filter(|pi| f(pi)).count();
+        assert_eq!(layout.len() + 1, NUM_PUBLIC_INPUTS);
+        assert_eq!(count(|pi| matches!(pi, PI::MerkleRoot)), 1);
+        assert_eq!(count(|pi| matches!(pi, PI::RootCheck)), 1);
+        assert_eq!(count(|pi| matches!(pi, PI::Nullifier(_))), 2);
+        assert_eq!(count(|pi| matches!(pi, PI::ValueCommitment(_))), 2);
+        assert_eq!(count(|pi| matches!(pi, PI::Segment)), 1);
+        // The contract-address write is the guarded block, `CADDR_OP_LEN` long.
+        let guarded = count(|pi| matches!(pi, PI::Address(_) | PI::IfContract(_)));
+        assert_eq!(guarded, CADDR_OP_LEN as usize);
+        assert_eq!(count(|pi| matches!(pi, PI::Address(_))), 2);
     }
 }
