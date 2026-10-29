@@ -3476,6 +3476,17 @@ mod tests {
     }
 
     #[test]
+    fn min_claimable_rewards_does_not_collapse_with_extreme_parameters() {
+        let mut params = INITIAL_PARAMETERS;
+        // A claim that cannot fit the block prices at `FixedPoint::MAX`; dividing
+        // that by a night/dust ratio between 0.5 and 1 used to wrap negative.
+        params.limits.block_limits.compute_time = CostDuration::from_picoseconds(1);
+        params.limits.block_limits.read_time = CostDuration::from_picoseconds(1);
+        params.dust.night_dust_ratio = 3 * (SPECKS_PER_DUST / STARS_PER_NIGHT) as u64 / 4;
+        assert!(params.min_claimable_rewards() > u64::MAX as u128);
+    }
+
+    #[test]
     fn test_genesis_state() {
         assert_eq!(
             LedgerState::<InMemoryDB>::with_genesis_settings(

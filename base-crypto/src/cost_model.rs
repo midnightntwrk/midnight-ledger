@@ -762,7 +762,8 @@ impl FixedPoint {
         } else {
             i256::from(1u64)
         } + c;
-        if c > i256::from(u128::MAX) {
+        // Saturate at the signed maximum; anything above it would wrap negative.
+        if c > i256::from(i128::MAX) {
             FixedPoint(i128::MAX)
         } else {
             FixedPoint(c.as_i128())
@@ -1043,6 +1044,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn from_u128_div_never_negative() {
+        let max = i128::MAX as u128;
+        for a in [
+            0,
+            1,
+            (1 << 63) - 1,
+            1 << 63,
+            1 << 64,
+            max,
+            max + 1,
+            u128::MAX,
+        ] {
+            for b in [1, 3, 1 << 64, u128::MAX] {
+                assert!(
+                    FixedPoint::from_u128_div(a, b).0 >= 0,
+                    "{a} / {b} went negative"
+                );
+            }
+        }
+        // Largest exactly representable integer quotient.
+        assert_eq!(
+            FixedPoint::from_u128_div((1 << 63) - 1, 1).0,
+            (((1u128 << 63) - 1) << 64) as i128
+        );
+        assert_eq!(FixedPoint::from_u128_div(1 << 63, 1), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u128_div(max + 1, 1 << 64), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u128_div(u128::MAX, 1), FixedPoint::MAX);
+    }
+
+    #[test]
+    fn fixed_point_div_saturates_with_sign() {
+        let three_quarters = FixedPoint::from_u64_div(3, 4);
+        let neg_max = FixedPoint(-i128::MAX);
+        assert_eq!(FixedPoint::MAX / three_quarters, FixedPoint::MAX);
+        assert_eq!(FixedPoint::MAX / -three_quarters, neg_max);
+        assert_eq!(neg_max / three_quarters, neg_max);
+        assert_eq!(neg_max / -three_quarters, FixedPoint::MAX);
+        assert_eq!(FixedPoint(i128::MIN) / three_quarters, neg_max);
+        assert_eq!(FixedPoint::MAX / FixedPoint::MIN_POSITIVE, FixedPoint::MAX);
+        // Quotients in range are unaffected.
+        assert_eq!(
+            FixedPoint::MAX / FixedPoint::from_u64_div(2, 1),
+            FixedPoint(i128::MAX / 2 + 1)
+        );
     }
 
     #[test]
