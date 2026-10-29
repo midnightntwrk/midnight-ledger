@@ -1182,7 +1182,10 @@ export type SegmentSpecifier = { tag: 'first' } | { tag: 'guaranteedOnly' } | { 
  * {@link partitionTranscripts} reserves from the guaranteed budget.
  *
  * Pass the counts of the final transaction, so the guaranteed section is
- * sized for it rather than for the derived default.
+ * sized for it rather than for the derived default. Raising a count moves the
+ * calls toward the fallible section, except for Dust spends, Zswap parts and
+ * non-NIGHT outputs, whose bytes can add more allowance than they cost;
+ * overstating those is caught by `wellFormed`.
  *
  * Obtained from {@link TransactionShape.forCalls}. Adjust a count
  * by assigning to it; a count added in a later version keeps its derived
@@ -1193,9 +1196,11 @@ export class TransactionShape {
 
   /**
    * Runs each call once and derives the shape that
-   * {@link partitionTranscripts} assumes by default.
-   *
-   * These are the partitioner's heuristic totals.
+   * {@link partitionTranscripts} assumes by default: the balanced
+   * transaction the calls imply, with their intent and a fee intent with one
+   * Dust spend, one UTXO spend per token type they receive, the outputs they
+   * send or mint, and a NIGHT change output when they spend NIGHT. Change for
+   * other tokens is not counted; set `nonNightUnshieldedOutputs` to expect it.
    */
   static forCalls(calls: PreTranscript[], params: LedgerParameters): TransactionShape;
 

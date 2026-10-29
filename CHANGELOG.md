@@ -10,6 +10,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 - feat: add `TransactionShape`, `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape` to partition calls against the final transaction's part counts.
 - feat: expose `TransactionShape` in the wasm API as a class obtained from `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to `partitionTranscripts` and `Transaction.addCalls`.
+- fix: transcript partitioning sizes the guaranteed section against the predicted transaction's time-to-dismiss allowance, `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus the reserve for its non-call parts, instead of a floor the reserve could not lower.
+- feat: for transcript partitioning, predicted transaction size and the reserve for the non-call parts are calculated from the mock transaction based on `expectedTxShape`.
 
 ## Ledger 8.2.0-rc.1
 

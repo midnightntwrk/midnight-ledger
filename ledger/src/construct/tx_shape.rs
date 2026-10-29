@@ -23,7 +23,10 @@ use storage::db::DB;
 /// reserves from the guaranteed budget.
 ///
 /// Pass the counts of the final transaction, so the guaranteed section is
-/// sized for it rather than for the derived default.
+/// sized for it rather than for the derived default. Raising a count moves the
+/// calls toward the fallible section, except for Dust spends, Zswap parts and
+/// non-NIGHT outputs, whose bytes can add more allowance than they cost;
+/// overstating those is caught by `well_formed`.
 ///
 /// To adjust a count, start from [`TransactionShape::for_calls`] and set the
 /// field.
@@ -41,6 +44,11 @@ pub struct TransactionShape {
 }
 
 impl TransactionShape {
+    /// The shape of the balanced transaction the calls imply: their intent and
+    /// a fee intent with one Dust spend, one UTXO spend per token type they
+    /// receive, the outputs they send or mint, and a NIGHT change output when
+    /// they spend NIGHT. Change for other tokens is not counted; set
+    /// `non_night_unshielded_outputs` to expect it.
     pub fn for_calls<D: DB>(
         calls: &[PreTranscript<D>],
         params: &LedgerParameters,
@@ -74,13 +82,15 @@ impl TransactionShape {
             zswap_outputs += effects.claimed_shielded_receives.size();
         }
         let night_spends = usize::from(receives_night);
-        let night_outputs = usize::from(sends_night);
+        let change_output = usize::from(receives_night);
+        let night_sends = usize::from(sends_night);
         TransactionShape {
-            intents: 1,
+            // The calls' intent and the one balancing adds.
+            intents: 2,
             night_spends,
-            night_outputs,
+            night_outputs: night_sends + change_output,
             non_night_unshielded_spends: unshielded_spends - night_spends,
-            non_night_unshielded_outputs: unshielded_outputs - night_outputs,
+            non_night_unshielded_outputs: unshielded_outputs - night_sends,
             dust_spends: 1,
             zswap_inputs,
             zswap_outputs,
@@ -90,7 +100,7 @@ impl TransactionShape {
 
 #[cfg(test)]
 mod tests {
-    use super::super::per_tx_cost_reserve;
+    use super::super::mock_tx::mock_tx;
     use super::*;
     use crate::structure::INITIAL_PARAMETERS;
     use base_crypto::hash::HashOutput;
@@ -121,7 +131,7 @@ mod tests {
     fn derived_tx_shapes() -> Vec<(&'static str, Vec<Effects<InMemoryDB>>, TransactionShape)> {
         let night = TokenType::Unshielded(NIGHT);
         let no_effects = TransactionShape {
-            intents: 1,
+            intents: 2,
             night_spends: 0,
             night_outputs: 0,
             non_night_unshielded_spends: 0,
@@ -147,6 +157,17 @@ mod tests {
                 vec![receives(&[night])],
                 TransactionShape {
                     night_spends: 1,
+                    night_outputs: 1,
+                    ..no_effects.clone()
+                },
+            ),
+            (
+                "NIGHT spend and non-NIGHT send",
+                vec![receives(&[night]), sends(&[non_night(1)])],
+                TransactionShape {
+                    night_spends: 1,
+                    night_outputs: 1,
+                    non_night_unshielded_outputs: 1,
                     ..no_effects.clone()
                 },
             ),
@@ -188,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn for_effects_reproduces_partitioner_heuristic() {
+    fn for_effects_counts_the_balanced_transaction() {
         for (case, effects, tx_shape) in derived_tx_shapes() {
             assert_eq!(TransactionShape::for_effects(&effects), tx_shape, "{case}");
         }
@@ -197,8 +218,10 @@ mod tests {
     #[test]
     fn reserve_grows_with_each_count() {
         let model = &INITIAL_PARAMETERS.cost_model;
+        let reserve = |tx_shape: &TransactionShape| {
+            mock_tx::<InMemoryDB>(&[], tx_shape).time_to_dismiss(model)
+        };
         let derived = TransactionShape::for_effects(&[Effects::<InMemoryDB>::default()]);
-        let reserve = per_tx_cost_reserve(&derived, model);
         // Non-NIGHT outputs are left out: inserting a UTXO costs only bytes
         // written, which the reserve, a time, does not count.
         let counts: [fn(&mut TransactionShape) -> &mut usize; 7] = [
@@ -213,10 +236,7 @@ mod tests {
         for count in counts {
             let mut tx_shape = derived.clone();
             *count(&mut tx_shape) += 100;
-            assert!(
-                per_tx_cost_reserve(&tx_shape, model) > reserve,
-                "{tx_shape:?}"
-            );
+            assert!(reserve(&tx_shape) > reserve(&derived), "{tx_shape:?}");
         }
     }
 }
