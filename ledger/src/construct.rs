@@ -24,9 +24,7 @@ use crate::structure::{
     MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
     SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
-use crate::structure::{
-    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
-};
+use crate::structure::{EXPECTED_CONTRACT_DEPTH, SegIntent};
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
@@ -121,7 +119,13 @@ impl<S: SignatureKind<D>, D: DB>
             zswap_inputs,
             zswap_outputs,
             zswap_transients,
-            None,
+            |derived| {
+                derived.with_zswap_parts(
+                    zswap_inputs.len(),
+                    zswap_outputs.len(),
+                    zswap_transients.len(),
+                )
+            },
         )
     }
 
@@ -150,7 +154,7 @@ impl<S: SignatureKind<D>, D: DB>
             zswap_inputs,
             zswap_outputs,
             zswap_transients,
-            Some(expected_tx_shape),
+            |_| expected_tx_shape.clone(),
         )
     }
 
@@ -165,7 +169,7 @@ impl<S: SignatureKind<D>, D: DB>
         zswap_inputs: &[ZswapInput<ProofPreimage, D>],
         zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
         zswap_transients: &[ZswapTransient<ProofPreimage, D>],
-        expected_tx_shape: Option<&TransactionShape>,
+        choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
     ) -> Result<Self, PartitionFailure<D>>
     where
         P: ContractCallExt<D>,
@@ -181,7 +185,7 @@ impl<S: SignatureKind<D>, D: DB>
                 ..call.pre_transcript.clone()
             })
             .collect::<Vec<_>>();
-        let partitioned = partition_transcripts_inner(&pre_transcripts, params, expected_tx_shape)?;
+        let partitioned = partition_transcripts_inner(&pre_transcripts, params, choose_tx_shape)?;
         let segment = match segment {
             SegmentSpecifier::First => 1,
             SegmentSpecifier::GuaranteedOnly
@@ -847,7 +851,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(params, false, 0),
+                    gas: res.gas_heuristic(params, false),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -862,48 +866,24 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(
-        &self,
-        params: &LedgerParameters,
-        include_external: bool,
-        public_input_count: usize,
-    ) -> RunningCost;
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost;
 }
 
-// gas_heuristic and the reserve, `mock_tx(&[], tx_shape).time_to_dismiss`,
-// together approximate Transaction::cost for use during transcript
+// gas_heuristic and the reserve, `mock_tx(calls, tx_shape).time_to_dismiss`,
+// together approximate Transaction::time_to_dismiss for use during transcript
 // partitioning, before the final Transaction exists. The reserve covers the
-// parts the TransactionShape counts; gas_heuristic covers, per call:
-//   From validation_cost: VK reads (cell_read + map_index for contract and
-//     operations depth, once per unique call), and ContractAction::Call proof
-//     verification (proof_verify + verifier_key_load). Parallelism is applied
-//     to the validation compute_time as in Transaction::cost.
-//   From application_cost: ContractAction::Call state fetch/store (map_index
-//     + map_insert for contract depth and sequence number) and
-//     stack_setup_cost for the call's effects.
+// validation cost of every part, the calls' proof verification and VK reads
+// included, and the application cost of the non-call parts. gas_heuristic
+// covers, per call kept guaranteed, its gas with 20% overhead and its
+// application cost: state fetch/store and stack setup for its effects.
 
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(
-        &self,
-        params: &LedgerParameters,
-        include_external: bool,
-        public_input_count: usize,
-    ) -> RunningCost {
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost {
         let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
         if !include_external {
             return transcript_gas_cost_with_overhead;
         }
         let model = &params.cost_model;
-
-        let mut validation = RunningCost::ZERO;
-        validation += model.cell_read(VERIFIER_KEY_SIZE as u64)
-            + model.map_index(EXPECTED_CONTRACT_DEPTH)
-            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
-        if public_input_count > 0 {
-            validation += model.proof_verify(public_input_count);
-            validation.compute_time += model.runtime_cost_model.verifier_key_load;
-        }
-        validation.compute_time = validation.compute_time / model.parallelism_factor;
 
         let mut application = RunningCost::ZERO;
         application += model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -912,7 +892,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
             + model.map_insert(1, true);
         application += model.stack_setup_cost_for_effects(&self.context.effects);
 
-        transcript_gas_cost_with_overhead + validation + application
+        transcript_gas_cost_with_overhead + application
     }
 }
 
@@ -929,7 +909,7 @@ pub fn partition_transcripts<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
-    partition_transcripts_inner(calls, params, None)
+    partition_transcripts_inner(calls, params, |derived| derived)
 }
 
 /// Splits each call's transcript into its guaranteed and fallible parts.
@@ -940,13 +920,15 @@ pub fn partition_transcripts_with_tx_shape<D: DB>(
     params: &LedgerParameters,
     expected_tx_shape: &TransactionShape,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
-    partition_transcripts_inner(calls, params, Some(expected_tx_shape))
+    partition_transcripts_inner(calls, params, |_| expected_tx_shape.clone())
 }
 
+/// `choose_tx_shape` gets the shape the calls imply and returns the one to size
+/// the partition for.
 fn partition_transcripts_inner<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
-    expected_tx_shape: Option<&TransactionShape>,
+    choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     if calls.is_empty() {
         return Ok(Vec::new());
@@ -1033,12 +1015,15 @@ fn partition_transcripts_inner<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let tx_shape = expected_tx_shape.cloned().unwrap_or_else(|| {
-        TransactionShape::for_effects(full_runs.iter().map(|run| &run.context.effects))
-    });
-    let reserve = mock_tx::<D>(&[], &tx_shape).time_to_dismiss(&params.cost_model);
+    let tx_shape = choose_tx_shape(TransactionShape::for_effects(
+        full_runs
+            .iter()
+            .map(|run| (run.context.address, &run.context.effects)),
+    ));
+    let mock = mock_tx(calls, &tx_shape);
+    let reserve = mock.time_to_dismiss(&params.cost_model);
     let allowance = CostDuration::max(
-        params.limits.time_to_dismiss_per_byte * mock_tx(calls, &tx_shape).serialized_size() as u64,
+        params.limits.time_to_dismiss_per_byte * mock.serialized_size() as u64,
         params.limits.min_time_to_dismiss,
     );
     if reserve >= allowance {
@@ -1094,15 +1079,10 @@ fn partition_transcripts_inner<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let public_input_count = calls[root].program.field_size() + 2;
-                let mut required_budget = partial_res
-                    .gas_heuristic(params, true, public_input_count)
-                    .max_time();
+                let mut required_budget = partial_res.gas_heuristic(params, true).max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next]
-                        .gas_heuristic(params, true, public_input_count)
-                        .max_time();
+                    required_budget += full_runs[next].gas_heuristic(params, true).max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {

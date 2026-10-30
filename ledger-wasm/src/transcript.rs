@@ -156,6 +156,36 @@ impl TransactionShape {
         self.0.zswap_outputs = zswap_outputs;
     }
 
+    #[wasm_bindgen(getter, js_name = "zswapTransients")]
+    pub fn zswap_transients(&self) -> usize {
+        self.0.zswap_transients
+    }
+
+    #[wasm_bindgen(setter, js_name = "zswapTransients")]
+    pub fn set_zswap_transients(&mut self, zswap_transients: usize) {
+        self.0.zswap_transients = zswap_transients;
+    }
+
+    #[wasm_bindgen(getter, js_name = "dustRegistrations")]
+    pub fn dust_registrations(&self) -> usize {
+        self.0.dust_registrations
+    }
+
+    #[wasm_bindgen(setter, js_name = "dustRegistrations")]
+    pub fn set_dust_registrations(&mut self, dust_registrations: usize) {
+        self.0.dust_registrations = dust_registrations;
+    }
+
+    #[wasm_bindgen(getter, js_name = "dustDeregistrations")]
+    pub fn dust_deregistrations(&self) -> usize {
+        self.0.dust_deregistrations
+    }
+
+    #[wasm_bindgen(setter, js_name = "dustDeregistrations")]
+    pub fn set_dust_deregistrations(&mut self, dust_deregistrations: usize) {
+        self.0.dust_deregistrations = dust_deregistrations;
+    }
+
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
