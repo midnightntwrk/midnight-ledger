@@ -3157,9 +3157,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "7.2.4"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3040d26341a9168a3db7adeb365da9b9b8e756bc911a08c5f76a6a93d441ca7"
+checksum = "79ba23314560e105bb1da33551199ae9abaa25188589d8308caddbcd8d1f3448"
 dependencies = [
  "base64 0.13.1",
  "ff 0.13.1",
@@ -3602,7 +3602,7 @@ dependencies = [
  "lru 0.16.4",
  "midnight-base-crypto",
  "midnight-serialize",
- "midnight-storage-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-storage-macros 1.0.0",
  "parking_lot",
  "rand 0.8.6",
  "serde",
@@ -3649,6 +3649,18 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aeb4dc8c8ea5a6495036a88943c38cce40c23fc0181e0073ca52b7124800960"
+dependencies = [
+ "midnight-serialize-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "midnight-storage-macros"
 version = "1.0.1"
 dependencies = [
  "derive-where",
@@ -3661,18 +3673,6 @@ dependencies = [
  "proptest-derive",
  "quote 1.0.45",
  "rand 0.8.6",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "midnight-storage-macros"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aeb4dc8c8ea5a6495036a88943c38cce40c23fc0181e0073ca52b7124800960"
-dependencies = [
- "midnight-serialize-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "proc-macro2",
- "quote 1.0.45",
  "syn 2.0.117",
 ]
 
@@ -3729,13 +3729,13 @@ dependencies = [
  "lru 0.18.2",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.1.0",
- "midnight-circuits 7.2.4",
+ "midnight-circuits 7.3.0",
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-storage-core 1.2.3",
  "midnight-transient-crypto 3.0.1",
- "midnight-zk-stdlib 2.3.5",
+ "midnight-zk-stdlib 2.4.0",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3778,9 +3778,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zk-stdlib"
-version = "2.3.5"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01ec8ff46d47734090358ac4dbfb444f2bfeede7cecd792225fbd9333dcf7758"
+checksum = "73819f4cd779e365545109dbbd759fe0055df4ea73f6e0ddb873281c1c8014ec"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -3789,7 +3789,7 @@ dependencies = [
  "ff 0.13.1",
  "group 0.13.0",
  "hex-literal",
- "midnight-circuits 7.2.4",
+ "midnight-circuits 7.3.0",
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "num-bigint",
@@ -3818,14 +3818,14 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-circuits 6.3.0",
- "midnight-circuits 7.2.4",
+ "midnight-circuits 7.3.0",
  "midnight-proofs 0.7.3",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.1",
  "midnight-zk-stdlib 1.3.0",
- "midnight-zk-stdlib 2.3.5",
+ "midnight-zk-stdlib 2.4.0",
  "midnight-zkir 2.2.0",
  "num-bigint",
  "pastey",
@@ -3853,12 +3853,12 @@ dependencies = [
  "group 0.13.0",
  "hex",
  "midnight-base-crypto",
- "midnight-circuits 7.2.4",
+ "midnight-circuits 7.3.0",
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-transient-crypto 3.0.1",
- "midnight-zk-stdlib 2.3.5",
+ "midnight-zk-stdlib 2.4.0",
  "num-bigint",
  "num-traits",
  "rand 0.8.6",
@@ -3888,12 +3888,12 @@ dependencies = [
  "indicatif",
  "log",
  "midnight-base-crypto",
- "midnight-circuits 7.2.4",
+ "midnight-circuits 7.3.0",
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-transient-crypto 3.0.1",
- "midnight-zk-stdlib 2.3.5",
+ "midnight-zk-stdlib 2.4.0",
  "midnight-zkir-v3",
  "num-bigint",
  "num-traits",
@@ -3915,7 +3915,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3-wasm"
-version = "3.0.0-rc.2"
+version = "3.0.0-rc.3"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3932,7 +3932,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-wasm"
-version = "2.2.0-rc.3"
+version = "2.2.0-rc.4"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
