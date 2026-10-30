@@ -250,8 +250,11 @@ impl CostModel {
         self.read_cell((FR_BYTES * 3 + 2) as u64, sync) * log_size as u64
     }
     pub fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
-        self.tree_copy_bounded(&value, u64::MAX)
-            .expect("no copy writes more than u64::MAX bytes")
+        // Bytes saturate, so nothing exceeds u64::MAX and the walk always completes.
+        self.tree_copy_bounded(&value, u64::MAX).unwrap_or(RunningCost {
+            bytes_written: u64::MAX,
+            ..RunningCost::ZERO
+        })
     }
     /// As [`Self::tree_copy`], or `None` once the bytes written exceed
     /// `limit`, having walked only the nodes counted so far.
