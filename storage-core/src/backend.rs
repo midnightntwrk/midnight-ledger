@@ -859,7 +859,19 @@ impl<D: DB> StorageBackend<D> {
     /// but may over- or under-shoot. A return value of `0` does *not* mean no progress is being
     /// made.
     pub fn gc(&mut self, bound: std::time::Duration) -> usize {
-        self.gc_override_gc_roots(bound, |db| db.get_roots().keys().cloned().collect())
+        self.gc_with_limits(bound, GcLimits::default())
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Acts as [`gc`](Self::gc), with additional per-call [`GcLimits`].
+    ///
+    /// With `max_deletes: Some(n)`, at most `n` nodes are deleted from the database in this call;
+    /// the sweep resumes after the last processed key on the next call, so repeated calls still
+    /// delete every unreachable node exactly once.
+    pub fn gc_with_limits(&mut self, bound: std::time::Duration, limits: GcLimits) -> usize {
+        self.gc_override_gc_roots_with_limits(bound, limits, |db| {
+            db.get_roots().keys().cloned().collect()
+        })
     }
 
     #[cfg(feature = "gc-v1")]
@@ -873,10 +885,21 @@ impl<D: DB> StorageBackend<D> {
         bound: std::time::Duration,
         roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> usize {
+        self.gc_override_gc_roots_with_limits(bound, GcLimits::default(), roots)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn gc_override_gc_roots_with_limits(
+        &mut self,
+        bound: std::time::Duration,
+        limits: GcLimits,
+        roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
+    ) -> usize {
         let t0 = std::time::Instant::now();
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
             || bound.saturating_sub(t0.elapsed()),
+            limits,
             &mut self.database,
             |key| {
                 self.write_cache
@@ -898,9 +921,19 @@ impl<D: DB> StorageBackend<D> {
         &mut self,
         remaining_budget: impl Fn() -> std::time::Duration,
     ) -> usize {
+        self.gc_budgeted_with_limits(remaining_budget, GcLimits::default())
+    }
+
+    #[cfg(all(test, feature = "gc-v1"))]
+    pub(crate) fn gc_budgeted_with_limits(
+        &mut self,
+        remaining_budget: impl Fn() -> std::time::Duration,
+        limits: GcLimits,
+    ) -> usize {
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
             remaining_budget,
+            limits,
             &mut self.database,
             |key| {
                 self.write_cache
@@ -1197,6 +1230,17 @@ impl<D: DB> StorageBackend<D> {
             .flat_map(|(_, cv)| cv.get_obj().map(|o| o.size()))
             .sum()
     }
+}
+
+#[cfg(feature = "gc-v1")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Per-call limits for [`StorageBackend::gc_with_limits`], on top of its time bound.
+pub struct GcLimits {
+    /// The maximum number of nodes one call may delete from the database. `None` means no cap.
+    ///
+    /// Bounds the write load of a single call, for instance so that a large backlog of garbage
+    /// does not saturate the disk when the database applies the deletions.
+    pub max_deletes: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
