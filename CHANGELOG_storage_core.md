@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- feat(gc-v1): `DB::scan_keys` and `DB::batch_get_children`, with default implementations over `scan` and `batch_get_nodes`. The garbage collector's sweep now asks for keys only and its mark phase for child references only, so a backend that can serve those without loading objects can override them (#782, #783).
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
 
 ## Version `1.2.1`

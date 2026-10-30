@@ -21,6 +21,7 @@ use crate::{
     backend::OnDiskObject,
     db::{DB, Update},
 };
+// `OnDiskObject` is still needed for the in-cache mark (`cache_read`).
 
 // A through-origin linear regression, we just keep the sum of x and y values.
 #[derive(Debug, Default)]
@@ -185,16 +186,13 @@ impl<D: DB> GcState<D> {
             let batch_start = Instant::now();
             let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
             let batch_size = batch.len();
-            let batch_read = db.batch_get_nodes(batch.iter().cloned());
+            // Children only: marking never needs an object's data.
+            let batch_read = db.batch_get_children(batch.iter().cloned());
             self.mark_set.extend(batch);
-            for (parent, obj) in batch_read {
+            for (parent, children) in batch_read {
                 self.grey_set.remove(&parent);
                 self.mark_set.insert(parent);
-                for child in obj
-                    .iter()
-                    .flat_map(|o| o.children.iter())
-                    .flat_map(|c| c.refs().into_iter())
-                {
+                for child in children.iter().flatten().flat_map(|c| c.refs().into_iter()) {
                     if !self.mark_set.contains(child) && !self.grey_set.contains(child) {
                         self.grey_set.insert(child.clone());
                     }
@@ -216,13 +214,13 @@ impl<D: DB> GcState<D> {
         let mut cull_set = vec![];
         while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
-            let (nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
+            // Keys only: the sweep never needs the objects.
+            let (keys, handle) = db.scan_keys(self.sweep_resume.clone(), batch_size);
             self.sweep_resume = handle;
-            let batch_size = nodes.len();
+            let batch_size = keys.len();
             // Cull all nodes in the batch that are *not* marked.
-            let to_delete = nodes
+            let to_delete = keys
                 .into_iter()
-                .map(|(k, _)| k)
                 .filter(|k| !self.mark_set.contains(k))
                 .collect::<Vec<_>>();
             db.batch_update(to_delete.iter().map(|k| (k.clone(), Update::DeleteNode)));
