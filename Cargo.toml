@@ -77,19 +77,19 @@ config = ".spellcheck/cargo-spellcheck.toml"
 # `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to the
 # rc tag because we rely on additions in 2.2.
 [patch.crates-io]
-midnight-base-crypto = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-1.1.1-rc.2" }
+midnight-base-crypto = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-1.1.1-rc.2" }
 midnight-base-crypto-derive = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
-midnight-ledger-v9 = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
-midnight-ledger-static = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
-midnight-zswap = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1-rc.2" }
-midnight-coin-structure = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "coin-structure-3.0.1-rc.1" }
-midnight-transient-crypto = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-3.0.1-rc.1" }
+midnight-ledger-v9 = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
+midnight-ledger-static = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
+midnight-zswap = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1-rc.2" }
+midnight-coin-structure = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "coin-structure-3.0.1-rc.1" }
+midnight-transient-crypto = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-3.0.1-rc.1" }
 midnight-transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1" }
-midnight-onchain-state = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-state-4.0.1-rc.1" }
-midnight-onchain-vm = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-vm-4.0.1-rc.2" }
-midnight-onchain-runtime = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-onchain-runtime-4.0.1-rc.2" }
+midnight-onchain-state = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-state-4.0.1-rc.1" }
+midnight-onchain-vm = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-vm-4.0.1-rc.2" }
+midnight-onchain-runtime = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-onchain-runtime-4.0.1-rc.2" }
 midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.4" }
-midnight-serialize = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "serialize-1.2.1-rc.1" }
-midnight-storage = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0-rc.1" }
-midnight-storage-core = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3-rc.2" }
-midnight-storage-macros = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1-rc.1" }
+midnight-serialize = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "serialize-1.2.1-rc.1" }
+midnight-storage = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0-rc.1" }
+midnight-storage-core = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3-rc.2" }
+midnight-storage-macros = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1-rc.1" }
