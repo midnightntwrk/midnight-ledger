@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
 - feat: `MerkleTree::fold` combines a function over a tree's leaves in time
   linear in its distinct nodes, which `onchain-state` uses to size shared trees.
 - chore: upgrade `k256` to 0.14.
