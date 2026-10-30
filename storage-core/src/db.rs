@@ -299,6 +299,44 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
         Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
         Option<Self::ScanResumeHandle>,
     );
+
+    #[cfg(feature = "gc-v1")]
+    /// Keys-only variant of [`scan`](DB::scan), for the garbage collector's sweep phase, which
+    /// never needs the objects. Same resume semantics as `scan`.
+    ///
+    /// The default implementation scans objects and drops them; backends that can enumerate
+    /// keys without loading values should override it.
+    fn scan_keys(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (Vec<ArenaHash<Self::Hasher>>, Option<Self::ScanResumeHandle>) {
+        let (nodes, handle) = self.scan(resume_from, batch_size);
+        (nodes.into_iter().map(|(k, _)| k).collect(), handle)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Children-only variant of [`batch_get_nodes`](DB::batch_get_nodes), for the garbage
+    /// collector's mark phase, which never needs an object's data. `None` for a missing key.
+    ///
+    /// The default implementation loads whole objects and keeps the children; backends that
+    /// store child references separately from the payload should override it.
+    #[allow(clippy::type_complexity)]
+    fn batch_get_children<I>(
+        &self,
+        keys: I,
+    ) -> std::vec::Vec<(
+        ArenaHash<Self::Hasher>,
+        Option<std::vec::Vec<ArenaKey<Self::Hasher>>>,
+    )>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        self.batch_get_nodes(keys)
+            .into_iter()
+            .map(|(key, node)| (key, node.map(|node| node.children)))
+            .collect()
+    }
 }
 
 /// A dubious default implementation of `DB::batch_update`.
@@ -987,5 +1025,73 @@ mod tests {
         assert_eq!(db.get_node(&k1).unwrap(), n1.into_obj());
         n2.insert_into_db(&mut db);
         assert_eq!(db.get_node(&k1).unwrap(), n2.into_obj());
+    }
+
+    /// `scan_keys` yields exactly the keys `scan` yields, across resumes, and
+    /// `batch_get_children` yields exactly the children `batch_get_nodes` yields,
+    /// `None` included. Backends overriding either must keep this.
+    #[cfg(feature = "gc-v1")]
+    fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
+        let leaf = RawNode::new(&[0], 0, vec![]);
+        let mut nodes = vec![leaf];
+        for i in 1..60u8 {
+            let prev = &nodes[nodes.len() - 1];
+            let n = RawNode::new(&[i], 0, vec![prev]);
+            nodes.push(n);
+        }
+        for n in nodes.iter() {
+            n.insert_into_db(db);
+        }
+
+        for batch in [1usize, 7, 1000] {
+            let (mut from_scan, mut from_keys) = (vec![], vec![]);
+            let (mut h_scan, mut h_keys) = (None, None);
+            loop {
+                let (objs, h) = db.scan(h_scan, batch);
+                from_scan.extend(objs.into_iter().map(|(k, _)| k));
+                h_scan = h;
+                let (keys, h) = db.scan_keys(h_keys, batch);
+                from_keys.extend(keys);
+                h_keys = h;
+                if h_scan.is_none() && h_keys.is_none() {
+                    break;
+                }
+                assert!(
+                    h_scan.is_some() && h_keys.is_some(),
+                    "resume handles diverge"
+                );
+            }
+            assert_eq!(from_scan, from_keys, "batch {batch}");
+            assert_eq!(from_keys.len(), nodes.len());
+        }
+
+        let missing = ArenaHash::<DefaultHasher>::_from_bytes(&[0xff; 32]);
+        let keys: Vec<_> = nodes
+            .iter()
+            .map(|n| n.key.clone())
+            .chain([missing.clone()])
+            .collect();
+        let objs = db.batch_get_nodes(keys.iter().cloned());
+        let children = db.batch_get_children(keys.iter().cloned());
+        assert_eq!(objs.len(), children.len());
+        for ((k1, obj), (k2, ch)) in objs.into_iter().zip(children) {
+            assert_eq!(k1, k2);
+            assert_eq!(obj.map(|o| o.children), ch);
+        }
+        assert!(db.get_node(&missing).is_none());
+    }
+
+    #[cfg(feature = "gc-v1")]
+    #[test]
+    fn keys_and_children_match_objects_inmemorydb() {
+        let mut db = InMemoryDB::<DefaultHasher>::default();
+        test_keys_and_children_match_objects(&mut db);
+    }
+
+    #[cfg(all(feature = "gc-v1", feature = "sqlite"))]
+    #[test]
+    fn keys_and_children_match_objects_sqldb() {
+        let mut db = crate::db::SqlDB::<DefaultHasher>::memory();
+        test_keys_and_children_match_objects(&mut db);
     }
 }
