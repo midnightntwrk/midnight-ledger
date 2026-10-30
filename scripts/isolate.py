@@ -64,8 +64,12 @@ def main():
 
     # `name` must really be a workspace member, but it need not be a
     # *default* member (e.g. `zkir-v3`), so default-members is overwritten
-    # rather than filtered.
-    text = rewrite_list(text, "members", require_member=True)
+    # rather than filtered. Path dependencies inside the workspace (e.g.
+    # `storage-macros`) are members without being listed.
+    is_path_dep = any(
+        f'path = "../{name}"' in p.read_text() for p in repo.glob("*/Cargo.toml")
+    )
+    text = rewrite_list(text, "members", require_member=not is_path_dep)
     text = rewrite_list(text, "default-members", require_member=False)
     root.write_text(text)
 
