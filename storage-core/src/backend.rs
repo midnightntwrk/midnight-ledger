@@ -871,7 +871,7 @@ impl<D: DB> StorageBackend<D> {
     pub fn gc_override_gc_roots(
         &mut self,
         bound: std::time::Duration,
-        roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
+        roots: impl FnOnce(&mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> usize {
         let t0 = std::time::Instant::now();
         let culled = self.gc_state.run(
