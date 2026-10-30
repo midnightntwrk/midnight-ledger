@@ -1,5 +1,11 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: `MerkleTree::fold` combines a function over a tree's leaves in time
+  linear in its distinct nodes, which `onchain-state` uses to size shared trees.
+- chore: upgrade `k256` to 0.14.
+
 ## Version `3.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7

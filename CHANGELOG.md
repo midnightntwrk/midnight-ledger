@@ -6,6 +6,30 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- security: transaction pricing and `well_formed` take time linear in the
+  encoding, however storage nodes are shared. Previously a few hundred bytes
+  repeating entries through shared subtrees could force exponential work
+  before the fee check. Repeated entries are rejected first, then fees are
+  computed, and only then do the checks that walk every entry run.
+- security: committee signatures repeated in a transaction
+  (`MalformedTransaction::RepeatedCommitteeSignature`) and dust registrations
+  repeated in a transaction, compared without their signatures
+  (`MalformedTransaction::RepeatedDustRegistration`), are rejected. Pricing
+  rejects any repeated entry with `FeeCalculationError::RepeatedEntries`.
+- security: contracts hold at most `MAX_CONTRACT_OPERATIONS` (256)
+  operations. Larger deploys are malformed
+  (`MalformedContractDeploy::TooManyOperations`), and maintenance updates
+  exceeding the cap fail (`TransactionInvalid::ContractTooManyOperations`).
+- security: each deploy is charged for its full state, through a walk bounded
+  by the block's write and churn limits.
+- security: the time to dismiss counts every path to a call's effects, and a
+  call's public-input count includes its transcripts' program lengths.
+- breaking: `Transaction::application_cost` and `Transaction::time_to_dismiss`
+  take `&LedgerParameters` and return `Result<_, FeeCalculationError>`.
+- breaking: `FeeCalculationError` gains `RepeatedEntries` and is
+  `#[non_exhaustive]`.
+- security: `zswap` offers verify each distinct input, output and transient
+  once, however often sharing repeats it.
 - security: price each segment's writes separately. Previously, the guaranteed
   and all fallible costs were summed before netting bytes written against bytes
   deleted, so a fallible transcript declaring deletions it never performs could

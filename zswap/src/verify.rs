@@ -372,15 +372,19 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
 impl<D: DB> Offer<Proof, D> {
     #[instrument(skip(self))]
     pub fn well_formed(&self, segment: u16) -> Result<Pedersen, MalformedOffer> {
+        // Repeats share proof and statement, so each distinct entry is verified once.
         self.inputs
+            .distinct_values()
             .iter()
-            .try_for_each(|i| i.well_formed(segment))?;
+            .try_for_each(|(i, _)| i.well_formed(segment))?;
         self.outputs
+            .distinct_values()
             .iter()
-            .try_for_each(|o| o.well_formed(segment))?;
+            .try_for_each(|(o, _)| o.well_formed(segment))?;
         self.transient
+            .distinct_values()
             .iter()
-            .try_for_each(|t| t.well_formed(segment))?;
+            .try_for_each(|(t, _)| t.well_formed(segment))?;
         offer_well_formed_common(self, segment)
     }
 }

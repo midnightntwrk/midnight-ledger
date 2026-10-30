@@ -20,6 +20,7 @@
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
+use crate::dag_memo::InvariantMemos;
 use crate::storable::{Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{
@@ -210,6 +211,19 @@ impl<H: Digest> Serializable for ArenaHash<H> {
 
     fn serialized_size(&self) -> usize {
         <H as Digest>::output_size()
+    }
+}
+
+impl<H: Digest> serialize::EncodingShape for ArenaHash<H> {
+    type State = usize;
+    fn start() -> usize {
+        0
+    }
+    fn step(read: &usize, _: u8) -> Option<usize> {
+        (*read < <H as Digest>::output_size()).then_some(read + 1)
+    }
+    fn accepts(read: &usize) -> bool {
+        *read == <H as Digest>::output_size()
     }
 }
 
@@ -490,6 +504,26 @@ type SpCache<D> =
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
+    /// The stored node behind `key`, or its inline contents.
+    fn node_at(&self, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
+        match key {
+            ArenaKey::Ref(key) => self
+                .lock_backend()
+                .borrow_mut()
+                .get(key)
+                .expect("Arena should contain current serialization target")
+                .clone(),
+            ArenaKey::Direct(d) => OnDiskObject {
+                data: d.data.as_ref().clone(),
+                #[cfg(not(feature = "layout-v2"))]
+                ref_count: 0,
+                children: d.children.as_ref().clone(),
+            },
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn lock_metadata(&self) -> MutexGuard<'_, RefCell<MetaData<D>>> {
         self.metadata.lock()
@@ -928,6 +962,7 @@ impl<D: DB> Arena<D> {
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1123,6 +1158,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
     inlined: InlineMemo<D>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
+    invariant_memos: Rc<RefCell<InvariantMemos<D>>>,
 }
 
 #[cfg(test)]
@@ -1140,6 +1176,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
     }
 }
@@ -1173,6 +1210,7 @@ impl<D: DB> IrLoader<'_, D> {
             visited: self.visited.clone(),
             inlined: self.inlined.clone(),
             key_to_child_repr: self.key_to_child_repr.clone(),
+            invariant_memos: self.invariant_memos.clone(),
         })
     }
 
@@ -1191,6 +1229,12 @@ impl<D: DB> IrLoader<'_, D> {
 
 impl<D: DB> Loader<D> for IrLoader<'_, D> {
     const CHECK_INVARIANTS: bool = true;
+
+    // Checks in one decode share memos, so shared children are checked once.
+    fn do_check<T: Storable<D>>(&self, obj: T) -> std::io::Result<T> {
+        obj.check_invariant_memoized(&mut self.invariant_memos.borrow_mut())?;
+        Ok(obj)
+    }
 
     /// Always forces deserialization of each key the first time we see it, so
     /// that `Sp` deserialization does not depend on the `Arena` state before
@@ -1513,6 +1557,8 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
     /// Access the inner data, forcing initialization if necessary.
     fn deref(&self) -> &Self::Target {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
         self.force_as_arc()
     }
 }
@@ -1789,6 +1835,25 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         self.data.get().unwrap()
     }
 
+    /// Calls `f` with the data and child count of each distinct node of this
+    /// sub-graph, stopping as soon as `f` returns `false`. Returns whether
+    /// every node was visited.
+    pub fn try_visit_nodes(&self, mut f: impl FnMut(&[u8], usize) -> bool) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let mut frontier = vec![self.child_repr.clone()];
+        while let Some(key) = frontier.pop() {
+            if !seen.insert(key.hash().clone()) {
+                continue;
+            }
+            let node = self.arena.node_at(&key);
+            if !f(&node.data, node.children.len()) {
+                return false;
+            }
+            frontier.extend(node.children.iter().cloned());
+        }
+        true
+    }
+
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
     /// This will force and load all nodes in this sub-graph.
@@ -1823,20 +1888,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if disk_objects.contains_key(child.hash()) {
                 continue;
             }
-            let node = match child {
-                ArenaKey::Ref(ref key) => arena
-                    .lock_backend()
-                    .borrow_mut()
-                    .get(key)
-                    .expect("Arena should contain current serialization target")
-                    .clone(),
-                ArenaKey::Direct(ref d) => OnDiskObject {
-                    data: d.data.as_ref().clone(),
-                    #[cfg(not(feature = "layout-v2"))]
-                    ref_count: 0,
-                    children: d.children.as_ref().clone(),
-                },
-            };
+            let node = arena.node_at(&child);
             for child in node.children.iter() {
                 *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());
@@ -2056,6 +2108,13 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         T::check_invariant(self)
+    }
+
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        T::check_invariant_memoized(self, memos)
     }
 }
 

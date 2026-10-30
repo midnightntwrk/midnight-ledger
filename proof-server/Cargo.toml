@@ -2,7 +2,7 @@
 name = "midnight-proof-server"
 edition = "2024"
 license.workspace = true
-version = "9.0.1-rc.1"
+version = "9.0.1-rc.2"
 publish = false
 
 [features]
