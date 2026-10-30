@@ -16,8 +16,13 @@ onchain-state-v8 = { version = "3.0.0", package = "midnight-onchain-state" }
 ledger-v9        = { version = "1.0.0", package = "midnight-ledger-v9", features = [] }
 onchain-state-v9 = { version = "4.0.0", package = "midnight-onchain-state" }
 
+# v9 moved to a new `storage` major, so v8 and v9 tries and maps are distinct
+# types; `storage-v9` also hosts the translation machinery. Both share
+# `storage-core`, and so one arena.
+storage     = { version = "2.0.1", package = "midnight-storage", features = ["public-internal-structure"] }
+storage-v9  = { version = "3.0.0", package = "midnight-storage", features = ["state-translation"] }
+
 # Shared infrastructure: same crates.io versions for both v8 and v9.
-storage     = { version = "2.0.1", package = "midnight-storage", features = ["state-translation"] }
 serialize   = { version = "1.1.0", package = "midnight-serialize" }
 base-crypto = { version = "1.0.0", package = "midnight-base-crypto" }
 
