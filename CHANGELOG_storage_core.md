@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- fix: revert to `sha2` 0.10 / `digest` 0.10. `1.2.2` exposed `digest` 0.11
+  through `WellBehavedHasher` and `ArenaHash`, which broke published
+  `storage` 2.0.x sharing this crate.
 - security: in-lined (`ArenaKey::Direct`) children now count towards the
   recursion limit when deserializing a storage graph, so a deeply nested graph
   of small nodes can no longer overflow the stack. In-lined values are also

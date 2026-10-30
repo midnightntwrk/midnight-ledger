@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix: revert to `sha2` 0.10 / `digest` 0.10, matching `storage-core`, so
+  `ledger-8`'s published `storage` can share `storage-core` with this one.
 - security: `MerklePatriciaTrie` node deserialization threads the loader's
   recursion depth through, rather than restarting it at every node boundary.
 
