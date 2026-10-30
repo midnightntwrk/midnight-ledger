@@ -158,6 +158,15 @@ impl PureGeneratorPedersen {
         }
     }
 
+    /// The instance with the smallest encoding this type can have, for bounding
+    /// transaction sizes from below.
+    pub fn smallest_representable() -> Self {
+        PureGeneratorPedersen {
+            reply: EmbeddedFr::from(0),
+            ..Self::largest_representable()
+        }
+    }
+
     /// Creates a new, Fiat-Shamir evidenced Pedersen commitment with no second bases.
     /// Takes `wit`, the preimage of the commitment, and `challenge_pre`,
     /// arbitrary data that is bound in the Fiat-Shamir.
@@ -207,15 +216,16 @@ mod tests {
     use super::PureGeneratorPedersen;
 
     #[test]
-    fn test_largest_representable() {
-        let claimed = PureGeneratorPedersen::largest_representable().serialized_size();
+    fn test_representable_bounds() {
+        let smallest = PureGeneratorPedersen::smallest_representable().serialized_size();
+        let largest = PureGeneratorPedersen::largest_representable().serialized_size();
         let mut rng = StdRng::seed_from_u64(0x42);
         for _ in 0..100_000 {
             let rand = rng.r#gen();
             let mut challenge_pre = [0u8; 1024];
             rng.fill_bytes(&mut challenge_pre);
             let actual = PureGeneratorPedersen::new_from(&mut rng, &rand, &challenge_pre);
-            assert!(claimed >= actual.serialized_size());
+            assert!((smallest..=largest).contains(&actual.serialized_size()));
         }
     }
 }

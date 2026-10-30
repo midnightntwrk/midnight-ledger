@@ -1,5 +1,9 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: add `PureGeneratorPedersen::smallest_representable`, for bounding transaction sizes from below.
+
 ## Version `2.1.1`
 
 - security: `VerifierKey` serialization is now independent of whether the key has
