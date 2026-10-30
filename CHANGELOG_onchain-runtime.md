@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- security: sizing shared transcript programs and state values takes time
+  linear in their distinct nodes, through `Transcript::public_inputs_len_memoized`
+  and `onchain-state`'s `StateValue::field_size_memoized`.
+- feat: `onchain-vm`'s cost model gains `tree_copy_bounded`, which prices a
+  copy but stops walking once it exceeds a byte budget.
 - feat: `Transcript::public_inputs_len` counts the field elements a transcript
   contributes to a contract call's public inputs without materializing them,
   and `transcript::MAX_CALL_PUBLIC_INPUTS` exposes the ledger's per-call bound,
