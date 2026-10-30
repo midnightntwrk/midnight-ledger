@@ -2,6 +2,10 @@
 
 ## Version `4.0.0`
 
+- fix: the VM `lt` operation now decodes its operands as `u128` instead of
+  `u64`, so comparisons cover the full range of unshielded token balances.
+  Previously the `unshieldedBalance{Lt,Lte,Gt,Gte}` Compact builtins failed
+  with `InvalidBuiltinDecode("u64")` for any operand above `u64::MAX`.
 - feat: `ContractOperation` includes ir field
 - feat: add support for ECDSA signatures.
 - feat: Changed the structure of logged events according to events MIP (link tbd).
