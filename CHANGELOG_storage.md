@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- fix: a state-translation run that exhausts its budget continues until it
+  has persisted at least one result. Results for in-lined nodes do not survive
+  a run, so a budget below an in-lined subtree's work never finished.
 - fix: revert to `sha2` 0.10 / `digest` 0.10, matching `storage-core`, so
   `ledger-8`'s published `storage` can share `storage-core` with this one.
 - breaking: `Map` requires its keys to implement `serialize::EncodingShape`
