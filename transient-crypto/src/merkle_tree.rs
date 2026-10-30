@@ -1432,14 +1432,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sha2::Sha256;
 
     use storage_core::db::InMemoryDB;
 
     use super::*;
 
-    fn new_mt<A: Storable<InMemoryDB>>(height: u8) -> MerkleTree<A, InMemoryDB<Sha256>> {
-        MerkleTree::<A, InMemoryDB<Sha256>>::blank(height)
+    fn new_mt<A: Storable<InMemoryDB>>(height: u8) -> MerkleTree<A, InMemoryDB> {
+        MerkleTree::<A, InMemoryDB>::blank(height)
     }
 
     #[derive(Clone, Debug, PartialEq)]

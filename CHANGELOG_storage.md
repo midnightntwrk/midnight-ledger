@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix: revert to `sha2` 0.10 / `digest` 0.10, matching `storage-core`, so
+  `ledger-8`'s published `storage` can share `storage-core` with this one.
 - breaking: `Map` requires its keys to implement `serialize::EncodingShape`
   (through `MapKey`), so that decoding checks keys once per trie node. This is
   a major version so that `ledger-8`, whose keys lack the trait, keeps

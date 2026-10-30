@@ -24,8 +24,8 @@ use crate::merkle_patricia_trie::{Monoid, Semigroup};
 use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
+use crypto::digest::Digest;
 use derive_where::derive_where;
-use digest::Digest;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 use rand::distributions::{Distribution, Standard};

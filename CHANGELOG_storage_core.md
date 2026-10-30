@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- fix: revert to `sha2` 0.10 / `digest` 0.10. `1.2.2` exposed `digest` 0.11
+  through `WellBehavedHasher` and `ArenaHash`, which broke published
+  `storage` 2.0.x sharing this crate.
 - feat: `DagMemo` caches a function's result per distinct node, and
   `Monoid` combines results, for walks over shared DAGs in linear time.
 - feat: `Storable::check_invariant_memoized` shares memos across the checks of
