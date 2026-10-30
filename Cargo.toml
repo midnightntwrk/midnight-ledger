@@ -70,24 +70,26 @@ panic = "abort"
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
 
-# v9 release-candidate patches per the release instructions, combined with the
-# local-path patches from ledger-8 development. `midnight-serialize` and
-# `midnight-base-crypto` must resolve to the local workspace copies so that the
-# older crates.io/git `transient-crypto` unifies with the workspace's shared
-# infra; the local versions (1.2.0 / 1.1.0) also satisfy the v9 rc
-# requirements, so the v9 crates unify onto them too.
+# v9 release-candidate patches, per the release notes of its rc tags. The
+# shared infrastructure (`base-crypto`, `serialize`, `storage-core`,
+# `storage-macros`) resolves to the v9 tags for both v8 and v9; `storage`
+# patches only v9's 3.x, so v8 keeps its crates.io 2.x.
 # `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to the
 # rc tag because we rely on additions in 2.2.
 [patch.crates-io]
-midnight-base-crypto = { path = "base-crypto" }
-midnight-serialize = { path = "serialize" }
+midnight-base-crypto = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-1.1.1-rc.2" }
 midnight-base-crypto-derive = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
-midnight-ledger-v9 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.1.0.0-rc.3" }
-midnight-zswap = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-rc.3" }
-midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-3.0.0-rc.1" }
-midnight-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-3.0.0-rc.2" }
+midnight-ledger-v9 = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
+midnight-ledger-static = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
+midnight-zswap = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1-rc.2" }
+midnight-coin-structure = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "coin-structure-3.0.1-rc.1" }
+midnight-transient-crypto = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-3.0.1-rc.1" }
 midnight-transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1" }
-midnight-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-rc.3" }
-midnight-onchain-vm = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-rc.2" }
-midnight-onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-rc.2" }
-midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.3" }
+midnight-onchain-state = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-state-4.0.1-rc.1" }
+midnight-onchain-vm = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-vm-4.0.1-rc.2" }
+midnight-onchain-runtime = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-onchain-runtime-4.0.1-rc.2" }
+midnight-zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.4" }
+midnight-serialize = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "serialize-1.2.1-rc.1" }
+midnight-storage = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0-rc.1" }
+midnight-storage-core = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3-rc.2" }
+midnight-storage-macros = { git = "ssh://git@github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1-rc.1" }

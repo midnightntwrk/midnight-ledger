@@ -17,7 +17,7 @@ use midnight_node_ledger_helpers::ledger_8::mn_ledger;
 use std::ops::Deref;
 use std::time::{Duration, Instant};
 use storage::arena::Sp;
-use storage::state_translation::TypedTranslationState;
+use storage_v9::state_translation::TypedTranslationState;
 use v8_to_v9_state_translation::StateTranslationTable;
 
 use v8_to_v9_state_translation_replay::progress::Phases;
