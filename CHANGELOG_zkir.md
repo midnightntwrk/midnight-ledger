@@ -1,5 +1,13 @@
 # `zkir` Changelog
 
+## Unreleased
+
+- chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
+  This changes the verifier keys of V2 circuits that use `hash_to_curve`,
+  whose in-circuit `is_square` now rejects 0 as a non-square, and of
+  `zkir-v3` circuits that `encode` a Jubjub scalar. V0 and V1 keys are
+  unchanged.
+
 ## Version `2.3.0`
 
 - breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)

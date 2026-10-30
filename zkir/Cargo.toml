@@ -28,9 +28,9 @@ base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-
 serialize = { version = "1.1.1", path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
-midnight-proofs = { version = "^0.8.1" }
-midnight-circuits = { version = "^7.2.2" }
-midnight-zk-stdlib = { version = "^2.3.3" }
+midnight-proofs = { version = "^0.8.2" }
+midnight-circuits = { version = "^7.3.0" }
+midnight-zk-stdlib = { version = "^2.4.0" }
 
 # Pinned pre-zk-stdlib-v2 versions for backwards-compatible v1 proving.
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.2.0" }
