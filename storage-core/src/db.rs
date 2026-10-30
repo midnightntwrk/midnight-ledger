@@ -1031,7 +1031,7 @@ mod tests {
     /// `batch_get_children` yields exactly the children `batch_get_nodes` yields,
     /// `None` included. Backends overriding either must keep this.
     #[cfg(feature = "gc-v1")]
-    fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
+    pub(super) fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
         let leaf = RawNode::new(&[0], 0, vec![]);
         let mut nodes = vec![leaf];
         for i in 1..60u8 {
