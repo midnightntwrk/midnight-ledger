@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- fix: a state-translation run that exhausts its budget continues until it
+  has persisted at least one result. Results for in-lined nodes do not survive
+  a run, so a budget below an in-lined subtree's work never finished.
 - security: `MerklePatriciaTrie` node deserialization threads the loader's
   recursion depth through, rather than restarting it at every node boundary.
 
