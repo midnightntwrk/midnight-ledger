@@ -23,7 +23,7 @@ use base_crypto::{
     fab::{AlignedValue, Alignment, Value},
     hash::HashOutput,
 };
-use digest::Digest;
+use crypto::digest::Digest;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
