@@ -3,6 +3,7 @@
 ## Unreleased
 
 - feat(gc-v1): `DB::scan_keys` and `DB::batch_get_children`, with default implementations over `scan` and `batch_get_nodes`. The garbage collector's sweep now asks for keys only and its mark phase for child references only, so a backend that can serve those without loading objects can override them (#782, #783).
+- perf(gc-v1, parity-db): `ParityDb` serves `scan_keys` and `batch_get_children` from a children index in its reserved third column (unused under `layout-v2`): per node hash, the node's child references in the same encoding as inside `OnDiskObject`, written and deleted in the same commit as the node. It is a backend-internal index, fully derivable from node data and invisible in the `DB` trait, so gc sweeps and marks no longer read or decompress node values. No format change for existing databases: only a database that is empty when opened gets a completeness marker and uses the index for key scans; databases that already hold nodes fall back to node-column scans, and to decoding the node for a child read without an index entry.
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
 
 ## Version `1.2.1`
