@@ -46,6 +46,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
+use storage::dag_memo::DagMemo;
 use storage::db::{DB, InMemoryDB};
 use storage::delta_tracking::{incremental_write_delete_costs, initial_write_delete_costs};
 use storage::{
@@ -435,19 +436,29 @@ impl<D: DB, V: AlignedValueKind<D>> FieldRepr for StateValue<D, V> {
     }
 
     fn field_size(&self) -> usize {
+        self.field_size_memoized(&mut DagMemo::new())
+    }
+}
+
+impl<D: DB, V: AlignedValueKind<D>> StateValue<D, V> {
+    /// [`FieldRepr::field_size`], saturating, visiting each distinct node once
+    /// across every value sharing `memo`.
+    pub fn field_size_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
         use StateValue::*;
-        match self {
-            Null => 1,
-            Cell(v) => 1 + v.field_size(),
-            Map(m) => {
-                1 + m
-                    .iter()
-                    .map(|kv| kv.0.field_size() + kv.1.field_size())
-                    .sum::<usize>()
+        let child = |memo: &mut DagMemo<usize, D>, v: &Sp<StateValue<D, V>, D>| {
+            memo.get_or_compute(v, |memo, v| v.field_size_memoized(memo))
+        };
+        1usize.saturating_add(match self {
+            Null => 0,
+            Cell(v) => v.field_size(),
+            Map(m) => m.fold(memo, |memo, k, v| {
+                k.field_size().saturating_add(child(memo, v))
+            }),
+            Array(arr) => arr.fold(memo, child),
+            BoundedMerkleTree(t) => {
+                t.fold(memo, |_, hash, _| 1usize.saturating_add(hash.field_size()))
             }
-            Array(arr) => 1 + arr.iter().map(|s| s.field_size()).sum::<usize>(),
-            BoundedMerkleTree(t) => 1 + t.iter().map(|(_, v)| 1 + v.field_size()).sum::<usize>(),
-        }
+        })
     }
 }
 

@@ -21,10 +21,10 @@ use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
     ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, GUARANTEED_SEGMENT, Intent,
-    IntentHash, LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded,
-    PedersenDowngradeable, ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate,
-    StandardTransaction, SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState,
-    VerifiedTransaction,
+    IntentHash, LedgerParameters, LedgerState, MAX_CONTRACT_OPERATIONS, MAX_SUPPLY,
+    OutputInstructionUnshielded, PedersenDowngradeable, ProofKind, ReplayProtectionState,
+    SignatureKind, SingleUpdate, StandardTransaction, SystemTransaction, Transaction,
+    UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
 use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
@@ -1567,6 +1567,7 @@ impl<D: DB> LedgerState<D> {
                         }
                         cstate.maintenance_authority.counter =
                             cstate.maintenance_authority.counter.saturating_add(1);
+                        let before_operations = cstate.operations.size() as u64;
                         for op in upd.updates.iter_deref() {
                             match op {
                                 SingleUpdate::ReplaceAuthority(auth) => {
@@ -1634,6 +1635,15 @@ impl<D: DB> LedgerState<D> {
                                     cstate.operations = cstate.operations.insert(ep.clone(), op);
                                 }
                             }
+                        }
+                        // A contract already over the cap may still shrink.
+                        let operations = cstate.operations.size() as u64;
+                        if operations > MAX_CONTRACT_OPERATIONS && operations > before_operations {
+                            return Err(TransactionInvalid::ContractTooManyOperations {
+                                address: addr,
+                                operations,
+                                limit: MAX_CONTRACT_OPERATIONS,
+                            });
                         }
                         let limit = self.parameters.limits.max_contract_metadata_size;
                         if let Err(e) =

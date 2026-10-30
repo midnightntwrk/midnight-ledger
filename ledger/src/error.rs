@@ -14,7 +14,7 @@
 use crate::dust::{DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
-use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
+use crate::structure::{MAX_SUPPLY, Signature, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
@@ -246,6 +246,11 @@ pub enum TransactionInvalid<D: DB> {
         size: u64,
         limit: u64,
     },
+    ContractTooManyOperations {
+        address: ContractAddress,
+        operations: u64,
+        limit: u64,
+    },
     IrNotFound(EntryPointBuf),
     IrAlreadyPresent(EntryPointBuf),
 }
@@ -361,6 +366,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
+            ContractTooManyOperations {
+                address,
+                operations,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} would have {operations} operations, more than the limit of {limit}"
+            ),
             IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
             IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
         }
@@ -413,6 +426,7 @@ impl From<DustStateError> for SystemTransactionError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FeeCalculationError {
     OutsideTimeToDismiss {
         time_to_dismiss: CostDuration,
@@ -420,6 +434,10 @@ pub enum FeeCalculationError {
         size: u64,
     },
     BlockLimitExceeded,
+    /// The transaction repeats an entry that no valid transaction repeats,
+    /// which `well_formed` reports in detail; priced, it would cost time
+    /// quadratic in its size.
+    RepeatedEntries,
 }
 
 impl Display for FeeCalculationError {
@@ -428,6 +446,10 @@ impl Display for FeeCalculationError {
             FeeCalculationError::BlockLimitExceeded => write!(
                 formatter,
                 "exceeded block limit in transaction fee computation"
+            ),
+            FeeCalculationError::RepeatedEntries => write!(
+                formatter,
+                "transaction repeats an entry no valid transaction repeats, so has no fee"
             ),
             FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss,
@@ -455,6 +477,10 @@ pub enum MalformedContractDeploy {
     },
     AuthorityMetadataTooLarge {
         size: u64,
+        limit: u64,
+    },
+    TooManyOperations {
+        operations: u64,
         limit: u64,
     },
 }
@@ -487,6 +513,10 @@ impl Display for MalformedContractDeploy {
             AuthorityMetadataTooLarge { size, limit } => write!(
                 formatter,
                 "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            TooManyOperations { operations, limit } => write!(
+                formatter,
+                "contract deployment has {operations} operations, more than the limit of {limit}"
             ),
         }
     }
@@ -575,6 +605,12 @@ pub enum MalformedTransaction<D: DB> {
     },
     MultipleDustRegistrationsForKey {
         key: SignatureVerifyingKey,
+    },
+    RepeatedCommitteeSignature {
+        signature: Signature,
+    },
+    RepeatedDustRegistration {
+        registration: Box<DustRegistration<(), D>>,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -1047,6 +1083,14 @@ impl<D: DB> Display for MalformedTransaction<D> {
             MultipleDustRegistrationsForKey { key } => write!(
                 formatter,
                 "multiple dust registrations for key in the same intent: {key:?}"
+            ),
+            RepeatedCommitteeSignature { signature } => write!(
+                formatter,
+                "committee signature used more than once in the transaction: {signature:?}"
+            ),
+            RepeatedDustRegistration { registration } => write!(
+                formatter,
+                "dust registration used more than once in the transaction: {registration:?}"
             ),
             InsufficientDustForRegistrationFee {
                 registration,
