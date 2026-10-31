@@ -87,10 +87,10 @@ def main():
     sub_cargo.write_text("".join(out_lines))
 
     # 3. Commit, tag, push, revert.
-    # `ledger` is the headline package: the bare `ledger-<version>` tag is
-    # already used for the release commit, so isolated-crate tags get a
-    # `crate-` prefix to disambiguate.
-    git_tag = f"crate-{tag}" if name == "ledger" else tag
+    # `ledger` and `onchain-runtime` are already headline packages:
+    # the bare `ledger-<version>` tag is already used for the release commit,
+    # so isolated-crate tags get a `crate-` prefix to disambiguate.
+    git_tag = f"crate-{tag}" if (name == "ledger" or name == "onchain-runtime") else tag
     msg = f"isolate {git_tag}"
     tag_cmd = ["git", "-C", str(repo), "tag", "-a", git_tag, "-m", msg]
     push_cmd = ["git", "-C", str(repo), "push", "origin", git_tag]
