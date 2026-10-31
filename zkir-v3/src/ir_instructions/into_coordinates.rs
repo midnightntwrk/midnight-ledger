@@ -92,6 +92,9 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
 /// # Errors
 ///
 /// Errors if the input is not a supported type.
+// `x`/`y` would assert that Weierstrass points are not the identity, which
+// changes verifier keys.
+#[allow(deprecated)]
 pub fn into_coordinates_incircuit(
     std_lib: &ZkStdLib,
     layouter: &mut impl Layouter<F>,
