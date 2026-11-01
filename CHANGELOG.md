@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.0-rc.6
+
 ## Ledger 9.1.0.0-rc.5
 
 Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
