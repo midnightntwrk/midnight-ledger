@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { ZswapOutput, ZswapTransient } from '@midnightntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
+import { HEX_64_REGEX, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
 
@@ -28,7 +28,7 @@ describe('Ledger API - ZswapTransient', () => {
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenOutput = ZswapOutput.new(coinInfo, 0, Static.coinPublicKey(), Static.encryptionPublicKey());
     expect(() =>
-      ZswapTransient.newFromContractOwnedOutput(getQualifiedShieldedCoinInfo(coinInfo), 0, unprovenOutput)
+      ZswapTransient.newFromContractOwnedOutput(coinInfo, 0, unprovenOutput)
     ).toThrow('attempted to spend a user-owned output as contract owned');
   });
 
@@ -43,7 +43,7 @@ describe('Ledger API - ZswapTransient', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
@@ -67,7 +67,7 @@ describe('Ledger API - ZswapTransient', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
@@ -102,7 +102,7 @@ describe('Ledger API - ZswapTransient', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(0n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
@@ -124,7 +124,7 @@ describe('Ledger API - ZswapTransient', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );

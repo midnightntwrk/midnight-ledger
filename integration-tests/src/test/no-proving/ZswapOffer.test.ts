@@ -91,7 +91,7 @@ describe('Ledger API - ZswapOffer', () => {
     const unprovenOutput = ZswapOutput.newContractOwned(coinInfo, 0, Static.contractAddress());
 
     const unprovenOffer = ZswapOffer.fromTransient(
-      ZswapTransient.newFromContractOwnedOutput(getQualifiedShieldedCoinInfo(coinInfo), 0, unprovenOutput)
+      ZswapTransient.newFromContractOwnedOutput(coinInfo, 0, unprovenOutput)
     );
 
     expect(unprovenOffer.transients[0]?.contractAddress).toEqual(unprovenOutput.contractAddress);
@@ -300,7 +300,7 @@ describe('Ledger API - ZswapOffer', () => {
     const unprovenOutput = ZswapOutput.newContractOwned(coinInfo, 0, Static.contractAddress());
 
     const unprovenOffer = ZswapOffer.fromTransient(
-      ZswapTransient.newFromContractOwnedOutput(getQualifiedShieldedCoinInfo(coinInfo), 0, unprovenOutput)
+      ZswapTransient.newFromContractOwnedOutput(coinInfo, 0, unprovenOutput)
     );
 
     expect(unprovenOffer.transients[0]?.contractAddress).toEqual(unprovenOutput.contractAddress);

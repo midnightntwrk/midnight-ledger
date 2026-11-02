@@ -29,7 +29,7 @@ import {
   maxField,
   ZswapInput
 } from '@midnightntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -44,7 +44,7 @@ describe('Security Boundary Validation Tests', () => {
     test('should reject zero coin values in specific contexts', () => {
       expect(() => {
         ZswapInput.newContractOwned(
-          getQualifiedShieldedCoinInfo(Static.shieldedCoinInfo(0n)),
+          Static.shieldedCoinInfo(0n),
           0,
           Random.contractAddress(),
           new ZswapChainState()
