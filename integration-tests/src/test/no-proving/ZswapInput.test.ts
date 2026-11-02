@@ -25,12 +25,7 @@ describe('Ledger API - ZSwapInput', () => {
    */
   test('should throw error on a commitment absent from the merkle tree', () => {
     expect(() =>
-      ZswapInput.newContractOwned(
-        Static.shieldedCoinInfo(10_000n),
-        0,
-        Random.contractAddress(),
-        new ZswapChainState()
-      )
+      ZswapInput.newContractOwned(Static.shieldedCoinInfo(10_000n), 0, Random.contractAddress(), new ZswapChainState())
     ).toThrow('is not in the coin commitment tree');
   });
 
@@ -43,12 +38,7 @@ describe('Ledger API - ZSwapInput', () => {
    */
   test('should throw error on negative value', () => {
     expect(() =>
-      ZswapInput.newContractOwned(
-        Static.shieldedCoinInfo(-10_000n),
-        0,
-        Random.contractAddress(),
-        new ZswapChainState()
-      )
+      ZswapInput.newContractOwned(Static.shieldedCoinInfo(-10_000n), 0, Random.contractAddress(), new ZswapChainState())
     ).toThrow("Error: Couldn't deserialize u128 from a BigInt outside u128::MIN..u128::MAX bounds");
   });
 
