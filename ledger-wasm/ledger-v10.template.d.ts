@@ -1984,7 +1984,7 @@ export class ZswapLocalState {
 export class ZswapInput<P extends Proofish> {
   private constructor();
 
-  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
+  static newContractOwned(coin: ShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
 
   serialize(): Uint8Array;
 
@@ -2058,10 +2058,8 @@ export class ZswapTransient<P extends Proofish> {
 
   /**
    * Creates a new contract-owned transient, from a given output and its coin.
-   *
-   * The {@link QualifiedShieldedCoinInfo} should have an `mt_index` of `0`
    */
-  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput): UnprovenTransient;
+  static newFromContractOwnedOutput(coin: ShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput): UnprovenTransient;
 
   serialize(): Uint8Array;
 

@@ -516,16 +516,7 @@ describe('Ledger API - MicroDao', () => {
           }
         );
         const potIn = ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap);
-        const transient = ZswapTransient.newFromContractOwnedOutput(
-          {
-            type: coin.type,
-            nonce: coin.nonce,
-            value: coin.value,
-            mt_index: 0n
-          },
-          0,
-          out
-        );
+        const transient = ZswapTransient.newFromContractOwnedOutput(coin, 0, out);
         const newCoin: ShieldedCoinInfo = evolveFrom(
           Static.encodeFromText('midnight:kernel:nonce_evolve'),
           pot.value + coin.value,
