@@ -13,7 +13,7 @@
 
 import { ZswapTransient, ZswapOffer, ZswapOutput, Transaction } from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
+import { HEX_64_REGEX, Random, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess } from '@/test-utils';
 import { ProofMarker } from '@/test/utils/Markers';
@@ -30,7 +30,7 @@ describe.concurrent('Ledger API - Transient [@slow][@proving]', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );
@@ -54,7 +54,7 @@ describe.concurrent('Ledger API - Transient [@slow][@proving]', () => {
     const contractAddress = Random.contractAddress();
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(coinInfo),
+      coinInfo,
       0,
       ZswapOutput.newContractOwned(coinInfo, 0, contractAddress)
     );

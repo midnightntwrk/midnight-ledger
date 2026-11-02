@@ -74,7 +74,7 @@ impl ZswapTransient {
     ) -> Result<ZswapTransient, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
-                let coin = value_to_qualified_shielded_coininfo(coin)?;
+                let coin = value_to_shielded_coininfo(coin)?;
                 Ok(ZswapTransient(ZswapTransientTypes::UnprovenTransient(
                     Box::new(zswap::Transient::new_from_contract_owned_output(
                         &mut OsRng,
@@ -411,7 +411,7 @@ impl ZswapInput {
         contract: &str,
         state: &ZswapChainState,
     ) -> Result<ZswapInput, JsError> {
-        let coin = value_to_qualified_shielded_coininfo(coin)?;
+        let coin = value_to_shielded_coininfo(coin)?;
         let addr = from_hex_ser(contract)?;
         Ok(ZswapInput(ZswapInputTypes::UnprovenInput(
             zswap::Input::new_contract_owned(&mut OsRng, &coin, segment, addr, &state.0.coin_coms)?,
