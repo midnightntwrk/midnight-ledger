@@ -43,12 +43,7 @@ describe('Security Boundary Validation Tests', () => {
      */
     test('should reject zero coin values in specific contexts', () => {
       expect(() => {
-        ZswapInput.newContractOwned(
-          Static.shieldedCoinInfo(0n),
-          0,
-          Random.contractAddress(),
-          new ZswapChainState()
-        );
+        ZswapInput.newContractOwned(Static.shieldedCoinInfo(0n), 0, Random.contractAddress(), new ZswapChainState());
       }).toThrow();
     });
 

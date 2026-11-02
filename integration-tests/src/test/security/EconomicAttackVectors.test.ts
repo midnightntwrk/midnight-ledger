@@ -45,12 +45,7 @@ describe('Economic Attack Vector Tests', () => {
       const chainState = new ZswapChainState();
 
       expect(() => {
-        ZswapInput.newContractOwned(
-          Static.shieldedCoinInfo(1000n),
-          999999,
-          Random.contractAddress(),
-          chainState
-        );
+        ZswapInput.newContractOwned(Static.shieldedCoinInfo(1000n), 999999, Random.contractAddress(), chainState);
       }).toThrow('is not in the coin commitment tree');
     });
 

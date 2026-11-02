@@ -624,11 +624,7 @@ describe('Ledger API - TokenVault Shielded', () => {
 
     // Create ZSwap inputs/outputs
     const potIn = ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap);
-    const transient = ZswapTransient.newFromContractOwnedOutput(
-      newCoin,
-      0,
-      out
-    );
+    const transient = ZswapTransient.newFromContractOwnedOutput(newCoin, 0, out);
 
     publicTranscript = [
       ...kernelSelf(),

@@ -27,9 +27,9 @@ describe('Ledger API - ZswapTransient', () => {
   test('should not allow contract-owned transients from user outputs', () => {
     const coinInfo = Static.shieldedCoinInfo(10n);
     const unprovenOutput = ZswapOutput.new(coinInfo, 0, Static.coinPublicKey(), Static.encryptionPublicKey());
-    expect(() =>
-      ZswapTransient.newFromContractOwnedOutput(coinInfo, 0, unprovenOutput)
-    ).toThrow('attempted to spend a user-owned output as contract owned');
+    expect(() => ZswapTransient.newFromContractOwnedOutput(coinInfo, 0, unprovenOutput)).toThrow(
+      'attempted to spend a user-owned output as contract owned'
+    );
   });
 
   /**
