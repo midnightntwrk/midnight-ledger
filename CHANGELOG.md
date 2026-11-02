@@ -8,6 +8,18 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Ledger 9.1.0.0-rc.7
 
+- fix: refine transcript gas accounting for transcripts that both write and
+  delete state.
+- breaking: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
+  This changes the verifier keys of zkir V2 circuits that use `hash_to_curve`,
+  and of zkir v3 circuits that `encode` a Jubjub scalar. V0 and V1 keys are
+  unchanged.
+- chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.0-rc.2`.
+- chore: `zkir-wasm` moves to `2.2.0-rc.5`, skipping `2.2.0-rc.4` to match the
+  `zkir` crate tag.
+- chore: `base-crypto` moves to `k256` 0.14 and `signature` 3;
+  `transient-crypto` no longer depends on either.
+
 ## Ledger 9.1.0.0-rc.6
 
 ## Ledger 9.1.0.0-rc.5
