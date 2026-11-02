@@ -344,19 +344,15 @@ async fn micro_dao_inner(mode: TestMode) {
                     let coin_nul = coin.nullifier(&SenderEvidence::Contract(addr));
                     let pot_in = ZswapInput::new_contract_owned(
                         &mut rng,
-                        &pot,
+                        &CoinInfo::from(&pot),
                         None,
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
                     .unwrap();
-                    let transient = ZswapTransient::new_from_contract_owned_output(
-                        &mut rng,
-                        &coin.qualify(0),
-                        None,
-                        out,
-                    )
-                    .unwrap();
+                    let transient =
+                        ZswapTransient::new_from_contract_owned_output(&mut rng, &coin, None, out)
+                            .unwrap();
                     let new_coin = CoinInfo::from(&pot).evolve_from(
                         b"midnight:kernel:nonce_evolve",
                         pot.value + coin.value,
@@ -925,7 +921,7 @@ async fn micro_dao_inner(mode: TestMode) {
                 inputs: vec![
                     ZswapInput::new_contract_owned(
                         &mut rng,
-                        &pot,
+                        &CoinInfo::from(&pot),
                         None,
                         addr,
                         &state.ledger.zswap.coin_coms,

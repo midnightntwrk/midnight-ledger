@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (Ledger 10)
 
+- breaking: `zswap::Input::new_contract_owned` and `zswap::Transient::new_from_contract_owned_output` take a `CoinInfo` instead of a `QualifiedCoinInfo`. A contract-owned coin's commitment is located in the tree by hash, since the contract address that completes it is public. The caller no longer supplies a Merkle index. `OfferCreationFailed` gains `CommitmentNotInTree` for a coin the tree does not hold.
+- breaking: `ZswapInput.newContractOwned` and `ZswapTransient.newFromContractOwnedOutput` in `ledger-wasm` take a `ShieldedCoinInfo` instead of a `QualifiedShieldedCoinInfo`.
 - feat: ZKIR gains `verify_proof` and `inner_proof` instructions.
 - breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<DeferredAccumulator> }`.
 - feat: `DeferredAccumulator` carries a `verify_proof` instruction's deferred KZG accumulator as the two points it collapses to, rather than as its public-input field elements. The always-one side scalars are regenerated rather than stored, taking each accumulator from 384 bytes to 96, and a point off the curve or outside the prime-order subgroup is now refused when the proof is deserialized rather than after it verifies.

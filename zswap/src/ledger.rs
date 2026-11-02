@@ -298,7 +298,7 @@ mod tests {
         let addr = ContractAddress::default();
         state = insert_dummy_outputs(&mut rng, state, 25);
         let output = Output::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
-        let (new_state, indices) = state
+        let (new_state, _) = state
             .try_apply(
                 &Offer {
                     inputs: vec![].into(),
@@ -315,12 +315,7 @@ mod tests {
             .unwrap();
         state = new_state.post_block_update(Default::default(), Duration::from_secs(3600));
         state = insert_dummy_outputs(&mut rng, state, 25);
-        let qcoin = coin.qualify(
-            *indices
-                .get(&coin.commitment(&Recipient::Contract(addr)))
-                .unwrap(),
-        );
-        Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
+        Input::new_contract_owned(&mut rng, &coin, None, addr, &state.filter(&[addr])).unwrap();
     }
 
     #[test]
