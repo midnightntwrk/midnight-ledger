@@ -11,6 +11,7 @@
   `overwriteBindingInput` for `verifier-key[v6]` circuits. Previously the
   override was dropped, so in-process Dust spend proofs were bound to a zero
   binding input and rejected with `InvalidDustSpendProof` (#832).
+  (zkir-wasm 2.2.0-rc.6)
 
 ## Version `2.3.0`
 
