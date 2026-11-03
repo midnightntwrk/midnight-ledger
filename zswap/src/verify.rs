@@ -57,8 +57,6 @@ use std::sync::Arc;
 #[cfg(feature = "proof-verifying")]
 const OUTPUT_VK_RAW: &[u8] = include_bytes!("../static/output.verifier");
 #[cfg(feature = "proof-verifying")]
-const SPEND_VK_RAW: &[u8] = include_bytes!("../static/spend.verifier");
-#[cfg(feature = "proof-verifying")]
 const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 
 #[cfg(feature = "proof-verifying")]
@@ -66,9 +64,6 @@ lazy_static! {
     pub static ref OUTPUT_VK: transient_crypto_old::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
             .expect("Zswap Output VK should be valid");
-    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
-        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
-            .expect("Zswap Spend VK should be valid");
     pub static ref SIGN_VK: transient_crypto_old::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
             .expect("Zswap Sign VK should be valid");
@@ -160,6 +155,11 @@ impl<D: DB> Input<Proof, D> {
     #[instrument]
     #[cfg(feature = "proof-verifying")]
     pub fn well_formed(&self, segment: u16) -> Result<(), MalformedOffer> {
+        // The proof's accumulator count says which spend circuit proved it:
+        // none for the plain circuit, one for the guarded circuit, whose
+        // transcript also reads the guard's reserved inputs and whose
+        // statement discloses the named output.
+        let guarded = !self.proof.accumulators.is_empty();
         let mut prog = Vec::new();
         prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
             [Key::Value(0u8.into())],
@@ -183,7 +183,17 @@ impl<D: DB> Input<Proof, D> {
             )),
             None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
         }
+        let mut outputs = vec![true.into()];
+        if guarded {
+            prog.extend(Cell_read!(
+                [Key::Value(crate::construct::RESERVED_SLOT.into())],
+                false,
+                (Fr, Fr, Fr, Fr)
+            ));
+            outputs.push(crate::construct::reserved_value());
+        }
         prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        outputs.push(segment.into());
         prog.extend(Cell_write!(
             [Key::Value(2u8.into())],
             false,
@@ -191,19 +201,24 @@ impl<D: DB> Input<Proof, D> {
             self.value_commitment.0
         ));
         let mut statement = vec![0.into()];
-        for op in with_outputs(prog.into_iter(), [true.into(), segment.into()].into_iter()) {
+        for op in with_outputs(prog.into_iter(), outputs.into_iter()) {
             op.field_repr(&mut statement);
         }
-        SPEND_VK
-            .verify(
-                &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
-                statement.into_iter().map(|f| {
-                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
-                        .expect("Fr round-trip")
-                }),
-            )
-            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
+        if guarded {
+            match &self.named_output {
+                Some(com) => {
+                    statement.push(1.into());
+                    com.deref().field_repr(&mut statement);
+                }
+                None => statement.extend([transient_crypto::curve::Fr::from(0u64); 3]),
+            }
+        } else if self.named_output.is_some() {
+            return Err(MalformedOffer::InvalidProof(anyhow::anyhow!(
+                "a plain spend names no output"
+            )));
+        }
+        crate::spend_circuit::verify_spend(&self.proof, &statement)
+            .map_err(MalformedOffer::InvalidProof)
     }
 }
 
@@ -327,6 +342,33 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
     {
         warn!("Zswap offer not in normal form");
         return Err(MalformedOffer::NotNormalized);
+    }
+    // Each named output is an output or transient of this offer, named by no
+    // other input or transient.
+    let offer_outputs = offer
+        .outputs
+        .iter_deref()
+        .map(|o| o.coin_com)
+        .chain(offer.transient.iter_deref().map(|t| t.coin_com))
+        .collect::<std::collections::HashSet<_>>();
+    let mut named = std::collections::HashSet::new();
+    for com in offer
+        .inputs
+        .iter_deref()
+        .filter_map(|i| i.named_output.as_deref().copied())
+        .chain(
+            offer
+                .transient
+                .iter_deref()
+                .filter_map(|t| t.named_output.as_deref().copied()),
+        )
+    {
+        if !offer_outputs.contains(&com) {
+            return Err(MalformedOffer::NamedOutputNotInOffer(com));
+        }
+        if !named.insert(com) {
+            return Err(MalformedOffer::NamedOutputNamedTwice(com));
+        }
     }
     let com_unit: Pedersen = Pedersen(EmbeddedGroupAffine::identity());
     let io_com = offer

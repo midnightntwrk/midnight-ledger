@@ -21,11 +21,10 @@
 
 use std::collections::BTreeMap;
 
-use group::Group;
 use midnight_circuits::hash::poseidon::PoseidonState;
 use midnight_circuits::instructions::AssignmentInstructions;
 use midnight_circuits::types::{AssignedBit, AssignedNative};
-use midnight_circuits::verifier::{Accumulator, SelfEmulation, fixed_bases};
+use midnight_circuits::verifier::{Accumulator, fixed_bases};
 use midnight_curves::Bls12;
 use midnight_proofs::{
     circuit::{Layouter, Value},
@@ -34,18 +33,10 @@ use midnight_proofs::{
     transcript::{CircuitTranscript, Transcript},
 };
 use midnight_zk_stdlib::ZkStdLib;
-use sha2::{Digest, Sha256};
 use transient_crypto::curve::outer;
 use transient_crypto::proofs::InnerSelfEmulation as S;
 
 use crate::decider::{decide_incircuit, decide_offcircuit, deserialize_vk};
-
-/// Label prefix for an inner verifying key's fixed bases.
-///
-/// Derived from the blob's own digest.
-fn vk_name(vk_blob: &[u8]) -> String {
-    format!("inner_vk_{}", const_hex::encode(Sha256::digest(vk_blob)))
-}
 
 /// Off-circuit half of `verify_proof`: partially verifies the inner proof and
 /// returns the accumulator the check defers. There is no verdict to return --
@@ -68,8 +59,7 @@ pub fn verify_proof_offcircuit(
 
     let (kind, vk) = deserialize_vk(vk_blob)?;
     let plonk_vk = vk.vk();
-    let vk_name = vk_name(vk_blob);
-    let bases = fixed_bases::<S>(&vk_name, plonk_vk);
+    let bases = fixed_bases::<S>(plonk_vk);
 
     let mut transcript = CircuitTranscript::<PoseidonState<outer::Scalar>>::init_from_bytes(proof);
     let dual_msm = plonk::prepare::<
@@ -78,12 +68,12 @@ pub fn verify_proof_offcircuit(
         CircuitTranscript<PoseidonState<outer::Scalar>>,
     >(
         plonk_vk,
-        &[&[<S as SelfEmulation>::C::identity()]],
-        &[&[instance]],
+        &[],
+        &[&[], instance],
         &mut transcript,
     )?;
 
-    let own_acc = Accumulator::<S>::from_dual_msm(dual_msm, &vk_name, &bases);
+    let own_acc = Accumulator::<S>::from_dual_msm(dual_msm, &bases);
     decide_offcircuit(kind, own_acc, &bases, instance)
 }
 
@@ -106,36 +96,30 @@ pub fn verify_proof_incircuit(
     let (kind, vk) = deserialize_vk(vk_blob)
         .map_err(|e| Error::Synthesis(format!("inner verifying key: {e}")))?;
     let plonk_vk = vk.vk();
-    let vk_name = vk_name(vk_blob);
     let verifier = std.verifier();
     let bls = std.bls12_381();
 
     let assigned_vk = verifier.assign_fixed_vk(
         layouter,
-        &vk_name,
         plonk_vk.get_domain(),
         plonk_vk.cs(),
         plonk_vk.transcript_repr(),
     )?;
 
-    // Assign the inner VK's fixed bases in-circuit, keyed by the same names
+    // Assign the inner VK's fixed bases in-circuit, keyed by the same labels
     // `fixed_bases` produces, so `resolve_fixed_bases` can match them.
     let mut assigned_bases = BTreeMap::new();
-    for (name, base) in fixed_bases::<S>(&vk_name, plonk_vk) {
+    for (name, base) in fixed_bases::<S>(plonk_vk) {
         assigned_bases.insert(name, bls.assign_fixed(layouter, base)?);
     }
 
-    // The committed instance is a single identity point (we do not support
-    // committed instances), mirroring the off-circuit `&[&[C::identity()]]`.
-    let committed = [bls.assign_fixed(layouter, <S as SelfEmulation>::C::identity())?];
-
-    let own_acc = verifier.prepare(layouter, &assigned_vk, &committed, instance, proof)?;
-
-    // Exactly one instance set, matching the off-circuit `&[&[instance]]`.
+    // Exactly one instance set. Without a committed instance, its column is
+    // an empty instance column, mirroring the off-circuit `&[&[], instance]`.
     let [fields] = instance else {
         return Err(Error::Synthesis(
             "`verify_proof` supports exactly one instance set".into(),
         ));
     };
+    let own_acc = verifier.prepare(layouter, &assigned_vk, &[], &[&[], fields], proof)?;
     decide_incircuit(std, layouter, kind, own_acc, &assigned_bases, fields, guard)
 }

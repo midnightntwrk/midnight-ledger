@@ -20,6 +20,7 @@ use base_crypto::repr::MemWrite;
 use coin_structure::coin::{
     self, Commitment, Info as CoinInfo, Nullifier, QualifiedInfo as QualifiedCoinInfo,
 };
+use coin_structure::custom_spend::ShieldedTokenPreimage;
 use coin_structure::transfer::{Recipient, SenderEvidence};
 use derive_where::derive_where;
 use rand::{CryptoRng, Rng};
@@ -235,18 +236,34 @@ impl<D: DB> State<D> {
         Ok(res)
     }
 
-    #[instrument(skip(self, rng))]
+    /// Spends a coin this wallet holds.
+    ///
+    /// Every shielded spend re-derives the coin's type from `preimage`.
+    /// `guarded` selects the guarded spend circuit, which a coin whose type has
+    /// a rule requires, and which a coin without one may use too.
+    #[instrument(skip(self, rng, guarded))]
     pub fn spend<R: Rng + CryptoRng + ?Sized>(
         &self,
         rng: &mut R,
         secret_keys: &SecretKeys,
         coin: &QualifiedCoinInfo,
         segment: Option<u16>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<(State<D>, Input<ProofPreimage, D>), OfferCreationFailed> {
-        self.spend_from_tree(rng, secret_keys, coin, segment, &self.merkle_tree.clone())
+        self.spend_from_tree(
+            rng,
+            secret_keys,
+            coin,
+            segment,
+            &self.merkle_tree.clone(),
+            preimage,
+            guarded,
+        )
     }
 
-    #[instrument(skip(self, rng, tree))]
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(self, rng, tree, guarded))]
     fn spend_from_tree<R: Rng + CryptoRng + ?Sized>(
         &self,
         rng: &mut R,
@@ -254,6 +271,8 @@ impl<D: DB> State<D> {
         coin: &QualifiedCoinInfo,
         segment: Option<u16>,
         tree: &MerkleTree<(), D>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<(State<D>, Input<ProofPreimage, D>), OfferCreationFailed> {
         let inp = Input::new_from_secret_key(
             rng,
@@ -261,6 +280,8 @@ impl<D: DB> State<D> {
             segment,
             SenderEvidence::User(Cow::Borrowed(&secret_keys.coin_secret_key)),
             tree,
+            preimage,
+            guarded,
         )?;
         let res = State {
             pending_spends: self.pending_spends.insert(inp.nullifier, *coin),
@@ -269,7 +290,8 @@ impl<D: DB> State<D> {
         Ok((res, inp))
     }
 
-    #[instrument(skip(self, rng))]
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(self, rng, guarded))]
     pub fn spend_from_output<R: Rng + CryptoRng + ?Sized>(
         &self,
         rng: &mut R,
@@ -277,12 +299,22 @@ impl<D: DB> State<D> {
         coin: &QualifiedCoinInfo,
         segment: Option<u16>,
         output: Output<ProofPreimage, D>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
         let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)
             .try_update_hash(0, output.coin_com.0, ())
             .map_err(OfferCreationFailed::MerkleTreeError)?
             .rehash();
-        let (res, input) = self.spend_from_tree(rng, secret_keys, coin, segment, &tree)?;
+        let (res, input) = self.spend_from_tree(
+            rng,
+            secret_keys,
+            coin,
+            segment,
+            &tree,
+            preimage,
+            guarded,
+        )?;
         let io = Transient {
             nullifier: input.nullifier,
             coin_com: output.coin_com,
@@ -290,6 +322,7 @@ impl<D: DB> State<D> {
             value_commitment_output: output.value_commitment,
             contract_address: output.contract_address,
             ciphertext: output.ciphertext,
+            named_output: input.named_output,
             proof_input: input.proof,
             proof_output: output.proof,
         };

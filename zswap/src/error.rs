@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use crate::structure::CoinCiphertext;
-use coin_structure::coin::{Commitment, Nullifier};
+use coin_structure::coin::{Commitment, Nullifier, ShieldedTokenType};
 use coin_structure::contract::ContractAddress;
+use coin_structure::custom_spend::SpendRule;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use transient_crypto::merkle_tree::{InvalidIndex, InvalidUpdate, MerkleTreeDigest};
@@ -58,6 +59,8 @@ pub enum MalformedOffer {
     },
     NonDisjointCoinMerge,
     NotNormalized,
+    NamedOutputNotInOffer(Commitment),
+    NamedOutputNamedTwice(Commitment),
 }
 
 impl Display for MalformedOffer {
@@ -75,6 +78,14 @@ impl Display for MalformedOffer {
             ),
             NonDisjointCoinMerge => write!(formatter, "attempted to merge non-disjoint coin sets"),
             NotNormalized => write!(formatter, "offer is not in normal form"),
+            NamedOutputNotInOffer(com) => write!(
+                formatter,
+                "a spend names output {com:?}, which is no output or transient of its offer"
+            ),
+            NamedOutputNamedTwice(com) => write!(
+                formatter,
+                "output {com:?} is named by more than one spend"
+            ),
         }
     }
 }
@@ -88,6 +99,12 @@ pub enum OfferCreationFailed {
     NotContractOwned,
     TreeNotRehashed,
     MerkleTreeError(InvalidUpdate),
+    TypeOpeningMismatch(ShieldedTokenType),
+    UndefinedSpendRule(SpendRule),
+    GuardedSpendRequired(ShieldedTokenType),
+    GuardProofRequired(ShieldedTokenType),
+    UnexpectedGuardProof(ShieldedTokenType),
+    NonCanonicalGuardKeyHash,
 }
 
 impl Display for OfferCreationFailed {
@@ -105,6 +122,30 @@ impl Display for OfferCreationFailed {
                 "attempted to spend from a Merkle tree that was not rehashed"
             ),
             MerkleTreeError(msg) => write!(formatter, "merkle tree error: {msg}"),
+            TypeOpeningMismatch(token_type) => write!(
+                formatter,
+                "the token type preimage given does not derive the coin's token type {token_type:?}"
+            ),
+            UndefinedSpendRule(rule) => write!(
+                formatter,
+                "spend rule {rule:?} is undefined: only the empty rule and mode 2 version 1 descriptors are spendable"
+            ),
+            GuardedSpendRequired(token_type) => write!(
+                formatter,
+                "token type {token_type:?} has a spend rule, which only the guarded spend circuit enforces"
+            ),
+            GuardProofRequired(token_type) => write!(
+                formatter,
+                "token type {token_type:?} has a guard, so its spend needs a guard proof"
+            ),
+            UnexpectedGuardProof(token_type) => write!(
+                formatter,
+                "token type {token_type:?} has no guard, so its spend takes no guard proof"
+            ),
+            NonCanonicalGuardKeyHash => write!(
+                formatter,
+                "the descriptor's payload is not a canonical guard verifying-key hash"
+            ),
         }
     }
 }

@@ -90,8 +90,12 @@ async fn test_shielded_full_lifecycle() {
     // Initial test state with shielded rewards
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 10_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    let token = preimage.token_type();
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 100).await;
 
     let mut unbalanced_strictness = WellFormedStrictness::default();
@@ -279,13 +283,28 @@ async fn test_shielded_full_lifecycle() {
 
     // Create ZSwap input for existing pot
     let pot_in =
-        ZswapInput::new_contract_owned(&mut rng, &pot, None, addr, &state.ledger.zswap.coin_coms)
-            .unwrap();
+        ZswapInput::new_contract_owned(
+        &mut rng,
+        &pot,
+        None,
+        addr,
+        &state.ledger.zswap.coin_coms,
+        &preimage,
+        None,
+    )
+    .unwrap();
 
     // Create transient for new deposit (created and nullified in same tx)
     let transient =
-        ZswapTransient::new_from_contract_owned_output(&mut rng, &new_coin.qualify(0), None, out)
-            .unwrap();
+        ZswapTransient::new_from_contract_owned_output(
+        &mut rng,
+        &new_coin.qualify(0),
+        None,
+        out,
+        &preimage,
+        None,
+    )
+    .unwrap();
 
     // Output for merged coin
     let merged_out = ZswapOutput::new_contract_owned(&mut rng, &merged_coin, None, addr).unwrap();
@@ -429,8 +448,16 @@ async fn test_shielded_full_lifecycle() {
     let change_com = change_coin.commitment(&Recipient::Contract(addr));
 
     let pot_in =
-        ZswapInput::new_contract_owned(&mut rng, &pot, None, addr, &state.ledger.zswap.coin_coms)
-            .unwrap();
+        ZswapInput::new_contract_owned(
+        &mut rng,
+        &pot,
+        None,
+        addr,
+        &state.ledger.zswap.coin_coms,
+        &preimage,
+        None,
+    )
+    .unwrap();
 
     // User output (not contract-owned)
     let withdraw_out = ZswapOutput::new(

@@ -24,11 +24,14 @@ use lazy_static::lazy_static;
 use lru::LruCache;
 use midnight_circuits::types::Instantiable;
 use midnight_circuits::verifier::{
-    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, SelfEmulation,
+    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, Point, SelfEmulation,
 };
 use midnight_curves::Bls12;
 use midnight_proofs::{
-    poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    poly::{
+        PolynomialLabel,
+        kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    },
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
@@ -418,12 +421,24 @@ pub fn reconstruct_accumulator(
         let base = <<InnerSelfEmulation as SelfEmulation>::AssignedPoint as Instantiable<
             outer::Scalar,
         >>::from_public_input(point_fields)?;
-        Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
+        Some(single_base_msm(base, scalar[0]))
     };
     let half = fields.len() / 2;
     let lhs = reconstruct_side(&fields[..half])?;
     let rhs = reconstruct_side(&fields[half..])?;
     Some(Accumulator::new(lhs, rhs))
+}
+
+/// The MSM `scalar * base`, with a variable base.
+pub fn single_base_msm(
+    base: <InnerSelfEmulation as SelfEmulation>::C,
+    scalar: outer::Scalar,
+) -> Msm<InnerSelfEmulation> {
+    Msm::new(
+        &[Point::Variable(base)],
+        &[scalar],
+        &[PolynomialLabel::NoLabel],
+    )
 }
 
 /// A deferred KZG accumulator, as a `verify_proof` instruction exposes it.
@@ -439,6 +454,16 @@ pub struct DeferredAccumulator {
 }
 
 impl DeferredAccumulator {
+    /// The accumulator collapsed to the points `lhs` and `rhs`.
+    pub fn from_points(lhs: outer::Affine, rhs: outer::Affine) -> Self {
+        DeferredAccumulator { lhs, rhs }
+    }
+
+    /// The points the accumulator is collapsed to, `(lhs, rhs)`.
+    pub fn points(&self) -> (outer::Affine, outer::Affine) {
+        (self.lhs, self.rhs)
+    }
+
     /// The compressed encoding of both points.
     fn to_bytes(self) -> [u8; 2 * outer::POINT_BYTES] {
         let mut out = [0u8; 2 * outer::POINT_BYTES];
@@ -450,8 +475,7 @@ impl DeferredAccumulator {
     /// Rebuilds the accumulator midnight-circuits works with, restoring the
     /// scalars that `collapse` had set to one.
     pub fn to_accumulator(self) -> Accumulator<InnerSelfEmulation> {
-        let side =
-            |p: outer::Affine| Msm::new(&[p.into()], &[outer::Scalar::ONE], &BTreeMap::new());
+        let side = |p: outer::Affine| single_base_msm(p.into(), outer::Scalar::ONE);
         Accumulator::new(side(self.lhs), side(self.rhs))
     }
 
@@ -463,10 +487,10 @@ impl DeferredAccumulator {
             if bases.len() != 1 || scalars.len() != 1 || scalars[0] != outer::Scalar::ONE {
                 return None;
             }
-            if !msm.fixed_base_scalars().is_empty() {
-                return None;
+            match bases[0] {
+                Point::Variable(p) => Some(p.into()),
+                Point::Fixed => None,
             }
-            Some(bases[0].into())
         };
         Some(DeferredAccumulator {
             lhs: side(acc.lhs())?,
@@ -1111,8 +1135,8 @@ mod accumulator_discharge_tests {
     fn non_pairing_accumulator() -> Accumulator<InnerSelfEmulation> {
         let one = outer::Scalar::from(1u64);
         Accumulator::new(
-            Msm::new(&[C::generator()], &[one], &BTreeMap::new()),
-            Msm::new(&[C::identity()], &[one], &BTreeMap::new()),
+            single_base_msm(C::generator(), one),
+            single_base_msm(C::identity(), one),
         )
     }
 
@@ -1254,16 +1278,18 @@ mod accumulator_discharge_tests {
     fn a_non_collapsed_accumulator_is_refused() {
         let two = outer::Scalar::from(2u64);
         let scaled = Accumulator::new(
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
+            single_base_msm(C::generator(), two),
+            single_base_msm(C::generator(), two),
         );
         assert!(DeferredAccumulator::from_accumulator(&scaled).is_none());
 
-        let mut fixed = BTreeMap::new();
-        fixed.insert("unresolved".to_owned(), outer::Scalar::ONE);
         let unresolved = Accumulator::new(
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &fixed),
+            single_base_msm(C::generator(), outer::Scalar::ONE),
+            Msm::new(
+                &[Point::Fixed],
+                &[outer::Scalar::ONE],
+                &[PolynomialLabel::Custom("unresolved".into())],
+            ),
         );
         assert!(DeferredAccumulator::from_accumulator(&unresolved).is_none());
     }

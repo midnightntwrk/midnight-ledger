@@ -939,7 +939,8 @@ fn per_tx_cost_reserve<D: DB>(
     // === Validation cost (parallelized) ===
     let mut validation = model.baseline_cost;
     // Zswap proof verifications
-    validation += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
+    // Conservatively, as guarded spends.
+    validation += model.guarded_spend_verify() * zswap_inputs;
     validation += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
     // Pedersen binding commitment check
     if zswap_inputs + zswap_outputs > 0 {

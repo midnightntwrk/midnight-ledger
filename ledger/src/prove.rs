@@ -135,6 +135,26 @@ fn mock_proof_of_serialized_size(size: usize) -> transient_crypto::proofs::Proof
     transient_crypto::proofs::Proof::from_bytes(nonsense_data)
 }
 
+/// A stand-in guarded spend proof: one accumulator, and serialized to exactly
+/// the size of a real one.
+fn mock_guarded_spend_proof() -> transient_crypto::proofs::Proof {
+    use serialize::Serializable;
+    let accumulators = vec![transient_crypto::proofs::DeferredAccumulator::from_points(
+        Default::default(),
+        Default::default(),
+    )];
+    let accumulators_size = transient_crypto::proofs::Proof {
+        bytes: vec![],
+        accumulators: accumulators.clone(),
+    }
+    .serialized_size()
+        - transient_crypto::proofs::Proof::from_bytes(vec![]).serialized_size();
+    let mut proof =
+        mock_proof_of_serialized_size(zswap::GUARDED_INPUT_PROOF_SIZE - accumulators_size);
+    proof.accumulators = accumulators;
+    proof
+}
+
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     /// Mocks proving, producing a 'proven' transaction that, while it will
     /// *not* verify, is accurate for fee computation purposes.
@@ -411,7 +431,8 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
 pub(crate) struct MockProver;
 
 const BUILTIN_KEYS: &[&str] = &[
-    "midnight/zswap/spend",
+    zswap::PLAIN_SPEND_KEY_LOCATION,
+    zswap::GUARDED_SPEND_KEY_LOCATION,
     "midnight/zswap/output",
     "midnight/dust/spend",
 ];
@@ -433,7 +454,12 @@ impl ProvingProvider for MockProver {
         _overwrite_binding_input: Option<transient_crypto::curve::Fr>,
     ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
         let size = match preimage.key_location.0.as_ref() {
-            "midnight/zswap/spend" => zswap::INPUT_PROOF_SIZE,
+            zswap::PLAIN_SPEND_KEY_LOCATION => zswap::PLAIN_INPUT_PROOF_SIZE,
+            // A guarded spend's proof carries one accumulator; the mock does too,
+            // so it is costed as one.
+            zswap::GUARDED_SPEND_KEY_LOCATION => {
+                return Ok(mock_guarded_spend_proof());
+            }
             "midnight/zswap/output" => zswap::OUTPUT_PROOF_SIZE,
             "midnight/dust/spend" => crate::dust::DUST_SPEND_PROOF_SIZE,
             _ => anyhow::bail!("cannot mock prove non-builtin circuit"),
@@ -464,8 +490,12 @@ mod tests {
     #[test]
     fn a_mock_proof_serializes_to_the_size_it_stands_in_for() {
         use serialize::Serializable;
+        assert_eq!(
+            super::mock_guarded_spend_proof().serialized_size(),
+            zswap::GUARDED_INPUT_PROOF_SIZE
+        );
         for size in [
-            zswap::INPUT_PROOF_SIZE,
+            zswap::PLAIN_INPUT_PROOF_SIZE,
             zswap::OUTPUT_PROOF_SIZE,
             crate::dust::DUST_SPEND_PROOF_SIZE,
         ] {

@@ -71,16 +71,22 @@ impl ZswapTransient {
         coin: JsValue,
         segment: Option<u16>,
         output: &ZswapOutput,
+        preimage: JsValue,
+        guarded: Option<JsValue>,
     ) -> Result<ZswapTransient, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
                 let coin = value_to_qualified_shielded_coininfo(coin)?;
+                let preimage = crate::custom_spend::value_to_shielded_token_preimage(preimage)?;
+                let guarded = crate::custom_spend::value_to_guarded_spend(guarded)?;
                 Ok(ZswapTransient(ZswapTransientTypes::UnprovenTransient(
                     Box::new(zswap::Transient::new_from_contract_owned_output(
                         &mut OsRng,
                         &coin,
                         segment,
                         val.clone(),
+                        &preimage,
+                        guarded,
                     )?),
                 )))
             }
@@ -410,11 +416,23 @@ impl ZswapInput {
         segment: Option<u16>,
         contract: &str,
         state: &ZswapChainState,
+        preimage: JsValue,
+        guarded: Option<JsValue>,
     ) -> Result<ZswapInput, JsError> {
         let coin = value_to_qualified_shielded_coininfo(coin)?;
         let addr = from_hex_ser(contract)?;
+        let preimage = crate::custom_spend::value_to_shielded_token_preimage(preimage)?;
+        let guarded = crate::custom_spend::value_to_guarded_spend(guarded)?;
         Ok(ZswapInput(ZswapInputTypes::UnprovenInput(
-            zswap::Input::new_contract_owned(&mut OsRng, &coin, segment, addr, &state.0.coin_coms)?,
+            zswap::Input::new_contract_owned(
+                &mut OsRng,
+                &coin,
+                segment,
+                addr,
+                &state.0.coin_coms,
+                &preimage,
+                guarded,
+            )?,
         )))
     }
 

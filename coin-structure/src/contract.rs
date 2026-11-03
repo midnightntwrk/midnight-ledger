@@ -14,7 +14,7 @@
 use crate::coin::{ShieldedTokenType, UnshieldedTokenType};
 use crate::custom_spend::SpendRule;
 use crate::hash_serde;
-use base_crypto::hash::{HashOutput, persistent_commit};
+use base_crypto::hash::{HashOutput, persistent_commit, persistent_hash};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
 use fake::Dummy;
 #[cfg(feature = "proptest")]
@@ -57,16 +57,27 @@ impl rand::distributions::Distribution<ContractAddress> for rand::distributions:
 }
 
 impl ContractAddress {
+    /// The address genesis mints shielded types under. No contract can have
+    /// it, since an address is the hash of its deploy.
+    pub const GENESIS: ContractAddress = ContractAddress(HashOutput([0u8; 32]));
+
     fn custom_token_type(&self, domain_sep: HashOutput, rule: &SpendRule) -> HashOutput {
         let inner_domain_sep = HashOutput(*b"midnight:derive_token\0\0\0\0\0\0\0\0\0\0\0");
-        match rule.descriptor_hash() {
+        match rule.descriptor() {
             // NOTE: The no-rule preimage must remain byte-identical to the
             // pre-`SpendRule` derivation for existing token types to be
             // preserved.
             None => persistent_commit(&(domain_sep, self.0), inner_domain_sep),
-            Some(descriptor) => {
-                persistent_commit(&(domain_sep, self.0, descriptor), inner_domain_sep)
-            }
+            // The descriptor is appended as its fixed-width bytes, unhashed.
+            Some(descriptor) => persistent_hash(
+                &[
+                    &inner_domain_sep.0[..],
+                    &domain_sep.0,
+                    &self.0.0,
+                    &descriptor.to_bytes(),
+                ]
+                .concat(),
+            ),
         }
     }
 

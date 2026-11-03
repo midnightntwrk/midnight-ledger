@@ -39,9 +39,13 @@ async fn malicious_imbalance() {
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
 
     // Lets start by giving ourself 100 million tokens. We just need something to start.
-    let token = Default::default();
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    let token = preimage.token_type();
     state.give_fee_token(&mut rng, 10).await;
-    state.rewards_shielded(&mut rng, token, 100_000_000);
+    state.rewards_shielded(&mut rng, preimage, 100_000_000);
     let deploy = ContractDeploy::new(&mut rng, ContractState::default());
     // Bypass some machinery to directly deploy an existing contract.
     state.ledger.contract = state
@@ -87,7 +91,14 @@ async fn malicious_imbalance() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, Some(1))
+                .spend(
+                    &mut rng,
+                    &state.zswap_keys,
+                    &coin,
+                    Some(1),
+                    &preimage,
+                    None,
+                )
                 .unwrap()
                 .1,
         ]
@@ -101,7 +112,14 @@ async fn malicious_imbalance() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, Some(0))
+                .spend(
+                    &mut rng,
+                    &state.zswap_keys,
+                    &coin,
+                    Some(0),
+                    &preimage,
+                    None,
+                )
                 .unwrap()
                 .1,
         ]
@@ -163,9 +181,13 @@ async fn malicious_imbalance_duplicate_nullifier() {
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
 
     // Lets start by giving ourself 100 million tokens. We just need something to start.
-    let token = Default::default();
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    let token = preimage.token_type();
     state.give_fee_token(&mut rng, 10).await;
-    state.rewards_shielded(&mut rng, token, 100_000_000);
+    state.rewards_shielded(&mut rng, preimage, 100_000_000);
     // Bypass some machinery to directly deploy an existing contract.
     let deploy = ContractDeploy::new(&mut rng, Default::default());
     state.ledger.contract = state
@@ -211,7 +233,14 @@ async fn malicious_imbalance_duplicate_nullifier() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, Some(1))
+                .spend(
+                    &mut rng,
+                    &state.zswap_keys,
+                    &coin,
+                    Some(1),
+                    &preimage,
+                    None,
+                )
                 .unwrap()
                 .1,
         ]
@@ -225,7 +254,14 @@ async fn malicious_imbalance_duplicate_nullifier() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, Some(0))
+                .spend(
+                    &mut rng,
+                    &state.zswap_keys,
+                    &coin,
+                    Some(0),
+                    &preimage,
+                    None,
+                )
                 .unwrap()
                 .1,
         ]

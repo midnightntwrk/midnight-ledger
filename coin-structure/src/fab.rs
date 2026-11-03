@@ -17,7 +17,7 @@ use crate::coin::{
     UnshieldedTokenType,
 };
 use crate::contract::ContractAddress;
-use crate::custom_spend::SpendRule;
+use crate::custom_spend::{Descriptor, SpendRule};
 use crate::transfer::{Recipient, SenderEvidence};
 use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAtom, ValueSlice};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES as PHB};
@@ -196,22 +196,32 @@ impl TryFrom<&ValueSlice> for Recipient {
     }
 }
 
-const SPEND_RULE_EMPTY_TAG: u8 = 0;
-const SPEND_RULE_GATE_CIRCUIT_TAG: u8 = 1;
+/// A spend rule is encoded as its descriptor's fields, `mode`, `version` and
+/// `payload`, with the empty rule as mode 0 (and a zero version and payload).
+const SPEND_RULE_EMPTY_MODE: u8 = 0;
 
 impl Aligned for SpendRule {
     fn alignment() -> Alignment {
-        Alignment::concat([&u8::alignment(), &<[u8; 32]>::alignment()])
+        Alignment::concat([
+            &u8::alignment(),
+            &u8::alignment(),
+            &<[u8; 32]>::alignment(),
+        ])
     }
 }
 
 impl From<SpendRule> for Value {
     fn from(rule: SpendRule) -> Value {
         Value(match rule {
-            SpendRule::Empty => vec![SPEND_RULE_EMPTY_TAG.into(), ().into()],
-            SpendRule::GateCircuit(vk_hash) => vec![
-                SPEND_RULE_GATE_CIRCUIT_TAG.into(),
-                ValueAtom(vk_hash.0.to_vec()).normalize(),
+            SpendRule::Empty => vec![
+                SPEND_RULE_EMPTY_MODE.into(),
+                0u8.into(),
+                ValueAtom(vec![]).normalize(),
+            ],
+            SpendRule::Descriptor(descriptor) => vec![
+                descriptor.mode.into(),
+                descriptor.version.into(),
+                ValueAtom(descriptor.payload.0.to_vec()).normalize(),
             ],
         })
     }
@@ -221,28 +231,29 @@ impl TryFrom<&ValueSlice> for SpendRule {
     type Error = InvalidBuiltinDecode;
 
     fn try_from(value: &ValueSlice) -> Result<SpendRule, InvalidBuiltinDecode> {
-        fn hash_from(atom: &ValueAtom) -> Result<HashOutput, InvalidBuiltinDecode> {
-            let mut buf = [0u8; PHB];
-            if atom.0.len() <= PHB {
-                buf[..atom.0.len()].copy_from_slice(&atom.0[..]);
-                Ok(HashOutput(buf))
-            } else {
-                Err(InvalidBuiltinDecode("SpendRule"))
-            }
+        if value.0.len() != 3 {
+            return Err(InvalidBuiltinDecode("SpendRule"));
         }
-        if value.0.len() == 2 {
-            let tag: u8 = (&value.0[0]).try_into()?;
-            match tag {
-                SPEND_RULE_EMPTY_TAG => {
-                    <()>::try_from(&value.0[1])?;
-                    Ok(SpendRule::Empty)
-                }
-                SPEND_RULE_GATE_CIRCUIT_TAG => Ok(SpendRule::GateCircuit(hash_from(&value.0[1])?)),
-                _ => Err(InvalidBuiltinDecode("SpendRule")),
-            }
-        } else {
-            Err(InvalidBuiltinDecode("SpendRule"))
+        let mode: u8 = (&value.0[0]).try_into()?;
+        let version: u8 = (&value.0[1]).try_into()?;
+        let payload = &value.0[2].0;
+        if payload.len() > PHB {
+            return Err(InvalidBuiltinDecode("SpendRule"));
         }
+        let mut buf = [0u8; PHB];
+        buf[..payload.len()].copy_from_slice(payload);
+        if mode == SPEND_RULE_EMPTY_MODE {
+            // A canonical encoding: the empty rule has no version or payload.
+            if version != 0 || !payload.is_empty() {
+                return Err(InvalidBuiltinDecode("SpendRule"));
+            }
+            return Ok(SpendRule::Empty);
+        }
+        Ok(SpendRule::Descriptor(Descriptor {
+            mode,
+            version,
+            payload: HashOutput(buf),
+        }))
     }
 }
 

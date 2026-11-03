@@ -1369,6 +1369,7 @@ impl<D: DB> LedgerState<D> {
     ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
         match &tx.inner {
             Transaction::Standard(stx) => {
+                self.public_balance_check(stx)?;
                 let (state, deferred_events) =
                     self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
                 debug!(
@@ -1416,6 +1417,53 @@ impl<D: DB> LedgerState<D> {
                 }
             }
         }
+    }
+
+    /// Refuses the whole transaction if any call's public-balance effects
+    /// name a guarded shielded type, in any segment, fallible or not: a
+    /// guarded type as the state records them, or as the transaction itself
+    /// mints with a descriptor.
+    fn public_balance_check<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>>(
+        &self,
+        stx: &StandardTransaction<S, P, B, D>,
+    ) -> Result<(), TransactionInvalid<D>> {
+        let transcripts = || {
+            stx.calls().flat_map(|(_, call)| {
+                call.guaranteed_transcript
+                    .iter()
+                    .chain(call.fallible_transcript.iter())
+                    .map(|t| (call.address, (**t).clone()))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let minted: std::collections::HashSet<ShieldedTokenType> = transcripts()
+            .flat_map(|(address, transcript)| {
+                transcript
+                    .effects
+                    .shielded_mints
+                    .clone()
+                    .into_iter()
+                    .filter(|(key, _)| key.rule().descriptor().is_some())
+                    .map(|(key, _)| address.custom_shielded_token_type(key.domain_sep(), key.rule()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        for (_, transcript) in transcripts() {
+            let effects = &transcript.effects;
+            for (token_type, _) in effects
+                .unshielded_inputs
+                .clone()
+                .into_iter()
+                .chain(effects.unshielded_outputs.clone())
+            {
+                if let TokenType::Shielded(token_type) = token_type
+                    && (minted.contains(&token_type) || self.zswap.is_guarded_type(&token_type))
+                {
+                    return Err(TransactionInvalid::GuardedTypeInPublicBalance(token_type));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn apply_actions<P: ProofKind<D>>(
@@ -1500,6 +1548,17 @@ impl<D: DB> LedgerState<D> {
                             }
                             res =
                                 res.update_index(call.address, results.context.state, new_balance);
+                            // A mint with a descriptor adds the type it mints
+                            // to the guarded types.
+                            for (mint_key, _) in transcript.effects.shielded_mints.clone() {
+                                if mint_key.rule().descriptor().is_some() {
+                                    let token_type = call.address.custom_shielded_token_type(
+                                        mint_key.domain_sep(),
+                                        mint_key.rule(),
+                                    );
+                                    res.zswap = Sp::new(res.zswap.add_guarded_type(token_type));
+                                }
+                            }
                         }
                     } else {
                         warn!(?call.address, "contract not present");

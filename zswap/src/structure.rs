@@ -18,6 +18,7 @@ use coin_structure::coin::{
     TokenType, UnshieldedTokenType,
 };
 use coin_structure::contract::ContractAddress;
+use coin_structure::transfer::Recipient;
 use derive_where::derive_where;
 use itertools::Itertools;
 use rand::{CryptoRng, Rng};
@@ -39,7 +40,7 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
 use transient_crypto::encryption;
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
-use transient_crypto::proofs::ProofPreimage;
+use transient_crypto::proofs::{InnerProofWitness, Proof, ProofPreimage};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 
 macro_rules! exptfile {
@@ -209,16 +210,103 @@ impl<P> AuthorizedClaim<P> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-input[v2]"]
+#[tag = "zswap-input[v3]"]
 #[storable(db = D)]
 pub struct Input<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
     pub value_commitment: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub merkle_tree_root: MerkleTreeDigest,
+    /// The commitment of the spend's named output, which the guarded spend
+    /// circuit discloses. It must be an output or transient of the same
+    /// offer, named by no other input or transient.
+    pub named_output: Option<Sp<Commitment, D>>,
     pub proof: Arc<P>,
 }
 tag_enforcement_test!(Input<(), InMemoryDB>);
+
+/// Which spend circuit a spend's proof, or proof preimage, is for.
+pub trait SpendProof {
+    /// Whether the guarded spend circuit proves (or proved) the spend.
+    fn is_guarded_spend(&self) -> bool;
+}
+
+impl SpendProof for ProofPreimage {
+    fn is_guarded_spend(&self) -> bool {
+        self.key_location.0 == GUARDED_SPEND_KEY_LOCATION
+    }
+}
+
+impl SpendProof for Proof {
+    /// A guarded spend's proof carries its accumulator; a plain one's none.
+    fn is_guarded_spend(&self) -> bool {
+        !self.accumulators.is_empty()
+    }
+}
+
+impl SpendProof for () {
+    /// A proof-erased spend counts as plain.
+    fn is_guarded_spend(&self) -> bool {
+        false
+    }
+}
+
+/// A guard's verifying key and a guard proof, as the ledger serializes them:
+/// the key as midnight-zk writes it (`MidnightVK`, processed format), and the
+/// proof over a Poseidon transcript.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuardProof {
+    pub verifier_key: Vec<u8>,
+    pub proof: Vec<u8>,
+}
+
+impl GuardProof {
+    /// How a spend's proof preimage carries the guard proof: its proof, then
+    /// its verifying key.
+    pub fn inner_proofs(&self) -> Vec<InnerProofWitness> {
+        vec![
+            InnerProofWitness::Direct(self.proof.clone()),
+            InnerProofWitness::Direct(self.verifier_key.clone()),
+        ]
+    }
+}
+
+/// The payee a spend declares to its guard: a shielded address, or a
+/// contract. Change and other self-transfers declare the sender's own
+/// address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpendRecipient {
+    User {
+        coin_key: CoinPublicKey,
+        encryption_key: encryption::PublicKey,
+    },
+    Contract(ContractAddress),
+}
+
+impl SpendRecipient {
+    /// The recipient a coin commitment names.
+    pub fn as_recipient(&self) -> Recipient {
+        match self {
+            SpendRecipient::User { coin_key, .. } => Recipient::User(*coin_key),
+            SpendRecipient::Contract(addr) => Recipient::Contract(*addr),
+        }
+    }
+}
+
+/// What a spend through the guarded circuit needs beyond the coin and its
+/// type's preimage.
+#[derive(Clone, Debug)]
+pub struct GuardedSpend {
+    /// The payee the spend declares.
+    pub recipient: SpendRecipient,
+    /// The named output: a coin paid to `recipient` by an output or transient
+    /// of the same offer.
+    pub output: Option<CoinInfo>,
+    /// The guard proof the coin's type requires. `None` for a coin without a
+    /// rule, which the guarded circuit spends with the published accept-all
+    /// proof.
+    pub guard: Option<GuardProof>,
+}
 
 impl<P> Debug for AuthorizedClaim<P> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -237,6 +325,7 @@ impl<P: Storable<D>, D: DB> Input<P, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
+            named_output: self.named_output.clone(),
             proof: Arc::new(()),
         }
     }
@@ -376,7 +465,7 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
-#[tag = "zswap-transient[v2]"]
+#[tag = "zswap-transient[v3]"]
 #[storable(db = D)]
 pub struct Transient<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
@@ -385,6 +474,8 @@ pub struct Transient<P: Storable<D>, D: DB> {
     pub value_commitment_output: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
+    /// The named output of the transient's spend; see [`Input::named_output`].
+    pub named_output: Option<Sp<Commitment, D>>,
     pub proof_input: Arc<P>,
     pub proof_output: Arc<P>,
 }
@@ -399,6 +490,7 @@ impl<P: Storable<D>, D: DB> Transient<P, D> {
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
+            named_output: self.named_output.clone(),
             proof_input: Arc::new(()),
             proof_output: Arc::new(()),
         }
@@ -426,6 +518,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
                 .rehash()
                 .root()
                 .expect("rehashed tree must have root"),
+            named_output: self.named_output.clone(),
             proof: self.proof_input.clone(),
         }
     }
@@ -471,7 +564,7 @@ tag_enforcement_test!(Delta);
 
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
-#[tag = "zswap-offer[v5]"]
+#[tag = "zswap-offer[v6]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
 /// inputs/outputs.
@@ -517,6 +610,24 @@ impl<P: Storable<D>, D: DB> Offer<P, D> {
                 .collect(),
             deltas: self.deltas.clone(),
         }
+    }
+}
+
+impl<P: SpendProof + Storable<D>, D: DB> Offer<P, D> {
+    /// The offer's spends (inputs and transients), as `(plain, guarded)`
+    /// counts by the circuit proving them.
+    pub fn spend_counts(&self) -> (usize, usize) {
+        let guarded = self
+            .inputs
+            .iter_deref()
+            .filter(|i| i.proof.is_guarded_spend())
+            .count()
+            + self
+                .transient
+                .iter_deref()
+                .filter(|t| t.proof_input.is_guarded_spend())
+                .count();
+        (self.inputs.len() + self.transient.len() - guarded, guarded)
     }
 }
 
@@ -626,8 +737,21 @@ impl Debug for Symbol {
     }
 }
 
-pub const INPUT_PIS: usize = 68;
-pub const INPUT_PROOF_SIZE: usize = 4_835;
+/// The key location of the plain spend circuit, which re-derives the coin's
+/// type with an empty descriptor.
+pub const PLAIN_SPEND_KEY_LOCATION: &str = "midnight/zswap/plain-spend[v1]";
+/// The key location of the guarded spend circuit, which also enforces the
+/// coin's spend rule.
+pub const GUARDED_SPEND_KEY_LOCATION: &str = "midnight/zswap/guarded-spend[v1]";
+
+/// The public inputs of the plain spend circuit (those of today's spend).
+pub const PLAIN_INPUT_PIS: usize = 68;
+/// The public inputs of the guarded spend circuit, its accumulator included.
+pub const GUARDED_INPUT_PIS: usize = 98;
+/// The serialized size of a plain spend proof.
+pub const PLAIN_INPUT_PROOF_SIZE: usize = 4_519;
+/// The serialized size of a guarded spend proof, its accumulator included.
+pub const GUARDED_INPUT_PROOF_SIZE: usize = 6_487;
 pub const OUTPUT_PIS: usize = 77;
 pub const OUTPUT_PROOF_SIZE: usize = 4_835;
 pub const AUTHORIZED_CLAIM_PIS: usize = 13;

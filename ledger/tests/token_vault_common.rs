@@ -85,7 +85,7 @@ pub use transient_crypto::fab::ValueReprAlignedValue;
 pub use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
 pub use transient_crypto::proofs::PARAMS_VERIFIER;
 pub use transient_crypto::proofs::{KeyLocation, ProofPreimage};
-pub use zswap::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
+pub use zswap::verify::{OUTPUT_VK, SIGN_VK};
 pub use zswap::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
@@ -191,7 +191,7 @@ pub fn context_with_balance<D: DB>(
 /// Initialize crypto parameters for tests
 pub fn init_crypto() {
     lazy_static::initialize(&PARAMS_VERIFIER);
-    SPEND_VK.init().ok();
+    let _ = zswap::spend_circuit::spend_vk(false);
     OUTPUT_VK.init().ok();
     SIGN_VK.init().ok();
 }

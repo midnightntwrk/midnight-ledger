@@ -3,7 +3,6 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
 use coin_structure::coin::Info as CoinInfo;
-use coin_structure::coin::ShieldedTokenType;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use midnight_zswap::keys::SecretKeys;
 use midnight_zswap::ledger::State as ZswapLedgerState;
@@ -47,9 +46,13 @@ pub fn zswap_ledger(c: &mut Criterion) {
     let mut zswap_local_state = ZswapLocalState::<InMemoryDB>::new();
     let keys = SecretKeys::from_rng_seed(&mut rng);
     let zswap_state: ZswapLedgerState<InMemoryDB> = ZswapLedgerState::new();
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        OsRng.r#gen(),
+        Default::default(),
+    );
     let coin = CoinInfo {
         nonce: OsRng.r#gen(),
-        type_: ShieldedTokenType(OsRng.r#gen()),
+        type_: preimage.token_type(),
         value: OsRng.r#gen::<u64>() as u128,
     };
     let resolver = ZswapResolver(
@@ -74,7 +77,9 @@ pub fn zswap_ledger(c: &mut Criterion) {
     zswap_local_state = zswap_local_state.watch_for(&keys.coin_public_key(), &coin);
     zswap_local_state = zswap_local_state.apply(&keys, &offer).unwrap();
     let qc = zswap_local_state.coins.iter().next().unwrap().1;
-    let (_, input) = zswap_local_state.spend(&mut rng, &keys, &qc, None).unwrap();
+    let (_, input) = zswap_local_state
+        .spend(&mut rng, &keys, &qc, None, &preimage, None)
+        .unwrap();
     let offer = Offer {
         inputs: vec![input].into(),
         outputs: storage::storage::Array::new(),

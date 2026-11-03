@@ -404,6 +404,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         + Hash
         + Storable<D>
         + Tagged
+        + zswap::SpendProof
         + Into<Self::Proof>;
     fn zswap_well_formed(
         offer: &zswap::Offer<Self::LatestProof, D>,
@@ -695,17 +696,25 @@ impl<D: DB> ProofKind<D> for () {
                     .unwrap_or(0)
             })
             .sum::<usize>();
-        let (zswap_inputs, zswap_outputs) = if let Transaction::Standard(stx) = tx {
-            let transients = stx.transients().count();
-            (
-                stx.inputs().count() + transients,
-                stx.outputs().count() + transients,
-            )
-        } else {
-            (0, 0)
-        };
+        let (plain_inputs, guarded_inputs, zswap_outputs) =
+            if let Transaction::Standard(stx) = tx {
+                let (plain, guarded) = stx
+                    .guaranteed_coins
+                    .iter()
+                    .map(|o| o.spend_counts())
+                    .chain(stx.fallible_coins.iter().map(|o| o.1.spend_counts()))
+                    .fold((0, 0), |(p, g), (dp, dg)| (p + dp, g + dg));
+                (
+                    plain,
+                    guarded,
+                    stx.outputs().count() + stx.transients().count(),
+                )
+            } else {
+                (0, 0, 0)
+            };
         size + calls * PROOF_SIZE
-            + zswap_inputs * zswap::INPUT_PROOF_SIZE
+            + plain_inputs * zswap::PLAIN_INPUT_PROOF_SIZE
+            + guarded_inputs * zswap::GUARDED_INPUT_PROOF_SIZE
             + zswap_outputs * zswap::OUTPUT_PROOF_SIZE
             + dust_spends * DUST_SPEND_PROOF_SIZE
     }
@@ -955,7 +964,7 @@ pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 #[derive(Storable, Envelope)]
 #[envelope(InnerIntentSigningEnvelope<S, P, B, D>)]
 #[envelope(InnerIntentPedersenEnvelope<S, P, B, D>)]
-#[tag = "intent[v10]"]
+#[tag = "intent[v11]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
@@ -969,7 +978,7 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, 
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-signing-envelope[v10]"]
+#[tag = "inner-intent-signing-envelope[v11]"]
 #[phantom(D)]
 // Note: This signing envelope is *not* just the erased intent in order to not count the number of
 // signatures in unshielded offers. For this same reason, no wrapper is required for contract
@@ -985,7 +994,7 @@ pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: S
 tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-signing-envelope[v10]"]
+#[tag = "intent-signing-envelope[v11]"]
 #[phantom(D)]
 pub struct IntentSigningEnvelope<D: DB> {
     pub segment: u16,
@@ -994,7 +1003,7 @@ pub struct IntentSigningEnvelope<D: DB> {
 tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-pedersen-challenge-envelope[v10]"]
+#[tag = "inner-intent-pedersen-challenge-envelope[v11]"]
 #[phantom(D)]
 // Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
 // binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
@@ -1017,7 +1026,7 @@ struct InnerIntentPedersenEnvelope<
 tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-pedersen-challenge-envelope[v10]"]
+#[tag = "intent-pedersen-challenge-envelope[v11]"]
 #[phantom(D)]
 struct IntentPedersenEnvelope<D: DB> {
     segment: u16,
@@ -1218,6 +1227,12 @@ impl TransactionCostModel {
         let time = self.runtime_cost_model.proof_verify_constant
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
+    }
+    /// Verifying a guarded spend: its proof, and its accumulator's pairing
+    /// check, priced as a second proof's constant cost.
+    pub(crate) fn guarded_spend_verify(&self) -> RunningCost {
+        self.proof_verify(zswap::GUARDED_INPUT_PIS)
+            + RunningCost::compute(self.runtime_cost_model.proof_verify_constant)
     }
     pub(crate) fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
         let layers = log_size.div_ceil(4);
@@ -1476,7 +1491,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v13]"]
+#[tag = "transaction[v14]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1760,7 +1775,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v13]"]
+#[tag = "standard-transaction[v14]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -2002,7 +2017,7 @@ impl<S: SignatureKind<D>, D: DB> Debug for ClaimRewardsTransaction<S, D> {
 }
 
 pub(crate) const MIN_PROOF_SIZE: usize = DUST_SPEND_PROOF_SIZE;
-pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
+pub(crate) const PROOF_SIZE: usize = zswap::PLAIN_INPUT_PROOF_SIZE;
 // Retrieved from zswap key size. Unfortunately varies with circuits, this
 // should be an upper bound.
 pub(crate) const VERIFIER_KEY_SIZE: usize = 2875;
@@ -2081,15 +2096,16 @@ where
                     .map(|o| (**o).clone())
                     .chain(stx.fallible_coins.values())
                     .collect::<Vec<_>>();
-                let zswap_inputs = offers
+                let (plain_inputs, guarded_inputs) = offers
                     .iter()
-                    .map(|offer| offer.inputs.len() + offer.transient.len())
-                    .sum::<usize>();
+                    .map(|offer| offer.spend_counts())
+                    .fold((0, 0), |(p, g), (dp, dg)| (p + dp, g + dg));
                 let zswap_outputs = offers
                     .iter()
                     .map(|offer| offer.outputs.len() + offer.transient.len())
                     .sum::<usize>();
-                cost += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
+                cost += model.proof_verify(zswap::PLAIN_INPUT_PIS) * plain_inputs;
+                cost += model.guarded_spend_verify() * guarded_inputs;
                 cost += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
                 for intent in stx.intents.values() {
                     // Binding commitment check
@@ -2739,7 +2755,7 @@ impl rand::distributions::Distribution<ContractCall<(), InMemoryDB>>
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; P)]
 #[storable(db = D)]
-#[tag = "contract-call[v4]"]
+#[tag = "contract-call[v5]"]
 pub struct ContractCall<P: ProofKind<D>, D: DB> {
     pub address: ContractAddress,
     pub entry_point: EntryPointBuf,
@@ -3149,7 +3165,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v10]"]
+#[tag = "contract-action[v11]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -3459,7 +3475,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v18]"]
+#[tag = "ledger-state[v19]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,

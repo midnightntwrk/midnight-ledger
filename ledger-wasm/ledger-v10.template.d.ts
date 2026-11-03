@@ -1515,6 +1515,75 @@ export type TransactionId = string;
 export type EncPublicKey = string;
 
 /**
+ * The preimage of a shielded token type, from which every shielded spend
+ * re-derives the coin's type: the domain separator and contract the type was
+ * minted under (genesis types under {@link genesisContractAddress}), and its
+ * spend rule (hex-encoded tagged serialization, as {@link guardSpendRule}
+ * produces; omitted for a type without one).
+ *
+ * The ledger stores no preimages: the spender learns it privately, for
+ * instance from the minting contract or the sender.
+ */
+export type ShieldedTokenPreimage = {
+  domainSep: DomainSeparator,
+  contract: ContractAddress,
+  spendRule?: string,
+};
+
+/**
+ * The payee a guarded spend declares to its guard. Change and other
+ * self-transfers declare the spender's own address.
+ */
+export type SpendRecipient =
+  | { tag: 'user', coinPublicKey: CoinPublicKey, encryptionPublicKey: EncPublicKey }
+  | { tag: 'contract', address: ContractAddress };
+
+/**
+ * A guard proof: the guard's verifying key as midnight-zk writes it, and a
+ * proof over a Poseidon transcript, on the spend's guard arguments.
+ */
+export type GuardProof = {
+  verifierKey: Uint8Array,
+  proof: Uint8Array,
+};
+
+/**
+ * What a spend through the guarded spend circuit needs: the declared
+ * recipient; optionally the named output, a coin the same offer pays to the
+ * recipient, whose commitment the spend discloses; and the guard proof the
+ * coin's type requires (omitted for a coin without a spend rule).
+ */
+export type GuardedSpend = {
+  recipient: SpendRecipient,
+  output?: ShieldedCoinInfo,
+  guard?: GuardProof,
+};
+
+/**
+ * The hash of a guard's verifying key, which a mode 2 spend rule names.
+ */
+export function guardVerifierKeyHash(verifierKey: Uint8Array): string;
+
+/**
+ * Verifies a guard proof against its verifying key, on the spend's 30 guard
+ * arguments (field elements, in the order and encoding the guarded spend
+ * circuit hands them to the guard).
+ */
+export function verifyGuardProof(verifierKey: Uint8Array, proof: Uint8Array, args: bigint[]): boolean;
+
+/**
+ * The hex-encoded mode 2, version 1 spend rule naming the guard whose
+ * verifying key hashes to `vkHash`, for {@link ShieldedTokenPreimage} and
+ * `rawTokenType`.
+ */
+export function guardSpendRule(vkHash: string): string;
+
+/**
+ * The all-zero contract address genesis mints shielded types under.
+ */
+export function genesisContractAddress(): ContractAddress;
+
+/**
  * Samples a dummy user coin public key, for use in testing
  */
 export function sampleCoinPublicKey(): CoinPublicKey;
@@ -1928,15 +1997,22 @@ export class ZswapLocalState {
    * Initiates a new spend of a specific coin, outputting the corresponding
    * {@link ZswapInput}, and the updated state marking this coin as
    * in-flight.
+   *
+   * Every shielded spend re-derives the coin's token type from `preimage`,
+   * which the spender learns privately. `guarded` selects the guarded spend
+   * circuit, which a coin whose type has a spend rule requires; see
+   * {@link GuardedSpend}.
    */
-  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, ttl?: Date): [ZswapLocalState, UnprovenInput];
+  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, preimage: ShieldedTokenPreimage, guarded?: GuardedSpend, ttl?: Date): [ZswapLocalState, UnprovenInput];
 
   /**
    * Initiates a new spend of a new-yet-received output, outputting the
    * corresponding {@link ZswapTransient}, and the updated state marking
    * this coin as in-flight.
+   *
+   * `preimage` and `guarded` are as for {@link spend}.
    */
-  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
+  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput, preimage: ShieldedTokenPreimage, guarded?: GuardedSpend, ttl?: Date): [ZswapLocalState, UnprovenTransient];
 
   /**
    * Adds a coin to the list of coins that are expected to be received
@@ -1984,7 +2060,11 @@ export class ZswapLocalState {
 export class ZswapInput<P extends Proofish> {
   private constructor();
 
-  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
+  /**
+   * Spends a contract-owned coin. `preimage` and `guarded` are as for
+   * {@link ZswapLocalState.spend}.
+   */
+  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState, preimage: ShieldedTokenPreimage, guarded?: GuardedSpend): UnprovenInput;
 
   serialize(): Uint8Array;
 
@@ -2061,7 +2141,7 @@ export class ZswapTransient<P extends Proofish> {
    *
    * The {@link QualifiedShieldedCoinInfo} should have an `mt_index` of `0`
    */
-  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput): UnprovenTransient;
+  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput, preimage: ShieldedTokenPreimage, guarded?: GuardedSpend): UnprovenTransient;
 
   serialize(): Uint8Array;
 

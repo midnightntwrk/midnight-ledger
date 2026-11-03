@@ -15,7 +15,7 @@ use crate::ZSWAP_TREE_HEIGHT;
 use crate::error::TransactionInvalid;
 use crate::structure::*;
 use base_crypto::time::{Duration, Timestamp};
-use coin_structure::coin::{Commitment, Nullifier};
+use coin_structure::coin::{Commitment, Nullifier, ShieldedTokenType};
 use coin_structure::contract::ContractAddress;
 use derive_where::derive_where;
 use serde::Serialize;
@@ -37,7 +37,7 @@ use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Debug, Eq)]
 #[storable(db = D)]
-#[tag = "zswap-ledger-state[v5]"]
+#[tag = "zswap-ledger-state[v6]"]
 #[must_use]
 pub struct State<D: DB> {
     pub coin_coms: MerkleTree<Option<Sp<ContractAddress, D>>, D>,
@@ -45,6 +45,9 @@ pub struct State<D: DB> {
     pub first_free: u64,
     pub nullifiers: HashMap<Nullifier, (), D>,
     pub past_roots: TimeFilterMap<Identity<MerkleTreeDigest>, D>,
+    /// The guarded shielded token types: every type a mint with a descriptor
+    /// has issued. Nothing removes a type.
+    pub guarded_types: HashMap<ShieldedTokenType, (), D>,
 }
 tag_enforcement_test!(State<storage::db::InMemoryDB>);
 
@@ -56,6 +59,7 @@ impl<D: DB> Default for State<D> {
             first_free: 0,
             nullifiers: HashMap::new(),
             past_roots: TimeFilterMap::new(),
+            guarded_types: HashMap::new(),
         }
     }
 }
@@ -63,6 +67,19 @@ impl<D: DB> Default for State<D> {
 impl<D: DB> State<D> {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    /// Records that a mint with a descriptor issued `token_type`.
+    pub fn add_guarded_type(&self, token_type: ShieldedTokenType) -> Self {
+        State {
+            guarded_types: self.guarded_types.insert(token_type, ()),
+            ..self.clone()
+        }
+    }
+
+    /// Whether a mint with a descriptor has issued `token_type`.
+    pub fn is_guarded_type(&self, token_type: &ShieldedTokenType) -> bool {
+        self.guarded_types.contains_key(token_type)
     }
 
     fn apply_input<P: Storable<D>>(
@@ -262,6 +279,7 @@ mod tests {
     use base_crypto::time::{Duration, Timestamp};
     use coin_structure::coin::{Info as CoinInfo, ShieldedTokenType, TokenType};
     use coin_structure::contract::ContractAddress;
+    use coin_structure::custom_spend::ShieldedTokenPreimage;
     use coin_structure::transfer::Recipient;
     use itertools::Itertools;
     use rand::rngs::ThreadRng;
@@ -290,12 +308,18 @@ mod tests {
         }
         let mut state = State::<InMemoryDB>::new();
         let mut rng = rand::thread_rng();
+        let addr = ContractAddress::default();
+        // Spending re-derives the coin's type, so needs the type's preimage.
+        let preimage = ShieldedTokenPreimage {
+            domain_sep: rng.r#gen(),
+            contract_address: addr,
+            rule: Default::default(),
+        };
         let coin = CoinInfo {
             nonce: rng.r#gen(),
-            type_: rng.r#gen(),
+            type_: preimage.token_type(),
             value: 500,
         };
-        let addr = ContractAddress::default();
         state = insert_dummy_outputs(&mut rng, state, 25);
         let output = Output::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
         let (new_state, indices) = state
@@ -320,7 +344,16 @@ mod tests {
                 .get(&coin.commitment(&Recipient::Contract(addr)))
                 .unwrap(),
         );
-        Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
+        Input::new_contract_owned(
+            &mut rng,
+            &qcoin,
+            None,
+            addr,
+            &state.filter(&[addr]),
+            &preimage,
+            None,
+        )
+        .unwrap();
     }
 
     #[test]

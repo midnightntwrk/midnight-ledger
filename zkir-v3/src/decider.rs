@@ -32,6 +32,7 @@ use midnight_circuits::verifier::{Accumulator, AssignedAccumulator, SelfEmulatio
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
+    poly::PolynomialLabel,
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, ZkStdLib};
@@ -171,7 +172,7 @@ fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator
 pub fn decide_offcircuit(
     kind: DeciderKind,
     own_acc: Accumulator<S>,
-    bases: &BTreeMap<String, <S as SelfEmulation>::C>,
+    bases: &BTreeMap<PolynomialLabel, <S as SelfEmulation>::C>,
     instance: &[outer::Scalar],
 ) -> anyhow::Result<Accumulator<S>> {
     let mut acc = match kind {
@@ -197,7 +198,7 @@ pub fn decide_incircuit(
     layouter: &mut impl Layouter<outer::Scalar>,
     kind: DeciderKind,
     own_acc: AssignedAccumulator<S>,
-    bases: &BTreeMap<String, AssignedPoint>,
+    bases: &BTreeMap<PolynomialLabel, AssignedPoint>,
     instance: &[AssignedNative<outer::Scalar>],
     guard: &AssignedBit<outer::Scalar>,
 ) -> Result<(), Error> {

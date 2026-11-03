@@ -75,10 +75,12 @@ async fn main() -> std::io::Result<()> {
             ),
             Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
         );
-        let ks = futures::future::join_all((10..=15).map(|k| PUBLIC_PARAMS.0.fetch_k(k)));
+        // Up to the guarded spend circuit's size.
+        let ks = futures::future::join_all((10..=18).map(|k| PUBLIC_PARAMS.0.fetch_k(k)));
         let keys = futures::future::join_all(
             [
-                "midnight/zswap/spend",
+                zswap::PLAIN_SPEND_KEY_LOCATION,
+                zswap::GUARDED_SPEND_KEY_LOCATION,
                 "midnight/zswap/output",
                 "midnight/zswap/sign",
                 "midnight/dust/spend",

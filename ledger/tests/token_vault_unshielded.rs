@@ -84,7 +84,7 @@ async fn test_unshielded_contract_deposit() {
 
     // Initialize crypto parameters
     lazy_static::initialize(&PARAMS_VERIFIER);
-    SPEND_VK.init().ok();
+    let _ = zswap::spend_circuit::spend_vk(false);
     OUTPUT_VK.init().ok();
     SIGN_VK.init().ok();
 
@@ -382,7 +382,7 @@ async fn test_unshielded_contract_withdraw() {
 
     // Initialize crypto parameters
     lazy_static::initialize(&PARAMS_VERIFIER);
-    SPEND_VK.init().ok();
+    let _ = zswap::spend_circuit::spend_vk(false);
     OUTPUT_VK.init().ok();
     SIGN_VK.init().ok();
 

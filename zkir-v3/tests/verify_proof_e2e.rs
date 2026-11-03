@@ -233,7 +233,7 @@ impl Relation for Recursive {
 
 /// Keygen and prove `relation`, with the Poseidon transcript the in-circuit
 /// verifier expects.
-async fn prove_inner<R: Relation>(
+async fn prove_inner<R: Relation<Error: std::fmt::Debug>>(
     params: &GeneratedParams,
     relation: &R,
     instance: &R::Instance,

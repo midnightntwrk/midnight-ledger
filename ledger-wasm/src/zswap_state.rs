@@ -368,12 +368,21 @@ impl ZswapLocalState {
         secret_keys: &ZswapSecretKeys,
         coin: JsValue,
         segment: Option<u16>,
+        preimage: JsValue,
+        guarded: Option<JsValue>,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
-        let (succ, inp) = self
-            .0
-            .spend(&mut OsRng, &secret_keys.try_into()?, &coin, segment)?;
+        let preimage = crate::custom_spend::value_to_shielded_token_preimage(preimage)?;
+        let guarded = crate::custom_spend::value_to_guarded_spend(guarded)?;
+        let (succ, inp) = self.0.spend(
+            &mut OsRng,
+            &secret_keys.try_into()?,
+            &coin,
+            segment,
+            &preimage,
+            guarded,
+        )?;
         let succ = JsValue::from(ZswapLocalState(succ));
         let inp = JsValue::from(ZswapInput::from(inp));
         let res = Array::new();
@@ -389,15 +398,21 @@ impl ZswapLocalState {
         coin: JsValue,
         segment: Option<u16>,
         output: &ZswapOutput,
+        preimage: JsValue,
+        guarded: Option<JsValue>,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
+        let preimage = crate::custom_spend::value_to_shielded_token_preimage(preimage)?;
+        let guarded = crate::custom_spend::value_to_guarded_spend(guarded)?;
         let (succ, tra) = self.0.spend_from_output(
             &mut OsRng,
             &secret_keys.try_into()?,
             &coin,
             segment,
             output.clone().try_into()?,
+            &preimage,
+            guarded,
         )?;
         let succ = JsValue::from(ZswapLocalState(succ));
         let tra = JsValue::from(ZswapTransient::from(tra));

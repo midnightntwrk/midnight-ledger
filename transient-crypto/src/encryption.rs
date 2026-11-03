@@ -48,6 +48,13 @@ use zeroize::Zeroize;
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct PublicKey(EmbeddedGroupAffine);
 
+impl PublicKey {
+    /// The public key's group element.
+    pub fn point(&self) -> EmbeddedGroupAffine {
+        self.0
+    }
+}
+
 impl Distribution<PublicKey> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PublicKey {
         PublicKey(rng.r#gen())

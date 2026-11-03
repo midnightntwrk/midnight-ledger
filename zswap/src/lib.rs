@@ -36,6 +36,7 @@ pub(crate) fn ciphertext_to_field(c: &CoinCiphertext) -> transient_crypto::curve
 }
 
 mod construct;
+pub use construct::{GUARD_ARGS_LEN, guard_args};
 pub mod error;
 pub mod keys;
 pub mod ledger;

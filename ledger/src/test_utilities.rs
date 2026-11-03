@@ -36,6 +36,7 @@ use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
+use coin_structure::custom_spend::ShieldedTokenPreimage;
 use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
 };
@@ -122,6 +123,9 @@ pub struct TestState<D: DB> {
     pub zswap_keys: SecretKeys,
     pub night_key: SigningKey,
     pub dust_key: DustSecretKey,
+    /// The preimages of the shielded token types this wallet holds, learned
+    /// privately, which spending their coins requires.
+    pub shielded_preimages: std::collections::HashMap<ShieldedTokenType, ShieldedTokenPreimage>,
 
     pub mode: TestProcessingMode,
     pub past_state_window: VecDeque<ArenaHash<D::Hasher>>,
@@ -143,6 +147,7 @@ impl<D: DB> TestState<D> {
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
             night_key: SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut *rng)),
             dust_key: DustSecretKey::sample(&mut *rng),
+            shielded_preimages: std::collections::HashMap::new(),
 
             mode: TestProcessingMode::Regular,
             past_state_window: VecDeque::new(),
@@ -268,12 +273,16 @@ impl<D: DB> TestState<D> {
         self.assert_apply(&tx, strictness);
     }
 
+    /// Pays this wallet `amount` of the shielded type `preimage` derives,
+    /// outside any mint, and records the preimage for spending its coins.
     pub fn rewards_shielded(
         &mut self,
         rng: &mut (impl Rng + CryptoRng),
-        token: ShieldedTokenType,
+        preimage: ShieldedTokenPreimage,
         amount: u128,
     ) {
+        let token = preimage.token_type();
+        self.shielded_preimages.insert(token, preimage);
         let coin = CoinInfo {
             nonce: rng.r#gen(),
             value: amount,
@@ -513,9 +522,13 @@ impl<D: DB> TestState<D> {
                 let inputs = input_coins
                     .into_iter()
                     .map(|(_, qci)| {
+                        let preimage = self
+                            .shielded_preimages
+                            .get(&tt)
+                            .expect("the wallet must know the preimage of a type it spends");
                         let (next_state, inp) = self
                             .zswap
-                            .spend(&mut rng, &self.zswap_keys, &qci, Some(seg))
+                            .spend(&mut rng, &self.zswap_keys, &qci, Some(seg), preimage, None)
                             .unwrap(); // TODO: unwrap
                         self.zswap = next_state;
                         inp
@@ -769,6 +782,11 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
                     tagged_deserialize(&mut &key_material.ir_source[..])?;
                 preimage.check(&ir_v3)
             }
+            "zswap-spend-ir[v3]" => {
+                let ir: zswap::spend_circuit::ZswapSpendIr =
+                    tagged_deserialize(&mut &key_material.ir_source[..])?;
+                ir.check(preimage)
+            }
             _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
         }
     }
@@ -799,6 +817,17 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
                 }
                 preimage
                     .prove::<zkir_v3::IrSource>(self.rng, self.resolver, self.resolver)
+                    .await
+                    .map(|(proof, _)| proof)
+            }
+            "zswap-spend-ir[v3]" => {
+                let ir: zswap::spend_circuit::ZswapSpendIr =
+                    tagged_deserialize(&mut &key_material.ir_source[..])?;
+                let mut preimage = preimage.clone();
+                if let Some(binding_input) = overwrite_binding_input {
+                    preimage.binding_input = binding_input;
+                }
+                ir.prove(self.rng, self.resolver, &preimage)
                     .await
                     .map(|(proof, _)| proof)
             }
@@ -891,7 +920,8 @@ pub struct ProofServerProvider<'a> {
 impl ProofServerProvider<'_> {
     fn is_builtin_key(loc: &KeyLocation) -> bool {
         [
-            "midnight/zswap/spend",
+            zswap::PLAIN_SPEND_KEY_LOCATION,
+            zswap::GUARDED_SPEND_KEY_LOCATION,
             "midnight/zswap/output",
             "midnight/zswap/sign",
             "midnight/dust/spend",

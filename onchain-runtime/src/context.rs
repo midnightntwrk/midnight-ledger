@@ -602,7 +602,7 @@ impl Distribution<ClaimedUnshieldedSpendsKey> for Standard {
 /// [`ShieldedTokenType`](coin_structure::coin::ShieldedTokenType).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable, Hash)]
 #[storable(base)]
-#[tag = "contract-effects-shielded-mint-key[v1]"]
+#[tag = "contract-effects-shielded-mint-key[v2]"]
 pub struct ShieldedMintKey(pub HashOutput, pub SpendRule);
 tag_enforcement_test!(ShieldedMintKey);
 
@@ -632,10 +632,10 @@ impl TryFrom<&ValueSlice> for ShieldedMintKey {
     type Error = InvalidBuiltinDecode;
 
     fn try_from(value: &ValueSlice) -> Result<ShieldedMintKey, InvalidBuiltinDecode> {
-        if value.0.len() == 3 {
+        if value.0.len() == 4 {
             Ok(ShieldedMintKey(
                 (&value[0..1]).try_into()?,
-                (&value[1..3]).try_into()?,
+                (&value[1..4]).try_into()?,
             ))
         } else {
             Err(InvalidBuiltinDecode("ShieldedMintKey"))
@@ -737,7 +737,7 @@ impl Distribution<ClaimedContractCallsValue> for Standard {
 #[derive_where(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
-#[tag = "contract-effects[v4]"]
+#[tag = "contract-effects[v5]"]
 pub struct Effects<D: DB> {
     pub claimed_nullifiers: storage::storage::HashSet<Nullifier, D>,
     pub claimed_shielded_receives: storage::storage::HashSet<CoinCommitment, D>,
@@ -1126,7 +1126,7 @@ mod shielded_mint_key_tests {
                 (
                     ShieldedMintKey(
                         HashOutput([2u8; 32]),
-                        SpendRule::GateCircuit(HashOutput([3u8; 32])),
+                        SpendRule::guard(HashOutput([3u8; 32])),
                     ),
                     7u64,
                 ),

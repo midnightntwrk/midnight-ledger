@@ -662,6 +662,7 @@ where
                     }
                     stx.disjoint_check()?;
                     stx.effects_check()?;
+                    stx.mint_check()?;
                     stx.sequencing_check()?;
                     stx.pedersen_check()
                 })?;
@@ -1436,6 +1437,25 @@ impl<
             });
         };
 
+        Ok(())
+    }
+
+    /// Refuses any shielded mint whose descriptor the ledger does not define
+    /// (anything but mode 2, version 1).
+    fn mint_check(&self) -> Result<(), MalformedTransaction<D>> {
+        for (_, call) in self.calls() {
+            for transcript in call
+                .guaranteed_transcript
+                .iter()
+                .chain(call.fallible_transcript.iter())
+            {
+                for (mint_key, _) in transcript.effects.shielded_mints.clone() {
+                    if !mint_key.rule().is_defined() {
+                        return Err(MalformedTransaction::UndefinedSpendRule(*mint_key.rule()));
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

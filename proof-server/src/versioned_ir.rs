@@ -23,6 +23,10 @@ use zkir as zkir_v2;
 
 use crate::endpoints::PUBLIC_PARAMS;
 
+fn spend_ir(ir: &[u8]) -> Result<zswap::spend_circuit::ZswapSpendIr, String> {
+    tagged_deserialize(ir).map_err(|e| e.to_string())
+}
+
 pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
     let tag = peek_tag(&mut std::io::Cursor::new(request)).map_err(|e| e.to_string())?;
     match tag.as_str() {
@@ -36,6 +40,7 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
                 tagged_deserialize::<zkir_v3::IrSource>(request).map_err(|e| e.to_string())?;
             Ok(ir_v3.k())
         }
+        "zswap-spend-ir[v3]" => Ok(spend_ir(request)?.k()),
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
@@ -52,6 +57,9 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
             let ir_v3 = tagged_deserialize::<zkir_v3::IrSource>(ir).map_err(|e| e.to_string())?;
             ppi.check(&ir_v3).map_err(|e| e.to_string())
         }
+        "zswap-spend-ir[v3]" => spend_ir(ir)?
+            .check(&ppi)
+            .map_err(|e| e.to_string()),
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }
@@ -89,6 +97,11 @@ pub(crate) async fn prove(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "zswap-spend-ir[v3]" => spend_ir(ir_source)?
+            .prove(OsRng, &*PUBLIC_PARAMS, &ppi)
+            .await
+            .map(|(proof, _)| (proof, vec![]))
+            .map_err(|e| e.to_string()),
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }

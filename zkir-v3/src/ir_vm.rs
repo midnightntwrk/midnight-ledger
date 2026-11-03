@@ -958,6 +958,13 @@ impl Relation for IrSource {
             // we are inserting is the same.
             // Miguel: This seems unnecessary to me. I would fail when calling
             // `mem_insert` with an id that exists in the witness memory.
+            // midnight-zk `main` reads a Jubjub scalar's value back from its
+            // bits without reducing it, and panics on a non-canonical one, so
+            // those are not checked.
+            if matches!(cell, CircuitValue::JubjubScalar(_)) {
+                mem.insert(id, cell);
+                return Ok(());
+            }
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
@@ -1519,6 +1526,7 @@ impl Relation for IrSource {
             keccak_256: involves_instructions(&|op| matches!(op, I::Keccak256 { .. })),
             sha3_256: false,
             blake2b: false,
+            nb_arith_cols: 5,
             nr_pow2range_cols: 4,
             secp256k1: involves_types(&[
                 IrType::Secp256k1Point,

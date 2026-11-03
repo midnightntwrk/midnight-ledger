@@ -16,11 +16,14 @@ use crate::filter_invalid;
 use crate::structure::*;
 use crate::{ZSWAP_TREE_HEIGHT, ciphertext_to_field};
 use base_crypto::fab::AlignedValue;
+use base_crypto::hash::HashOutput;
+use coin_structure::coin::ShieldedTokenType;
 use coin_structure::coin::{
     self, Commitment, Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo,
     SecretKey as CoinSecretKey,
 };
 use coin_structure::contract::ContractAddress;
+use coin_structure::custom_spend::{ShieldedTokenPreimage, SpendRule};
 use coin_structure::transfer::{Recipient, SenderEvidence};
 use midnight_onchain_runtime::ops::{Key, Op};
 use midnight_onchain_runtime::program_fragments::*;
@@ -39,7 +42,7 @@ use storage::arena::Sp;
 use storage::db::{DB, InMemoryDB};
 use storage::storage::default_storage;
 use transient_crypto::commitment::Pedersen;
-use transient_crypto::curve::{EmbeddedFr, Fr};
+use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
 use transient_crypto::encryption;
 use transient_crypto::hash::transient_commit;
 use transient_crypto::merkle_tree::MerkleTree;
@@ -84,13 +87,18 @@ impl AuthorizedClaim<ProofPreimage> {
 }
 
 impl<D: DB> Input<ProofPreimage, D> {
-    #[instrument(skip(rng))]
+    /// Spends a coin a contract holds. `preimage` is the preimage of the
+    /// coin's type, which the spend re-derives; `guarded` selects the guarded
+    /// spend circuit, which a coin whose type has a rule requires.
+    #[instrument(skip(rng, guarded))]
     pub fn new_contract_owned<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
         segment: Option<u16>,
         contract: ContractAddress,
         tree: &MerkleTree<A, D>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<Self, OfferCreationFailed> {
         Self::new_from_secret_key::<A, R>(
             rng,
@@ -98,6 +106,8 @@ impl<D: DB> Input<ProofPreimage, D> {
             segment,
             SenderEvidence::Contract(contract),
             tree,
+            preimage,
+            guarded,
         )
     }
 
@@ -129,7 +139,11 @@ impl<D: DB> Input<ProofPreimage, D> {
         let len = proof_preimage.public_transcript_inputs.len();
         proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
             .copy_from_slice(&public_transcript_inputs_end);
-        proof_preimage.public_transcript_outputs = vec![true.into(), new_segment.into()];
+        // The segment is the last output; the guarded circuit's reserved
+        // inputs precede it.
+        if let Some(segment) = proof_preimage.public_transcript_outputs.last_mut() {
+            *segment = new_segment.into();
+        }
 
         Input {
             value_commitment,
@@ -144,7 +158,10 @@ impl<D: DB> Input<ProofPreimage, D> {
         segment: Option<u16>,
         sk: SenderEvidence<'_>,
         tree: &MerkleTree<A, D>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<Self, OfferCreationFailed> {
+        let extra_inputs = spend_extra_inputs(&coin.type_, preimage, guarded.as_ref())?;
         let rc_e: EmbeddedFr = rng.r#gen();
         let rc = Fr::try_from(rc_e).expect("Fr should be larger than EmbeddedFr");
         let nullifier = CoinInfo::from(coin).nullifier(&sk);
@@ -181,11 +198,23 @@ impl<D: DB> Input<ProofPreimage, D> {
                 *addr
             ));
         }
+        let mut public_transcript_outputs: Vec<Fr> = vec![true.into()];
+        if guarded.is_some() {
+            // The ledger supplies the guard's reserved inputs, as it supplies
+            // the segment; version 1 guards receive zeros.
+            public_transcript_prog.extend(
+                Cell_read!([Key::Value(RESERVED_SLOT.into())], false, (Fr, Fr, Fr, Fr))
+                    .into_iter()
+                    .map(|op: Op<ResultModeGather, _>| op.translate(|()| reserved_value())),
+            );
+            public_transcript_outputs.extend([Fr::from(0u64); 4]);
+        }
         public_transcript_prog.extend(
             Cell_read!([Key::Value(5u8.into())], false, u16)
                 .into_iter()
                 .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
         );
+        public_transcript_outputs.push(segment.unwrap_or(0).into());
         public_transcript_prog.extend(Cell_write!(
             [Key::Value(2u8.into())],
             false,
@@ -198,21 +227,33 @@ impl<D: DB> Input<ProofPreimage, D> {
         tree.path_for_leaf(coin.mt_index, ((), hash))
             .map_err(OfferCreationFailed::InvalidIndex)?
             .field_repr(&mut inputs);
+        inputs.extend(extra_inputs);
         CoinInfo::from(coin).field_repr(&mut inputs);
         inputs.push(rc);
         let mut public_transcript_inputs = Vec::new();
         for op in filter_invalid(public_transcript_prog.into_iter()) {
             op.field_repr(&mut public_transcript_inputs);
         }
+        let named_output = guarded
+            .as_ref()
+            .and_then(|g| g.output.map(|out| out.commitment(&g.recipient.as_recipient())));
         let proof_preimage = ProofPreimage {
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,
-            public_transcript_outputs: vec![true.into(), segment.unwrap_or(0).into()],
-            inner_proofs: vec![],
+            public_transcript_outputs,
+            inner_proofs: guarded
+                .as_ref()
+                .and_then(|g| g.guard.as_ref())
+                .map(GuardProof::inner_proofs)
+                .unwrap_or_default(),
             binding_input: 0.into(),
             communications_commitment: None,
-            key_location: KeyLocation(Cow::Borrowed("midnight/zswap/spend")),
+            key_location: KeyLocation(Cow::Borrowed(if guarded.is_some() {
+                GUARDED_SPEND_KEY_LOCATION
+            } else {
+                PLAIN_SPEND_KEY_LOCATION
+            })),
         };
         let inp = Input {
             nullifier,
@@ -222,11 +263,137 @@ impl<D: DB> Input<ProofPreimage, D> {
                 _ => None,
             },
             merkle_tree_root,
+            named_output: named_output.map(Sp::new),
             proof: Arc::new(proof_preimage),
         };
         //debug_assert!(inp.well_formed().is_ok());
         Ok(inp)
     }
+}
+
+/// The zswap ledger slot of the guard's reserved inputs.
+pub(crate) const RESERVED_SLOT: u8 = 6;
+
+/// The reserved inputs a version 1 guard receives: four zeros.
+pub(crate) fn reserved_value() -> AlignedValue {
+    (Fr::from(0u64), Fr::from(0u64), Fr::from(0u64), Fr::from(0u64)).into()
+}
+
+/// The spend's proof preimage inputs between the Merkle path and the coin:
+/// the type's preimage, and for the guarded circuit, the descriptor's key
+/// hash, the recipient and the named output.
+fn spend_extra_inputs(
+    token_type: &ShieldedTokenType,
+    preimage: &ShieldedTokenPreimage,
+    guarded: Option<&GuardedSpend>,
+) -> Result<Vec<Fr>, OfferCreationFailed> {
+    if preimage.token_type() != *token_type {
+        return Err(OfferCreationFailed::TypeOpeningMismatch(*token_type));
+    }
+    if !preimage.rule.is_defined() {
+        return Err(OfferCreationFailed::UndefinedSpendRule(preimage.rule));
+    }
+    let mut inputs = Vec::new();
+    preimage.domain_sep.field_repr(&mut inputs);
+    preimage.contract_address.0.field_repr(&mut inputs);
+    let Some(guarded) = guarded else {
+        if preimage.rule != SpendRule::Empty {
+            return Err(OfferCreationFailed::GuardedSpendRequired(*token_type));
+        }
+        return Ok(inputs);
+    };
+    match (preimage.rule.descriptor(), &guarded.guard) {
+        (Some(descriptor), Some(_)) => {
+            let vk_hash = Fr::from_le_bytes(&descriptor.payload.0)
+                .ok_or(OfferCreationFailed::NonCanonicalGuardKeyHash)?;
+            inputs.extend([Fr::from(1u64), vk_hash]);
+        }
+        (Some(_), None) => return Err(OfferCreationFailed::GuardProofRequired(*token_type)),
+        (None, None) => inputs.extend([Fr::from(0u64), Fr::from(0u64)]),
+        (None, Some(_)) => return Err(OfferCreationFailed::UnexpectedGuardProof(*token_type)),
+    }
+    inputs.extend(recipient_fields(&guarded.recipient));
+    inputs.extend(output_fields(guarded.output.as_ref()));
+    Ok(inputs)
+}
+
+/// The number of field elements a guard is handed.
+pub const GUARD_ARGS_LEN: usize = 30;
+
+/// `recipient: Either<ShieldedAddress, ContractAddress>`, in the ledger's
+/// field encoding: `is_left`, the shielded address (coin key, encryption key
+/// as `(x, y)`), then the contract address. The branch not taken is
+/// `default`: zero, and the identity point for the encryption key.
+pub(crate) fn recipient_fields(recipient: &SpendRecipient) -> Vec<Fr> {
+    let mut fields = Vec::with_capacity(7);
+    let (is_left, coin_key, encryption_key, contract) = match recipient {
+        SpendRecipient::User {
+            coin_key,
+            encryption_key,
+        } => (
+            true,
+            *coin_key,
+            encryption_key.point(),
+            ContractAddress::default(),
+        ),
+        SpendRecipient::Contract(addr) => (
+            false,
+            Default::default(),
+            EmbeddedGroupAffine::identity(),
+            *addr,
+        ),
+    };
+    fields.push(Fr::from(is_left as u64));
+    coin_key.field_repr(&mut fields);
+    fields.push(encryption_key.x().unwrap_or(0.into()));
+    fields.push(encryption_key.y().unwrap_or(1.into()));
+    contract.field_repr(&mut fields);
+    fields
+}
+
+/// `output: Maybe<ShieldedCoinInfo>`, in the ledger's field encoding:
+/// `is_some`, then the coin (`default` if absent).
+pub(crate) fn output_fields(output: Option<&CoinInfo>) -> Vec<Fr> {
+    let mut fields = vec![Fr::from(output.is_some() as u64)];
+    match output {
+        Some(coin) => coin.field_repr(&mut fields),
+        None => CoinInfo {
+            nonce: Default::default(),
+            type_: Default::default(),
+            value: 0,
+        }
+        .field_repr(&mut fields),
+    }
+    fields
+}
+
+/// The arguments the guarded spend circuit hands a coin's guard, in the
+/// ledger's field encoding, in order: `coin` (with its commitment tree
+/// index), `nullifier`, `spender`, `recipient`, `output`, and `reserved`
+/// (zero for version 1).
+///
+/// A guard proof for a spend must be made with these as its public inputs.
+pub fn guard_args(
+    coin: &QualifiedCoinInfo,
+    sender: &SenderEvidence<'_>,
+    recipient: &SpendRecipient,
+    output: Option<&CoinInfo>,
+) -> Vec<Fr> {
+    let mut args = Vec::with_capacity(GUARD_ARGS_LEN);
+    coin.field_repr(&mut args);
+    CoinInfo::from(coin).nullifier(sender).field_repr(&mut args);
+    let (is_left, coin_key, contract) = match Recipient::from(sender.clone()) {
+        Recipient::User(pk) => (true, pk, ContractAddress::default()),
+        Recipient::Contract(addr) => (false, Default::default(), addr),
+    };
+    args.push(Fr::from(is_left as u64));
+    coin_key.field_repr(&mut args);
+    contract.field_repr(&mut args);
+    args.extend(recipient_fields(recipient));
+    args.extend(output_fields(output));
+    args.extend([Fr::from(0u64); 4]);
+    debug_assert_eq!(args.len(), GUARD_ARGS_LEN);
+    args
 }
 
 impl<D: DB> Output<ProofPreimage, D> {
@@ -387,12 +554,14 @@ impl<D: DB> Output<ProofPreimage, D> {
 }
 
 impl<D: DB> Transient<ProofPreimage, D> {
-    #[instrument(skip(rng))]
+    #[instrument(skip(rng, guarded))]
     pub fn new_from_contract_owned_output<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
         segment: Option<u16>,
         output: Output<ProofPreimage, D>,
+        preimage: &ShieldedTokenPreimage,
+        guarded: Option<GuardedSpend>,
     ) -> Result<Self, OfferCreationFailed> {
         let tree = MerkleTree::<(), InMemoryDB>::blank(ZSWAP_TREE_HEIGHT)
             .try_update_hash(0, output.coin_com.0, ())
@@ -402,7 +571,15 @@ impl<D: DB> Transient<ProofPreimage, D> {
             .contract_address
             .clone()
             .ok_or(OfferCreationFailed::NotContractOwned)?;
-        let input = Input::new_contract_owned(rng, coin, segment, *addr.deref(), &tree)?;
+        let input = Input::new_contract_owned(
+            rng,
+            coin,
+            segment,
+            *addr.deref(),
+            &tree,
+            preimage,
+            guarded,
+        )?;
         let io = Transient {
             nullifier: input.nullifier,
             coin_com: output.coin_com,
@@ -410,6 +587,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
             value_commitment_output: output.value_commitment,
             contract_address: output.contract_address,
             ciphertext: output.ciphertext,
+            named_output: input.named_output.map(|com| Sp::new(*com)),
             proof_input: input.proof,
             proof_output: output.proof,
         };
@@ -426,6 +604,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
             value_commitment_output: output.value_commitment,
             contract_address: output.contract_address,
             ciphertext: output.ciphertext,
+            named_output: input.named_output,
             proof_input: input.proof,
             proof_output: output.proof,
         }
@@ -499,8 +678,18 @@ mod tests {
         let pk = CoinPublicKey(rng.r#gen());
         let out: Output<ProofPreimage, InMemoryDB> =
             Output::new::<_>(&mut rng, &coin, None, &pk, None).unwrap();
-        let trans =
-            Transient::new_from_contract_owned_output(&mut rng, &coin.qualify(0), None, out);
+        let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+            rng.r#gen(),
+            Default::default(),
+        );
+        let trans = Transient::new_from_contract_owned_output(
+            &mut rng,
+            &coin.qualify(0),
+            None,
+            out,
+            &preimage,
+            None,
+        );
         assert!(trans.is_err());
     }
 }

@@ -1265,7 +1265,11 @@ async fn composable_funded() {
         .unwrap();
     state.assert_apply(&tx, strictness);
 
-    let token = Default::default();
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    let token = preimage.token_type();
 
     // Part 3: Burn
     println!(":: Part 3: Burn");
@@ -1410,6 +1414,8 @@ async fn composable_funded() {
                     &coin_in.qualify(0),
                     None,
                     coin_in_out,
+                    &preimage,
+                    None,
                 )
                 .unwrap(),
             ]

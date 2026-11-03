@@ -1,5 +1,9 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: `encryption::PublicKey::point`, and `DeferredAccumulator::{from_points, points}`.
+
 ## Version `3.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7

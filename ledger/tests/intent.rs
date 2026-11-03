@@ -517,8 +517,11 @@ async fn balanced_utxos_1_intent() {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
 
     // Part 1: Deploy
@@ -748,8 +751,11 @@ async fn intents_cannot_balance_across_segments() {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
 
     // Part 1: Deploy
@@ -1029,8 +1035,11 @@ async fn causality_check_sanity_check() {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
 
     // Part 1: Deploy
@@ -1336,8 +1345,11 @@ async fn imbalanced_utxos_1_intent() {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
 
     // Part 1: Deploy
@@ -1528,8 +1540,11 @@ async fn imbalanced_utxos_1_intent_fallible() {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
 
     // Part 1: Deploy

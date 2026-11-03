@@ -15,6 +15,7 @@
 pub mod contract;
 pub mod conversions;
 pub mod crypto;
+pub mod custom_spend;
 pub mod dust;
 pub mod events;
 pub mod intent;

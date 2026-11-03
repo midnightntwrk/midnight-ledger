@@ -1,5 +1,11 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- breaking: `ShieldedMintKey` follows `spend-rule[v2]`, as `contract-effects-shielded-mint-key[v2]`;
+  its field-aligned form is the domain separator then the rule's `[mode, version, payload]`.
+  `Effects` moves to `contract-effects[v5]` and `Transcript` to `contract-transcript[v6]`.
+
 ## Version `5.0.0`
 
 - breaking: pull in breaking transient-crypto changes. A verifier key in

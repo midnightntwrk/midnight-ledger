@@ -540,9 +540,12 @@ export function decodeQualifiedShieldedCoinInfo(coin: {
 /**
  * Derives the raw {@link RawTokenType} associated with a particular
  * {@link DomainSeparator} and contract, and optionally a custom spend rule
- * (hex-encoded tagged serialization of a `SpendRule`). Omitting `spend_rule`
- * derives the token type with the empty spend rule, matching the historical
- * derivation.
+ * (hex-encoded tagged serialization of a `SpendRule`, `spend-rule[v2]`).
+ * Omitting `spend_rule` derives the token type with the empty spend rule,
+ * matching the historical derivation; a rule appends its fixed-width
+ * descriptor (`mode ‖ version ‖ payload`) to the derivation preimage.
+ * Shielded types minted under a rule other than mode 2, version 1 are
+ * refused by the ledger.
  */
 export function rawTokenType(domain_sep: DomainSeparator, contract: ContractAddress, spend_rule?: string): RawTokenType;
 

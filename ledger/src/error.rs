@@ -19,7 +19,10 @@ use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
 use base_crypto::time::Timestamp;
-use coin_structure::coin::{self, Commitment, Nullifier, PublicAddress, TokenType};
+use coin_structure::coin::{
+    self, Commitment, Nullifier, PublicAddress, ShieldedTokenType, TokenType,
+};
+use coin_structure::custom_spend::SpendRule;
 use coin_structure::contract::ContractAddress;
 use derive_where::derive_where;
 use onchain_runtime::context::Effects;
@@ -201,6 +204,8 @@ pub enum TransactionInvalid<D: DB> {
     },
     ContractAlreadyDeployed(ContractAddress),
     ContractNotPresent(ContractAddress),
+    /// A call's public-balance effects name a guarded shielded type.
+    GuardedTypeInPublicBalance(ShieldedTokenType),
     Zswap(zswap::error::TransactionInvalid),
     Transcript(onchain_runtime::error::TranscriptRejected<D>),
     InsufficientClaimable {
@@ -256,6 +261,10 @@ impl<D: DB> Display for TransactionInvalid<D> {
             ContractNotPresent(addr) => {
                 write!(formatter, "call to non-existant contract {:?}", addr)
             }
+            GuardedTypeInPublicBalance(token_type) => write!(
+                formatter,
+                "guarded shielded type {token_type:?} cannot enter or leave a contract's public balance"
+            ),
             ContractAlreadyDeployed(addr) => {
                 write!(formatter, "contract already deployed {:?}", addr)
             }
@@ -498,6 +507,8 @@ pub enum MalformedTransaction<D: DB> {
         operation: EntryPointBuf,
     },
     ContractNotPresent(ContractAddress),
+    /// A shielded mint with a descriptor the ledger does not define.
+    UndefinedSpendRule(SpendRule),
     InvalidProof(VerifyingError),
     BindingCommitmentOpeningInvalid,
     NotNormalized,
@@ -877,6 +888,10 @@ impl<D: DB> Display for MalformedTransaction<D> {
             ContractNotPresent(addr) => {
                 write!(formatter, "call to non-existant contract {:?}", addr)
             }
+            UndefinedSpendRule(rule) => write!(
+                formatter,
+                "shielded mint with undefined spend rule {rule:?}: only mode 2 version 1 descriptors are defined"
+            ),
             VerifierKeyNotPresent { address, operation } => write!(
                 formatter,
                 "operation {address:?}/{operation:?} does not have a verifier key",

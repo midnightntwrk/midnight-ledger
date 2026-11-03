@@ -57,7 +57,7 @@ use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
 use transient_crypto::proofs::PARAMS_VERIFIER;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
-use zswap::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
+use zswap::verify::{OUTPUT_VK, SIGN_VK};
 use zswap::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
@@ -156,7 +156,7 @@ async fn micro_dao_inner(mode: TestMode) {
     let mut rng = StdRng::seed_from_u64(0x42);
     //rayon::ThreadPoolBuilder::new().use_current_thread().num_threads(1).build_global().unwrap();
     lazy_static::initialize(&PARAMS_VERIFIER);
-    SPEND_VK.init().ok();
+    let _ = zswap::spend_circuit::spend_vk(false);
     OUTPUT_VK.init().ok();
     SIGN_VK.init().ok();
     let org_sk: HashOutput = rng.r#gen();
@@ -173,8 +173,12 @@ async fn micro_dao_inner(mode: TestMode) {
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     const REWARDS_AMOUNT: u128 = 5_000_000_000;
-    let token = Default::default();
-    state.rewards_shielded(&mut rng, token, REWARDS_AMOUNT);
+    let preimage = coin_structure::custom_spend::ShieldedTokenPreimage::genesis(
+        Default::default(),
+        Default::default(),
+    );
+    let token = preimage.token_type();
+    state.rewards_shielded(&mut rng, preimage, REWARDS_AMOUNT);
     state.give_fee_token(&mut rng, 25).await;
     let mut unbalanced_strictness = WellFormedStrictness::default();
     unbalanced_strictness.enforce_balancing = false;
@@ -348,6 +352,8 @@ async fn micro_dao_inner(mode: TestMode) {
                         None,
                         addr,
                         &state.ledger.zswap.coin_coms,
+                        &preimage,
+                        None,
                     )
                     .unwrap();
                     let transient = ZswapTransient::new_from_contract_owned_output(
@@ -355,6 +361,8 @@ async fn micro_dao_inner(mode: TestMode) {
                         &coin.qualify(0),
                         None,
                         out,
+                        &preimage,
+                        None,
                     )
                     .unwrap();
                     let new_coin = CoinInfo::from(&pot).evolve_from(
@@ -929,6 +937,8 @@ async fn micro_dao_inner(mode: TestMode) {
                         None,
                         addr,
                         &state.ledger.zswap.coin_coms,
+                        &preimage,
+                        None,
                     )
                     .unwrap(),
                 ]
