@@ -7,6 +7,10 @@
   whose in-circuit `is_square` now rejects 0 as a non-square, and of
   `zkir-v3` circuits that `encode` a Jubjub scalar. V0 and V1 keys are
   unchanged.
+- fix: zkir-wasm `prove()` (and `provingProvider().prove`) now applies
+  `overwriteBindingInput` for `verifier-key[v6]` circuits. Previously the
+  override was dropped, so in-process Dust spend proofs were bound to a zero
+  binding input and rejected with `InvalidDustSpendProof` (#832).
 
 ## Version `2.3.0`
 
