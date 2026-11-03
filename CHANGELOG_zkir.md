@@ -13,7 +13,7 @@
   binding input and rejected with `InvalidDustSpendProof` (#832).
   (zkir-wasm 2.2.0-rc.6)
 
-## Version `2.3.0`
+## Version `2.2.0`
 
 - breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)
 - breaking: default `IrMinorVersion` changed from `V1` to `V2`
@@ -25,8 +25,6 @@
   IR version tag, with separate `transient_crypto_old::proofs::ParamsProverProvider`
   implementation for v1 circuits
 - fix: precompile hash fixtures updated for new key format
-
-## Version `2.2.0`
 
 - feat: dual v1/v2 proving and verification pipeline
   - `VersionedInnerPK` enum holds either v1 (zk-stdlib v1) or v2 (zk-stdlib v2)
