@@ -226,13 +226,8 @@ pub async fn prove(
     let mut res = Vec::new();
     match tag.as_str() {
         "verifier-key[v6]" => {
-            let mut old_preimage: transient_crypto_old::proofs::ProofPreimage =
-                tagged_deserialize(&mut &ser_preimage.to_vec()[..])?;
-            old_preimage.binding_input = transient_crypto_old::curve::Fr::from_le_bytes(
-                &preimage.binding_input.as_le_bytes(),
-            )
-            .ok_or_else(|| JsError::new("binding input out of range"))?;
-            let proof = old_preimage
+            let preimage = zkir::ir_v1::preimage_to_v1(&preimage);
+            let proof = preimage
                 .prove::<IrSource>(OsRng, &provider, &provider)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?
