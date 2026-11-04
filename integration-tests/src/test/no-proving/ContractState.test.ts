@@ -19,7 +19,7 @@ import {
   StateValue,
   ContractMaintenanceAuthority,
   signatureVerifyingKey
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 

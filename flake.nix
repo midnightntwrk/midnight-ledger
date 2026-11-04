@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/48b80c5d6d21412a0a531cf5336389656b9ad2d1";
+      url = "github:midnightntwrk/midnight-ledger/ac65d01dee84a36eaccd9b7f4631941239721e14";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -43,7 +43,32 @@
   }:
     utils.lib.eachDefaultSystem (
       system: let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # crates.io returns 403 to any request whose User-Agent starts with
+        # "curl/", which is exactly what nixpkgs' fetchurl sends
+        # ("curl/$curlVersion Nixpkgs/$nixpkgsVersion"), so every crate tarball
+        # missing from the binary cache fails to download.
+        # To solve this we replace the agent for all fetchurl derivations.
+        # fetchurl's builder appends curlOptsList after its own --user-agent,
+        # and curl lets the last one win, so this overrides the default.
+        overlays = [
+          (_final: prev: {
+            fetchurl = args:
+              (prev.fetchurl args).overrideAttrs (old: let
+                userAgent = ["--user-agent" "midnight-ledger/1.0"];
+                previous = old.curlOptsList or [];
+              in {
+                # nixpkgs >= 26.05 keeps curlOptsList as a list (structured
+                # attrs); 25.11 and earlier store `lib.escapeShellArgs` of it,
+                # i.e. a string the builder eval's into the curl argv array.
+                # Both shapes are in use across our flake inputs.
+                curlOptsList =
+                  if builtins.isList previous
+                  then previous ++ userAgent
+                  else previous + " " + prev.lib.escapeShellArgs userAgent;
+              });
+          })
+        ];
+        pkgs = import nixpkgs {inherit system overlays;};
         pkgsStatic = pkgs.pkgsStatic;
         mkShell = pkgs.mkShell.override {
           stdenv = pkgs.clangStdenv;
@@ -90,7 +115,7 @@
           doCheck = false;
         };
         bagel-wasm = (import ./bagel.nix) {
-          inherit system nixpkgs;
+          inherit system nixpkgs overlays;
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
@@ -233,13 +258,38 @@
               ];
 
               config = {
-                entrypoint = ["${bashInteractive}/bin/bash" "-c"];
-                Cmd = ["${proof-server}/bin/midnight-proof-server --port $PORT"];
+                # Usual docker-entrypoint dispatch, so `docker run <image> -v` reaches the
+                # server. The old `bash -c` entrypoint made trailing words bash's `$0`/`$1`,
+                # silently dropping flags. Leading word without a dash runs as a command
+                # (`bash`, `midnight-proof-server -v`); a single quoted string with spaces is
+                # the pre-entrypoint compose form and still runs via `bash -c`.
+                Entrypoint = [
+                  "${bashInteractive}/bin/bash"
+                  "-c"
+                  ''
+                    export PORT="''${PORT:-6300}"
+                    export MIDNIGHT_PROOF_SERVER_PORT="''${MIDNIGHT_PROOF_SERVER_PORT:-$PORT}"
+                    case "''${1-}" in
+                      "" | -*) set -- midnight-proof-server "$@" ;;
+                      *" "*) exec bash -c "$*" ;;
+                    esac
+                    exec "$@"
+                  ''
+                  "proof-server-entrypoint"
+                ];
+                Cmd = [];
                 Env = [
                   "PATH=${lib.makeBinPath [
                     proof-server
+                    bashInteractive
+                    coreutils
                   ]}"
+                  # Kept for compatibility; `MIDNIGHT_PROOF_SERVER_PORT` wins if both are set.
                   "PORT=6300"
+                  # Fixed path so a volume can keep the zk params across container restarts
+                  # (`-v proof-params:/var/cache/midnight/zk-params`); without it every fresh
+                  # container re-downloads them before binding the port.
+                  "MIDNIGHT_PP=/var/cache/midnight/zk-params"
                 ];
                 ExposedPorts = {
                   "6300/tcp" = {};

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { DustUtxoState } from '@midnight-ntwrk/ledger';
+import { DustUtxoState } from '@midnightntwrk/ledger';
 import { expect } from 'vitest';
 import { assertSerializationSuccess } from '@/test-utils';
 

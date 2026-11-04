@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ContractMaintenanceAuthority, signatureVerifyingKey } from '@midnight-ntwrk/ledger';
+import { ContractMaintenanceAuthority, signatureVerifyingKey } from '@midnightntwrk/ledger';
 import { Random } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 

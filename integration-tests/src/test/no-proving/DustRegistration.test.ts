@@ -19,7 +19,7 @@ import {
   SignatureEnabled,
   signatureVerifyingKey,
   signData
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { SignatureMarker } from '@/test/utils/Markers';
 import { BALANCING_OVERHEAD } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';

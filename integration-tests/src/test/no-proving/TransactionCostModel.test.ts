@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { TransactionCostModel } from '@midnight-ntwrk/ledger';
+import { TransactionCostModel } from '@midnightntwrk/ledger';
 
 describe('Ledger API - TransactionCostModel', () => {
   /**

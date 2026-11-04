@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapOutput } from '@midnight-ntwrk/ledger';
+import { ZswapOutput } from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { HEX_64_REGEX, Static } from '@/test-objects';
 import '@/setup-proving';

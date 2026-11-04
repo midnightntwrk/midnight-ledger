@@ -23,7 +23,7 @@ import {
   TransactionContext,
   ZswapChainState,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';

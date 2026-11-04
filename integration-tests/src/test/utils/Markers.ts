@@ -20,7 +20,7 @@ import type {
   PreBinding,
   Binding,
   NoBinding
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 
 export class SignatureMarker {
   static readonly signature: SignatureEnabled['instance'] = 'signature';

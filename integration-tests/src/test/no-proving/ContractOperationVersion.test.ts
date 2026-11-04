@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ContractOperationVersion } from '@midnight-ntwrk/ledger';
+import { ContractOperationVersion } from '@midnightntwrk/ledger';
 
 describe('Ledger API - ContractOperation', () => {
   /**

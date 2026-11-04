@@ -213,7 +213,7 @@ fn idx<D: DB>(
         }
         StateValue::BoundedMerkleTree(tree) => {
             let key = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
-            if key >= (1u64 << tree.height() as u64) {
+            if 1u64.checked_shl(tree.height() as u32).is_some_and(|bound| key >= bound) {
                 Err(OnchainProgramError::MissingKey)
             } else {
                 Ok((
@@ -417,7 +417,12 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     StateValue::Cell(_) => (0, cost_model.type_cell),
                     StateValue::Null => (1, cost_model.type_null),
                     StateValue::Map(_) => (2, cost_model.type_map),
-                    StateValue::Array(a) => (3 + a.len() as u8 * 8, cost_model.type_array),
+                    StateValue::Array(a) => {
+                        if a.len() > 16 {
+                            return Err(OnchainProgramError::TypeError("attempted to take type of illegal array with >16 entries".to_string()));
+                        }
+                        (3 + a.len() as u8 * 8, cost_model.type_array)
+                    }
                     StateValue::BoundedMerkleTree(t) => {
                         (4 + t.height().saturating_sub(1) * 8, cost_model.type_bmt)
                     }
@@ -629,7 +634,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     },
                 )?;
                 stack.push((
-                    vnew(if *storage { Strong } else { Weak }, value.clone()),
+                    vnew(if *storage { Strong } else { Weak }, value.clone().into()),
                     CacheKey(None),
                 ))
             }
@@ -783,7 +788,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         i += 1;
                         stack_keys.next().unwrap()
                     }
-                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone()))),
+                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone().into()))),
                 });
                 let mut curr = stack.pop().unwrap();
                 for key in refined_path {
@@ -977,7 +982,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         }
                         StateValue::BoundedMerkleTree(t) => {
                             let idx = (&**AsRef::<Value>::as_ref(&key_cell)).try_into()?;
-                            if idx < (1u64 << t.height()) {
+                            if 1u64.checked_shl(t.height() as u32).is_none_or(|bound| idx < bound) {
                                 let cell_ref = curr.0.as_cell_ref().map_err(|e| {
                                     OnchainProgramError::TypeError(format!(
                                         "attempted to ins a non-cell value into a bmt: {e}"

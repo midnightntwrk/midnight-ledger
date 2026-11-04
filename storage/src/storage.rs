@@ -867,7 +867,7 @@ impl<V: Storable<D>, D: DB> Iterator for ArrayIter<'_, V, D> {
 
 #[derive(Storable)]
 #[derive_where(Clone, Eq, PartialEq, PartialOrd, Ord, Hash; V)]
-#[storable(db = D)]
+#[storable(db = D, invariant = MultiSet::invariant)]
 #[tag = "multi-set[v1]"]
 /// A set with quantity. Often known as a bag.
 pub struct MultiSet<V: Serializable + Storable<D>, D: DB> {
@@ -885,6 +885,14 @@ impl<V: Serializable + Storable<D>, D: DB> Default for MultiSet<V, D> {
 }
 
 impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
+    fn invariant(&self) -> std::io::Result<()> {
+        if self.elements.iter().any(|e| *e.1 == 0) {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "MultiSet may not contain zero-count entries"))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Create a new, empty `MultiSet`
     pub fn new() -> Self {
         MultiSet {
@@ -1081,7 +1089,7 @@ impl Deserializable for BigEndianU64 {
 /// searching and pruning.
 #[derive(Storable)]
 #[derive_where(Clone, Eq, PartialEq, PartialOrd, Ord, Hash; C)]
-#[storable(db = D)]
+#[storable(db = D, invariant = TimeFilterMap::invariant)]
 pub struct TimeFilterMap<C: Serializable + Storable<D>, D: DB>
 where
     C: Container<D> + Serializable + Storable<D>,
@@ -1129,6 +1137,20 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<C: Container<D> + Storable<D> + Serializable, D: DB> TimeFilterMap<C, D>
+where
+    <C as Container<D>>::Item: Serializable,
+{
+    fn invariant(&self) -> std::io::Result<()> {
+        let reconstructed_set: MultiSet<<C as Container<D>>::Item, D> = self.time_map.iter().flat_map(|e| e.1.deref().clone().iter_items()).fold(MultiSet::new(), |s, i| s.insert(i));
+        if reconstructed_set != self.set {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "TimeFilterMap decoded with mismatching set/map representations"))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1458,7 +1480,9 @@ fn from_nibbles<T: Deserializable>(value: &[u8]) -> std::io::Result<T> {
             Ok((nibbles_pair[0] << 4) | nibbles_pair[1])
         })
         .collect::<Result<std::vec::Vec<u8>, std::io::Error>>()?;
-    T::deserialize(&mut &bytes[..], 0)
+    let mut reader = &bytes[..];
+    let result = T::deserialize(&mut reader, 0)?;
+    reader.is_empty().then_some(result).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "bytes remaining after nibble decode"))
 }
 
 impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>

@@ -23,7 +23,7 @@ import {
   MaintenanceUpdate,
   VerifierKeyRemove,
   ContractOperationVersion
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { Static, type ShieldedTokenType } from '@/test-objects';
 import '@/setup-proving';

@@ -18,7 +18,7 @@ import {
   Transaction,
   ZswapChainState,
   WellFormedStrictness
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { Static } from '@/test-objects';
 import '@/setup-proving';

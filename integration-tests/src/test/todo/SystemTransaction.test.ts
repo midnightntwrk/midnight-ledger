@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { SystemTransaction } from '@midnight-ntwrk/ledger';
+import { SystemTransaction } from '@midnightntwrk/ledger';
 
 describe('Ledger API - SystemTransaction', () => {
   /**

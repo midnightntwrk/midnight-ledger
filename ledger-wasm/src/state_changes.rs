@@ -80,9 +80,9 @@ impl ZswapStateChanges {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.inner)
+            format!("{:?}", self.inner)
         } else {
-            format!("{:#?}", &self.inner)
+            format!("{:#?}", self.inner)
         }
     }
 }
@@ -152,9 +152,9 @@ impl DustStateChanges {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self.inner)
+            format!("{:?}", self.inner)
         } else {
-            format!("{:#?}", &self.inner)
+            format!("{:#?}", self.inner)
         }
     }
 }

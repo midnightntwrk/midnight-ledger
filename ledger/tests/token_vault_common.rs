@@ -67,7 +67,7 @@ pub use midnight_ledger::test_utilities::{Tx, TxBound};
 pub use midnight_ledger::test_utilities::{test_intents, test_resolver};
 pub use midnight_ledger::verify::WellFormedStrictness;
 pub use onchain_runtime::context::QueryContext;
-pub use onchain_runtime::ops::{Key, Op, key};
+pub use onchain_runtime::ops::{Key, Op, expect_checked, key};
 pub use onchain_runtime::program_fragments::*;
 pub use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
 pub use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
@@ -261,7 +261,7 @@ pub fn receive_unshielded_ops<D: DB>(
         // Push the token type as key
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         // Duplicate for member check
         Op::Dup {
@@ -275,7 +275,7 @@ pub fn receive_unshielded_ops<D: DB>(
         // Push the amount
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         // Swap and negate for branching
         Op::Swap {
@@ -348,7 +348,7 @@ pub fn send_unshielded_ops<D: DB>(
         },
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         Op::Dup {
             n: 1.try_into().unwrap(),
@@ -359,7 +359,7 @@ pub fn send_unshielded_ops<D: DB>(
         Op::Member,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         Op::Swap {
             n: 0.try_into().unwrap(),
@@ -448,7 +448,7 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         },
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(key_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(key_av.clone()))),
         },
         Op::Dup {
             n: 1.try_into().unwrap(),
@@ -459,7 +459,7 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         Op::Member,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         Op::Swap {
             n: 0.try_into().unwrap(),
@@ -539,7 +539,7 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         // Push token type as key
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         // Check if key exists in balance map
         Op::Member,
@@ -551,7 +551,7 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         Op::Pop,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(zero_av)),
+            value: StateValue::Cell(Sp::new(expect_checked(zero_av))),
         },
         // Jump past the "key exists" path
         Op::Jmp {
@@ -561,12 +561,12 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         Op::Idx {
             cached: true,
             push_path: false,
-            path: vec![Key::Value(token_type_av)].try_into().unwrap(),
+            path: vec![Key::Value(expect_checked(token_type_av))].try_into().unwrap(),
         },
         // Push amount to compare
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av)),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av))),
         },
         // Less than comparison: balance < amount?
         Op::Lt,

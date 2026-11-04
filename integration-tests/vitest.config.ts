@@ -21,7 +21,7 @@ export default defineConfig({
       ['allure-vitest/reporter', { resultsDir: './reports/allure-results' }]
     ],
     coverage: {
-      include: ['lib-sources/@midnight-ntwrk/ledger-v7/**/*.js'],
+      include: ['lib-sources/@midnightntwrk/ledger-v8/**/*.js'],
       provider: 'v8',
       reporter: ['clover', 'json', 'json-summary', 'lcov', 'text'],
       reportsDirectory: './coverage',

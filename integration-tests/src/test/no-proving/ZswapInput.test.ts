@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapInput, ZswapChainState } from '@midnight-ntwrk/ledger';
+import { ZswapInput, ZswapChainState } from '@midnightntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
 import { createValidZSwapInput } from '@/test-utils';
 

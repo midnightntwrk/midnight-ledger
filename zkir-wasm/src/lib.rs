@@ -164,7 +164,7 @@ pub async fn check(ser_preimage: Uint8Array, provider: JsValue) -> Result<Vec<Js
     let Some(data) = provider.resolve_key(preimage.key_location.clone()).await? else {
         return Err(JsError::new(&format!(
             "failed to resolve key at '{}'",
-            &preimage.key_location.0
+            preimage.key_location.0
         )));
     };
     let ir = IrSource::load_from_tagged(std::io::Cursor::new(&data.ir_source[..]))?;

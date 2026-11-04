@@ -6,6 +6,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
+- feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
+
+## Ledger 8.2.0-rc.1
+
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
@@ -15,6 +21,55 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 - fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
+## Ledger 8.1.3
+
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: contract call transcripts must embed canonical field values, across
+  `base-crypto`, `onchain-state` and `onchain-vm`. A `field` atom encoding
+  `x + p` has the same proof public inputs as `x`, but the VM compares and
+  hashes it differently; such values in `push`, `pushs` and `idx`-style path
+  keys are now rejected. This narrows what is well-formed: an 8.1.3 node
+  rejects contract calls an 8.1.2 node accepts. See the per-crate changelogs
+  for the individual rules.
+- security: `noop 0` in a contract call transcript is rejected as not
+  normalized. It contributes no public inputs, but shifted `branch` and `jmp`
+  targets.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Rust code constructing
+  these directly must convert with `AlignedValueChecked::try_from`.
+
+## Ledger 8.1.2
+
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an 8.1.2 node rejects data an 8.1.1 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
+
+## Ledger 8.1.1
+
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
+- add array tests
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
@@ -23,7 +78,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`

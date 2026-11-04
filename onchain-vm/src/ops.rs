@@ -19,7 +19,7 @@ use derive_where::derive_where;
 use proptest::prelude::*;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
-use runtime_state::state::StateValue;
+use runtime_state::state::{AlignedValueChecked, StateValue};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
@@ -40,7 +40,7 @@ use transient_crypto::repr::FieldRepr;
 #[serde(tag = "tag", content = "value", rename_all = "camelCase")]
 #[tag = "impact-idx-key"]
 pub enum Key {
-    Value(AlignedValue),
+    Value(AlignedValueChecked),
     Stack,
 }
 tag_enforcement_test!(Key);
@@ -54,7 +54,7 @@ impl Debug for Key {
     }
 }
 
-impl TryFrom<Key> for AlignedValue {
+impl TryFrom<Key> for AlignedValueChecked {
     type Error = ();
     fn try_from(value: Key) -> Result<Self, Self::Error> {
         match value {
@@ -62,6 +62,42 @@ impl TryFrom<Key> for AlignedValue {
             Key::Stack => Err(()),
         }
     }
+}
+
+impl TryFrom<Key> for AlignedValue {
+    type Error = ();
+    fn try_from(value: Key) -> Result<Self, Self::Error> {
+        AlignedValueChecked::try_from(value).map(Into::into)
+    }
+}
+
+/// Converts a value into its checked aligned form, panicking if it has no canonical field
+/// encoding.
+///
+/// Used by the generated program fragments, whose arguments are typed values, keys, or fixed
+/// literals, all of which are canonical by construction.
+pub fn expect_checked<T: TryInto<AlignedValue>>(value: T) -> AlignedValueChecked
+where
+    T::Error: Debug,
+{
+    let value = value
+        .try_into()
+        .expect("program fragment argument should convert to an aligned value");
+    AlignedValueChecked::try_from(value)
+        .expect("program fragment argument should have a canonical field encoding")
+}
+
+/// Converts a state value into its checked form, panicking if it contains a non-canonical field
+/// encoding or a non-empty Merkle tree.
+///
+/// Used by the generated program fragments. Must not be used on the critical path; see
+/// [`StateValue::try_into_checked`].
+pub fn expect_checked_state_value<D: DB>(
+    value: StateValue<D>,
+) -> StateValue<D, AlignedValueChecked> {
+    value
+        .try_into_checked()
+        .expect("program fragment state value should be checkable")
 }
 
 impl FieldRepr for Key {
@@ -89,7 +125,7 @@ impl FieldRepr for Key {
 ))]
 #[serde(rename_all = "lowercase", expecting = "operation")]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[storable(db = D)]
+#[storable(db = D, invariant = Op::invariant)]
 #[tag = "impact-op[v1]"]
 #[phantom(M)]
 pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
@@ -131,7 +167,7 @@ pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
     },
     Push {
         storage: bool,
-        value: StateValue<D>,
+        value: StateValue<D, AlignedValueChecked>,
     },
     Branch {
         #[cfg_attr(
@@ -205,7 +241,7 @@ macro_rules! key {
         Key::Stack
     };
     ($val:expr_2021) => {
-        Key::Value($val.into())
+        Key::Value($crate::ops::expect_checked($val))
     };
 }
 
@@ -342,6 +378,14 @@ impl<M: ResultMode<D>, D: DB> Debug for Op<M, D> {
 }
 
 impl<M: ResultMode<D>, D: DB> Op<M, D> {
+    fn invariant(&self) -> std::io::Result<()> {
+        match self {
+            Op::Dup { n } | Op::Swap { n } | Op::Ins { n, .. } if *n >= 16 => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "stack operation out of legal encoding bound")),
+            Op::Idx { path, .. } if !(1..=16).contains(&path.len()) => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid `idx` sequence length")),
+            _ => Ok(()),
+        }
+    }
+
     pub fn translate<M2: ResultMode<D>, F: FnOnce(M::ReadResult) -> M2::ReadResult>(
         self,
         f: F,

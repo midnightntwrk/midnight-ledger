@@ -14,7 +14,7 @@
 import { prove } from '@/proof-provider';
 import { Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
-import { LedgerState, WellFormedStrictness, ZswapChainState } from '@midnight-ntwrk/ledger';
+import { LedgerState, WellFormedStrictness, ZswapChainState } from '@midnightntwrk/ledger';
 import '@/setup-proving';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 

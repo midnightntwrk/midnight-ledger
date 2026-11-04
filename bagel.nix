@@ -11,15 +11,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-{ system, rust-build-toolchain, nixpkgs, stdenv }:
+{ system, rust-build-toolchain, nixpkgs, stdenv, overlays ? [] }:
 
 {
   name,
   package-name,
   path,
   prefix ? "midnight",
-  scope ? "@midnight-ntwrk",
-  repo ? "https://github.com/midnight-ntwrk/artifacts",
+  scope ? "@midnightntwrk",
+  repo ? "https://github.com/midnightntwrk/midnight-ledger",
   version,
   extraBuildInputs ? [],
   extraVariables ? {},
@@ -29,7 +29,7 @@
 }:
 
 let
-  pkgs = import nixpkgs { inherit system; };
+  pkgs = import nixpkgs { inherit system overlays; };
   raw-wasm = ((pkgs.makeRustPlatform {
       rustc = rust-build-toolchain;
       cargo = rust-build-toolchain;

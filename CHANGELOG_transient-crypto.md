@@ -2,6 +2,17 @@
 
 ## Version `2.2.0`
 
+- chore: drop the `k256` and `signature` dependencies; `CtOption` now comes
+  from `subtle`.
+
+## Version `2.1.1`
+
+- security: `VerifierKey` serialization is now independent of whether the key has
+  been initialized: the bytes a key was decoded from are preserved, so
+  initializing in place (which is shared across clones) no longer changes what
+  the key serializes to.
+- security: reject a verifier key with trailing bytes after the encoded key, so
+  that two encodings cannot map to the same key.
 - fix: rehashing serde deserialized `MerkleTree`s
 - fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
 - fix: do not panic on indexing into a collapsed `MerkleTree`, but return `None` instead

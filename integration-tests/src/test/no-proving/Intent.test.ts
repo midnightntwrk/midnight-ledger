@@ -27,7 +27,7 @@ import {
   UnshieldedOffer,
   VerifierKeyRemove,
   type SegmentSpecifier
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { getNewUnshieldedOffer, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 
 describe('Ledger API - Intent', () => {

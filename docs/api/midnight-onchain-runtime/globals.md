@@ -1,8 +1,8 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](README.md)
+[**@midnight-ntwrk/onchain-runtime v3.1.2**](README.md)
 
 ***
 
-# @midnight-ntwrk/onchain-runtime v3.1.0
+# @midnight-ntwrk/onchain-runtime v3.1.2
 
 ## Classes
 
@@ -85,9 +85,13 @@
 - [encodeUserAddress](functions/encodeUserAddress.md)
 - [entryPointHash](functions/entryPointHash.md)
 - [hashToCurve](functions/hashToCurve.md)
+- [jubjubSampleScalar](functions/jubjubSampleScalar.md)
+- [jubjubScalarFromNative](functions/jubjubScalarFromNative.md)
 - [leafHash](functions/leafHash.md)
 - [maxAlignedSize](functions/maxAlignedSize.md)
 - [maxField](functions/maxField.md)
+- [maxJubjubScalar](functions/maxJubjubScalar.md)
+- [nativeFromJubjubScalar](functions/nativeFromJubjubScalar.md)
 - [persistentCommit](functions/persistentCommit.md)
 - [persistentHash](functions/persistentHash.md)
 - [proofDataIntoSerializedPreimage](functions/proofDataIntoSerializedPreimage.md)

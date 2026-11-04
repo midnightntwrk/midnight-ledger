@@ -28,7 +28,7 @@ import {
   sampleSigningKey,
   signData,
   addressFromKey
-} from '@midnight-ntwrk/ledger';
+} from '@midnightntwrk/ledger';
 import { Random, Static } from '@/test-objects';
 import { compareBigIntArrays, sortBigIntArray } from '@/test-utils';
 

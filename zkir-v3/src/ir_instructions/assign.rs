@@ -67,6 +67,15 @@ pub fn assign_incircuit(
                 .map(|xs| xs.into_iter().map(CircuitValue::Native).collect())
         }
 
+        IrType::Bytes32 => {
+            let mut byte32_chunks = vec![];
+            for chunk in convert_values::<[u8; 32]>(values)? {
+                let assigned_chunk = std_lib.assign_many(layouter, &chunk.transpose_array())?;
+                byte32_chunks.push(CircuitValue::Bytes32(assigned_chunk.try_into().unwrap()));
+            }
+            Ok(byte32_chunks)
+        }
+
         IrType::JubjubPoint => std_lib
             .jubjub()
             .assign_many(layouter, &convert_values::<JubjubSubgroup>(values)?)

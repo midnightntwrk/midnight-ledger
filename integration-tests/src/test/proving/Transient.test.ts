@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapTransient, ZswapOffer, ZswapOutput, Transaction } from '@midnight-ntwrk/ledger';
+import { ZswapTransient, ZswapOffer, ZswapOutput, Transaction } from '@midnightntwrk/ledger';
 import { prove } from '@/proof-provider';
 import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Random, Static } from '@/test-objects';
 import '@/setup-proving';

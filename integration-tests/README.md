@@ -20,13 +20,13 @@ Env vars affecting proof server:
 
 ### Compiled `ledger` and `zswap` libraries
 
-Build the `@midnight-ntwrk/ledger`, `@midnight-ntwrk/zswap` libraries using Nix (_from the project root_):
+Build the `@midnightntwrk/ledger`, `@midnightntwrk/zswap` libraries using Nix (_from the project root_):
 
 ```console
 $ nix build
 ```
 
-As a result `result/lib/node_modules/@midnight-ntwrk` directory contains built library that is tested by this module.
+As a result `result/lib/node_modules/@midnightntwrk` directory contains built library that is tested by this module.
 
 ## Run tests
 
