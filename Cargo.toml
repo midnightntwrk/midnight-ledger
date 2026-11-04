@@ -71,6 +71,21 @@ midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
 # Because we rely on additions in 2.2
 midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto" }
+# The labelled fixed bases of midnight-zk PR #572 are not released yet; resolve
+# midnight-zk from the head of midnight-zk PR #616 until it ships.
+# Spelled with `www.` because Cargo refuses a patch that points to the source
+# it patches, as the one below does.
+midnight-curves = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+midnight-proofs = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+midnight-circuits = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+midnight-zk-stdlib = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+
+# zk-stdlib's sha3 and blake2b circuits depend on midnight-zk by git; unify them
+# with the copy above.
+[patch."https://github.com/midnightntwrk/midnight-zk"]
+midnight-curves = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+midnight-proofs = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
+midnight-circuits = { git = "https://www.github.com/midnightntwrk/midnight-zk", rev = "17ae77b7cb84ea1b23edfa250be7f9ed61dd694f" }
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"

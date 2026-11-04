@@ -24,11 +24,14 @@ use lazy_static::lazy_static;
 use lru::LruCache;
 use midnight_circuits::types::Instantiable;
 use midnight_circuits::verifier::{
-    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, SelfEmulation,
+    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, Point, SelfEmulation,
 };
 use midnight_curves::Bls12;
 use midnight_proofs::{
-    poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    poly::{
+        PolynomialLabel,
+        kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    },
     utils::SerdeFormat,
 };
 use midnight_zk_stdlib::{MidnightVK, Relation};
@@ -418,7 +421,11 @@ pub fn reconstruct_accumulator(
         let base = <<InnerSelfEmulation as SelfEmulation>::AssignedPoint as Instantiable<
             outer::Scalar,
         >>::from_public_input(point_fields)?;
-        Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
+        Some(Msm::new(
+            &[Point::Variable(base)],
+            &[scalar[0]],
+            &[PolynomialLabel::NoLabel],
+        ))
     };
     let half = fields.len() / 2;
     let lhs = reconstruct_side(&fields[..half])?;
@@ -450,8 +457,13 @@ impl DeferredAccumulator {
     /// Rebuilds the accumulator midnight-circuits works with, restoring the
     /// scalars that `collapse` had set to one.
     pub fn to_accumulator(self) -> Accumulator<InnerSelfEmulation> {
-        let side =
-            |p: outer::Affine| Msm::new(&[p.into()], &[outer::Scalar::ONE], &BTreeMap::new());
+        let side = |p: outer::Affine| {
+            Msm::new(
+                &[Point::Variable(p.into())],
+                &[outer::Scalar::ONE],
+                &[PolynomialLabel::NoLabel],
+            )
+        };
         Accumulator::new(side(self.lhs), side(self.rhs))
     }
 
@@ -463,10 +475,10 @@ impl DeferredAccumulator {
             if bases.len() != 1 || scalars.len() != 1 || scalars[0] != outer::Scalar::ONE {
                 return None;
             }
-            if !msm.fixed_base_scalars().is_empty() {
-                return None;
+            match bases[0] {
+                Point::Variable(p) => Some(p.into()),
+                Point::Fixed => None,
             }
-            Some(bases[0].into())
         };
         Some(DeferredAccumulator {
             lhs: side(acc.lhs())?,
@@ -1107,12 +1119,17 @@ mod accumulator_discharge_tests {
 
     type C = <InnerSelfEmulation as SelfEmulation>::C;
 
+    /// A one-term MSM.
+    fn msm(base: Point<InnerSelfEmulation>, scalar: outer::Scalar) -> Msm<InnerSelfEmulation> {
+        Msm::new(&[base], &[scalar], &[PolynomialLabel::NoLabel])
+    }
+
     /// A collapsed accumulator that does *not* satisfy the pairing invariant.
     fn non_pairing_accumulator() -> Accumulator<InnerSelfEmulation> {
         let one = outer::Scalar::from(1u64);
         Accumulator::new(
-            Msm::new(&[C::generator()], &[one], &BTreeMap::new()),
-            Msm::new(&[C::identity()], &[one], &BTreeMap::new()),
+            msm(Point::Variable(C::generator()), one),
+            msm(Point::Variable(C::identity()), one),
         )
     }
 
@@ -1254,16 +1271,14 @@ mod accumulator_discharge_tests {
     fn a_non_collapsed_accumulator_is_refused() {
         let two = outer::Scalar::from(2u64);
         let scaled = Accumulator::new(
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
+            msm(Point::Variable(C::generator()), two),
+            msm(Point::Variable(C::generator()), two),
         );
         assert!(DeferredAccumulator::new(&scaled).is_none());
 
-        let mut fixed = BTreeMap::new();
-        fixed.insert("unresolved".to_owned(), outer::Scalar::ONE);
         let unresolved = Accumulator::new(
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &fixed),
+            msm(Point::Variable(C::generator()), outer::Scalar::ONE),
+            msm(Point::Fixed, outer::Scalar::ONE),
         );
         assert!(DeferredAccumulator::new(&unresolved).is_none());
     }
