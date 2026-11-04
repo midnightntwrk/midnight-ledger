@@ -6,6 +6,17 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.0
+
+First full release of the `ledger-9` line, promoting `9.1.0.0-rc.7`.
+
+- fix: zkir-wasm `prove()` and `provingProvider().prove` apply
+  `overwriteBindingInput` for `verifier-key[v6]` circuits, so in-process Dust
+  spend proofs are no longer rejected with `InvalidDustSpendProof` (#832).
+- chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.0`.
+- chore: zkir v2 resolves `midnight-transient-crypto` `2.2.0` from crates.io
+  rather than a git tag.
+
 ## Ledger 9.1.0.0-rc.7
 
 - fix: refine transcript gas accounting for transcripts that both write and
@@ -21,6 +32,22 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   `transient-crypto` no longer depends on either.
 
 ## Ledger 9.1.0.0-rc.6
+
+Security patch, carrying the mainnet `8.1.3` release onto the `ledger-9` line.
+
+- security: contract call transcripts must embed canonical field values, across
+  `base-crypto`, `onchain-state` and `onchain-vm`. A `field` atom encoding
+  `x + p` has the same proof public inputs as `x`, but the VM compares and
+  hashes it differently; such values in `push`, `pushs` and `idx`-style path
+  keys are now rejected. This narrows what is well-formed: an rc.6 node
+  rejects contract calls an rc.5 node accepts. See the per-crate changelogs
+  for the individual rules.
+- security: `noop 0` in a contract call transcript is rejected as not
+  normalized. It contributes no public inputs, but shifted `branch` and `jmp`
+  targets.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Rust code constructing
+  these directly must convert with `AlignedValueChecked::try_from`.
 
 ## Ledger 9.1.0.0-rc.5
 
