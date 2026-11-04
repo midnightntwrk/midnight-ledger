@@ -129,6 +129,35 @@ impl<S: SignatureKind<D>, D: DB>
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub fn add_calls_with_tx_shape<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        expected_tx_shape: &TransactionShape,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            |_| expected_tx_shape.clone(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn add_calls_inner<P>(
         &self,
         rng: &mut (impl Rng + CryptoRng),
@@ -896,6 +925,17 @@ pub fn partition_transcripts<D: DB>(
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     partition_transcripts_inner(calls, params, |derived| derived)
+}
+
+/// Splits each call's transcript into its guaranteed and fallible parts.
+/// `expected_tx_shape`'s parts add their bytes to the time-to-dismiss allowance
+/// and their cost is reserved from it.
+pub fn partition_transcripts_with_tx_shape<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    expected_tx_shape: &TransactionShape,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, |_| expected_tx_shape.clone())
 }
 
 /// `choose_tx_shape` gets the shape the calls imply and returns the one to size

@@ -22,6 +22,17 @@ use storage::db::DB;
 
 /// Counts of a transaction's non-call parts, whose cost transcript
 /// partitioning reserves from the guaranteed budget.
+///
+/// Pass the counts of the final transaction to
+/// [`partition_transcripts_with_tx_shape`](super::partition_transcripts_with_tx_shape),
+/// so the guaranteed section is sized for it rather than for the derived
+/// default. Raising a count moves the calls toward the fallible section,
+/// except for Dust spends, Dust deregistrations, Dust registrations when no
+/// NIGHT is spent, Zswap parts and non-NIGHT outputs: their bytes can add more
+/// allowance than they cost. Overstating those is caught by `well_formed`.
+///
+/// To adjust a count, start from [`TransactionShape::for_calls`] and set the
+/// field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct TransactionShape {
