@@ -5,8 +5,7 @@ This document enumerates each transaction *type / variant* — its **purpose**,
 constraints**.  The byte-level **structure and wire serialization** are in
 the companion [transaction-format.md](./transaction-format.md); refer there
 for full field tables and `[vN]` tags.  Contract-call transcripts are the
-[Impact opcode reference](./impact-opcodes.md); proofs are the
-[ZKIR reference](./zkir.md).
+[Impact opcode reference](./impact-opcodes.md).
 
 ## 1. The transaction taxonomy at a glance
 

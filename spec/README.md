@@ -9,7 +9,7 @@ description of intention and reasoning, and a precise definition.
 >
 > This spec *does not* cover the entire behaviour of the ledger. In particular,
 > *events* are not yet specified. Further, while data formats are now defined
-> for transactions, the onchain VM, and ZKIR, gaps remain elsewhere.
+> for transactions and the onchain VM, gaps remain elsewhere.
 >
 > These gaps in the specification are intended to be closed over time.
 
@@ -37,9 +37,6 @@ The parts of this specification are:
   programs, `StateValue`s, kernel operations, context, and effects.
 - [Impact Opcodes](./impact-opcodes.md), the per-opcode reference: binary
   encoding, semantics, error conditions, and gas / cost model.
-- [ZKIR](./zkir.md), the zero-knowledge IR — the instruction set the Compact
-  compiler emits for each circuit (v3 reference, with v2 retained as a legacy
-  appendix).
 - [Cost Model Architecture](./cost-model.md), the methodology behind the
   ledger's multi-dimensional cost model.
 - [Storage I/O Cost Modeling](./storage-io-cost-modeling.md), how storage
