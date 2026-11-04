@@ -7,6 +7,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## Unreleased
 
 - feat: add `TransactionShape`, the counts of a transaction's non-call parts; `TransactionShape::for_calls` derives the balanced transaction's counts from the calls.
+- fix: transcript partitioning sizes the guaranteed section against the predicted transaction's time-to-dismiss allowance, `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus the reserve, instead of a floor the reserve could not lower.
+- feat: for transcript partitioning, the predicted transaction size and the reserve are calculated from a mock transaction of the calls' `TransactionShape`; `add_calls` folds the Zswap parts it is given into the shape.
+- fix: transcript partitioning reserves every call's proof verification, including calls that end up fully fallible, and prices each by the call's own public inputs rather than its root call's.
 
 ## Ledger 9.1.0.0-rc.7
 

@@ -122,6 +122,18 @@ impl TransactionShape {
             dust_deregistrations: 0,
         }
     }
+
+    pub(crate) fn with_zswap_parts(
+        mut self,
+        inputs: usize,
+        outputs: usize,
+        transients: usize,
+    ) -> TransactionShape {
+        self.zswap_inputs = self.zswap_inputs.saturating_sub(transients).max(inputs);
+        self.zswap_outputs = self.zswap_outputs.saturating_sub(transients).max(outputs);
+        self.zswap_transients = transients;
+        self
+    }
 }
 
 #[derive(Default)]
@@ -432,6 +444,37 @@ mod tests {
         for (case, effects, tx_shape) in derived_tx_shapes() {
             let calls = effects.iter().map(|effects| (CALL_ADDRESS, effects));
             assert_eq!(TransactionShape::for_effects(calls), tx_shape, "{case}");
+        }
+    }
+
+    #[test]
+    fn zswap_parts_given_raise_the_derived_counts() {
+        let derived = TransactionShape {
+            zswap_inputs: 2,
+            zswap_outputs: 3,
+            ..TransactionShape::for_effects::<InMemoryDB>([])
+        };
+        // (inputs, outputs, transients) given, and the counts that result.
+        let cases = [
+            ((0, 0, 0), (2, 3, 0)),
+            ((4, 5, 0), (4, 5, 0)),
+            // A transient stands in for a claimed input and a claimed output.
+            ((1, 2, 1), (1, 2, 1)),
+            ((0, 0, 5), (0, 0, 5)),
+        ];
+        for ((inputs, outputs, transients), expected) in cases {
+            let tx_shape = derived
+                .clone()
+                .with_zswap_parts(inputs, outputs, transients);
+            assert_eq!(
+                (
+                    tx_shape.zswap_inputs,
+                    tx_shape.zswap_outputs,
+                    tx_shape.zswap_transients
+                ),
+                expected,
+                "given {inputs} inputs, {outputs} outputs and {transients} transients"
+            );
         }
     }
 }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- feat: add `PureGeneratorPedersen::smallest_representable`, for bounding transaction sizes from below.
 - chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
 
 ## Version `3.0.0`
