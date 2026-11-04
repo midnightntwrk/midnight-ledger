@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod tx_shape;
+
+pub use tx_shape::TransactionShape;
+
 use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{

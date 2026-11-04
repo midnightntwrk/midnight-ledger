@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: add `TransactionShape`, the counts of a transaction's non-call parts; `TransactionShape::for_calls` derives the balanced transaction's counts from the calls.
+
 ## Ledger 9.1.0.0-rc.7
 
 - fix: refine transcript gas accounting for transcripts that both write and
