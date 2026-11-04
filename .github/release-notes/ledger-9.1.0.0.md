@@ -172,3 +172,10 @@ the previous `parallelism_factor` of 4.
 | storage | MPT path removal no longer risks a panic. |
 | transient-crypto | Coin ciphertext decryption correctly excludes the identity point. |
 | zkir-wasm | `prove()` and `provingProvider().prove` apply `overwriteBindingInput` for `verifier-key[v6]` circuits, so in-process Dust spend proofs are no longer rejected with `InvalidDustSpendProof` (#832). |
+
+## Known defects
+
+| **Issue** | **Description** |
+|-----------|-----------------|
+| [#839](https://github.com/midnightntwrk/midnight-ledger/issues/839) | A contract call that spends a held shielded coin and writes the change back with `writeCoin` can be rejected with `Custom error: 104` (ran out of gas budget) on a chain whose commitment tree is non-empty. The node measures a few more `bytes_written` than the client declares, because the stored coin's `mt_index` is its real tree position rather than the output ordinal the client rehearsed with. |
+| [#838](https://github.com/midnightntwrk/midnight-ledger/issues/838) | A contract call paid with exactly one DUST spend can fail the time-to-dismiss check with `OutsideTimeToDismiss`, while the same call with zero, two or more DUST spends is accepted. The pre-proof size estimate overstates the transaction's size, so the client can believe it fits when the node rejects it. Paying with two or more DUST spends avoids it. |
