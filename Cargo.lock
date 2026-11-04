@@ -3295,7 +3295,7 @@ dependencies = [
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0-rc.2",
+ "midnight-zkir 3.2.0",
  "midnight-zswap",
  "pastey",
  "pprof",
@@ -3467,7 +3467,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0-rc.2",
+ "midnight-zkir 3.2.0",
  "midnight-zswap",
  "rand 0.8.6",
  "regex",
@@ -3850,8 +3850,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir"
-version = "3.2.0-rc.2"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.2.0-rc.2#eeb8a31620d07f74fd3f596ef8b20b9bd1cebec2"
+version = "3.2.0"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.2.0#446c7fecc6bd41dab99ebe89ab404e9d077d11a9"
 dependencies = [
  "anyhow",
  "const-hex",
