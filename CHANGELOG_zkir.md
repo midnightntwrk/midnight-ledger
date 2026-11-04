@@ -1,6 +1,6 @@
 # `zkir` Changelog
 
-## Unreleased
+## Version `2.2.0`
 
 - chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
   This changes the verifier keys of V2 circuits that use `hash_to_curve`,
@@ -11,10 +11,6 @@
   `overwriteBindingInput` for `verifier-key[v6]` circuits. Previously the
   override was dropped, so in-process Dust spend proofs were bound to a zero
   binding input and rejected with `InvalidDustSpendProof` (#832).
-  (zkir-wasm 2.2.0-rc.6)
-
-## Version `2.2.0`
-
 - breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)
 - breaking: default `IrMinorVersion` changed from `V1` to `V2`
 - feat: `LocalProvingProvider` dynamically dispatches V0/V1 circuits through
