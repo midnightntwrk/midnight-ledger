@@ -3311,7 +3311,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.1.1"
+version = "2.2.0"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3324,7 +3324,6 @@ dependencies = [
  "flate2",
  "futures",
  "group",
- "k256",
  "lazy_static",
  "lru",
  "midnight-base-crypto",
@@ -3346,7 +3345,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "sha2 0.11.0",
- "signature",
+ "subtle",
  "tracing",
  "tracing-subscriber",
  "zeroize",
@@ -4679,9 +4678,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -6043,9 +6042,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.7"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+checksum = "e49d0e65abc00c142e8f9428da991da9f1a250c39be97459901eb12b9b49f62a"
 dependencies = [
  "rustls-pki-types",
 ]
