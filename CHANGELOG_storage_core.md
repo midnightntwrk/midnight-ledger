@@ -20,6 +20,9 @@
 - security: reusing an already-deserialized (memoized) node now counts its
   height towards the recursion limit, so a graph that shares nodes can no
   longer decode to a value nested deeper than the limit.
+- security: deserializing a storage graph hashes each node once, rather than
+  once per reference to it, so a node referenced many times no longer costs
+  time quadratic in the encoding.
 
 ## Version `1.2.2`
 

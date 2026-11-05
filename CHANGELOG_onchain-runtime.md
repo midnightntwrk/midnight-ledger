@@ -14,6 +14,10 @@
 - security: the field representation of `noop n` is written in fixed-size
   chunks instead of first allocating `n` zero elements, so materializing it
   no longer needs a transient buffer proportional to the untrusted `n`.
+- security: `onchain-vm` tracks cache state through `ins` and through cached
+  `idx` on bounded Merkle trees, and `ins` and `rem` no longer mark a slot
+  read, so a cached `idx` cannot skip the read charge of a path the run has
+  not read.
 
 ## Version `4.0.0`
 

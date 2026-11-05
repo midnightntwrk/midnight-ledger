@@ -63,6 +63,18 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   could absorb the surplus Dust balance credited by a registration's
   `allow_fee_payment`, while the registration still minted the full
   entitlement to the registrant.
+- security: wallet event replay credits a Zswap output only if the recovered
+  coin opens the event's commitment. Previously a valid output could pair a
+  commitment with an unrelated ciphertext, so a wallet reported coins it could
+  not spend, or overwrote the tree index of a coin it held. On-chain state was
+  unaffected.
+- security: `CardanoBridge` claims must claim at least
+  `c_to_m_bridge_min_amount`, or the full, non-zero claimable balance, and
+  otherwise fail with `TransactionInvalid::BridgeClaimTooSmall`. Previously
+  zero-value claims passed validation without paying fees.
+- security: a cached `idx` succeeds only on a path the run has already read.
+  Placing persistent state in a new array, or overwriting a slot with `ins` or
+  `rem`, previously let later cached reads skip their read charge.
 
 ## Ledger 9.1.0.0
 
