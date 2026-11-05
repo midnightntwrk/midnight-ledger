@@ -75,6 +75,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - security: a cached `idx` succeeds only on a path the run has already read.
   Placing persistent state in a new array, or overwriting a slot with `ins` or
   `rem`, previously let later cached reads skip their read charge.
+- security: secret material is cleared more thoroughly. The hasher that
+  derives coin keys from the wallet seed clears its state on drop, and Zswap
+  preimage witness vectors are allocated at their exact size, so reallocation
+  no longer leaves copies of the witness in freed memory.
 
 ## Ledger 9.1.0.0
 
