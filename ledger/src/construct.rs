@@ -1065,7 +1065,7 @@ fn partition_transcripts_inner<D: DB>(
             .iter()
             .map(|run| (run.context.address, &run.context.effects)),
     ));
-    let mock = mock_tx(calls, &tx_shape);
+    let mock = mock_tx(&calls, &tx_shape);
     let reserve = mock.time_to_dismiss(&params.cost_model);
     let allowance = CostDuration::max(
         params.limits.time_to_dismiss_per_byte * mock.serialized_size() as u64,
