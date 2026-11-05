@@ -8,6 +8,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Ledger 9.1.0.1
 
+- note: this release ships the ledger crates only. The packages `ledger-wasm`
+  (`1.0.1-rc.2`), `onchain-runtime-wasm` (`4.0.1-rc.2`), `zkir-wasm`
+  (`2.2.0-rc.4`), `zkir-v3-wasm` (`3.0.0-rc.3`) and the proof server
+  (`9.0.1-rc.2`) stay at their release-candidate versions, and zkir v3 (the
+  external `midnight-zkir`) at `3.1.0-rc.1`. They do not yet carry the
+  `zkir-wasm` `prove()` fix (#832) or zkir v3 `3.2.0` from 9.1.0.0.
 - security: transaction pricing and `well_formed` take time linear in the
   encoding, however storage nodes are shared. Previously a few hundred bytes
   repeating entries through shared subtrees could force exponential work
