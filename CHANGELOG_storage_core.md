@@ -1,5 +1,11 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: `Sp::into_inner` no longer leaks an `sp_cache` entry each time it consumes the last reference to a value.
+- refactor: the `Arc` behind an `Sp` is private to a new `arena::slot` module, so it can no longer escape an `Sp` and leak its `sp_cache` entry. `Sp`'s size and layout are unchanged.
+- breaking: `test_helpers::read_sp_cache` returns `Option<Sp<T, D>>` instead of `Option<Arc<T>>`, as a bare `Arc` dropped last leaked its `sp_cache` entry.
+
 ## Version `1.2.0`
 
 - feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.
