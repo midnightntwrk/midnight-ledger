@@ -55,6 +55,7 @@ use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
 use zswap::{
     Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput, Transient as ZswapTransient,
+    ZSWAP_TREE_HEIGHT,
 };
 
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
@@ -719,7 +720,32 @@ impl<D: DB> Clone for PreTranscript<D> {
     }
 }
 
+const LAST_COMMITMENT_INDEX: u64 = (1 << ZSWAP_TREE_HEIGHT) - 1;
+
 impl<D: DB> PreTranscript<D> {
+    /// The chain assigns an output's index on inclusion, so the client rehearses
+    /// with a stand-in, typically the output's ordinal. A contract that stores
+    /// the index then writes as many bytes as the stand-in takes, and the real
+    /// index may take more. Packing the indices onto the last leaves of the tree,
+    /// in their original order, makes each as wide as an index can get, so the
+    /// rehearsal declares enough bytes for any tree.
+    fn with_widest_commitment_indices(&self) -> Self {
+        let mut context = self.context.clone();
+        let mut by_index = context.call_context.com_indices.iter().collect::<Vec<_>>();
+        by_index.sort_by_key(|(commitment, index)| (**index, *commitment));
+        let last_leaves = (LAST_COMMITMENT_INDEX + 1 - by_index.len() as u64)..;
+        context.call_context.com_indices = by_index
+            .into_iter()
+            .map(|(commitment, _)| commitment)
+            .zip(last_leaves)
+            .collect();
+        PreTranscript {
+            context,
+            program: self.program.clone(),
+            comm_comm: self.comm_comm,
+        }
+    }
+
     fn no_checkpoints(&self) -> usize {
         self.program
             .iter()
@@ -1024,6 +1050,10 @@ pub fn partition_transcripts<D: DB>(
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     let n = calls.len();
+    let calls = calls
+        .iter()
+        .map(PreTranscript::with_widest_commitment_indices)
+        .collect::<Vec<_>>();
     // Step 1: Generate a call graph between `calls`. Assert that this is a forest (no cycles,
     //      no multiple parents).
 
@@ -1197,15 +1227,21 @@ pub fn partition_transcripts<D: DB>(
 
 #[cfg(test)]
 mod gas_heuristic_tests {
-    use super::QueryResultsExt;
+    use super::{LAST_COMMITMENT_INDEX, PreTranscript, QueryResultsExt};
     use crate::structure::INITIAL_PARAMETERS;
     use base_crypto::cost_model::{CostDuration, RunningCost, SyntheticCost};
+    use base_crypto::fab::AlignedValue;
+    use base_crypto::hash::HashOutput;
+    use coin_structure::coin::Commitment;
     use coin_structure::contract::ContractAddress;
     use onchain_runtime::context::{QueryContext, QueryResults};
+    use onchain_runtime::ops::{Key, Op, expect_checked};
     use onchain_runtime::result_mode::ResultModeVerify;
     use onchain_runtime::state::{ChargedState, StateValue};
     use proptest::prelude::*;
+    use storage::arena::Sp;
     use storage::db::InMemoryDB;
+    use storage::storage::Map;
 
     fn declared(actual: RunningCost) -> RunningCost {
         let res = QueryResults::<ResultModeVerify, InMemoryDB> {
@@ -1240,5 +1276,132 @@ mod gas_heuristic_tests {
             let actual_net = SyntheticCost::from(actual).bytes_written;
             prop_assert!(declared.bytes_written <= actual.bytes_written + actual_net.div_ceil(5));
         }
+    }
+
+    const CONTEXT_COM_INDICES: u8 = 1;
+
+    fn store_coin_index(commitment: Commitment) -> Vec<Op<ResultModeVerify, InMemoryDB>> {
+        vec![
+            Op::Dup { n: 2 },
+            Op::Idx {
+                cached: false,
+                push_path: false,
+                path: [
+                    Key::Value(CONTEXT_COM_INDICES.into()),
+                    Key::Value(expect_checked(AlignedValue::from(commitment))),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            Op::Addi { immediate: 0 },
+            Op::Swap { n: 0 },
+            Op::Pop,
+        ]
+    }
+
+    fn coin_context(
+        commitment: Commitment,
+        stored_index: u64,
+        context_index: u64,
+    ) -> QueryContext<InMemoryDB> {
+        let mut context = QueryContext::new(
+            ChargedState::new(StateValue::Cell(Sp::new(AlignedValue::from(stored_index)))),
+            ContractAddress::default(),
+        );
+        context.call_context.com_indices = Map::new().insert(commitment, context_index);
+        context
+    }
+
+    fn overwrite_coin_index(
+        context: QueryContext<InMemoryDB>,
+        commitment: Commitment,
+    ) -> RunningCost {
+        context
+            .query(
+                &store_coin_index(commitment),
+                None,
+                &INITIAL_PARAMETERS.cost_model.runtime_cost_model,
+            )
+            .unwrap()
+            .gas_cost
+    }
+
+    #[test]
+    fn declared_writes_cover_the_real_commitment_index() {
+        const HELD_COIN_INDEX: u64 = 1;
+        const OUTPUT_ORDINAL: u64 = 0;
+        const FRESH_TREE_INDEX: u64 = 2;
+
+        let commitment = Commitment(HashOutput([7; 32]));
+        let rehearsal = PreTranscript {
+            context: coin_context(commitment, HELD_COIN_INDEX, OUTPUT_ORDINAL),
+            program: store_coin_index(commitment),
+            comm_comm: None,
+        };
+        let ordinal_declared =
+            declared(overwrite_coin_index(rehearsal.context.clone(), commitment));
+        let widened_declared = declared(overwrite_coin_index(
+            rehearsal.with_widest_commitment_indices().context,
+            commitment,
+        ));
+
+        let fresh_tree = overwrite_coin_index(
+            coin_context(commitment, HELD_COIN_INDEX, FRESH_TREE_INDEX),
+            commitment,
+        );
+        assert!(fresh_tree.within_bounds(&widened_declared));
+        assert!(
+            fresh_tree.within_bounds(&ordinal_declared),
+            "this assertion is here just to bring attention, but it might be fine that this fails"
+        );
+        let full_tree = overwrite_coin_index(
+            coin_context(commitment, HELD_COIN_INDEX, LAST_COMMITMENT_INDEX),
+            commitment,
+        );
+        assert!(
+            !full_tree.within_bounds(&ordinal_declared),
+            "the ordinal stand-in alone does not cover the last tree index; if this fails adjust\
+            this test; consider removing 'with_widest_commitment_indices' if other code change now\
+            covers this case"
+        );
+        assert!(
+            full_tree.within_bounds(&widened_declared),
+            "declared {} written bytes, the last tree index writes {}",
+            widened_declared.bytes_written,
+            full_tree.bytes_written
+        );
+    }
+
+    #[test]
+    fn widest_commitment_indices_keep_their_order_and_end_at_the_last_leaf() {
+        let first = Commitment(HashOutput([1; 32]));
+        let second = Commitment(HashOutput([2; 32]));
+        let third = Commitment(HashOutput([3; 32]));
+        let mut context = QueryContext::new(
+            ChargedState::new(StateValue::Null),
+            ContractAddress::default(),
+        );
+        context.call_context.com_indices = Map::new()
+            .insert(first, 0)
+            .insert(second, 1)
+            .insert(third, LAST_COMMITMENT_INDEX);
+        let widened = PreTranscript {
+            context,
+            program: Vec::<Op<ResultModeVerify, InMemoryDB>>::new(),
+            comm_comm: None,
+        }
+        .with_widest_commitment_indices();
+
+        let index = |commitment| {
+            *widened
+                .context
+                .call_context
+                .com_indices
+                .get(&commitment)
+                .unwrap()
+        };
+        assert_eq!(index(first), LAST_COMMITMENT_INDEX - 2);
+        assert_eq!(index(second), LAST_COMMITMENT_INDEX - 1);
+        assert_eq!(index(third), LAST_COMMITMENT_INDEX);
     }
 }

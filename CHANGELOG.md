@@ -6,6 +6,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: `partition_transcripts` rehearses each call with the widest commitment
+  tree indices the chain could assign, so a contract that stores a coin's
+  `mt_index` declares enough written bytes. Clients rehearse with an output's
+  ordinal in place of the index the chain assigns on inclusion; once the tree
+  had grown, the real index took more bytes than the ordinal, and the node
+  rejected the transaction for running out of gas budget.
+
 ## Ledger 9.1.0.0-rc.7
 
 - fix: refine transcript gas accounting for transcripts that both write and
