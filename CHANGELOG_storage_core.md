@@ -1,6 +1,6 @@
 # `storage-core` Changelog
 
-## Unreleased
+## Version `1.2.3`
 
 - fix: revert to `sha2` 0.10 / `digest` 0.10. `1.2.2` exposed `digest` 0.11
   through `WellBehavedHasher` and `ArenaHash`, which broke published

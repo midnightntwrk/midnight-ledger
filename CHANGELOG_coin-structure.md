@@ -1,6 +1,6 @@
 # `coin-structure` Changelog
 
-## Unreleased
+## Version `3.0.1`
 
 - feat: `Nullifier`, `Commitment`, `TokenType`, `UserAddress` and
   `ContractAddress` implement `serialize::EncodingShape`, which `storage` 3

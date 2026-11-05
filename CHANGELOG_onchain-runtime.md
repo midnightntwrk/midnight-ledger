@@ -1,6 +1,6 @@
 # `midnight-onchain-runtime` Changelog
 
-## Unreleased
+## Version `4.0.1`
 
 - security: sizing shared transcript programs and state values takes time
   linear in their distinct nodes, through `Transcript::public_inputs_len_memoized`

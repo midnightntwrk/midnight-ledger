@@ -1,6 +1,6 @@
 # `serialize` Changelog
 
-## Unreleased
+## Version `1.2.1`
 
 - feat: `EncodingShape`, an automaton accepting exactly a type's valid
   encodings, implemented for fixed-width integers, byte arrays, `()`, `bool`

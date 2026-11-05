@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.1
+
 - security: transaction pricing and `well_formed` take time linear in the
   encoding, however storage nodes are shared. Previously a few hundred bytes
   repeating entries through shared subtrees could force exponential work

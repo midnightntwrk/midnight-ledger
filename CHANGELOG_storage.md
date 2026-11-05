@@ -1,6 +1,6 @@
 # `storage` Changelog
 
-## Unreleased
+## Version `3.0.0`
 
 - fix: a state-translation run that exhausts its budget continues until it
   has persisted at least one result. Results for in-lined nodes do not survive
