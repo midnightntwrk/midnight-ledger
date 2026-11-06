@@ -12,6 +12,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: transcript partitioning reserves every call's proof verification, including calls that end up fully fallible, and prices each by the call's own public inputs rather than its root call's.
 - feat: add `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape` to partition calls against the final transaction's part counts.
 - feat: expose `TransactionShape` in the wasm API as a class obtained from `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to `partitionTranscripts` and `Transaction.addCalls`.
+- fix: `partition_transcripts` rehearses each call with the widest commitment tree indices the chain could assign, so a contract that stores a coin's
+  `mt_index` declares enough written bytes. Clients rehearse with an output's ordinal in place of the index the chain assigns on inclusion; once the tree
+  had grown, the real index took more bytes than the ordinal, and the node rejected the transaction for running out of gas budget.
 
 ## Ledger 9.1.0.0-rc.7
 
