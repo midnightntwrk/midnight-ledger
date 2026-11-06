@@ -43,7 +43,6 @@ use std::fmt::Display;
 use std::io;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::OnceLock;
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
@@ -53,6 +52,9 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
+
+mod slot;
+use slot::{Released, Slot, SpCache};
 
 #[cfg(feature = "test-utilities")]
 /// A tracking on time spent in reconstruction of data types loading from the backend.
@@ -441,21 +443,20 @@ pub struct Arena<D: DB = DefaultDB> {
     ///
     /// # Invariant
     ///
-    /// The code in this module that cleans up these weak pointers assumes that
-    /// the `Arc`s for these weak pointers are only stored in `Sp` objects. If
-    /// that's not true, e.g. if these `Arc`s were to leak out via pub APIs,
-    /// then they may never be removed from the `sp_cache` after being dropped
-    /// elsewhere, since the only time we attempt to clean up the `sp_cache` is
-    /// in `Sp::drop`. That would cause a memory leak.
+    /// The code that cleans up these weak pointers assumes that the `Arc`s for
+    /// these weak pointers are only stored in `Sp` objects, since the only time
+    /// we attempt to clean up the `sp_cache` is in `Sp::unload` and `Sp::drop`.
+    /// An `Arc` that escaped an `Sp` would leak its entry. The `slot` module
+    /// enforces this: the `Arc` is private to it.
     ///
     /// # Invariant
     ///
     /// If there is a non-dangling pointer `p` in this `Sp` cache, then the
-    /// root key for that pointer, i.e. `p.upgrade().unwrap().root` must be a
+    /// root key of the `Sp` holding that data must be a
     /// key in `Self::metadata`. This allows us to use cache values in short
     /// cutting the construction of `Sp`s, without having to worry about calling
     /// `Self::track_locked`.
-    sp_cache: Arc<SyncMutex<RefCell<SpCache<D>>>>,
+    sp_cache: Arc<SyncMutex<RefCell<SpCache<D::Hasher>>>>,
     backend: Arc<SyncMutex<RefCell<StorageBackend<D>>>>,
 }
 
@@ -475,12 +476,6 @@ type MetaData<D> = HashMap<ArenaHash<<D as DB>::Hasher>, Node>;
 /// need to include the type in the key to avoid collisions in some cases.
 type DynTypedArenaHash<H> = (ArenaHash<H>, TypeId);
 
-/// Keys are `hash x type_id` because the hash alone is ambiguous for
-/// determining the typed value with this hash: the hash is determined only by
-/// the binary serialization, which need not be disjoint across types.
-type SpCache<D> =
-    HashMap<DynTypedArenaHash<<D as DB>::Hasher>, std::sync::Weak<dyn Any + Sync + Send>>;
-
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
     #[allow(clippy::type_complexity)]
@@ -492,7 +487,7 @@ impl<D: DB> Arena<D> {
         self.backend.lock()
     }
 
-    fn lock_sp_cache(&self) -> MutexGuard<'_, RefCell<SpCache<D>>> {
+    fn lock_sp_cache(&self) -> MutexGuard<'_, RefCell<SpCache<D::Hasher>>> {
         self.sp_cache.lock()
     }
 
@@ -506,7 +501,7 @@ impl<D: DB> Arena<D> {
         Arena {
             backend: Arc::new(SyncMutex::new(RefCell::new(backend))),
             metadata: Arc::new(SyncMutex::new(RefCell::new(HashMap::new()))),
-            sp_cache: Arc::new(SyncMutex::new(RefCell::new(HashMap::new()))),
+            sp_cache: Arc::new(SyncMutex::new(RefCell::new(SpCache::new()))),
         }
     }
 
@@ -546,7 +541,7 @@ impl<D: DB> Arena<D> {
         } else {
             Sp {
                 arena: self.clone(),
-                data: OnceLock::from(Arc::new(value)),
+                data: Slot::new(value),
                 child_repr,
                 root: root_hash.clone(),
             }
@@ -566,18 +561,15 @@ impl<D: DB> Arena<D> {
         self.track_locked(metadata, key.clone(), data, children, &child_repr);
         // Try to reuse any existing cached `Arc` for `value`, creating and
         // caching a new `Arc` if necessary.
-        let arc = {
+        let slot = {
             let guard = &self.lock_sp_cache();
-            match self.read_sp_cache_locked(guard, &key) {
-                Some(arc) => arc,
-                None => {
-                    let arc = Arc::new(value);
-                    self.write_sp_cache_locked(guard, key.clone(), arc.clone());
-                    arc
-                }
-            }
+            self.read_sp_cache_locked(guard, &key).unwrap_or_else(|| {
+                let slot = Slot::new(value);
+                self.write_sp_cache_locked(guard, key.clone(), &slot);
+                slot
+            })
         };
-        Sp::eager(self.clone(), key, arc, child_repr)
+        Sp::eager(self.clone(), key, slot, child_repr)
     }
 
     fn new_sp<T: Storable<D>>(
@@ -602,38 +594,27 @@ impl<D: DB> Arena<D> {
     /// `Self::metadata`.
     ///
     /// Note: at some call sites callers need to hold the metadata lock when
-    /// calling this function and until they've used the returned `Arc`, to
+    /// calling this function and until they've used the returned `Slot`, to
     /// avoid the above invariant being violated by another thread
     /// concurrently. A possible refactor would be to make this function take
     /// the metadata lock as well.
     fn read_sp_cache_locked<T: Sync + Send + Any>(
         &self,
-        sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
+        sp_cache: &MutexGuard<RefCell<SpCache<D::Hasher>>>,
         key: &ArenaHash<D::Hasher>,
-    ) -> Option<Arc<T>> {
-        let type_id = TypeId::of::<T>();
-        let cache_key = (key.clone(), type_id);
-        let sp_cache = RefCell::borrow(sp_cache);
-        sp_cache
-            .get(&cache_key)
-            .and_then(|weak| weak.upgrade())
-            // The `downcast` is safe because we only insert `Arc`s of type `T`.
-            .map(|arc| arc.clone().downcast::<T>().unwrap())
+    ) -> Option<Slot<T>> {
+        RefCell::borrow(sp_cache).get(key)
     }
 
     /// Invariant: any `key` written to this cache must already be present in
     /// `Self::metadata`.
     fn write_sp_cache_locked<T: Storable<D>>(
         &self,
-        sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
+        sp_cache: &MutexGuard<RefCell<SpCache<D::Hasher>>>,
         key: ArenaHash<D::Hasher>,
-        value: Arc<T>,
+        slot: &Slot<T>,
     ) {
-        let type_id = TypeId::of::<T>();
-        let cache_key = (key, type_id);
-        // Upcast.
-        let arc: Arc<dyn Any + Send + Sync> = value;
-        RefCell::borrow_mut(sp_cache).insert(cache_key, Arc::downgrade(&arc));
+        RefCell::borrow_mut(sp_cache).insert(key, slot);
     }
 
     /// Returns the number of unique elements stored in the Arena
@@ -646,7 +627,7 @@ impl<D: DB> Arena<D> {
     fn get_from_cache<T: Storable<D>>(&self, key: &ArenaHash<D::Hasher>) -> Option<Sp<T, D>> {
         // Hold the metadata lock so we can hold the Sp cache lock while calling
         // Sp::eager, which itself acquires the metadata lock. We need to be
-        // careful to avoid a race where someone else clears our arc from the Sp
+        // careful to avoid a race where someone else clears our entry from the Sp
         // cache before we're able to call Sp::eager, which takes care of
         // updating the metadata.
         //
@@ -655,9 +636,9 @@ impl<D: DB> Arena<D> {
         let _metadata_lock = self.lock_metadata();
         let sp_cache_lock = self.lock_sp_cache();
         self.read_sp_cache_locked::<T>(&sp_cache_lock, key)
-            .map(|arc| {
-                let child_repr = arc.as_child();
-                Sp::eager(self.clone(), key.clone(), arc, child_repr)
+            .map(|slot| {
+                let child_repr = slot.get().expect("cached slots are loaded").as_child();
+                Sp::eager(self.clone(), key.clone(), slot, child_repr)
             })
     }
 
@@ -995,14 +976,14 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                 // below, so that no one can sneak in and remove `key` from the
                 // metadata in the mean time.
                 let metadata_lock = self.arena.lock_metadata();
-                let maybe_arc = self
+                let cached = self
                     .arena
                     .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
-                if let Some(arc) = maybe_arc {
+                if let Some(slot) = cached {
                     return Ok(Sp::eager(
                         self.arena.clone(),
                         key.clone(),
-                        arc,
+                        slot,
                         child.clone(),
                     ));
                 }
@@ -1041,7 +1022,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             )),
             ArenaKey::Direct(_) => Ok(Sp {
                 arena: self.arena.clone(),
-                data: OnceLock::from(Arc::new(value)),
+                data: Slot::new(value),
                 child_repr: child.clone(),
                 root: child.hash().clone(),
             }),
@@ -1241,9 +1222,8 @@ impl Node {
 pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     /// Cached Pointer data
     ///
-    /// The `Arc` is to allow sharing of the data with other `Sp`s. The
-    /// `OnceLock` is to support lazy loading.
-    data: OnceLock<Arc<T>>,
+    /// Shared with other `Sp`s of the same key, and empty until loaded.
+    data: Slot<T>,
     /// This Sp represented as a child node (for easy access)
     pub child_repr: ArenaKey<D::Hasher>,
     /// The arena this Sp points into
@@ -1300,23 +1280,23 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// Note: this function assumes that `root` is already in `metadata`, and
     /// will panic if not. See `Sp::lazy` for more details.
     ///
-    /// Note: this function assumes that the `arc` argument is already in the
+    /// Note: this function assumes that the `slot` argument is already in the
     /// arena data cache if it should be. We don't try to handle that logic
     /// here, since it's not uniform:
     ///
     /// - when creating a non-derived `Sp`s in `Arena::new_sp_locked`, we need to
     ///   check the arena cache, and otherwise create and cache a new `Sp`s.
     ///
-    /// - when forcing a lazy `Sp`s in `Sp::force_as_arc`, we need to look in the
+    /// - when forcing a lazy `Sp`s in `Sp::force`, we need to look in the
     ///   arena cache, and then fall back on deserialization.
     fn eager(
         arena: Arena<D>,
         root: ArenaHash<D::Hasher>,
-        arc: Arc<T>,
+        slot: Slot<T>,
         child_repr: ArenaKey<D::Hasher>,
     ) -> Self {
         let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
-        let _ = sp.data.set(arc);
+        sp.data.fill(slot);
         sp
     }
 
@@ -1333,14 +1313,14 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
                 let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-                let value = self.force_as_arc();
+                let value = self.force();
                 value
                     .to_binary_repr(&mut data)
                     .expect("Storable data should be able to be represented in binary");
                 let child_repr = ArenaKey::Ref(self.root.clone());
                 self.arena.new_sp_locked(
                     &mut self.arena.lock_metadata(),
-                    value.as_ref().clone(),
+                    value.clone(),
                     self.root.clone(),
                     data,
                     dcn.children.deref().clone(),
@@ -1353,7 +1333,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
 
     /// Create a new `Sp` with an uninitialized data payload.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
-        let data = OnceLock::new();
+        let data = Slot::empty();
         if let ArenaKey::Ref(_) = child_repr {
             arena.increment_ref(&root);
         };
@@ -1374,7 +1354,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// and updating `already_deserialized` to include all child values
     /// recursively deserialized along the way. Note that the return value
     /// itself is not included in `already_deserialized`, because the function
-    /// only exists as a helper for `Arena::get` and `Sp::force_as_arc`, which throws away the
+    /// only exists as a helper for `Arena::get` and `Sp::force`, which throws away the
     /// `already_deserialized` map before returning.
     ///
     /// If `max_depth == Some(depth)`, then `Sp::data` values down to that depth
@@ -1405,7 +1385,7 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
     /// Access the inner data, forcing initialization if necessary.
     fn deref(&self) -> &Self::Target {
-        self.force_as_arc()
+        self.force()
     }
 }
 
@@ -1426,16 +1406,12 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
+        // Cast before taking the metadata reference: a failed cast returns no
+        // `Sp`, so nothing would ever release it.
+        let data = self.data.downcast()?;
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
-        let data: OnceLock<Arc<T>> = match self.data.get() {
-            Some(arc) => {
-                let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
-                concrete_arc.into()
-            }
-            None => OnceLock::new(),
-        };
         Some(Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
@@ -1454,10 +1430,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
-        let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
-            Some(Ok(concrete_arc)) => concrete_arc.into(),
-            None | Some(Err(_)) => OnceLock::new(),
-        };
+        let data = self.data.downcast().unwrap_or_else(Slot::empty);
         Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
@@ -1473,13 +1446,7 @@ impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
         if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
-        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
-            Some(arc) => {
-                let dyn_arc: Arc<dyn Any + Send + Sync> = arc.clone();
-                dyn_arc.into()
-            }
-            None => OnceLock::new(),
-        };
+        let data = self.data.upcast();
         Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
@@ -1495,7 +1462,7 @@ impl<T: ?Sized, D: DB> Sp<T, D> {
     ///
     /// If the `Sp` is lazy, it can be forced by dereferencing it.
     pub fn is_lazy(&self) -> bool {
-        self.data.get().is_none()
+        self.data.is_empty()
     }
 
     /// Return hash of self and all children, cached from `&lt;T as Storable&gt;::hash()`.
@@ -1559,15 +1526,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
     /// the only reference to its data.  When the `Sp` is initialized, this
     /// behaves like [`Arc::into_inner`].
-    pub fn into_inner(this: Sp<T, D>) -> Option<T> {
-        // Note that we don't want to call `self.force_as_arc()` here, since
-        // that could force an uninitialized `Sp` unnecessarily.
-        let data: Option<Arc<T>> = this.data.get().cloned();
-        // The `Sp` gets dropped, decrementing the ref count, but if initialized
-        // the content survives, either in another `Arc`, or in the return
-        // value.
-        drop(this);
-        data.and_then(|arc| Arc::into_inner(arc))
+    pub fn into_inner(mut this: Sp<T, D>) -> Option<T> {
+        // Not `self.force()`: that would force an uninitialized `Sp` unnecessarily.
+        // `Sp::drop` then finds the slot empty, so its own `gc` is a no-op.
+        let (data, released) = this.data.take_inner();
+        this.gc_weak_pointer(released);
+        data
     }
 }
 
@@ -1586,52 +1550,23 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // `data`, if any. This must happen before `gc_weak_pointer`, so that
         // the strong count of the Arc is decremented before we check if the
         // sp_cache entry can be cleaned up.
-        let _ = self.data.take();
-        self.gc_weak_pointer();
+        let released = self.data.unload();
+        self.gc_weak_pointer(released);
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
-    fn gc_weak_pointer(&mut self) {
-        let sp_cache_guard = self.arena.lock_sp_cache();
-        let mut sp_cache = sp_cache_guard.borrow_mut();
-        let key = (self.root.clone(), TypeId::of::<T>());
-        // NOTE: Here, we rely on the `Arc` reference count to perform the cleanup if and only if
-        // the underlying `Arc` is no longer allocated. This relies on the `Sp`s internal `Arc`
-        // not leaking, as this ensures this check will be made during each `Arc` drop, including
-        // the final one.
-        //
-        // Previously, this used `weak.upgrade().is_none()` to determine this, but this can lead to
-        // a rare race condition between threads A and B that both hold the same Sp, and are
-        // deallocating it simultaneously:
-        //
-        // - A drops its reference
-        // - A acquires the critical section lock
-        // - A calls `upgrade`, obtaining an `Arc`
-        // - B drops its reference
-        // - B waits for the critical section lock
-        // - A calls `is_none`, dropping the final `Arc` and triggering `T::drop` in the critical
-        //   section
-        //
-        // Because T::drop can drop further `Sp`s, this can cause the same thread to re-enter the
-        // critical section, and attempt to double-borrow the sp cache mutably.
-        //
-        // Because `strong_count` can not bring a value of `T` into the critical section, it avoids
-        // this loop.
-        if sp_cache
-            .get(&key)
-            .is_some_and(|weak| weak.strong_count() == 0)
-        {
-            sp_cache.remove(&key);
-        }
+    fn gc_weak_pointer(&mut self, released: Released) {
+        self.arena
+            .lock_sp_cache()
+            .borrow_mut()
+            .gc(&self.root, released);
     }
 }
 
 impl<T: Storable<D>, D: DB> Sp<T, D> {
-    /// Return the inner value as an `Arc` ref, initializing the `OnceLock` if
-    /// this is an uninitialized lazy `Sp`.
-    fn force_as_arc(&self) -> &Arc<T> {
-        // Initialize `OnceLock` if necessary.
-        if self.data.get().is_none() {
+    /// Return the inner value, loading it if this is an uninitialized lazy `Sp`.
+    fn force(&self) -> &T {
+        if self.data.is_empty() {
             // Acquire metadata before sp_cache to respect the documented lock
             // ordering (metadata → sp_cache → backend; see Arena struct).
             // from_arena and its callees (track_lazy, increment_ref) also
@@ -1641,17 +1576,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             // acquires sp_cache).
             let _metadata_lock = self.arena.lock_metadata();
             let cache_lock = self.arena.lock_sp_cache();
-            let maybe_arc = self
+            let cached = self
                 .arena
                 .read_sp_cache_locked::<T>(&cache_lock, &self.root);
-            let arc: Arc<T> = match maybe_arc {
-                Some(arc) => arc,
+            let slot = match cached {
+                Some(slot) => slot,
                 None => {
                     let max_depth = Some(1);
-                    // All we really want is the inner `Arc` here, but the
+                    // All we really want is the inner `Slot` here, but the
                     // easiest way to get that is to just create the lazy `Sp`
-                    // for that `Arc`, i.e. what `self` will become when
-                    // `force_as_arc` is done!
+                    // for that `Slot`, i.e. what `self` will become when
+                    // `force` is done!
                     let mut sp: Sp<T, _> =
                         match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
                             Ok(v) => v,
@@ -1660,25 +1595,22 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                                 std::any::type_name::<T>()
                             ),
                         };
-                    let arc = sp
-                        .data
-                        .take()
-                        .expect("result of Sp::from_arena should be initialized");
+                    let slot = sp.data.take();
+                    assert!(
+                        !slot.is_empty(),
+                        "result of Sp::from_arena should be initialized"
+                    );
                     if let ArenaKey::Ref(_) = &self.child_repr {
-                        self.arena.write_sp_cache_locked(
-                            &cache_lock,
-                            self.root.clone(),
-                            arc.clone(),
-                        );
+                        self.arena
+                            .write_sp_cache_locked(&cache_lock, self.root.clone(), &slot);
                     }
-                    arc
+                    slot
                 }
             };
-            // We don't care if this succeeds: failure just means
-            // someone else set the same value in another thread.
-            let _ = self.data.set(arc);
+            // A no-op if someone else loaded the same value in another thread.
+            self.data.fill(slot);
         }
-        self.data.get().unwrap()
+        self.data.get().expect("loaded above")
     }
 
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
@@ -1820,7 +1752,7 @@ impl<T: PartialOrd + Storable<D>, D: DB> PartialOrd for Sp<T, D> {
         if self.root == other.root {
             return Some(std::cmp::Ordering::Equal);
         }
-        self.force_as_arc().partial_cmp(other.force_as_arc())
+        self.force().partial_cmp(other.force())
     }
 }
 
@@ -1830,7 +1762,7 @@ impl<T: Ord + Storable<D>, D: DB> Ord for Sp<T, D> {
         if self.root == other.root {
             return std::cmp::Ordering::Equal;
         }
-        self.force_as_arc().cmp(other.force_as_arc())
+        self.force().cmp(other.force())
     }
 }
 
@@ -2082,20 +2014,12 @@ pub mod test_helpers {
         arena.lock_backend().borrow().get_root_count(key)
     }
 
-    /// Read the `sp_cache`.
-    ///
-    /// # Safety
-    ///
-    /// The `Arc` returned here *must* be dropped before the `Sp` itself is to ensure proper cache
-    /// cleanup. A failure to do so could lead to the de-allocation of the value *not* leading to
-    /// the value being removed from the cache, as `Sp`'s rely on the `Arc` reference count to
-    /// determine if this cleanup should be performed. This requires the last drop to be an `Sp`
-    /// drop, not just an `Arc` drop.
+    /// Read the `sp_cache`, as an `Sp` so the cache clean-up still runs when it is dropped.
     pub fn read_sp_cache<D: DB, T: Storable<D>>(
         arena: &Arena<D>,
         key: &ArenaHash<D::Hasher>,
-    ) -> Option<Arc<T>> {
-        arena.read_sp_cache_locked::<T>(&arena.lock_sp_cache(), key)
+    ) -> Option<Sp<T, D>> {
+        arena.get_from_cache(key)
     }
 }
 
@@ -2226,116 +2150,149 @@ mod tests {
     // root hash share the same `Arc`, i.e. the one in the cache.
     #[test]
     fn sp_cache_sp_drop() {
+        type V = [u8; SMALL_OBJECT_LIMIT];
         let arena = &new_arena();
 
         // Allocate an `Sp` in the arena
         let sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let root_key = sp1.root.clone();
-        let type_id = TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>();
-        let cache_key = (root_key.clone(), type_id);
+        let cached = || arena.read_sp_cache_locked::<V>(&arena.lock_sp_cache(), &root_key);
 
-        // Ensure the `Arc` is in the `sp_cache`, and equal to the one in the
-        // `Sp`
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            assert!(sp_cache.get(&cache_key).is_some());
-            let weak_ref = sp_cache.get(&cache_key).unwrap();
-            assert!(weak_ref.upgrade().is_some());
-            let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
-            assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
-        }
+        // Ensure the data is in the `sp_cache`, and shared with the `Sp`
+        assert!(cached().unwrap().ptr_eq(&sp1.data));
 
         // Clone the `Sp` to increase the strong reference count
         let sp2 = sp1.clone();
 
-        // The `Arc` should be the same for both `Sp`s
-        assert!(Arc::ptr_eq(
-            sp1.data.get().unwrap(),
-            sp2.data.get().unwrap()
-        ));
-        // Strong count should be 2 now
-        assert_eq!(Arc::strong_count(sp1.data.get().unwrap()), 2);
+        // The data should be shared by both `Sp`s
+        assert!(sp1.data.ptr_eq(&sp2.data));
+        assert_eq!(sp1.data.strong_count(), 2);
 
         // Drop one `Sp`
         drop(sp2);
+        assert_eq!(sp1.data.strong_count(), 1);
 
-        // Strong count should decrease
-        assert_eq!(Arc::strong_count(sp1.data.get().unwrap()), 1);
-
-        // The `Arc` should still be in `sp_cache`
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            assert!(sp_cache.get(&cache_key).is_some());
-            let weak_ref = sp_cache.get(&cache_key).unwrap();
-            assert!(weak_ref.upgrade().is_some());
-            let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
-            assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
-        }
+        // The data should still be in `sp_cache`
+        assert!(cached().unwrap().ptr_eq(&sp1.data));
 
         // Drop the last strong reference
         drop(sp1);
 
-        // Now the `Arc` should be dropped, and the weak reference should be cleaned up
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            assert!(
-                sp_cache.get(&cache_key).is_none(),
-                "the weak reference should be gone"
-            );
-        }
+        // Now the data should be dropped, and the weak reference cleaned up
+        assert!(
+            !arena.lock_sp_cache().borrow().contains::<V>(&root_key),
+            "the weak reference should be gone"
+        );
+    }
+
+    // `Sp::into_inner` frees the data without an `Sp` holding it, so the `Sp::drop` clean-up must
+    // still see it gone; otherwise the `sp_cache` entry dangles and nothing ever removes it.
+    #[test]
+    fn sp_cache_into_inner() {
+        let arena = &new_arena();
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        assert!(!arena.lock_sp_cache().borrow().is_empty());
+
+        assert_eq!(Sp::into_inner(sp), Some([42u8; SMALL_OBJECT_LIMIT]));
+
+        assert!(
+            arena.lock_sp_cache().borrow().is_empty(),
+            "`Sp::into_inner` left a dangling `sp_cache` entry"
+        );
     }
 
     // Test that `Sp::unload` removes the weak reference from the `sp_cache`,
     // but only when the last strong reference is dropped.
     #[test]
     fn sp_cache_sp_unload() {
+        type V = [u8; SMALL_OBJECT_LIMIT];
         let arena = &new_arena();
         let mut sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let mut sp2 = sp1.clone();
-        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>());
+        let root_key = sp1.root.clone();
+        let cached = || {
+            arena
+                .read_sp_cache_locked::<V>(&arena.lock_sp_cache(), &root_key)
+                .is_some()
+        };
 
-        // Verify the weak reference exists in the cache
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            let weak_ref = sp_cache.get(&cache_key).unwrap();
-            assert!(
-                weak_ref.upgrade().is_some(),
-                "weak reference should be valid before unload"
-            );
-        }
+        assert!(cached(), "weak reference should be valid before unload");
 
-        // Unload sp1
         sp1.unload();
+        assert!(
+            cached(),
+            "weak reference should still be valid after unloading sp1"
+        );
 
-        // Verify the weak reference is still in the cache after sp1.unload()
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            let weak_ref = sp_cache.get(&cache_key).unwrap();
-            assert!(
-                weak_ref.upgrade().is_some(),
-                "weak reference should still be valid after unloading sp1"
-            );
-        }
-
-        // Unload sp2
         sp2.unload();
+        assert!(
+            !arena.lock_sp_cache().borrow().contains::<V>(&root_key),
+            "the weak reference should be gone after unloading sp2"
+        );
+    }
 
-        // Now the weak reference should be cleaned up
-        {
-            let sp_cache = arena.lock_sp_cache();
-            let sp_cache = sp_cache.borrow();
-            assert!(
-                sp_cache.get(&cache_key).is_none(),
-                "the weak reference should be gone after unloading sp2"
-            );
-        }
+    // Regression test: dropping the last strong reference through an upcast
+    // `Sp<dyn Any + Send + Sync>` must still remove the weak pointer from the
+    // `sp_cache`. The cache entry is keyed by the concrete type's `TypeId`, so
+    // cleanup keyed on the dyn type would miss it and leak the entry.
+    #[test]
+    fn sp_cache_sp_drop_via_upcast() {
+        type V = [u8; SMALL_OBJECT_LIMIT];
+        let arena = &new_arena();
+
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let root_key = sp.root.clone();
+        let dyn_sp = sp.upcast();
+
+        // Both `Sp`s share the same `Arc` allocation.
+        assert_eq!(sp.data.strong_count(), 2);
+
+        // Drop the concretely typed `Sp` first, so the upcast `Sp` holds the
+        // last strong reference.
+        drop(sp);
+
+        // The entry must survive while the dyn `Sp` still holds the data.
+        assert!(
+            arena
+                .read_sp_cache_locked::<V>(&arena.lock_sp_cache(), &root_key)
+                .is_some(),
+            "weak reference should still be valid while the dyn Sp is alive"
+        );
+
+        // Dropping the dyn `Sp` drops the last strong reference; the cache
+        // entry under the concrete `TypeId` must be cleaned up.
+        drop(dyn_sp);
+        let sp_cache = arena.lock_sp_cache();
+        let sp_cache = sp_cache.borrow();
+        assert!(
+            !sp_cache.contains::<V>(&root_key),
+            "the weak reference should be gone after the upcast Sp drops the last Arc"
+        );
+        assert!(
+            sp_cache.is_empty(),
+            "no dangling entries should remain in the sp_cache"
+        );
+    }
+
+    // A failed `Sp::downcast` must not leave the metadata reference count
+    // for its root incremented: nothing is returned, so no `Sp` drop ever
+    // decrements it, and the key can never be collected.
+    #[test]
+    fn metadata_downcast_failure() {
+        let arena = &new_arena();
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let dyn_sp = sp.upcast();
+        assert_eq!(arena.size(), 1);
+
+        assert!(dyn_sp.downcast::<u64>().is_none());
+
+        drop(sp);
+        drop(dyn_sp);
+        assert_eq!(
+            arena.size(),
+            0,
+            "metadata entry should be gone once every Sp for it is dropped"
+        );
     }
 
     // Test that attempting to load the same value into the arena twice,
@@ -2346,10 +2303,8 @@ mod tests {
         let arena = &new_arena();
         let sp1 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
         let sp2 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
-        let data1 = sp1.data.get().unwrap();
-        let data2 = sp2.data.get().unwrap();
         assert!(
-            Arc::ptr_eq(data1, data2),
+            sp1.data.ptr_eq(&sp2.data),
             "underlying Arc should be shared when allocating the same data"
         );
     }
@@ -2419,10 +2374,7 @@ mod tests {
             for _ in 0..depth {
                 assert!(p1.unwrap().data.get().is_none());
                 assert!(p2.unwrap().data.get().is_none());
-                assert!(Arc::ptr_eq(
-                    p1.unwrap().force_as_arc(),
-                    p2.unwrap().force_as_arc(),
-                ));
+                assert!(std::ptr::eq(p1.unwrap().force(), p2.unwrap().force()));
                 p1 = p1.unwrap().left.as_ref();
                 p2 = p2.unwrap().right.as_ref();
             }
@@ -2461,7 +2413,7 @@ mod tests {
 
     // Stress test concurrent arena access, to trigger deadlocks from
     // inconsistent-ordering in mutex acquisition via `Arena::alloc`,
-    // `Sp::unload`, `Arena::get_lazy`, `Arena::get`, and `Sp::force_as_arc`
+    // `Sp::unload`, `Arena::get_lazy`, `Arena::get`, and `Sp::force`
     // (via `Sp::deref()`). For the `Sp` data, we use nested chains of
     // `Option<Sp<_>>`.
     #[test]
@@ -2809,8 +2761,8 @@ mod tests {
         let tx_a = tx.clone();
         let tx_b = tx;
 
-        // Thread A: force_as_arc path (sp_cache → metadata).
-        // get_lazy_unversioned creates a lazy Sp; deref triggers force_as_arc,
+        // Thread A: `Sp::force` path (formerly `force_as_arc`).
+        // get_lazy_unversioned creates a lazy Sp; deref triggers `Sp::force`,
         // which holds sp_cache and then acquires metadata via from_arena →
         // track_lazy / increment_ref.
         let arena_a = arena.clone();
@@ -2820,7 +2772,7 @@ mod tests {
                 let sp = arena_a
                     .get_lazy_unversioned::<Parent>(&key_a)
                     .expect("get_lazy_unversioned");
-                let _ = &*sp; // Deref → force_as_arc
+                let _ = &*sp; // Deref → Sp::force
                 drop(sp);
             }
             tx_a.send("A").ok();
@@ -2839,7 +2791,7 @@ mod tests {
 
         let timeout = Duration::from_secs(30);
         rx.recv_timeout(timeout)
-            .expect("DEADLOCK: neither thread completed within 30s — lock ordering violation between force_as_arc (sp_cache → metadata) and new_sp_locked (metadata → sp_cache)");
+            .expect("DEADLOCK: neither thread completed within 30s — lock ordering violation between Sp::force (sp_cache → metadata) and new_sp_locked (metadata → sp_cache)");
         rx.recv_timeout(timeout)
             .expect("DEADLOCK: only one thread completed — lock ordering violation");
     }
