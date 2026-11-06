@@ -54,7 +54,7 @@ use std::{
 };
 
 mod slot;
-use slot::{Slot, SpCache};
+use slot::{Released, Slot, SpCache};
 
 #[cfg(feature = "test-utilities")]
 /// A tracking on time spent in reconstruction of data types loading from the backend.
@@ -1528,11 +1528,9 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// behaves like [`Arc::into_inner`].
     pub fn into_inner(mut this: Sp<T, D>) -> Option<T> {
         // Not `self.force()`: that would force an uninitialized `Sp` unnecessarily.
-        //
-        // Release our strong reference before `Sp::drop` runs, so its `sp_cache`
-        // clean-up sees the data gone if we held the last one.
-        let data = this.data.take_inner();
-        drop(this);
+        // `Sp::drop` then finds the slot empty, so its own `gc` is a no-op.
+        let (data, released) = this.data.take_inner();
+        this.gc_weak_pointer(released);
         data
     }
 }
@@ -1552,16 +1550,16 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // `data`, if any. This must happen before `gc_weak_pointer`, so that
         // the strong count of the Arc is decremented before we check if the
         // sp_cache entry can be cleaned up.
-        let type_id = self.data.unload();
-        self.gc_weak_pointer(type_id);
+        let released = self.data.unload();
+        self.gc_weak_pointer(released);
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
-    fn gc_weak_pointer(&mut self, type_id: TypeId) {
+    fn gc_weak_pointer(&mut self, released: Released) {
         self.arena
             .lock_sp_cache()
             .borrow_mut()
-            .gc(&self.root, type_id);
+            .gc(&self.root, released);
     }
 }
 

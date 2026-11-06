@@ -18,8 +18,8 @@
 //! if the last strong reference is released anywhere else, e.g. by an `Arc` that escaped an
 //! `Sp`. This module makes that unrepresentable outside it: the `Arc` is private to [`Slot`],
 //! and no function here returns one. The only operations that release a strong reference are
-//! [`Slot::unload`] and [`Slot::take_inner`], and the `Sp` methods that call them follow up with
-//! [`SpCache::gc`], keyed by the concrete type [`Slot::unload`] returns.
+//! [`Slot::unload`] and [`Slot::take_inner`], and both return a `#[must_use]` [`Released`] that
+//! only [`SpCache::gc`] consumes, so skipping the clean-up is a compiler warning.
 //!
 //! Everything here is zero cost: [`Slot`] is a transparent wrapper of the `OnceLock<Arc<T>>`
 //! that `Sp` held before.
@@ -30,6 +30,11 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use super::{ArenaHash, DynTypedArenaHash};
 use crate::WellBehavedHasher;
+
+/// Proof that a [`Slot`] released a strong reference, carrying the concrete type its data is
+/// cached under. Hand it to [`SpCache::gc`]: that release may have been the last one.
+#[must_use = "pass to `SpCache::gc`, or the `sp_cache` entry may dangle"]
+pub(super) struct Released(TypeId);
 
 /// The possibly not yet loaded data of an `Sp`, shared with other `Sp`s of the same key.
 ///
@@ -69,18 +74,20 @@ impl<T: ?Sized> Slot<T> {
     }
 
     /// Load `self` from `other`, unless it is already loaded. Losing a race to load the same
-    /// key keeps the winner's data; `other`'s is released and the winner still holds the entry.
+    /// key keeps the winner's data and drops `other`'s with no [`Released`]: it is a clone of
+    /// the winner's `Arc` (both loads read `sp_cache` under its lock), or one never cached.
     pub(super) fn fill(&self, other: Self) {
         if let Some(arc) = other.0.into_inner() {
             let _ = self.0.set(arc);
         }
     }
 
-    /// Release this slot's strong reference, returning the type to pass to [`SpCache::gc`].
+    /// Release this slot's strong reference, if any.
     ///
-    /// That is the concrete type the data is cached under, which for an upcast
-    /// `Slot<dyn Any>` differs from `T`, so ask the value before dropping it.
-    pub(super) fn unload(&mut self) -> TypeId
+    /// The type is the one the data is cached under, which for an upcast `Slot<dyn Any>`
+    /// differs from `T`, so ask the value before dropping it. An empty slot released nothing
+    /// and its `TypeId::of::<T>()` is a harmless no-op key.
+    pub(super) fn unload(&mut self) -> Released
     where
         T: 'static,
     {
@@ -89,7 +96,7 @@ impl<T: ?Sized> Slot<T> {
             .get()
             .map_or_else(TypeId::of::<T>, |arc| Any::type_id(&**arc));
         let _ = self.0.take();
-        type_id
+        Released(type_id)
     }
 
     /// Whether two slots share one allocation.
@@ -110,10 +117,15 @@ impl<T> Slot<T> {
         Slot(OnceLock::from(Arc::new(value)))
     }
 
-    /// Release this slot's strong reference, returning the data if it was the last one. Must be
-    /// followed by [`SpCache::gc`], which then sees the allocation gone.
-    pub(super) fn take_inner(&mut self) -> Option<T> {
-        self.0.take().and_then(Arc::into_inner)
+    /// Release this slot's strong reference, returning the data if it was the last one.
+    pub(super) fn take_inner(&mut self) -> (Option<T>, Released)
+    where
+        T: 'static,
+    {
+        (
+            self.0.take().and_then(Arc::into_inner),
+            Released(TypeId::of::<T>()),
+        )
     }
 }
 
@@ -178,9 +190,9 @@ impl<H: WellBehavedHasher> SpCache<H> {
         }
     }
 
-    /// Remove the entry for `key` and `type_id` if its data has been freed.
-    pub(super) fn gc(&mut self, key: &ArenaHash<H>, type_id: TypeId) {
-        let key = (key.clone(), type_id);
+    /// Remove the entry for `key` if `released` freed its data.
+    pub(super) fn gc(&mut self, key: &ArenaHash<H>, released: Released) {
+        let key = (key.clone(), released.0);
         // NOTE: Here, we rely on the `Arc` reference count to perform the cleanup if and only if
         // the underlying `Arc` is no longer allocated. This relies on the `Sp`s internal `Arc`
         // not leaking, as this ensures this check will be made during each `Arc` drop, including
