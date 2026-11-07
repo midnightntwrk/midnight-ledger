@@ -3,6 +3,9 @@
 ## Unreleased
 
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
+- fix: revert to `sha2` 0.10 / `digest` 0.10. `1.2.2` exposed `digest` 0.11
+  through `WellBehavedHasher` and `ArenaHash`, which broke published
+  `storage` 2.0.x sharing this crate.
 
 ## Version `1.2.1`
 

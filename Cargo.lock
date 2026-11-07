@@ -3229,12 +3229,11 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.3"
+version = "2.0.5"
 dependencies = [
  "criterion",
  "crypto",
  "derive-where",
- "digest 0.11.3",
  "hashbrown 0.17.1",
  "midnight-base-crypto",
  "midnight-onchain-state",
@@ -3250,7 +3249,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.10.9",
  "sysinfo",
  "tempfile",
 ]
@@ -3263,7 +3262,6 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
- "digest 0.11.3",
  "fake",
  "fs2",
  "hashbrown 0.17.1",
@@ -3287,7 +3285,7 @@ dependencies = [
  "rayon",
  "rusqlite",
  "serde",
- "sha2 0.11.0",
+ "sha2 0.10.9",
  "sysinfo",
  "tempfile",
 ]
