@@ -8,12 +8,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Ledger 9.1.0.1
 
-- note: this release ships the ledger crates only. The packages `ledger-wasm`
-  (`1.0.1-rc.2`), `onchain-runtime-wasm` (`4.0.1-rc.2`), `zkir-wasm`
-  (`2.2.0-rc.4`), `zkir-v3-wasm` (`3.0.0-rc.3`) and the proof server
-  (`9.0.1-rc.2`) stay at their release-candidate versions, and zkir v3 (the
-  external `midnight-zkir`) at `3.1.0-rc.1`. They do not yet carry the
-  `zkir-wasm` `prove()` fix (#832) or zkir v3 `3.2.0` from 9.1.0.0.
+- note: alongside the ledger crates, this release ships `ledger-wasm` `1.0.1`
+  and `onchain-runtime-wasm` `4.0.1`. `zkir-wasm`, `zkir-v3-wasm` and the
+  proof server are unchanged from 9.1.0.0.
 - security: transaction pricing and `well_formed` take time linear in the
   encoding, however storage nodes are shared. Previously a few hundred bytes
   repeating entries through shared subtrees could force exponential work
@@ -255,7 +252,7 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
@@ -350,8 +347,8 @@ resolve past the fix.
 - breaking: feat: remove `inputFeeOverhead` and `outputFeeOverhead`. The use of
   these has dwindled with shielded tokens no longer being the fee payment means,
   and they were never fully accurate. As a more flexible replacement,
-  `Transaction.mockProve` produces a 'proven' transaction that is accurate (modulo a slight overestimation in rare
-  cases) for fee payments. This can be
+  `Transaction.mockProve` produces a 'proven' transaction that is accurate
+  (modulo a slight overestimation in rare cases) for fee payments. This can be
   used to estimate the fees of any modification without the expensive proving
   step accurately.
 - breaking: pull in breaking serialization changes
@@ -555,7 +552,8 @@ resolve past the fix.
 - Add to `LedgerState`:
   - A treasury balance, a map from token types to an amount of tokens
     controlled by privileged transactions
-  - Unclaimed mints, a map from public keys and token types to issued mints (block rewards), that are claimable
+  - Unclaimed mints, a map from public keys and token types to issued mints
+    (block rewards), that are claimable
   - A counter for the unminted native token supply, initialized to 24
     quadrillion atomic units. (Assumed 24 Billion denominated tokens)
 - For Zswap:
