@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::compact_slots::*;
 use crate::error::OfferCreationFailed;
 use crate::filter_invalid;
 use crate::structure::*;
@@ -24,6 +25,7 @@ use coin_structure::contract::ContractAddress;
 use coin_structure::transfer::{Recipient, SenderEvidence};
 use midnight_onchain_runtime::ops::{Key, Op};
 use midnight_onchain_runtime::program_fragments::*;
+use midnight_onchain_runtime::result_mode::ResultMode;
 use midnight_onchain_runtime::result_mode::ResultModeGather;
 use midnight_onchain_runtime::result_mode::ResultModeVerify;
 use midnight_onchain_runtime::state::{ContractOperation, StateValue};
@@ -46,6 +48,61 @@ use transient_crypto::merkle_tree::MerkleTree;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
 
+/// Field-encodes a transcript program, dropping the ops that carry no information.
+fn transcript_field_repr<M: ResultMode<D>, D: DB>(ops: impl Iterator<Item = Op<M, D>>) -> Vec<Fr>
+where
+    Op<M, D>: FieldRepr,
+{
+    let mut field_repr = Vec::new();
+    for op in filter_invalid(ops) {
+        op.field_repr(&mut field_repr);
+    }
+    field_repr
+}
+
+/// The trailing public transcript fragment shared by Zswap spends and outputs: a read of
+/// the segment cell, followed by the write of the value commitment bound to that segment.
+///
+/// `retarget_preimage` rewrites exactly this fragment in place, so the two must stay in
+/// step; emitting it from one place is what keeps them that way.
+fn segment_binding_transcript<D: DB>(
+    segment: u16,
+    value_commitment: Pedersen,
+) -> Vec<Op<ResultModeVerify, D>> {
+    let mut prog = Vec::new();
+    prog.extend(
+        Cell_read!([Key::Value(ZSWAP_IDX_SEGMENT.into())], false, u16)
+            .into_iter()
+            .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.into())),
+    );
+    prog.extend(Cell_write!(
+        [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
+        false,
+        (Fr, Fr),
+        value_commitment.0
+    ));
+    prog
+}
+
+/// Rebuilds the parts of a proof preimage that reference the segment: the trailing
+/// transcript fragment emitted by `segment_binding_transcript`, and the transcript
+/// outputs, which differs between spends and outputs and so are supplied by the caller.
+fn retarget_preimage<D: DB>(
+    proof: &ProofPreimage,
+    new_segment: u16,
+    value_commitment: Pedersen,
+    public_transcript_outputs: Vec<Fr>,
+) -> ProofPreimage {
+    let tail = transcript_field_repr(
+        segment_binding_transcript::<D>(new_segment, value_commitment).into_iter(),
+    );
+    let mut proof_preimage = proof.clone();
+    let len = proof_preimage.public_transcript_inputs.len();
+    proof_preimage.public_transcript_inputs[len - tail.len()..len].copy_from_slice(&tail);
+    proof_preimage.public_transcript_outputs = public_transcript_outputs;
+    proof_preimage
+}
+
 impl AuthorizedClaim<ProofPreimage> {
     #[instrument(skip(_rng))]
     pub fn new<R: Rng + CryptoRng + ?Sized, D: DB>(
@@ -57,9 +114,16 @@ impl AuthorizedClaim<ProofPreimage> {
             Recipient::User(pk) => pk,
             Recipient::Contract(_) => unreachable!(),
         };
-        let public_transcript_prog: &[Op<ResultModeVerify, D>] =
-            &Cell_write!([Key::Value(4u8.into())], false, CoinPublicKey, pk);
-        let mut inputs = Vec::new();
+        let public_transcript_prog: &[Op<ResultModeVerify, D>] = &Cell_write!(
+            [Key::Value(ZSWAP_IDX_PUBLIC_KEY.into())],
+            false,
+            CoinPublicKey,
+            pk
+        );
+        // Exact capacity: reallocating while appending would leave copies of the
+        // secret witness behind in freed allocations, which `ProofPreimage`'s
+        // zeroize-on-drop does not reach.
+        let mut inputs = Vec::with_capacity(sk.field_size());
         sk.field_repr(&mut inputs);
         let mut public_transcript_inputs = Vec::new();
         for op in filter_invalid(public_transcript_prog.iter().cloned()) {
@@ -107,32 +171,14 @@ impl<D: DB> Input<ProofPreimage, D> {
         let rc_e = self.binding_randomness();
         let value_commitment =
             Pedersen::commit(&(delta.token_type, new_segment), &delta.value.into(), &rc_e);
-        let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
-        public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
-                .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
-        );
-        public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
-            false,
-            (Fr, Fr),
-            value_commitment.0
-        ));
-        let mut public_transcript_inputs_end = Vec::new();
-        for op in filter_invalid(public_transcript_prog.into_iter()) {
-            op.field_repr(&mut public_transcript_inputs_end);
-        }
-
-        let mut proof_preimage = self.proof.deref().clone();
-        let len = proof_preimage.public_transcript_inputs.len();
-        proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
-            .copy_from_slice(&public_transcript_inputs_end);
-        proof_preimage.public_transcript_outputs = vec![true.into(), new_segment.into()];
-
         Input {
             value_commitment,
-            proof: Arc::new(proof_preimage),
+            proof: Arc::new(retarget_preimage::<D>(
+                self.proof.deref(),
+                new_segment,
+                value_commitment,
+                vec![true.into(), new_segment.into()],
+            )),
             ..self.clone()
         }
     }
@@ -157,7 +203,7 @@ impl<D: DB> Input<ProofPreimage, D> {
         let mut public_transcript_prog: Vec<Op<ResultModeVerify, D>> = Vec::new();
         public_transcript_prog.extend(
             HistoricMerkleTree_check_root!(
-                [Key::Value(0u8.into())],
+                [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
                 false,
                 32,
                 [u8; 32],
@@ -167,42 +213,35 @@ impl<D: DB> Input<ProofPreimage, D> {
             .map(|op: Op<ResultModeGather, D>| op.translate(|()| true.into())),
         );
         public_transcript_prog.extend(Set_insert!(
-            [Key::Value(1u8.into())],
+            [Key::Value(ZSWAP_IDX_NULLIFIERS.into())],
             false,
             [u8; 32],
             nullifier
         ));
         if let SenderEvidence::Contract(addr) = &sk {
             public_transcript_prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 *addr
             ));
         }
-        public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
-                .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
-        );
-        public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
-            false,
-            (Fr, Fr),
-            value_commitment.0
+        public_transcript_prog.extend(segment_binding_transcript::<D>(
+            segment.unwrap_or(0),
+            value_commitment,
         ));
-        let Commitment(hash) = CoinInfo::from(coin).commitment(&sk.clone().into());
-        let mut inputs = Vec::new();
+        let coin_info = CoinInfo::from(coin);
+        let Commitment(hash) = coin_info.commitment(&sk.clone().into());
+        let path = tree
+            .path_for_leaf(coin.mt_index, ((), hash))
+            .map_err(OfferCreationFailed::InvalidIndex)?;
+        let mut inputs =
+            Vec::with_capacity(sk.field_size() + path.field_size() + coin_info.field_size() + 1);
         sk.field_repr(&mut inputs);
-        tree.path_for_leaf(coin.mt_index, ((), hash))
-            .map_err(OfferCreationFailed::InvalidIndex)?
-            .field_repr(&mut inputs);
-        CoinInfo::from(coin).field_repr(&mut inputs);
+        path.field_repr(&mut inputs);
+        coin_info.field_repr(&mut inputs);
         inputs.push(rc);
-        let mut public_transcript_inputs = Vec::new();
-        for op in filter_invalid(public_transcript_prog.into_iter()) {
-            op.field_repr(&mut public_transcript_inputs);
-        }
+        let public_transcript_inputs = transcript_field_repr(public_transcript_prog.into_iter());
         let proof_preimage = ProofPreimage {
             inputs,
             private_transcript: Vec::new(),
@@ -244,40 +283,22 @@ impl<D: DB> Output<ProofPreimage, D> {
         // We redo the last two parts of the transcript which reference the segment, as well as the
         // binding commitment.
         let delta = self.delta();
-        // NOTE: negated because `Output::binding_randomness` already negates it, but we need the
-        // positive variant.
+        // NOTE: both negated because `Output::delta` and `Output::binding_randomness` already
+        // negate them, but we need the positive variants.
         let rc_e = -self.binding_randomness();
         let value_commitment = Pedersen::commit(
             &(delta.token_type, new_segment),
             &delta.value.saturating_neg().into(),
             &rc_e,
         );
-        let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
-        public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
-                .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
-        );
-        public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
-            false,
-            (Fr, Fr),
-            value_commitment.0
-        ));
-        let mut public_transcript_inputs_end = Vec::new();
-        for op in filter_invalid(public_transcript_prog.into_iter()) {
-            op.field_repr(&mut public_transcript_inputs_end);
-        }
-
-        let mut proof_preimage = self.proof.deref().clone();
-        let len = proof_preimage.public_transcript_inputs.len();
-        proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
-            .copy_from_slice(&public_transcript_inputs_end);
-        proof_preimage.public_transcript_outputs = vec![new_segment.into()];
-
         Output {
             value_commitment,
-            proof: Arc::new(proof_preimage),
+            proof: Arc::new(retarget_preimage::<D>(
+                self.proof.deref(),
+                new_segment,
+                value_commitment,
+                vec![new_segment.into()],
+            )),
             ..self.clone()
         }
     }
@@ -322,7 +343,7 @@ impl<D: DB> Output<ProofPreimage, D> {
         let mut public_transcript_prog = Vec::new();
         public_transcript_prog.extend::<[Op<ResultModeVerify, InMemoryDB>; 17]>(
             HistoricMerkleTree_insert_hash!(
-                [Key::Value(0u8.into())],
+                [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
                 false,
                 32,
                 [u8; 32],
@@ -331,31 +352,21 @@ impl<D: DB> Output<ProofPreimage, D> {
         );
         if let Recipient::Contract(addr) = &recipient {
             public_transcript_prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 addr
             ));
         }
-        public_transcript_prog.extend(
-            Cell_read!([Key::Value(5u8.into())], false, u16)
-                .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
-        );
-        public_transcript_prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
-            false,
-            (Fr, Fr),
-            value_commitment.0
+        public_transcript_prog.extend(segment_binding_transcript::<InMemoryDB>(
+            segment.unwrap_or(0),
+            value_commitment,
         ));
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::with_capacity(recipient.field_size() + coin.field_size() + 1);
         recipient.field_repr(&mut inputs);
         coin.field_repr(&mut inputs);
         inputs.push(rc);
-        let mut public_transcript_inputs = Vec::new();
-        for op in filter_invalid(public_transcript_prog.into_iter()) {
-            op.field_repr(&mut public_transcript_inputs);
-        }
+        let public_transcript_inputs = transcript_field_repr(public_transcript_prog.into_iter());
         let proof_preimage = ProofPreimage {
             inputs,
             private_transcript: Vec::new(),
@@ -400,32 +411,13 @@ impl<D: DB> Transient<ProofPreimage, D> {
             .clone()
             .ok_or(OfferCreationFailed::NotContractOwned)?;
         let input = Input::new_contract_owned(rng, coin, segment, *addr.deref(), &tree)?;
-        let io = Transient {
-            nullifier: input.nullifier,
-            coin_com: output.coin_com,
-            value_commitment_input: input.value_commitment,
-            value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
-            proof_input: input.proof,
-            proof_output: output.proof,
-        };
-        Ok(io)
+        Ok(Transient::from_parts(input, output))
     }
 
     pub fn retarget_segment(&self, new_segment: u16) -> Self {
         let input = self.as_input().retarget_segment(new_segment);
         let output = self.as_output().retarget_segment(new_segment);
-        Transient {
-            nullifier: input.nullifier,
-            coin_com: output.coin_com,
-            value_commitment_input: input.value_commitment,
-            value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
-            proof_input: input.proof,
-            proof_output: output.proof,
-        }
+        Transient::from_parts(input, output)
     }
 }
 
