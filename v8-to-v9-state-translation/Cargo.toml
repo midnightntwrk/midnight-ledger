@@ -1,8 +1,11 @@
 [package]
 name = "v8-to-v9-state-translation"
 edition = "2024"
-license.workspace = true
+license = "Apache-2.0"
 version = "0.1.0"
+
+# Standalone Cargo project, not a workspace member (see root `exclude`).
+[workspace]
 
 [dependencies]
 # v8: released crates.io versions. `midnight-node`'s `toolkit-1.0.0` tag

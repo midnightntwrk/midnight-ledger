@@ -25,7 +25,6 @@ members = [
     "wasm-proving-demos/zkir-mt",
     "static",
     "storage-core",
-    "v8-to-v9-state-translation",
 ]
 default-members = [
     "zswap",
@@ -50,6 +49,10 @@ exclude = [
     # tags that would otherwise feature-unify with the main workspace and
     # pull in conflicting sqlite linkers (sqlx-sqlite vs rusqlite).
     "v8-to-v9-state-translation-replay",
+    # Standalone: depends on the released ledger 9.1.0.1 crates, whose base-crypto /
+    # serialize / storage-core are newer than this workspace's, so the workspace
+    # `[patch.crates-io]` path patches cannot apply to it.
+    "v8-to-v9-state-translation",
 ]
 
 # Pretty much every dependency is crypto.
@@ -69,3 +72,16 @@ panic = "abort"
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
+
+# Local-path patches from ledger-8 development. `midnight-serialize` and
+# `midnight-base-crypto` must resolve to the local workspace copies so that the
+# older crates.io/git `transient-crypto` unifies with the workspace's shared
+# infra. The v9 crates are no longer built here: `v8-to-v9-state-translation`
+# is standalone and resolves the released ledger 9.1.0.1 crates itself.
+# `midnight-transient-crypto-old` pins the v8-side transient-crypto 2.x to the
+# rc tag because we rely on additions in 2.2.
+[patch.crates-io]
+midnight-base-crypto = { path = "base-crypto" }
+midnight-serialize = { path = "serialize" }
+midnight-base-crypto-derive = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
+midnight-transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1" }
