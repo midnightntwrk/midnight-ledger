@@ -18,7 +18,7 @@ use rand::{Rng, SeedableRng};
 use std::ops::Deref;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
-use storage::state_translation::{TranslationTable, TypedTranslationState};
+use storage_v9::state_translation::{TranslationTable, TypedTranslationState};
 use storage::storage::HashMap;
 use transient_crypto::proofs::VerifierKey;
 use v8_to_v9_state_translation::StateTranslationTable;
@@ -478,6 +478,7 @@ fn table_tags_match_types() {
     // from types and compare.
     use serialize::Tagged;
     use storage::merkle_patricia_trie::{MerklePatriciaTrie, Node};
+    use storage_v9::merkle_patricia_trie::{MerklePatriciaTrie as MerklePatriciaTrieV9, Node as NodeV9};
     use storage::storable::SizeAnn;
 
     type V8Ann = ledger_v8::annotation::NightAnn;
@@ -497,20 +498,20 @@ fn table_tags_match_types() {
         (V8Contract::tag(), V9Contract::tag()),
         (
             MerklePatriciaTrie::<V8Contract, InMemoryDB, V8Ann>::tag(),
-            MerklePatriciaTrie::<V9Contract, InMemoryDB, V9Ann>::tag(),
+            MerklePatriciaTrieV9::<V9Contract, InMemoryDB, V9Ann>::tag(),
         ),
         (
             Node::<V8Contract, InMemoryDB, V8Ann>::tag(),
-            Node::<V9Contract, InMemoryDB, V9Ann>::tag(),
+            NodeV9::<V9Contract, InMemoryDB, V9Ann>::tag(),
         ),
         (u128::tag(), u128::tag()),
         (
             MerklePatriciaTrie::<u128, InMemoryDB, SizeAnn>::tag(),
-            MerklePatriciaTrie::<u128, InMemoryDB, V9Ann>::tag(),
+            MerklePatriciaTrieV9::<u128, InMemoryDB, V9Ann>::tag(),
         ),
         (
             Node::<u128, InMemoryDB, SizeAnn>::tag(),
-            Node::<u128, InMemoryDB, V9Ann>::tag(),
+            NodeV9::<u128, InMemoryDB, V9Ann>::tag(),
         ),
     ];
 
