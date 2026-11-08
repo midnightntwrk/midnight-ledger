@@ -902,7 +902,7 @@ mod fetch_params_endpoint {
             .await
             .expect("Request failed");
 
-        assert_eq!(response.status(), 405);
+        assert_eq!(response.status(), 404);
 
         stop_server(server).await;
     }
