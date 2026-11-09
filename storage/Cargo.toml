@@ -24,6 +24,7 @@ derive-where = "^1.6.1"
 digest = "^0.11.2"
 crypto = "0.5.1"
 parking_lot = "^0.12.4"
+scoped-tls = "^1.0.1"
 sha2 = "0.11.0"
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }
