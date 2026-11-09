@@ -172,17 +172,22 @@ fn mock_dust_actions<D: DB>(
             proof: Proof(vec![0; DUST_SPEND_PROOF_SIZE]),
         })
         .collect::<Vec<_>>();
-    // A deregistration is a registration without a Dust address.
+    // A deregistration is a registration without a Dust address. Deregistrations
+    // sharing a key would repeat, and are charged nothing per NIGHT spend, so
+    // each gets its own key.
+    let dereg_keys = (0..tx_shape.dust_deregistrations)
+        .map(|_| SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut *rng)))
+        .collect::<Vec<_>>();
     let dust_addresses = (0..tx_shape.dust_registrations)
-        .map(|i| Some(DustPublicKey(Fr::from(i as u64))))
-        .chain(repeat_n(None, tx_shape.dust_deregistrations));
+        .map(|i| (night_key, Some(DustPublicKey(Fr::from(i as u64)))))
+        .chain(dereg_keys.iter().map(|key| (key, None)));
     let registrations = dust_addresses
         .enumerate()
-        .map(|(i, dust_address)| DustRegistration {
-            night_key: night_key.verifying_key(),
+        .map(|(i, (key, dust_address))| DustRegistration {
+            night_key: key.verifying_key(),
             dust_address: dust_address.map(Sp::new),
             allow_fee_payment: 0,
-            signature: Some(Sp::new(night_key.sign(rng, &i.to_le_bytes()))),
+            signature: Some(Sp::new(key.sign(rng, &i.to_le_bytes()))),
         })
         .collect::<Vec<_>>();
     (!spends.is_empty() || !registrations.is_empty()).then(|| {
@@ -282,10 +287,10 @@ mod tests {
     fn reserve_charges_each_call() {
         let calls: [_; 2] = std::array::from_fn(|_| pre_transcript(vec![Op::Noop { n: 1 }], None));
         let tx_shape = TransactionShape::for_calls(&calls, &INITIAL_PARAMETERS).unwrap();
-        let cost_model = &INITIAL_PARAMETERS.cost_model;
         let reserves = [0, 1, 2].map(|n| {
             mock_tx(&calls[..n], &tx_shape)
-                .time_to_dismiss(cost_model)
+                .time_to_dismiss(&INITIAL_PARAMETERS)
+                .expect("mock transactions are disjoint by construction")
                 .into_picoseconds()
         });
         let [no_calls, one_call, two_calls] = reserves;
@@ -302,9 +307,10 @@ mod tests {
 
     #[test]
     fn reserve_grows_with_each_count() {
-        let model = &INITIAL_PARAMETERS.cost_model;
         let reserve = |tx_shape: &TransactionShape| {
-            mock_tx::<InMemoryDB>(&[], tx_shape).time_to_dismiss(model)
+            mock_tx::<InMemoryDB>(&[], tx_shape)
+                .time_to_dismiss(&INITIAL_PARAMETERS)
+                .expect("mock transactions are disjoint by construction")
         };
         // Non-NIGHT outputs are left out: inserting a UTXO costs only bytes
         // written, which time_to_dismiss does not count.
@@ -399,10 +405,9 @@ mod tests {
             real_size - mock_size <= 256,
             "{real_size} - {mock_size} > 256"
         );
-        let cost_model = &INITIAL_PARAMETERS.cost_model;
         assert_eq!(
-            mock.time_to_dismiss(cost_model),
-            tx.time_to_dismiss(cost_model)
+            mock.time_to_dismiss(&INITIAL_PARAMETERS),
+            tx.time_to_dismiss(&INITIAL_PARAMETERS)
         );
     }
 
