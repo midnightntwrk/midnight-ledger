@@ -64,6 +64,7 @@ import {
   StateMap,
   StateValue,
   Transaction,
+  TransactionShape,
   UnshieldedOffer,
   type UtxoOutput,
   type UtxoSpend,
@@ -399,6 +400,43 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const originalStillExists = finalUserUtxos.find((utxo) => utxo.value === UTXO_AMOUNT);
     expect(originalStillExists).toBeUndefined();
     console.log('   Original UTXO consumed ✓');
+  });
+
+  test('partitionTranscripts uses the TransactionShape it is given', () => {
+    const state = TestState.new();
+    state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
+
+    const ownerSk = Random.generate32Bytes();
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
+    const ops = setupOperations();
+    const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
+
+    const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
+    const program = programWithResults(
+      [
+        ...receiveUnshieldedOps(encodeUnshieldedTokenType(Random.hex(64)), encodeAmount(1500n)),
+        ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)
+      ],
+      []
+    );
+    const calls = [new PreTranscript(context, program)];
+    const params = LedgerParameters.initialParameters();
+
+    const transcripts = partitionTranscripts(calls, params);
+    expect(transcripts[0][0]).toBeDefined();
+    expect(transcripts[0][1]).toBeUndefined();
+
+    const txShape = TransactionShape.forCalls(calls, params);
+    // Extra weight to show the shape is used; the deposit is not even in NIGHT.
+    txShape.nightSpends = 2;
+    txShape.nightOutputs = 1;
+    const shapedTranscripts = partitionTranscripts(calls, params, txShape);
+    expect(shapedTranscripts[0][0]).toBeUndefined();
+    expect(shapedTranscripts[0][1]?.program).toEqual(program);
   });
 
   /**

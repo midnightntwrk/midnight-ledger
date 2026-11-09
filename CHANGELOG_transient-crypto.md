@@ -1,5 +1,10 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- feat: add `PureGeneratorPedersen::smallest_representable`, for bounding transaction sizes from below.
+- chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
+
 ## Version `3.0.1`
 
 - feat: `MerkleTree::fold` combines a function over a tree's leaves in time
