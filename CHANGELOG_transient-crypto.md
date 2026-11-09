@@ -7,6 +7,7 @@
 
 ## Version `3.0.0`
 
+- chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7
 - breaking: `Zkir` trait reworked: removed `Relation + Tagged + Deserializable`
   supertraits, added `type ProverKey` associated type, `read_raw_pk`,
