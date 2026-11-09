@@ -1,5 +1,15 @@
 # `storage` Changelog
 
+## Version `2.0.5`
+
+Skips `2.0.4`, published from the `ledger-9` line on `sha2` 0.11.
+
+- fix: revert to `sha2` 0.10 / `digest` 0.10, so this crate builds against
+  `storage-core` 1.2.3 and shares it with `ledger-9`'s `storage` 3.
+- fix: `MerklePatriciaTrie` removal no longer panics when the removed path is
+  shorter than an `Extension` node's compressed path. Shipped unlisted in
+  `2.0.4`.
+
 ## Version `2.0.3`
 
 - security: `MerklePatriciaTrie` deserialization now enforces full structural
