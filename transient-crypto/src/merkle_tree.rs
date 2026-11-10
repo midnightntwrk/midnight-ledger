@@ -40,9 +40,11 @@ use storage_core as storage;
 use storage_core::DefaultDB;
 use storage_core::Storable;
 use storage_core::arena::{ArenaKey, Sp};
+use storage_core::dag_memo::DagMemo;
 use storage_core::db::DB;
 #[cfg(test)]
 use storage_core::db::InMemoryDB;
+use storage_core::monoid::Monoid;
 use storage_core::storable::Loader;
 
 /// A `Storable` wrapper around `HashOutput`
@@ -1138,6 +1140,49 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         self.0.root().map(MerkleTreeDigest)
     }
 
+    /// Combines `leaf` over every leaf, in [`Self::iter_aux`] order, counting a
+    /// leaf once per path reaching it. Each distinct node is visited once, so a
+    /// tree with shared subtrees folds in time linear in its distinct nodes.
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &HashOutput, &A) -> R,
+    ) -> R {
+        fn go<A: Storable<D>, D: DB, R: Monoid + Clone>(
+            sp: &Sp<MerkleTreeNode<A, D>, D>,
+            memo: &mut DagMemo<R, D>,
+            leaf: &mut impl FnMut(&mut DagMemo<R, D>, &HashOutput, &A) -> R,
+        ) -> R {
+            memo.get_or_compute(sp, |memo, node| match node {
+                MerkleTreeNode::Leaf { hash, aux } => leaf(memo, hash, aux),
+                MerkleTreeNode::Collapsed { .. } | MerkleTreeNode::Stub { .. } => R::empty(),
+                MerkleTreeNode::Node { left, right, .. } => {
+                    go(left, memo, leaf).append(&go(right, memo, leaf))
+                }
+            })
+        }
+        go(&self.0, memo, &mut leaf)
+    }
+
+    /// A rehashed tree of the given height whose every leaf is `hash`, built
+    /// from `height + 1` distinct nodes.
+    #[cfg(any(test, feature = "test-utilities"))]
+    pub fn shared_full(height: u8, hash: HashOutput, aux: A) -> Self {
+        let mut node = Sp::new(MerkleTreeNode::Leaf { hash, aux });
+        for h in 1..=height {
+            node = Sp::new(
+                MerkleTreeNode::Node {
+                    hash: None,
+                    left: node.clone(),
+                    right: node,
+                    height: h,
+                }
+                .rehash(),
+            );
+        }
+        MerkleTree(node)
+    }
+
     /// Rehashes the Merkle tree, computing the new root and intermediate hashes.
     /// This is a separate operation as it amortizes costs across sequential
     /// insertions to `O(n + h)` instead of `O(nh)`.
@@ -1387,14 +1432,71 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sha2::Sha256;
 
     use storage_core::db::InMemoryDB;
 
     use super::*;
 
-    fn new_mt<A: Storable<InMemoryDB>>(height: u8) -> MerkleTree<A, InMemoryDB<Sha256>> {
-        MerkleTree::<A, InMemoryDB<Sha256>>::blank(height)
+    fn new_mt<A: Storable<InMemoryDB>>(height: u8) -> MerkleTree<A, InMemoryDB> {
+        MerkleTree::<A, InMemoryDB>::blank(height)
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    struct Hashes(Vec<HashOutput>);
+
+    impl storage_core::monoid::Semigroup for Hashes {
+        fn append(&self, other: &Self) -> Self {
+            Hashes([&self.0[..], &other.0[..]].concat())
+        }
+    }
+
+    impl Monoid for Hashes {
+        fn empty() -> Self {
+            Hashes(Vec::new())
+        }
+    }
+
+    // Random updates and collapses, over a blank tree or one whose leaves
+    // all share one subtree.
+    fn tree() -> impl proptest::strategy::Strategy<Value = MerkleTree<(), InMemoryDB>> {
+        use proptest::prelude::*;
+        let op = (0u64..16, 0u8..3, 0u64..16);
+        (any::<bool>(), prop::collection::vec(op, 0..12)).prop_map(|(shared, ops)| {
+            let base = if shared {
+                MerkleTree::shared_full(4, HashOutput([1; 32]), ())
+            } else {
+                MerkleTree::blank(4)
+            };
+            ops.iter().fold(base, |t, (i, how, v)| match how {
+                0 | 1 => t.try_update(*i, &Fr::from(*v), ()).unwrap_or(t),
+                _ => t.collapse((*i).min(*v), (*i).max(*v)),
+            })
+        })
+    }
+
+    fn distinct_nodes(tree: &MerkleTree<(), InMemoryDB>) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        let mut frontier = vec![tree.0.clone()];
+        while let Some(node) = frontier.pop() {
+            if seen.insert(node.hash())
+                && let Node { left, right, .. } = &*node
+            {
+                frontier.push(left.clone());
+                frontier.push(right.clone());
+            }
+        }
+        seen.len()
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn fold_matches_iter_and_visits_each_node_once(tree in tree()) {
+            let mut memo = DagMemo::new();
+            let hashes = tree.fold(&mut memo, |_, hash, _| Hashes(vec![*hash]));
+            let expected: Vec<_> = tree.iter_aux().map(|(_, (hash, _))| hash).collect();
+            proptest::prop_assert_eq!(hashes.0, expected);
+            proptest::prop_assert_eq!(memo.len(), distinct_nodes(&tree));
+        }
     }
 
     #[test]

@@ -21,10 +21,10 @@ use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
     ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, GUARANTEED_SEGMENT, Intent,
-    IntentHash, LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded,
-    PedersenDowngradeable, ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate,
-    StandardTransaction, SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState,
-    VerifiedTransaction,
+    IntentHash, LedgerParameters, LedgerState, MAX_CONTRACT_OPERATIONS, MAX_SUPPLY,
+    OutputInstructionUnshielded, PedersenDowngradeable, ProofKind, ReplayProtectionState,
+    SignatureKind, SingleUpdate, StandardTransaction, SystemTransaction, Transaction,
+    UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
 use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
@@ -321,7 +321,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<WithZswapStateChanges<Self>, EventReplayError> {
-        use coin_structure::transfer::SenderEvidence;
+        use coin_structure::transfer::{Recipient, SenderEvidence};
 
         let mut res = events.into_iter().try_fold(
             WithZswapStateChanges::new(self.clone()),
@@ -378,7 +378,14 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                             spent_coins: vec![],
                             source: event.source.transaction_hash,
                         })
-                    } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
+                    } else if let Some(ci) =
+                        preimage_evidence.try_with_keys(secret_keys).filter(|ci| {
+                            // The ciphertext is not bound to the commitment by the output
+                            // proof, so verify the preimage actually opens it.
+                            ci.commitment(&Recipient::User(secret_keys.coin_public_key()))
+                                == *commitment
+                        })
+                    {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
@@ -1560,6 +1567,7 @@ impl<D: DB> LedgerState<D> {
                         }
                         cstate.maintenance_authority.counter =
                             cstate.maintenance_authority.counter.saturating_add(1);
+                        let before_operations = cstate.operations.size() as u64;
                         for op in upd.updates.iter_deref() {
                             match op {
                                 SingleUpdate::ReplaceAuthority(auth) => {
@@ -1627,6 +1635,15 @@ impl<D: DB> LedgerState<D> {
                                     cstate.operations = cstate.operations.insert(ep.clone(), op);
                                 }
                             }
+                        }
+                        // A contract already over the cap may still shrink.
+                        let operations = cstate.operations.size() as u64;
+                        if operations > MAX_CONTRACT_OPERATIONS && operations > before_operations {
+                            return Err(TransactionInvalid::ContractTooManyOperations {
+                                address: addr,
+                                operations,
+                                limit: MAX_CONTRACT_OPERATIONS,
+                            });
                         }
                         let limit = self.parameters.limits.max_contract_metadata_size;
                         if let Err(e) =
@@ -1799,6 +1816,24 @@ fn claim_unshielded<D: DB>(
             TransactionResult::Failure(TransactionInvalid::RewardTooSmall {
                 claimed: tx.value,
                 minimum: state.parameters.min_claimable_rewards(),
+            }),
+        );
+    }
+
+    // Claims are valid if they are one of:
+    // - At least the min bridge amount
+    // - The full non-zero claimable value
+    let meets_min_amount = tx.value >= state.parameters.c_to_m_bridge_min_amount;
+    let claims_full_balance = tx.value == claimable && claimable != 0;
+    let is_valid_amount = meets_min_amount || claims_full_balance;
+
+    if tx.kind == ClaimKind::CardanoBridge && !is_valid_amount {
+        return (
+            old_state,
+            TransactionResult::Failure(TransactionInvalid::BridgeClaimTooSmall {
+                claimed: tx.value,
+                minimum: state.parameters.c_to_m_bridge_min_amount,
+                claimable,
             }),
         );
     }
@@ -2098,6 +2133,7 @@ mod tests {
     };
 
     use super::*;
+    use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;
@@ -2211,6 +2247,106 @@ mod tests {
                 panic!("Expected InsufficientClaimable, succeeded unexpectedly")
             }
         }
+    }
+
+    fn assert_zero_value_claim_rejected(
+        kind: ClaimKind,
+        bridge_balance: u128,
+        reward_balance: u128,
+    ) {
+        let mut rng = StdRng::seed_from_u64(0x42);
+
+        let network_id = "a".to_string();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
+        let address = UserAddress::from(vk.clone());
+        let mut bridge_receiving = Map::new();
+        if bridge_balance > 0 {
+            bridge_receiving = bridge_receiving.insert(address, bridge_balance);
+        }
+        let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
+        if reward_balance > 0 {
+            unclaimed_block_rewards = unclaimed_block_rewards.insert(address, reward_balance);
+        }
+        let state = LedgerState {
+            network_id: network_id.clone(),
+            parameters: Sp::<LedgerParameters, InMemoryDB>::new(INITIAL_PARAMETERS),
+            locked_pool: 0,
+            bridge_receiving,
+            reserve_pool: MAX_SUPPLY - bridge_balance - reward_balance,
+            block_reward_pool: 0,
+            unclaimed_block_rewards,
+            treasury: Map::new(),
+            zswap: Sp::new(State::default()),
+            contract: Map::new(),
+            utxo: Sp::new(UtxoState::default()),
+            replay_protection: Sp::new(ReplayProtectionState::new()),
+            dust: Sp::new(DustState::default()),
+        };
+        let claim: ClaimRewardsTransaction<(), InMemoryDB> = ClaimRewardsTransaction {
+            network_id,
+            value: 0,
+            owner: vk,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind,
+        };
+        let context = BlockContext::default();
+        match claim_unshielded(
+            &state,
+            &claim,
+            &context,
+            EventSource {
+                transaction_hash: TransactionHash(rng.r#gen()),
+                logical_segment: 0,
+                physical_segment: 0,
+            },
+        ) {
+            (new_st, TransactionResult::Failure(e)) => {
+                assert_eq!(new_st.utxo.utxos.iter().count(), 0);
+                assert_eq!(new_st.bridge_receiving, state.bridge_receiving);
+                assert_eq!(
+                    new_st.unclaimed_block_rewards,
+                    state.unclaimed_block_rewards
+                );
+                match (e, kind) {
+                    (TransactionInvalid::RewardTooSmall { .. }, ClaimKind::Reward) => {}
+                    (
+                        TransactionInvalid::BridgeClaimTooSmall {
+                            claimed,
+                            minimum,
+                            claimable,
+                        },
+                        ClaimKind::CardanoBridge,
+                    ) => {
+                        assert_eq!(claimed, 0);
+                        assert_eq!(minimum, state.parameters.c_to_m_bridge_min_amount);
+                        assert_eq!(claimable, bridge_balance);
+                    }
+                    (e, _) => panic!("Expected error for {kind:?}, got {e:?}"),
+                }
+            }
+            (_, TransactionResult::PartialSuccess(e, _)) => {
+                panic!("Expected failure, but got partial success {:?}", e)
+            }
+            (_, TransactionResult::Success(_)) => {
+                panic!("Expected failure, succeeded unexpectedly")
+            }
+        }
+    }
+
+    #[test]
+    fn bridge_claim_zero_value_unfunded() {
+        assert_zero_value_claim_rejected(ClaimKind::CardanoBridge, 0, 0);
+    }
+
+    #[test]
+    fn bridge_claim_zero_value_funded() {
+        assert_zero_value_claim_rejected(ClaimKind::CardanoBridge, 1000, 0);
+    }
+
+    #[test]
+    fn rewards_claim_zero_value() {
+        assert_zero_value_claim_rejected(ClaimKind::Reward, 0, MAX_SUPPLY);
     }
 
     #[test]
@@ -2514,5 +2650,165 @@ mod tests {
             amount
         );
         assert_eq!(new_state.locked_pool, 0);
+    }
+
+    fn zswap_output_event(
+        commitment: Commitment,
+        preimage_evidence: ZswapPreimageEvidence,
+        mt_index: u64,
+    ) -> Event<InMemoryDB> {
+        Event {
+            source: EventSource {
+                transaction_hash: TransactionHash(HashOutput([0u8; 32])),
+                logical_segment: 0,
+                physical_segment: 0,
+            },
+            content: EventDetails::ZswapOutput {
+                commitment,
+                preimage_evidence,
+                contract: None,
+                mt_index,
+            },
+        }
+    }
+
+    fn ciphertext_evidence(
+        rng: &mut StdRng,
+        coin: &coin_structure::coin::Info,
+        keys: &SecretKeys,
+    ) -> ZswapPreimageEvidence {
+        ZswapPreimageEvidence::Ciphertext(Box::new(zswap::CoinCiphertext::new(
+            rng,
+            coin,
+            keys.enc_public_key(),
+        )))
+    }
+
+    #[test]
+    fn replay_credits_ciphertext_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let coin: coin_structure::coin::Info = rng.r#gen();
+        let event = zswap_output_event(
+            coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &coin, &keys),
+            0,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&event])
+            .unwrap();
+
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(res.changes[0].received_coins, vec![coin.qualify(0)]);
+    }
+
+    #[test]
+    fn replay_ignores_ciphertext_not_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let attacker_keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let real_coin: coin_structure::coin::Info = rng.r#gen();
+        let phantom_coin: coin_structure::coin::Info = rng.r#gen();
+        let valid_coin: coin_structure::coin::Info = rng.r#gen();
+
+        // Commitment for a coin owned by the attacker, paired with a ciphertext of an
+        // unrelated coin encrypted to the victim.
+        let mismatched = zswap_output_event(
+            real_coin.commitment(&Recipient::User(attacker_keys.coin_public_key())),
+            ciphertext_evidence(&mut rng, &phantom_coin, &keys),
+            0,
+        );
+        let valid = zswap_output_event(
+            valid_coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &valid_coin, &keys),
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&mismatched, &valid])
+            .unwrap();
+
+        assert_eq!(res.result.first_free, 2);
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(res.changes[0].received_coins, vec![valid_coin.qualify(1)]);
+    }
+
+    #[test]
+    fn replay_ciphertext_cannot_overwrite_owned_coin() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let attacker_keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let owned_coin: coin_structure::coin::Info = rng.r#gen();
+        let cheap_coin: coin_structure::coin::Info = rng.r#gen();
+
+        let genuine = zswap_output_event(
+            owned_coin.commitment(&recipient),
+            ciphertext_evidence(&mut rng, &owned_coin, &keys),
+            0,
+        );
+        // Re-encrypts the already-received coin under an unrelated commitment, which
+        // would otherwise re-key the owned coin to the wrong Merkle tree index.
+        let replayed = zswap_output_event(
+            cheap_coin.commitment(&Recipient::User(attacker_keys.coin_public_key())),
+            ciphertext_evidence(&mut rng, &owned_coin, &keys),
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&genuine, &replayed])
+            .unwrap();
+
+        let nullifier = owned_coin.nullifier(&coin_structure::transfer::SenderEvidence::User(
+            Cow::Borrowed(&keys.coin_secret_key),
+        ));
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(
+            res.result.coins.get(&nullifier).map(|qci| qci.mt_index),
+            Some(0)
+        );
+        assert_eq!(res.changes.len(), 1);
+    }
+
+    #[test]
+    fn replay_ignores_public_preimage_not_opening_commitment() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let keys = SecretKeys::from_rng_seed(&mut rng);
+        let recipient = Recipient::User(keys.coin_public_key());
+        let committed_coin: coin_structure::coin::Info = rng.r#gen();
+        let claimed_coin: coin_structure::coin::Info = rng.r#gen();
+
+        let mismatched = zswap_output_event(
+            committed_coin.commitment(&recipient),
+            ZswapPreimageEvidence::PublicPreimage {
+                coin: claimed_coin,
+                recipient: recipient.clone(),
+            },
+            0,
+        );
+        let valid = zswap_output_event(
+            committed_coin.commitment(&recipient),
+            ZswapPreimageEvidence::PublicPreimage {
+                coin: committed_coin,
+                recipient,
+            },
+            1,
+        );
+
+        let res = ZswapLocalState::<InMemoryDB>::new()
+            .replay_events_with_changes(&keys, [&mismatched, &valid])
+            .unwrap();
+
+        assert_eq!(res.result.coins.size(), 1);
+        assert_eq!(res.changes.len(), 1);
+        assert_eq!(
+            res.changes[0].received_coins,
+            vec![committed_coin.qualify(1)]
+        );
     }
 }

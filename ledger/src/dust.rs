@@ -75,6 +75,83 @@ use transient_crypto::{
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
+/// State slot indices of the `ledger` fields declared in `ledger/dust.compact`.
+///
+/// The on-chain runtime addresses contract state positionally, so each `ledger`
+/// declaration in the Compact source is reachable under `Key::Value(n)` where `n` is
+/// its zero-based declaration index. These constants are the single definition of
+/// that mapping; they are mirrored by hand, because the build consumes the
+/// pre-compiled ZKIR in `zkir-precompiles/` rather than invoking `compactc` (see
+/// `flake.nix`).
+///
+/// Reordering, inserting or removing a `ledger` declaration in `dust.compact`
+/// therefore requires updating these values in lockstep. Getting them wrong produces
+/// a public transcript that does not match the circuit's verifier key, so every
+/// affected dust proof fails to verify.
+mod compact_slots {
+    /// `ledger commitment_merkle_tree: HistoricMerkleTree<32, Field>`
+    pub(super) const DUST_IDX_COMMITMENT_TREE: u8 = 0;
+    /// `ledger generation_merkle_tree: HistoricMerkleTree<32, Field>`
+    pub(super) const DUST_IDX_GENERATION_TREE: u8 = 1;
+    /// `ledger nullifiers: Set<Field>`
+    pub(super) const DUST_IDX_NULLIFIERS: u8 = 2;
+    /// `ledger parameters: DustParameters`
+    pub(super) const DUST_IDX_PARAMETERS: u8 = 3;
+    /// `ledger ctime: Uint<64>`
+    pub(super) const DUST_IDX_CTIME: u8 = 4;
+    /// `ledger dust_spend: DustSpend`
+    pub(super) const DUST_IDX_SPEND: u8 = 5;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The `ledger` field names declared in a Compact source, in declaration order.
+        fn ledger_fields(src: &str) -> Vec<&str> {
+            src.lines()
+                .map(str::trim)
+                .map(|line| line.strip_prefix("export ").unwrap_or(line))
+                .filter_map(|line| line.strip_prefix("ledger "))
+                .map(|rest| rest.split(':').next().unwrap_or("").trim())
+                .collect()
+        }
+
+        /// Pins the constants above to the declaration order in `dust.compact`, so that
+        /// reordering, inserting, removing or renaming a `ledger` field there fails here
+        /// rather than silently invalidating every dust proof.
+        #[test]
+        fn slot_indices_match_compact_source() {
+            let fields = ledger_fields(include_str!("../dust.compact"));
+            let expected = [
+                (DUST_IDX_COMMITMENT_TREE, "commitment_merkle_tree"),
+                (DUST_IDX_GENERATION_TREE, "generation_merkle_tree"),
+                (DUST_IDX_NULLIFIERS, "nullifiers"),
+                (DUST_IDX_PARAMETERS, "parameters"),
+                (DUST_IDX_CTIME, "ctime"),
+                (DUST_IDX_SPEND, "dust_spend"),
+            ];
+            assert_eq!(
+                fields.len(),
+                expected.len(),
+                "dust.compact declares {} ledger fields, but {} slot indices are \
+                 defined in dust.rs; found {fields:?}",
+                fields.len(),
+                expected.len(),
+            );
+            for (idx, name) in expected {
+                assert_eq!(
+                    fields[usize::from(idx)],
+                    name,
+                    "slot {idx} is documented as `{name}`, but dust.compact declares \
+                     `{}` at that position",
+                    fields[usize::from(idx)],
+                );
+            }
+        }
+    }
+}
+use compact_slots::*;
+
 #[cfg(feature = "proof-verifying")]
 const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
@@ -581,7 +658,7 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 let mut prog = Vec::new();
                 // Check commitment merkle tree root
                 prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
-                    [Key::Value(0u8.into())],
+                    [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
                     false,
                     32,
                     Fr,
@@ -589,30 +666,38 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 ));
                 // Check generation merkle tree root
                 prog.extend(HistoricMerkleTree_check_root!(
-                    [Key::Value(1u8.into())],
+                    [Key::Value(DUST_IDX_GENERATION_TREE.into())],
                     false,
                     32,
                     Fr,
                     generation_root.0
                 ));
                 // Read spend
-                prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+                prog.extend(Cell_read!(
+                    [Key::Value(DUST_IDX_SPEND.into())],
+                    false,
+                    DustSpend
+                ));
                 // Read ctime
-                prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+                prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
                 // Read dust parameters
-                prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+                prog.extend(Cell_read!(
+                    [Key::Value(DUST_IDX_PARAMETERS.into())],
+                    false,
+                    DustParameters
+                ));
                 // Insert old nullifier
                 prog.extend(Set_insert!(
-                    [Key::Value(2u8.into())],
+                    [Key::Value(DUST_IDX_NULLIFIERS.into())],
                     false,
                     Fr,
                     self.old_nullifier.0
                 ));
                 // Read ctime
-                prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+                prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
                 // Insert new commitment
                 prog.extend(HistoricMerkleTree_insert_hash!(
-                    [Key::Value(0u8.into())],
+                    [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
                     false,
                     32,
                     Fr,
@@ -707,20 +792,17 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
         }
     }
 
-    pub(crate) fn well_formed(
+    pub(crate) fn well_formed<'d>(
         &self,
-        segment_id: u16,
-        parent: &ErasedIntent<D>,
+        data_to_sign: impl FnOnce() -> &'d [u8],
         strictness: WellFormedStrictness,
     ) -> Result<(), MalformedTransaction<D>> {
         if !strictness.verify_signatures
-            || self.signature.as_ref().map(|sig| {
-                S::signature_verify(
-                    &parent.data_to_sign(segment_id),
-                    self.night_key.clone(),
-                    sig,
-                )
-            }) == Some(true)
+            || self
+                .signature
+                .as_ref()
+                .map(|sig| S::signature_verify(data_to_sign(), self.night_key.clone(), sig))
+                == Some(true)
         {
             Ok(())
         } else {
@@ -817,8 +899,15 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
         for spend in self.spends.iter() {
             spend.well_formed(ref_state, segment_id, binding, strictness, self.ctime)?;
         }
+        // Every registration signs the whole intent, so it is serialized once.
+        let data_to_sign = std::cell::OnceCell::new();
         for reg in self.registrations.iter() {
-            ref_state.stateless_check(|| reg.well_formed(segment_id, parent, strictness))?;
+            ref_state.stateless_check(|| {
+                reg.well_formed(
+                    || data_to_sign.get_or_init(|| parent.data_to_sign(segment_id)),
+                    strictness,
+                )
+            })?;
         }
         ref_state.param_check(true, |params| if self.ctime > tblock || self.ctime + params.dust.dust_grace_period < tblock {
             warn!(ctime = ?self.ctime, ?tblock, grace_period = ?params.dust.dust_grace_period, "dust actions out of TTL range");
@@ -1787,7 +1876,7 @@ impl<D: DB> DustLocalState<D> {
         let mut prog = Vec::new();
         // Check commitment merkle tree root
         prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
-            [Key::Value(0u8.into())],
+            [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
             false,
             32,
             Fr,
@@ -1797,7 +1886,7 @@ impl<D: DB> DustLocalState<D> {
         ));
         // Check generation merkle tree root
         prog.extend(HistoricMerkleTree_check_root!(
-            [Key::Value(1u8.into())],
+            [Key::Value(DUST_IDX_GENERATION_TREE.into())],
             false,
             32,
             Fr,
@@ -1808,18 +1897,31 @@ impl<D: DB> DustLocalState<D> {
                 ))?
         ));
         // Read spend
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+        prog.extend(Cell_read!(
+            [Key::Value(DUST_IDX_SPEND.into())],
+            false,
+            DustSpend
+        ));
         // Read ctime
-        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
         // Read dust parameters
-        prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+        prog.extend(Cell_read!(
+            [Key::Value(DUST_IDX_PARAMETERS.into())],
+            false,
+            DustParameters
+        ));
         // Insert old nullifier
-        prog.extend(Set_insert!([Key::Value(2u8.into())], false, Fr, old_nul.0));
+        prog.extend(Set_insert!(
+            [Key::Value(DUST_IDX_NULLIFIERS.into())],
+            false,
+            Fr,
+            old_nul.0
+        ));
         // Read ctime
-        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
         // Insert new commitment
         prog.extend(HistoricMerkleTree_insert_hash!(
-            [Key::Value(0u8.into())],
+            [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
             false,
             32,
             Fr,

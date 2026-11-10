@@ -167,7 +167,7 @@ impl Deposit {
         println!(
             "{night_spends} NIGHT spends: {} B, time to dismiss {:?}",
             ProofKind::<InMemoryDB>::estimated_tx_size(&tx),
-            tx.time_to_dismiss(&params.cost_model)
+            tx.time_to_dismiss(params)
         );
         match tx.well_formed(&state.ledger, WellFormedStrictness::default(), state.time) {
             Ok(_) => true,

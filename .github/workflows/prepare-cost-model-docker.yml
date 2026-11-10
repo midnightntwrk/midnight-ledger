@@ -72,4 +72,3 @@ jobs:
         run: |
           nix develop . --command generate-cost-model/build-docker.sh
           docker push ghcr.io/midnight-ntwrk/generate-ledger-cost-model:latest
-
