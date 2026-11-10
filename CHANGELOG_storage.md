@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## Version `3.1.0`
+
 - fix: add the scoped thread-local
   `merkle_patricia_trie::ALLOW_SHORT_EXTENSION_CHAINS`, which, while set, lets
   clients deserialize tries in which an `Extension` node shorter than 255

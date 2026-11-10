@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.2-rc.0
+
 - fix: the wasm API deserializes contract state containing a non-canonical
   trie shape that `insert` produces in some cases, instead of rejecting it.
 - feat: add `TransactionShape`, the counts of a transaction's non-call parts; `TransactionShape::for_calls` derives the balanced transaction's counts from the calls.
