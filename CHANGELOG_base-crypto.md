@@ -1,5 +1,14 @@
 # `base-crypto` Changelog
 
+## Version `1.1.1`
+
+- security: `FixedPoint::from_u64_div` saturates to `FixedPoint::MAX` instead of
+  wrapping negative for quotients of `2^63` or more, which made
+  `CostDuration * FixedPoint` return zero for such durations.
+- security: `FixedPoint::from_u128_div`, and with it `FixedPoint` division,
+  saturates to `FixedPoint::MAX` instead of wrapping negative for quotients
+  between `i128::MAX` and `u128::MAX` (e.g. `FixedPoint::MAX / 0.75`).
+
 ## Version `1.1.0`
 
 - feat: add `within_bounds` on `RunningCost`

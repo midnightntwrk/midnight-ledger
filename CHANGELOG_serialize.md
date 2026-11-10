@@ -1,5 +1,11 @@
 # `serialize` Changelog
 
+## Version `1.2.1`
+
+- feat: `EncodingShape`, an automaton accepting exactly a type's valid
+  encodings, implemented for fixed-width integers, byte arrays, `()`, `bool`
+  and pairs, so that `storage` can check `Map` keys once per trie node.
+
 ## Version `1.2.0`
 
 - feat: add `peek_tag` to identify a tag before deserialization

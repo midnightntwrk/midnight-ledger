@@ -15,30 +15,36 @@
 
 use crate as storage;
 use crate::arena::{ArenaHash, ArenaKey, Sp};
+use crate::dag_memo::{DagMemo, InvariantMemos};
 use crate::db::{DB, InMemoryDB};
+use crate::map_key::{ByShape, ByValue, HoldsKey, MapKey};
 use crate::merkle_patricia_trie::Annotation;
-use crate::merkle_patricia_trie::MerklePatriciaTrie;
-use crate::merkle_patricia_trie::Semigroup;
+use crate::merkle_patricia_trie::{MerklePatriciaTrie, Node};
+use crate::merkle_patricia_trie::{Monoid, Semigroup};
 use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
+use crypto::digest::Digest;
 use derive_where::derive_where;
-use digest::Digest;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use serialize::{Deserializable, EncodingShape, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub use storage_core::storage::*;
+
+#[cfg(any(test, feature = "test-utilities"))]
+mod shared_structure;
 
 /// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
@@ -46,7 +52,7 @@ pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
 /// A map from key hashes to values
 #[derive(Storable)]
 #[derive_where(Clone, Eq, PartialEq; V, A)]
-#[storable(db = D, invariant = HashMap::invariant)]
+#[storable(db = D, invariant_memoized = HashMap::invariant)]
 pub struct HashMap<
     K: Serializable + Storable<D>,
     V: Storable<D>,
@@ -263,18 +269,16 @@ impl<
         ))
     }
 
-    fn invariant(&self) -> Result<(), std::io::Error> {
-        for (hash, v) in self.0.iter() {
-            let key = &*v.0;
-            let hash2 = Self::gen_key(key);
-            if hash != hash2 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "hashmap key doesn't match serialized hash",
-                ));
-            }
+    fn invariant(&self, memos: &mut InvariantMemos<D>) -> Result<(), std::io::Error> {
+        let memo = memos.memo::<HashMapKeys, Anchor>();
+        if stored_under_own_keys(&self.0.mpt, memo, |kv| to_nibbles(&Self::gen_key(&kv.0))) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "hashmap key doesn't match serialized hash",
+            ))
         }
-        Ok(())
     }
 
     /// Get object keyed by the hash of object key
@@ -304,6 +308,16 @@ impl<
                 Some((k, v))
             }
         })
+    }
+
+    /// Combines `leaf` over every entry, in [`Self::iter`] order, in time
+    /// linear in the distinct nodes; see [`MerklePatriciaTrie::fold`].
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<K, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.0.mpt.fold(memo, |memo, kv| leaf(memo, &kv.0, &kv.1))
     }
 
     /// Iterate over the key value pairs in the hash map
@@ -565,10 +579,60 @@ where
     }
 }
 
+/// The largest key in a subtrie, read as the array index its nibbles spell
+/// below the subtrie's root.
+///
+/// Keys without leading zeroes compare as indices do: by length, then
+/// lexicographically.
+#[derive(Clone)]
+enum MaxIndex {
+    None,
+    Some { len: usize, value: u64 },
+    TooLong,
+}
+
+impl MaxIndex {
+    fn under(path: &[u8], r: Self) -> Self {
+        match r {
+            MaxIndex::Some { len, value } if len + path.len() <= 16 => {
+                let prefix = path.iter().fold(0u64, |acc, n| (acc << 4) | *n as u64);
+                MaxIndex::Some {
+                    len: len + path.len(),
+                    value: prefix.checked_shl(4 * len as u32).unwrap_or(0) | value,
+                }
+            }
+            MaxIndex::Some { .. } => MaxIndex::TooLong,
+            other => other,
+        }
+    }
+}
+
+impl Semigroup for MaxIndex {
+    fn append(&self, other: &Self) -> Self {
+        match (self, other) {
+            (MaxIndex::TooLong, _) | (_, MaxIndex::TooLong) => MaxIndex::TooLong,
+            (MaxIndex::None, x) | (x, MaxIndex::None) => x.clone(),
+            (MaxIndex::Some { len: a, value: x }, MaxIndex::Some { len: b, value: y }) => {
+                if (a, x) >= (b, y) {
+                    self.clone()
+                } else {
+                    other.clone()
+                }
+            }
+        }
+    }
+}
+
+impl Monoid for MaxIndex {
+    fn empty() -> Self {
+        MaxIndex::None
+    }
+}
+
 /// An array built from a `MerklePatriciaTrie`
 #[derive_where(Clone; V)]
 #[derive(Storable)]
-#[storable(db = D, invariant = Array::invariant)]
+#[storable(db = D, invariant_memoized = Array::invariant)]
 #[tag = "mpt-array[v1]"]
 pub struct Array<V: Storable<D>, D: DB = DefaultDB>(
     // Array wraps MPT in an Sp to guarantee it only has one child
@@ -695,40 +759,37 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         nibbles.into_iter().skip_while(|x| *x == 0).collect()
     }
 
-    fn nibbles_to_index(raw_nibbles: &[u8]) -> Result<u64, std::io::Error> {
-        if raw_nibbles.first() == Some(&0) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "nibbles in array should not have leading zeroes",
-            ));
+    fn invariant(&self, memos: &mut InvariantMemos<D>) -> Result<(), std::io::Error> {
+        let err = |msg: &str| Err(std::io::Error::new(std::io::ErrorKind::InvalidData, msg));
+        // A key's first nibble is the first step below the root, or below a
+        // value stored at the root.
+        let root = &(self.0).0;
+        let below = match root.deref() {
+            Node::MidBranchLeaf { child, .. } => child,
+            _ => root,
+        };
+        let leading_zero = match below.deref() {
+            Node::Branch { children, .. } => !matches!(*children[0], Node::Empty),
+            Node::Extension {
+                compressed_path, ..
+            } => compressed_path.first() == Some(&0),
+            _ => false,
+        };
+        if leading_zero {
+            return err("nibbles in array should not have leading zeroes");
         }
-        let mut nibbles = [0u8; 16];
-        if raw_nibbles.len() > 16 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "too long key for index in array",
-            ));
+        let max = self.0.fold_paths(
+            memos.memo::<MaxIndex, MaxIndex>(),
+            |_, _| MaxIndex::Some { len: 0, value: 0 },
+            &MaxIndex::under,
+        );
+        match max {
+            MaxIndex::TooLong => err("too long key for index in array"),
+            MaxIndex::Some { value, .. } if value >= self.len() as u64 => {
+                err("index out of range for array on deserialization")
+            }
+            MaxIndex::None | MaxIndex::Some { .. } => Ok(()),
         }
-        nibbles[(16 - raw_nibbles.len())..].copy_from_slice(raw_nibbles);
-        let val: BigEndianU64 = from_nibbles(&nibbles)?;
-        Ok(val.0)
-    }
-
-    fn invariant(&self) -> Result<(), std::io::Error> {
-        let len = self.len() as u64;
-        self.0
-            .iter()
-            .map(|(k, _)| Self::nibbles_to_index(&k))
-            .try_for_each(|n| {
-                if n? >= len {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "index out of range for array on deserialization",
-                    ))
-                } else {
-                    Ok(())
-                }
-            })
     }
 
     /// Construct an empty new array
@@ -786,6 +847,35 @@ impl<V: Storable<D>, D: DB> Array<V, D> {
         Sp::into_inner(self.0)
             .into_iter()
             .flat_map(MerklePatriciaTrie::into_inner_for_drop)
+    }
+
+    /// Combines `leaf` over every element in time linear in the distinct
+    /// nodes; see [`MerklePatriciaTrie::fold`]. The order is the trie's, not
+    /// index order.
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        self.0.fold(memo, leaf)
+    }
+
+    /// Each distinct element with the number of indices holding it,
+    /// saturating, in an unspecified but deterministic order; see
+    /// [`MerklePatriciaTrie::distinct_values`].
+    pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
+        self.0.distinct_values()
+    }
+
+    /// As [`Self::distinct_values`] over several arrays, each counted `weight`
+    /// times; see [`MerklePatriciaTrie::distinct_values_across`].
+    pub fn distinct_values_across<'a>(
+        arrays: impl IntoIterator<Item = (&'a Self, u128)>,
+    ) -> std::vec::Vec<(Sp<V, D>, u128)>
+    where
+        Self: 'a,
+    {
+        MerklePatriciaTrie::distinct_values_across(arrays.into_iter().map(|(a, n)| (&*a.0, n)))
     }
 
     /// Iterate over the elements in the array as `Sp<V>`s
@@ -1063,6 +1153,8 @@ pub struct BigEndianU64(u64);
 #[derive(Debug)]
 struct BigEndianU64(u64);
 
+serialize::encoding_shape_as!(BigEndianU64, [u8; 8]);
+
 impl Serializable for BigEndianU64 {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         writer.write_all(&self.0.to_be_bytes())
@@ -1144,10 +1236,25 @@ impl<C: Container<D> + Storable<D> + Serializable, D: DB> TimeFilterMap<C, D>
 where
     <C as Container<D>>::Item: Serializable,
 {
+    /// Counts each container's items once per entry holding it, so a time map
+    /// whose trie shares subtrees is checked in time linear in its encoding.
     fn invariant(&self) -> std::io::Result<()> {
-        let reconstructed_set: MultiSet<<C as Container<D>>::Item, D> = self.time_map.iter().flat_map(|e| e.1.deref().clone().iter_items()).fold(MultiSet::new(), |s, i| s.insert(i));
-        if reconstructed_set != self.set {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "TimeFilterMap decoded with mismatching set/map representations"))
+        let mut counts = std::collections::BTreeMap::<<C as Container<D>>::Item, u128>::new();
+        for (container, entries) in self.time_map.mpt.distinct_values() {
+            for item in container.deref().clone().iter_items() {
+                let count = counts.entry(item).or_insert(0);
+                *count = count.saturating_add(entries);
+            }
+        }
+        let matches = counts.len() == self.set.elements.size()
+            && counts
+                .iter()
+                .all(|(item, count)| self.set.count(item) as u128 == *count);
+        if !matches {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "TimeFilterMap decoded with mismatching set/map representations",
+            ))
         } else {
             Ok(())
         }
@@ -1284,11 +1391,13 @@ impl<K: Tagged, V: Storable<D> + Tagged, D: DB, A: Storable<D> + Annotation<V> +
 tag_enforcement_test!(Map<(), ()>);
 
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Storable<D> for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     /// Rather than in-lining the wrapped MPT it is a child such that we know the public Map has
     /// only a single child element (rather than up to 16)
@@ -1319,18 +1428,201 @@ impl<
     }
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        self.mpt
-            .iter()
-            .try_for_each(|(k, _)| from_nibbles::<K>(&k).and(Ok(())))
+        self.check_invariant_memoized(&mut InvariantMemos::new())
+    }
+
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        if K::Check::keys_valid(&self.mpt.0, memos) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Map key does not decode",
+            ))
+        }
     }
 }
 
+/// How decoding checks that every key of a `Map` decodes, in time linear in
+/// the trie's distinct nodes; see [`MapKey`].
+pub trait KeyCheck<K, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> {
+    /// Whether every path in the trie below `root` is a valid key.
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool;
+}
+
+impl<K: EncodingShape + 'static, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>
+    KeyCheck<K, V, D, A> for ByShape
+{
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool {
+        let table = memos.get::<MapKeyCheck<K, V, A>, KeyTable<K, D>>();
+        keys_decode::<K, V, D, A>(root, (K::start(), None), table)
+    }
+}
+
+impl<K: Serializable, V: Storable<D> + HoldsKey<K>, D: DB, A: Storable<D> + Annotation<V>>
+    KeyCheck<K, V, D, A> for ByValue
+{
+    fn keys_valid(root: &Sp<Node<V, D, A>, D>, memos: &mut InvariantMemos<D>) -> bool {
+        let memo = memos.memo::<HeldKeys, Anchor>();
+        stored_under_own_keys(&MerklePatriciaTrie(root.clone()), memo, |v| {
+            to_nibbles(v.key())
+        })
+    }
+}
+
+/// Marks the memo of [`stored_under_own_keys`] for keys held by values.
+struct HeldKeys;
+
+/// Marks the memo of [`stored_under_own_keys`] for `HashMap` keys.
+struct HashMapKeys;
+
+/// Where the keys below a trie node place it. A value's key fixes the path
+/// it must be stored under, so this depends only on the node, and is
+/// computed once however many tries share it.
+#[derive(Clone)]
+enum Anchor {
+    /// No value below.
+    None,
+    /// Every key below agrees with `key` on its first `depth` nibbles, and
+    /// on the rest with the path from this node to the key's value.
+    At { key: Rc<[u8]>, depth: usize },
+    /// Some value below is stored under a path other than its key.
+    Misplaced,
+}
+
+impl Anchor {
+    fn under(path: &[u8], anchor: Anchor) -> Anchor {
+        match anchor {
+            Anchor::At { key, depth }
+                if depth >= path.len() && key[depth - path.len()..depth] == *path =>
+            {
+                Anchor::At {
+                    key,
+                    depth: depth - path.len(),
+                }
+            }
+            Anchor::None => Anchor::None,
+            _ => Anchor::Misplaced,
+        }
+    }
+}
+
+impl Semigroup for Anchor {
+    fn append(&self, other: &Self) -> Self {
+        match (self, other) {
+            (Anchor::None, anchor) | (anchor, Anchor::None) => anchor.clone(),
+            (Anchor::At { key: a, depth: da }, Anchor::At { key: b, depth: db })
+                if da == db && a[..*da] == b[..*db] =>
+            {
+                self.clone()
+            }
+            _ => Anchor::Misplaced,
+        }
+    }
+}
+
+impl Monoid for Anchor {
+    fn empty() -> Self {
+        Anchor::None
+    }
+}
+
+/// Whether every value in `trie` is stored under the path `key_of` gives it,
+/// in time linear in the distinct nodes of every trie checked with `memo`.
+fn stored_under_own_keys<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+    trie: &MerklePatriciaTrie<V, D, A>,
+    memo: &mut DagMemo<Anchor, D>,
+    key_of: impl Fn(&V) -> std::vec::Vec<u8>,
+) -> bool {
+    let anchor = trie.fold_paths(
+        memo,
+        |_, value| {
+            let key: Rc<[u8]> = key_of(value).into();
+            Anchor::At {
+                depth: key.len(),
+                key,
+            }
+        },
+        &Anchor::under,
+    );
+    matches!(anchor, Anchor::None | Anchor::At { depth: 0, .. })
+}
+
+/// A position within a `Map` key's encoding: its shape's state, and the high
+/// nibble of a byte not yet complete.
+type KeyPosition<K> = (<K as EncodingShape>::State, Option<u8>);
+
+/// Marks the table of [`keys_decode`] for keys of type `K` in tries of `V`.
+struct MapKeyCheck<K, V, A>(PhantomData<(K, V, A)>);
+
+/// Whether every key below a trie node decodes from a given position, filled
+/// in as nodes are reached at positions.
+type KeyTable<K, D> =
+    std::collections::HashMap<(ArenaHash<<D as DB>::Hasher>, KeyPosition<K>), bool>;
+
+fn key_step<K: EncodingShape>(pos: &KeyPosition<K>, nibble: u8) -> Option<KeyPosition<K>> {
+    if nibble > 0x0f {
+        return None;
+    }
+    match pos.1 {
+        None => Some((pos.0.clone(), Some(nibble))),
+        Some(hi) => K::step(&pos.0, (hi << 4) | nibble).map(|state| (state, None)),
+    }
+}
+
+fn key_accepts<K: EncodingShape>(pos: &KeyPosition<K>) -> bool {
+    pos.1.is_none() && K::accepts(&pos.0)
+}
+
+/// Whether every key in the trie below `sp`, read on from `pos`, decodes as a
+/// `K`. Each node is visited once per position it is reached at, and a key
+/// shape has few positions, so this is linear in the trie's distinct nodes.
+fn keys_decode<K: EncodingShape, V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
+    sp: &Sp<Node<V, D, A>, D>,
+    pos: KeyPosition<K>,
+    table: &mut KeyTable<K, D>,
+) -> bool {
+    if let Some(&ok) = table.get(&(sp.hash(), pos.clone())) {
+        return ok;
+    }
+    let ok = match sp.deref() {
+        Node::Empty => true,
+        Node::Leaf { .. } => key_accepts::<K>(&pos),
+        Node::Branch { children, .. } => children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| !matches!(***child, Node::Empty))
+            .all(|(i, child)| {
+                key_step::<K>(&pos, i as u8)
+                    .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, table))
+            }),
+        Node::Extension {
+            compressed_path,
+            child,
+            ..
+        } => compressed_path
+            .iter()
+            .try_fold(pos.clone(), |pos, n| key_step::<K>(&pos, *n))
+            .is_some_and(|pos| keys_decode::<K, V, D, A>(child, pos, table)),
+        Node::MidBranchLeaf { child, .. } => {
+            key_accepts::<K>(&pos) && keys_decode::<K, V, D, A>(child, pos.clone(), table)
+        }
+    };
+    table.insert((sp.hash(), pos), ok);
+    ok
+}
+
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Serializable for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         Sp::new(self.clone()).serialize(writer)
@@ -1341,11 +1633,13 @@ impl<
 }
 
 impl<
-    K: Sync + Send + 'static + Deserializable,
+    K: Sync + Send + 'static + Deserializable + MapKey<V>,
     V: Storable<D>,
     D: DB,
     A: Storable<D> + Annotation<V>,
 > Deserializable for Map<K, V, D, A>
+where
+    K::Check: KeyCheck<K, V, D, A>,
 {
     fn deserialize(reader: &mut impl std::io::Read, recursion_depth: u32) -> std::io::Result<Self> {
         <Sp<Map<K, V, D, A>, D> as Deserializable>::deserialize(reader, recursion_depth)
@@ -1677,6 +1971,11 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    mod array_invariant;
+    mod hashmap_invariant;
+    mod map_key;
+    mod time_filter_map;
+
     use super::*;
     use crate::storable::SMALL_OBJECT_LIMIT;
 
