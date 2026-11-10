@@ -31,6 +31,26 @@ use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 pub use storage_core::monoid::{Monoid, Semigroup};
 
+scoped_tls::scoped_thread_local!(
+    /// While set, the trie invariants on the current thread accept a
+    /// [`Node::Extension`] with a path shorter than 255 nibbles whose child is
+    /// another [`Node::Extension`].
+    ///
+    /// `Node::insert` has produced such tries when splitting a 255-nibble
+    /// extension whose child is itself an extension, and they exist in chain
+    /// state. This lets clients load that state as-is, preserving its hash.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Client-side mitigation only. NEVER set this in a node, or in any code
+    /// that validates data for consensus.** A node that deserializes under it
+    /// accepts wire data that every other node rejects, and splits from the
+    /// network.
+    ///
+    /// </div>
+    pub static ALLOW_SHORT_EXTENSION_CHAINS: ()
+);
+
 /// A Merkle Patricia Trie
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
@@ -1414,7 +1434,9 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 }
                 match child.deref() {
                     Node::Empty => return err("Node::Extension child must not be Node::Empty"),
-                    Node::Extension { .. } if compressed_path.len() != 255 => {
+                    Node::Extension { .. }
+                        if compressed_path.len() != 255 && !ALLOW_SHORT_EXTENSION_CHAINS.is_set() =>
+                    {
                         return err(
                             "Node::Extension path must be of length 255 when having another Node::Extension child",
                         );
@@ -1587,6 +1609,46 @@ mod tests {
         assert_eq!(mpt.size(), 2);
         dbg!(&mpt.0.arena);
         assert_eq!(mpt.0.arena.size(), 1);
+    }
+
+    #[test]
+    fn short_extension_chains_load_when_allowed() {
+        fn key(diverge_at: usize) -> std::vec::Vec<u8> {
+            let mut key = vec![0u8; 300];
+            key[diverge_at] = 1;
+            key
+        }
+        fn bytes(mpt: &MerklePatriciaTrie<u8>) -> std::vec::Vec<u8> {
+            let mut bytes = std::vec::Vec::new();
+            Serializable::serialize(mpt, &mut bytes).unwrap();
+            bytes
+        }
+        // A 300-nibble key forms Extension(255) -> Extension(45) -> Leaf, and
+        // diverging at nibble 10 splits the 255-nibble extension, leaving an
+        // Extension(244) -> Extension(45) chain.
+        let mpt = MerklePatriciaTrie::<u8>::new()
+            .insert(&[0; 300], 1)
+            .insert(&key(10), 2);
+        let encoded = bytes(&mpt);
+
+        assert!(
+            <MerklePatriciaTrie<u8> as Deserializable>::deserialize(&mut &encoded[..], 0).is_err()
+        );
+        let loaded: MerklePatriciaTrie<u8> = ALLOW_SHORT_EXTENSION_CHAINS
+            .set(&(), || Deserializable::deserialize(&mut &encoded[..], 0))
+            .unwrap();
+        assert!(!ALLOW_SHORT_EXTENSION_CHAINS.is_set());
+        assert_eq!(bytes(&loaded), encoded);
+
+        // The loaded trie must evolve exactly as the in-memory one does.
+        assert_eq!(
+            bytes(&loaded.insert(&key(100), 3)),
+            bytes(&mpt.insert(&key(100), 3))
+        );
+        assert_eq!(
+            bytes(&loaded.remove(&key(10))),
+            bytes(&mpt.remove(&key(10)))
+        );
     }
 
     #[test]
