@@ -88,7 +88,12 @@ jobs:
           # failures in `nix develop` command.
           set -o pipefail
           nix develop -c cargo config -Z unstable-options get net.git-fetch-with-cli
-          nix develop -c cargo test --workspace --all-features --release  --no-fail-fast -- --nocapture --test-threads=1 | tee test-output.log
+          {
+            test_status=0
+            nix develop -c cargo test --workspace --all-features --exclude midnight-proof-server --release --no-fail-fast -- --nocapture --test-threads=1 || test_status=$?
+            nix develop -c cargo test --package midnight-proof-server --features experimental --release --no-fail-fast -- --nocapture --test-threads=1 || test_status=$?
+            exit "$test_status"
+          } | tee test-output.log
 
       - name: Upload Artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
