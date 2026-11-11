@@ -230,6 +230,7 @@ pub fn proof_data_into_serialized_preimage(
     public_transcript: JsValue,
     private_transcript_outputs: JsValue,
     key_location: Option<String>,
+    inner_proofs: Option<Vec<Uint8Array>>,
 ) -> Result<Uint8Array, JsError> {
     let input: AlignedValue = from_value(input)?;
     let output: AlignedValue = from_value(output)?;
@@ -259,6 +260,11 @@ pub fn proof_data_into_serialized_preimage(
         private_transcript,
         public_transcript_inputs,
         public_transcript_outputs,
+        inner_proofs: inner_proofs
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| transient_crypto::proofs::InnerProofWitness::Direct(b.to_vec()))
+            .collect(),
         key_location: transient_crypto::proofs::KeyLocation(
             key_location
                 .map(Cow::Owned)

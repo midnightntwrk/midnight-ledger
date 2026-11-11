@@ -51,6 +51,7 @@ mod v2_proof_tests {
         let (pk, vk) = ir.v2_keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
+            inner_proofs: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into()],
@@ -88,6 +89,7 @@ mod v2_proof_tests {
         let (pk, vk) = ir.v2_keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
+            inner_proofs: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into()],
@@ -133,6 +135,7 @@ mod v2_proof_tests {
         let (pk, vk) = ir.v2_keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
+            inner_proofs: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
@@ -175,6 +178,7 @@ mod v2_proof_tests {
 
         let p = EmbeddedGroupAffine::generator();
         let preimage = ProofPreimage {
+            inner_proofs: vec![],
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![p.x().unwrap(), p.y().unwrap(), 42.into(), 63.into()],

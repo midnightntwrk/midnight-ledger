@@ -134,6 +134,7 @@ impl AuthorizedClaim<ProofPreimage> {
             private_transcript: Vec::new(),
             public_transcript_inputs,
             public_transcript_outputs: Vec::new(),
+            inner_proofs: vec![],
             binding_input: transient_commit(&coin, 0u8.into()),
             communications_commitment: None,
             key_location: KeyLocation(Cow::Borrowed("midnight/zswap/sign")),
@@ -247,6 +248,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             private_transcript: Vec::new(),
             public_transcript_inputs,
             public_transcript_outputs: vec![true.into(), segment.unwrap_or(0).into()],
+            inner_proofs: vec![],
             binding_input: 0.into(),
             communications_commitment: None,
             key_location: KeyLocation(Cow::Borrowed("midnight/zswap/spend")),
@@ -372,6 +374,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             private_transcript: Vec::new(),
             public_transcript_inputs,
             public_transcript_outputs: vec![segment.unwrap_or(0).into()],
+            inner_proofs: vec![],
             binding_input: match &ciphertext {
                 Some(ciph) => ciphertext_to_field(ciph),
                 None => 0.into(),

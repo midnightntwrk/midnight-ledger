@@ -118,6 +118,23 @@ async fn prove_intents<D: DB, S: SignatureKind<D>>(
     Ok(res)
 }
 
+/// A stand-in proof that serializes to exactly `size` bytes.
+///
+/// The `*_PROOF_SIZE` constants are serialized sizes, so the raw bytes must
+/// fall short of one by the framing a `Proof` puts around them. Overshoot and
+/// the mock outweighs the proof it stands in for, and the fee it estimates
+/// comes out high.
+fn mock_proof_of_serialized_size(size: usize) -> transient_crypto::proofs::Proof {
+    use serialize::Serializable;
+    let framing =
+        transient_crypto::proofs::Proof::from_bytes(vec![0u8; size]).serialized_size() - size;
+    let nonsense_data = std::iter::repeat([0xde, 0xad, 0xc0, 0xde])
+        .flat_map(|v| v.into_iter())
+        .take(size - framing)
+        .collect::<Vec<_>>();
+    transient_crypto::proofs::Proof::from_bytes(nonsense_data)
+}
+
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     /// Mocks proving, producing a 'proven' transaction that, while it will
     /// *not* verify, is accurate for fee computation purposes.
@@ -372,10 +389,9 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
                     .await?;
                 let tag = peek_tag(&mut std::io::Cursor::new(&vk))
                     .map_err(TransactionProvingError::Tokio)?;
-                match tag.as_str() {
-                    "verifier-key[v6]" => ProofVersioned::V2(proof),
-                    "verifier-key[v7]" => ProofVersioned::V3(proof),
-                    _ => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
+                match ProofVersioned::of_verifier_key_tag(&tag, proof) {
+                    Some(versioned) => versioned,
+                    None => return Err(TransactionProvingError::UnknownVerifierKeyVersion(tag)),
                 }
             }
         };
@@ -422,12 +438,7 @@ impl ProvingProvider for MockProver {
             "midnight/dust/spend" => crate::dust::DUST_SPEND_PROOF_SIZE,
             _ => anyhow::bail!("cannot mock prove non-builtin circuit"),
         };
-        let nonsense_data = std::iter::repeat([0xde, 0xad, 0xc0, 0xde])
-            .flat_map(|v| v.into_iter())
-            .take(size)
-            .collect::<Vec<_>>();
-        let mock_proof = transient_crypto::proofs::Proof(nonsense_data);
-        Ok(mock_proof)
+        Ok(mock_proof_of_serialized_size(size))
     }
     fn split(&mut self) -> Self {
         MockProver
@@ -445,6 +456,26 @@ impl ResolverT for MockProver {
 
 #[cfg(test)]
 mod tests {
+
+    /// A mock proof stands in for a real one during fee estimation, so it has
+    /// to weigh the same. Building it from the raw byte count instead of the
+    /// serialized one overshoots by the framing, and every mock fee comes out
+    /// high.
+    #[test]
+    fn a_mock_proof_serializes_to_the_size_it_stands_in_for() {
+        use serialize::Serializable;
+        for size in [
+            zswap::INPUT_PROOF_SIZE,
+            zswap::OUTPUT_PROOF_SIZE,
+            crate::dust::DUST_SPEND_PROOF_SIZE,
+        ] {
+            assert_eq!(
+                super::mock_proof_of_serialized_size(size).serialized_size(),
+                size
+            );
+        }
+    }
+
     use base_crypto::data_provider::{self, MidnightDataProvider};
     use storage::db::InMemoryDB;
     use zswap::ZSWAP_EXPECTED_FILES;

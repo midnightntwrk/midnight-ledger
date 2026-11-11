@@ -91,6 +91,7 @@ impl Deposit {
         let mut state = self.state.clone();
         let (guaranteed_public_transcript, fallible_public_transcript) = split;
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: self.vault.addr,
             entry_point: b"depositUnshielded"[..].into(),
             op: self.vault.operation("depositUnshielded"),

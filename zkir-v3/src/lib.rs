@@ -14,10 +14,13 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod decider;
 pub mod ir;
 pub mod ir_instructions;
 pub mod ir_types;
 pub mod ir_vm;
+#[cfg(feature = "test-utilities")]
+pub mod testing;
 
 pub use ir::{Identifier, Instruction, IrSource};
 pub use ir_vm::Preprocessed;

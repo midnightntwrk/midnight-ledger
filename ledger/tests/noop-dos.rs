@@ -24,7 +24,7 @@ use midnight_ledger::test_utilities::{
     Resolver, TestState, contract_operation, test_intents, test_resolver, tx_prove,
 };
 use midnight_ledger::verify::WellFormedStrictness;
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;
@@ -142,6 +142,7 @@ async fn noop_dos() {
         .unwrap();
     let mut tx = {
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"count"[..].into(),
             op: count_op.clone(),

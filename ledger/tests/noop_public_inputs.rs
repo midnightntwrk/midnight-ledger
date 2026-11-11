@@ -16,8 +16,8 @@
 //! unit of it contributes one 32-byte field element. Fee estimation must
 //! therefore count public inputs without materializing them.
 
-use midnight_ledger_v9::error::MalformedTransaction;
-use midnight_ledger_v9::structure::ContractCall;
+use midnight_ledger_v10::error::MalformedTransaction;
+use midnight_ledger_v10::structure::ContractCall;
 use onchain_runtime::context::Effects;
 use onchain_runtime::ops::{Key, Op};
 use onchain_runtime::result_mode::ResultModeVerify;
@@ -161,7 +161,7 @@ fn public_inputs_len_does_not_materialize() {
 /// A 9-byte opcode must not be able to name an arbitrarily large statement.
 #[test]
 fn declared_public_inputs_are_capped() {
-    use midnight_ledger_v9::verify::MAX_CALL_PUBLIC_INPUTS;
+    use midnight_ledger_v10::verify::MAX_CALL_PUBLIC_INPUTS;
 
     let over = call_with_program(vec![Op::Noop {
         n: MAX_CALL_PUBLIC_INPUTS as u32,

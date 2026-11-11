@@ -199,7 +199,10 @@ mod tests {
         let [r, s] = core::array::from_fn(|_| p256::Fq::random(OsRng));
         assert_eq!(Secp256r1Point(p) + Secp256r1Point(q), Secp256r1Point(p + q));
         assert_eq!(Secp256r1Base(x) + Secp256r1Base(y), Secp256r1Base(x + y));
-        assert_eq!(Secp256r1Scalar(r) + Secp256r1Scalar(s), Secp256r1Scalar(r + s));
+        assert_eq!(
+            Secp256r1Scalar(r) + Secp256r1Scalar(s),
+            Secp256r1Scalar(r + s)
+        );
 
         // Negative test: adding same-role values of different curves should fail
         let result = add_offcircuit(&Secp256r1Base(x), &Secp256k1Base(k256::Fp::ZERO));

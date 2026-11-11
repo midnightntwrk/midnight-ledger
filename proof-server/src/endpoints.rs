@@ -30,7 +30,7 @@ use ledger::structure::{
     Signature, Transaction,
 };
 use rand::rngs::OsRng;
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use storage::db::InMemoryDB;
@@ -306,7 +306,13 @@ pub(crate) async fn prove(
                             .map_err(WorkError::BadInput)?
                             .0;
 
-                        ProofVersioned::V2(proof)
+                        // The key the proof will be verified against decides which
+                        // variant it is, as it does in `ledger::prove`.
+                        let tag = peek_tag(&mut std::io::Cursor::new(&proving_data.verifier_key))
+                            .map_err(|e| WorkError::BadInput(e.to_string()))?;
+                        ProofVersioned::of_verifier_key_tag(&tag, proof).ok_or_else(|| {
+                            WorkError::BadInput(format!("unknown verifier key version {tag}"))
+                        })?
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.

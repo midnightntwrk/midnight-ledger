@@ -24,7 +24,7 @@ use midnight_ledger::construct::SegmentSpecifier;
 use midnight_ledger::structure::{
     INITIAL_PARAMETERS, ProofPreimageMarker, Signature, StandardTransaction,
 };
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use rand::{CryptoRng, RngCore};
 use storage::db::InMemoryDB;
 use transient_crypto::commitment::PedersenRandomness;

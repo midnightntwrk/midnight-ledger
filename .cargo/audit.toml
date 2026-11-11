@@ -20,4 +20,5 @@ ignore = [
     "RUSTSEC-2026-0195", # quick-xml: unbounded namespace-declaration allocation
     "RUSTSEC-2026-0387", # crypto-bigint 0.5: timing variability in constant-time ops
     "RUSTSEC-2026-0459", # libsqlite3-sys < 0.39: uninitialized page-cache read via mismatched WAL
+    "RUSTSEC-2026-0258", # Temporary until https://github.com/actix/actix-web/issues/4199 resolved 
 ]

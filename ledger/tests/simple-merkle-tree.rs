@@ -20,7 +20,7 @@ use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction
 use midnight_ledger::test_utilities::{Resolver, TestState, contract_operation, test_resolver};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::{
@@ -111,6 +111,7 @@ async fn simple_merkle_tree() {
         )
         .unwrap();
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"store"[..].into(),
             op: store_op.clone(),
@@ -174,6 +175,7 @@ async fn simple_merkle_tree() {
             transcript.gas = transcript.gas * 1.2;
         }
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"check"[..].into(),
             op: check_op.clone(),
@@ -217,6 +219,7 @@ async fn simple_merkle_tree() {
     .unwrap();
     let tx = {
         let call = ContractCallPrototype {
+            inner_proofs: vec![],
             address: addr,
             entry_point: b"store"[..].into(),
             op: store_op.clone(),

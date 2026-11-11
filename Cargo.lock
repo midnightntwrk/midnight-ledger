@@ -3195,7 +3195,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-serialize",
  "midnight-storage-core 1.2.3",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3270,8 +3270,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger-v9"
-version = "1.0.2"
+name = "midnight-ledger-v10"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -3288,16 +3288,16 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger-static",
- "midnight-ledger-v9",
+ "midnight-ledger-v10",
  "midnight-onchain-runtime",
  "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
  "midnight-storage-core 1.2.3",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-transient-crypto 4.0.0",
+ "midnight-zkir",
+ "midnight-zkir-v3",
  "midnight-zswap",
  "pastey",
  "pprof",
@@ -3317,8 +3317,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger-wasm-v9"
-version = "1.0.2-rc.0"
+name = "midnight-ledger-wasm-v10"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3327,14 +3327,14 @@ dependencies = [
  "js-sys",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger-v9",
+ "midnight-ledger-v10",
  "midnight-onchain-runtime",
  "midnight-onchain-runtime-wasm",
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir 2.2.0",
+ "midnight-transient-crypto 4.0.0",
+ "midnight-zkir",
  "midnight-zswap",
  "pastey",
  "rand 0.8.6",
@@ -3349,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3367,7 +3367,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3380,7 +3380,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "4.0.2-rc.0"
+version = "5.0.0-alpha.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3391,7 +3391,7 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "rand 0.8.6",
  "serde",
  "serde-wasm-bindgen",
@@ -3412,7 +3412,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3435,7 +3435,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3447,7 +3447,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.2-rc.0"
+version = "10.0.0-alpha.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3463,13 +3463,13 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger-v9",
+ "midnight-ledger-v10",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-transient-crypto 4.0.0",
+ "midnight-zkir",
+ "midnight-zkir-v3",
  "midnight-zswap",
  "rand 0.8.6",
  "regex",
@@ -3720,7 +3720,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3741,7 +3741,7 @@ dependencies = [
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-storage-core 1.2.3",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "midnight-zk-stdlib 2.4.0",
  "pastey",
  "proptest",
@@ -3829,10 +3829,10 @@ dependencies = [
  "midnight-proofs 0.8.2",
  "midnight-serialize",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "midnight-zk-stdlib 1.3.0",
  "midnight-zk-stdlib 2.4.0",
- "midnight-zkir 2.2.0",
+ "midnight-zkir",
  "num-bigint",
  "pastey",
  "proptest",
@@ -3847,35 +3847,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "midnight-zkir"
-version = "3.2.0"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.2.0#446c7fecc6bd41dab99ebe89ab404e9d077d11a9"
-dependencies = [
- "anyhow",
- "const-hex",
- "group 0.13.0",
- "hex",
- "midnight-base-crypto",
- "midnight-circuits 7.3.0",
- "midnight-curves 0.3.1",
- "midnight-proofs 0.8.2",
- "midnight-serialize",
- "midnight-transient-crypto 3.1.0",
- "midnight-zk-stdlib 2.4.0",
- "num-bigint",
- "num-traits",
- "rand 0.8.6",
- "rand_chacha 0.3.1",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_repr",
- "sha2 0.11.0",
- "sha3",
- "tracing",
 ]
 
 [[package]]
@@ -3898,7 +3869,7 @@ dependencies = [
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
  "midnight-serialize",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "midnight-zk-stdlib 2.4.0",
  "midnight-zkir-v3",
  "num-bigint",
@@ -3928,7 +3899,7 @@ dependencies = [
  "hex",
  "js-sys",
  "midnight-serialize",
- "midnight-transient-crypto 3.1.0",
+ "midnight-transient-crypto 4.0.0",
  "midnight-zkir-v3",
  "rand 0.8.6",
  "serde_json",
@@ -3946,8 +3917,8 @@ dependencies = [
  "js-sys",
  "midnight-serialize",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir 2.2.0",
+ "midnight-transient-crypto 4.0.0",
+ "midnight-zkir",
  "rand 0.8.6",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3983,8 +3954,8 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir 2.2.0",
+ "midnight-transient-crypto 4.0.0",
+ "midnight-zkir",
  "pastey",
  "rand 0.8.6",
  "rayon",

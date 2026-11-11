@@ -147,7 +147,7 @@ impl AuthorizedClaim<Proof> {
         SIGN_VK
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
@@ -207,7 +207,7 @@ impl<D: DB> Input<Proof, D> {
         SPEND_VK
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
@@ -286,7 +286,7 @@ impl<D: DB> Output<Proof, D> {
         OUTPUT_VK
             .verify(
                 &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")

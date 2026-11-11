@@ -76,9 +76,10 @@ pub fn ec_mul_incircuit(
             Ok(Secp256k1Point(r))
         }
         (Secp256r1Point(p), Secp256r1Scalar(s)) => {
-            let r = std_lib
-                .p256()
-                .msm(layouter, std::slice::from_ref(s), std::slice::from_ref(p))?;
+            let r =
+                std_lib
+                    .p256()
+                    .msm(layouter, std::slice::from_ref(s), std::slice::from_ref(p))?;
             Ok(Secp256r1Point(r))
         }
         (Curve25519Point(p), Curve25519Scalar(s)) => {
