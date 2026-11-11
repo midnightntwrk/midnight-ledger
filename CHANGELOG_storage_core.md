@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
+
 ## Version `1.2.3`
 
 - fix: revert to `sha2` 0.10 / `digest` 0.10. `1.2.2` exposed `digest` 0.11

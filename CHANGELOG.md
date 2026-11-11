@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
+- feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
+
 ## Ledger 9.1.0.2-rc.0
 
 - note: alongside the `ledger` crate `1.0.2`, this release candidate ships
@@ -286,7 +289,7 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
