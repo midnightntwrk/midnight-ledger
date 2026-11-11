@@ -21,7 +21,7 @@ use actix_web::{App, HttpServer};
 use std::sync::Arc;
 
 use crate::endpoints::{
-    check, fetch_k, get_k, health, proof_versions, prove, prove_transaction, ready, version,
+    MaxK, check, fetch_k, get_k, health, proof_versions, prove, prove_transaction, ready, version,
 };
 use crate::worker_pool::WorkerPool;
 
@@ -29,11 +29,17 @@ pub mod endpoints;
 pub mod versioned_ir;
 pub mod worker_pool;
 
-pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Result<(Server, u16)> {
+pub fn server(
+    port: u16,
+    fetch_params: bool,
+    pool: WorkerPool,
+    max_k: MaxK,
+) -> std::io::Result<(Server, u16)> {
     let pool = Arc::new(pool);
     let http_server = HttpServer::new(move || {
         let app = App::new()
             .app_data(Data::new(pool.clone()))
+            .app_data(Data::new(max_k))
             .service(prove_transaction)
             .service(prove)
             .service(check)

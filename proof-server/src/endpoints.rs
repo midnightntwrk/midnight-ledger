@@ -65,6 +65,37 @@ async fn payload_to_bytes(mut payload: Payload) -> Result<Bytes, Error> {
     Ok(body.freeze())
 }
 
+/// The largest circuit size (`k`) this server accepts for proving, or `None` for no limit.
+///
+/// Proving memory grows with `2^k`, so the limit lets operators reject circuits that would exceed
+/// the host's memory instead of having the process killed mid-proof.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MaxK(pub Option<u8>);
+
+impl MaxK {
+    fn check(&self, k: u8) -> Result<(), Error> {
+        match self.0 {
+            Some(max_k) if k > max_k => Err(ErrorBadRequest(format!(
+                "k={k} exceeds this server's limit of max_k={max_k}"
+            ))),
+            _ => Ok(()),
+        }
+    }
+
+    async fn check_key(&self, name: &str, data: &ProvingKeyMaterial) -> Result<(), Error> {
+        if self.0.is_none() {
+            return Ok(());
+        }
+        // Computing `k` builds the circuit model, which takes seconds for large circuits.
+        let ir = data.ir_source.clone();
+        let k = web::block(move || versioned_ir::k(&ir))
+            .await?
+            .map_err(ErrorBadRequest)?;
+        self.check(k)
+            .map_err(|e| ErrorBadRequest(format!("circuit '{name}': {e}")))
+    }
+}
+
 type TransactionProvePayload<S> = (
     Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
     HashMap<String, ProvingKeyMaterial>,
@@ -76,11 +107,12 @@ pub(crate) async fn version() -> impl Responder {
 }
 
 #[get("/fetch-params/{k}")]
-pub(crate) async fn fetch_k(path: web::Path<u8>) -> impl Responder {
+pub(crate) async fn fetch_k(path: web::Path<u8>, max_k: Data<MaxK>) -> impl Responder {
     let k = path.into_inner();
     if !(0..=25).contains(&k) {
         return Err(ErrorBadRequest(format!("k={k} out of range")));
     }
+    max_k.check(k)?;
     PUBLIC_PARAMS.0.fetch_k(k).await?;
     Ok("success")
 }
@@ -184,6 +216,7 @@ pub(crate) async fn check(
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {
@@ -244,6 +277,7 @@ pub(crate) async fn check(
 #[post("/prove")]
 pub(crate) async fn prove(
     pool: Data<Arc<WorkerPool>>,
+    max_k: Data<MaxK>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove...");
@@ -257,6 +291,9 @@ pub(crate) async fn prove(
         Option<ProvingKeyMaterial>,
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
+    if let Some(data) = &data {
+        max_k.check_key(&ppi.key_location().0, data).await?;
+    }
 
     let data_resolver = data.clone();
     let (_id, updates) = pool
@@ -327,6 +364,7 @@ pub(crate) async fn prove(
 #[post("/prove-tx")]
 pub(crate) async fn prove_transaction(
     pool: Data<Arc<WorkerPool>>,
+    max_k: Data<MaxK>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove-tx...");
@@ -337,9 +375,13 @@ pub(crate) async fn prove_transaction(
     );
     let (tx, keys): TransactionProvePayload<Signature> =
         tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
+    for (name, data) in &keys {
+        max_k.check_key(name, data).await?;
+    }
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {

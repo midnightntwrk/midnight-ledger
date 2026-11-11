@@ -119,7 +119,7 @@ graph TD;
 | `onchain-runtime-wasm` | Provides WASM bindings the the contract runtime |
 | `onchain-state` | Provides contract state format |
 | `onchain-vm` | Provides the VM that contracts may execute on-chain (Impact) |
-| `proof-server` | A simple HTTP wrapper of proving |
+| `proof-server` | A simple HTTP wrapper of proving; see [its README](proof-server/README.md) for running it |
 | `serialize` | Provides serialization traits and top-level methods |
 | `serialize-macros` | Provides derive macros for serialization traits, exposed through `serialize` |
 | `storage` | Provides the ledger's storage layer and basic stored data types |

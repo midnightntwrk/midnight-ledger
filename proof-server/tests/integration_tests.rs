@@ -18,6 +18,7 @@ mod common {
     use std::time::Duration;
 
     use actix_web::{dev::ServerHandle, rt};
+    use midnight_proof_server::endpoints::MaxK;
     use midnight_proof_server::server;
     use midnight_proof_server::worker_pool::WorkerPool;
     use reqwest::Client;
@@ -61,7 +62,16 @@ mod common {
     }
 
     pub fn start_server(num_workers: usize, job_limit: usize) -> TestServer {
-        start_server_impl(num_workers, job_limit, false)
+        start_server_impl(num_workers, job_limit, false, None)
+    }
+
+    pub fn start_server_with_max_k(fetch_params: bool, max_k: u8) -> TestServer {
+        start_server_impl(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            fetch_params,
+            Some(max_k),
+        )
     }
 
     pub fn start_server_with_fetch_params(
@@ -69,10 +79,15 @@ mod common {
         job_limit: usize,
         fetch_params: bool,
     ) -> TestServer {
-        start_server_impl(num_workers, job_limit, fetch_params)
+        start_server_impl(num_workers, job_limit, fetch_params, None)
     }
 
-    fn start_server_impl(num_workers: usize, job_limit: usize, fetch_params: bool) -> TestServer {
+    fn start_server_impl(
+        num_workers: usize,
+        job_limit: usize,
+        fetch_params: bool,
+        max_k: Option<u8>,
+    ) -> TestServer {
         init_logger();
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -81,7 +96,7 @@ mod common {
             rt::System::new().block_on(async move {
                 let pool = WorkerPool::new(num_workers, job_limit, 600.0);
                 let (srv, bound_port) =
-                    server(0, fetch_params, pool).expect("Failed to start server");
+                    server(0, fetch_params, pool, MaxK(max_k)).expect("Failed to start server");
                 tx.send((srv.handle(), bound_port))
                     .expect("Failed to send server handle");
                 srv.await.expect("Server error");
@@ -944,6 +959,149 @@ mod fetch_params_endpoint {
 
         let text = response.text().await.expect("Failed to get response text");
         assert_eq!(text, "success");
+
+        stop_server(server).await;
+    }
+}
+
+mod max_k {
+    use super::common::*;
+    use super::test_data::*;
+    use ledger::structure::Signature;
+    use serialize::tagged_serialize;
+    use std::collections::HashMap;
+    use storage::db::InMemoryDB;
+    use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as _};
+
+    const ZSWAP_OUTPUT: &str = "midnight/zswap/output";
+
+    async fn zswap_output_key() -> ProvingKeyMaterial {
+        RESOLVER
+            .resolve_key(KeyLocation(ZSWAP_OUTPUT.into()))
+            .await
+            .expect("Failed to resolve key")
+            .expect("Missing zswap output key")
+    }
+
+    async fn k_of(server: &TestServer, key: &ProvingKeyMaterial) -> u8 {
+        HTTP_CLIENT
+            .post(format!("{}/k", server.base_url()))
+            .body(key.ir_source.clone())
+            .send()
+            .await
+            .expect("Request failed")
+            .text()
+            .await
+            .expect("Failed to get response text")
+            .parse()
+            .expect("Failed to parse k value")
+    }
+
+    async fn output_k() -> u8 {
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let k = k_of(&server, &zswap_output_key().await).await;
+        stop_server(server).await;
+        k
+    }
+
+    fn prove_body(key: ProvingKeyMaterial) -> Vec<u8> {
+        let binding_input: Option<transient_crypto::curve::Fr> = None;
+        let mut body = Vec::new();
+        tagged_serialize(
+            &(
+                create_zswap_output_proof_preimage(),
+                Some(key),
+                binding_input,
+            ),
+            &mut body,
+        )
+        .expect("Failed to serialize prove request");
+        body
+    }
+
+    #[tokio::test]
+    async fn prove_rejects_circuit_above_max_k() {
+        let k = output_k().await;
+        let server = start_server_with_max_k(false, k - 1);
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove", server.base_url()))
+            .body(prove_body(zswap_output_key().await))
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 400);
+        let error_text = response.text().await.expect("Failed to get response text");
+        assert_eq!(
+            error_text,
+            format!(
+                "circuit '{ZSWAP_OUTPUT}': k={k} exceeds this server's limit of max_k={}",
+                k - 1
+            )
+        );
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn prove_accepts_circuit_at_max_k() {
+        let k = output_k().await;
+        let server = start_server_with_max_k(false, k);
+
+        let response = build_client(LONG_REQUEST_TIMEOUT_SECS)
+            .post(format!("{}/prove", server.base_url()))
+            .body(prove_body(zswap_output_key().await))
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 200);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn prove_tx_rejects_key_above_max_k() {
+        let k = output_k().await;
+        let server = start_server_with_max_k(false, k - 1);
+
+        let tx = create_contract_deploy_tx::<Signature, InMemoryDB>().await;
+        let keys: HashMap<String, ProvingKeyMaterial> =
+            [(ZSWAP_OUTPUT.to_owned(), zswap_output_key().await)].into();
+        let mut body = Vec::new();
+        tagged_serialize(&(tx, keys), &mut body).expect("Failed to serialize transaction");
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .body(body)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 400);
+        let error_text = response.text().await.expect("Failed to get response text");
+        assert!(
+            error_text.contains(&format!("circuit '{ZSWAP_OUTPUT}': k={k} exceeds")),
+            "Unexpected error: {error_text}"
+        );
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn fetch_params_rejects_k_above_max_k() {
+        let server = start_server_with_max_k(true, 10);
+
+        let response = HTTP_CLIENT
+            .get(format!("{}/fetch-params/12", server.base_url()))
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 400);
+        let error_text = response.text().await.expect("Failed to get response text");
+        assert_eq!(error_text, "k=12 exceeds this server's limit of max_k=10");
 
         stop_server(server).await;
     }
