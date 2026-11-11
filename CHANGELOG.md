@@ -6,17 +6,42 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
+- feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
+
+## Ledger 9.1.0.2-rc.0
+
+- note: alongside the `ledger` crate `1.0.2`, this release candidate ships
+  `ledger-wasm` `1.0.2-rc.0`, `onchain-runtime-wasm` `4.0.2-rc.0` and the proof
+  server `9.0.2-rc.0`, with `storage` `3.1.0` and `transient-crypto` `3.1.0`.
+  Every other crate is unchanged from 9.1.0.1.
 - fix: the wasm API deserializes contract state containing a non-canonical
   trie shape that `insert` produces in some cases, instead of rejecting it.
-- feat: add `TransactionShape`, the counts of a transaction's non-call parts; `TransactionShape::for_calls` derives the balanced transaction's counts from the calls.
-- fix: transcript partitioning sizes the guaranteed section against the predicted transaction's time-to-dismiss allowance, `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus the reserve, instead of a floor the reserve could not lower.
-- feat: for transcript partitioning, the predicted transaction size and the reserve are calculated from a mock transaction of the calls' `TransactionShape`; `add_calls` folds the Zswap parts it is given into the shape.
-- fix: transcript partitioning reserves every call's proof verification, including calls that end up fully fallible, and prices each by the call's own public inputs rather than its root call's.
-- feat: add `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape` to partition calls against the final transaction's part counts.
-- feat: expose `TransactionShape` in the wasm API as a class obtained from `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to `partitionTranscripts` and `Transaction.addCalls`.
-- fix: `partition_transcripts` rehearses each call with the widest commitment tree indices the chain could assign, so a contract that stores a coin's
-  `mt_index` declares enough written bytes. Clients rehearse with an output's ordinal in place of the index the chain assigns on inclusion; once the tree
-  had grown, the real index took more bytes than the ordinal, and the node rejected the transaction for running out of gas budget.
+- feat: add `TransactionShape`, the counts of a transaction's non-call parts;
+  `TransactionShape::for_calls` derives the balanced transaction's counts from
+  the calls.
+- feat: add `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape`
+  to partition calls against the final transaction's part counts.
+- feat: expose `TransactionShape` in the wasm API as a class obtained from
+  `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to
+  `partitionTranscripts` and `Transaction.addCalls`.
+- feat: for transcript partitioning, the predicted transaction size and the
+  reserve are calculated from a mock transaction of the calls'
+  `TransactionShape`; `add_calls` folds the Zswap parts it is given into the
+  shape.
+- fix: transcript partitioning sizes the guaranteed section against the
+  predicted transaction's time-to-dismiss allowance,
+  `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus the
+  reserve, instead of a floor the reserve could not lower.
+- fix: transcript partitioning reserves every call's proof verification,
+  including calls that end up fully fallible, and prices each by the call's own
+  public inputs rather than its root call's.
+- fix: `partition_transcripts` rehearses each call with the widest commitment
+  tree indices the chain could assign, so a contract that stores a coin's
+  `mt_index` declares enough written bytes. Clients rehearse with an output's
+  ordinal in place of the index the chain assigns on inclusion; once the tree
+  had grown, the real index took more bytes than the ordinal, and the node
+  rejected the transaction for running out of gas budget.
 
 ## Ledger 9.1.0.1
 
@@ -264,7 +289,7 @@ resolve past the fix.
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
