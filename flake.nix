@@ -563,6 +563,17 @@
             program = "${packages.proof-server}/bin/midnight-proof-server";
           };
 
+          # Metadata checks do not need proving parameters or compiled test artifacts.
+          devShells.ci-tools = pkgs.mkShellNoCC {
+            packages = [
+              rust.stable.cargo
+              rust.stable.rustc
+              pkgs.git
+              pkgs.cargo-spellcheck
+              cargo-audit
+            ];
+          };
+
           devShells.ci = mkShell {
             inputsFrom = with packages; [ledger];
             packages = [
