@@ -3297,7 +3297,7 @@ dependencies = [
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.1.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-zkir 3.2.1",
  "midnight-zswap",
  "pastey",
  "pprof",
@@ -3447,7 +3447,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.2-rc.0"
+version = "9.0.2-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3469,7 +3469,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 3.1.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-zkir 3.2.1",
  "midnight-zswap",
  "rand 0.8.6",
  "regex",
@@ -3851,8 +3851,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir"
-version = "3.2.0"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.2.0#446c7fecc6bd41dab99ebe89ab404e9d077d11a9"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aaeb48ea50efc4ee1dfdeed72ab6f38a64a6bb76b05d95851306a8f4cfd5202"
 dependencies = [
  "anyhow",
  "const-hex",
