@@ -19,6 +19,7 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
+    zkir-v3.url = "github:midnightntwrk/midnight-zkir/zkir-3.2.1";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -32,6 +33,7 @@
     utils,
     fenix,
     inclusive,
+    zkir-v3,
     #compactc,
     ...
   }:
@@ -69,7 +71,6 @@
           ./proof-server
           ./storage
           ./zkir
-          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -338,7 +339,6 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
-              packages.zkir-v3-wasm
             ];
           };
 
@@ -359,7 +359,7 @@
               pkgs.jq
               packages.public-params
               self.packages.${system}.zkir
-              self.packages.${system}.zkir-v3
+              zkir-v3.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -375,7 +375,7 @@
                 if [[ "$VERSION" == "2" ]]; then
                   ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${zkir-v3.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 fi
               done
             '';
@@ -438,7 +438,6 @@
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v9"; package-name = "ledger-v9"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
-          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -473,32 +472,6 @@
                 packages.public-params
               ];
               cargoBuildFlags = "--package midnight-zkir --features binary";
-              nativeBuildInputs = [
-                packages.rust-build-toolchain
-              ];
-              doCheck = false;
-            };
-          packages.zkir-v3 = ({
-              "x86_64-linux" = pkgsStatic;
-              "x86_64-darwin" = pkgs;
-              "aarch64-linux" = pkgsStatic;
-              "aarch64-darwin" = pkgs;
-          }.${system}.makeRustPlatform {
-            rustc = packages.rust-build-toolchain;
-            cargo = packages.rust-build-toolchain;
-          }).buildRustPackage rec {
-              pname = "zkir-v3";
-              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
-              src = rustWorkspaceSrc;
-              cargoLock.lockFile = ./Cargo.lock;
-              cargoLock.allowBuiltinFetchGit = true;
-
-              MIDNIGHT_PP = "${packages.public-params}";
-
-              buildInputs = [
-                packages.public-params
-              ];
-              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];

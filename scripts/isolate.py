@@ -63,7 +63,7 @@ def main():
         return new_text
 
     # `name` must really be a workspace member, but it need not be a
-    # *default* member (e.g. `zkir-v3`), so default-members is overwritten
+    # *default* member (e.g. `ledger-wasm`), so default-members is overwritten
     # rather than filtered. Path dependencies inside the workspace (e.g.
     # `storage-macros`) are members without being listed.
     is_path_dep = any(
