@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
+use crate::dust::{DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
-use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
+use crate::structure::{MAX_SUPPLY, Signature, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
@@ -85,7 +85,7 @@ pub enum SystemTransactionError {
         distributed_amount: u128,
         reserve_supply: u128,
     },
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
     TreasuryDisabled,
@@ -162,10 +162,10 @@ impl Display for SystemTransactionError {
                     "illegal distribution of {distributed_amount} reserve tokens, exceeding remaining supply of {reserve_supply}"
                 )
             }
-            SystemTransactionError::GenerationInfoAlreadyPresent(gen_info) => write!(
+            SystemTransactionError::InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             SystemTransactionError::InvalidBasisPoints(bp) => {
                 write!(
@@ -222,11 +222,16 @@ pub enum TransactionInvalid<D: DB> {
     InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     InvariantViolation(InvariantViolation),
     RewardTooSmall {
         claimed: u128,
         minimum: u128,
+    },
+    BridgeClaimTooSmall {
+        claimed: u128,
+        minimum: u128,
+        claimable: u128,
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
@@ -239,6 +244,11 @@ pub enum TransactionInvalid<D: DB> {
     ContractAuthorityMetadataTooLarge {
         address: ContractAddress,
         size: u64,
+        limit: u64,
+    },
+    ContractTooManyOperations {
+        address: ContractAddress,
+        operations: u64,
         limit: u64,
     },
     IrNotFound(EntryPointBuf),
@@ -315,10 +325,26 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
             ),
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            BridgeClaimTooSmall {
+                claimed,
+                minimum,
+                claimable: 0,
+            } => write!(
                 formatter,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "claimed bridge transfer ({claimed} STARs) below payout threshold ({minimum} STARs); no bridge balance is claimable"
+            ),
+            BridgeClaimTooSmall {
+                claimed,
+                minimum,
+                claimable,
+            } => write!(
+                formatter,
+                "claimed bridge transfer ({claimed} STARs) below payout threshold ({minimum} STARs); claims below the threshold must withdraw the full claimable balance ({claimable} STARs)"
+            ),
+            InitialNonceAlreadyPresent(nonce) => write!(
+                formatter,
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
@@ -339,6 +365,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
             } => write!(
                 formatter,
                 "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            ContractTooManyOperations {
+                address,
+                operations,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} would have {operations} operations, more than the limit of {limit}"
             ),
             IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
             IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
@@ -372,8 +406,8 @@ impl<D: DB> From<onchain_runtime::error::TranscriptRejected<D>> for TransactionI
 impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
     fn from(err: DustStateError) -> TransactionInvalid<D> {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                TransactionInvalid::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                TransactionInvalid::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => TransactionInvalid::MerkleTreeError(err),
         }
@@ -383,8 +417,8 @@ impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
 impl From<DustStateError> for SystemTransactionError {
     fn from(err: DustStateError) -> SystemTransactionError {
         match err {
-            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
-                SystemTransactionError::GenerationInfoAlreadyPresent(gen_info)
+            DustStateError::InitialNonceAlreadyPresent(nonce) => {
+                SystemTransactionError::InitialNonceAlreadyPresent(nonce)
             }
             DustStateError::MerkleTreeError(err) => SystemTransactionError::MerkleTreeError(err),
         }
@@ -392,6 +426,7 @@ impl From<DustStateError> for SystemTransactionError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FeeCalculationError {
     OutsideTimeToDismiss {
         time_to_dismiss: CostDuration,
@@ -399,6 +434,10 @@ pub enum FeeCalculationError {
         size: u64,
     },
     BlockLimitExceeded,
+    /// The transaction repeats an entry that no valid transaction repeats,
+    /// which `well_formed` reports in detail; priced, it would cost time
+    /// quadratic in its size.
+    RepeatedEntries,
 }
 
 impl Display for FeeCalculationError {
@@ -407,6 +446,10 @@ impl Display for FeeCalculationError {
             FeeCalculationError::BlockLimitExceeded => write!(
                 formatter,
                 "exceeded block limit in transaction fee computation"
+            ),
+            FeeCalculationError::RepeatedEntries => write!(
+                formatter,
+                "transaction repeats an entry no valid transaction repeats, so has no fee"
             ),
             FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss,
@@ -434,6 +477,10 @@ pub enum MalformedContractDeploy {
     },
     AuthorityMetadataTooLarge {
         size: u64,
+        limit: u64,
+    },
+    TooManyOperations {
+        operations: u64,
         limit: u64,
     },
 }
@@ -467,6 +514,10 @@ impl Display for MalformedContractDeploy {
                 formatter,
                 "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
+            TooManyOperations { operations, limit } => write!(
+                formatter,
+                "contract deployment has {operations} operations, more than the limit of {limit}"
+            ),
         }
     }
 }
@@ -489,6 +540,12 @@ pub enum MalformedTransaction<D: DB> {
         tx_size: usize,
         limit: u64,
     },
+    TooManyPublicInputs {
+        address: ContractAddress,
+        operation: EntryPointBuf,
+        public_inputs: usize,
+        limit: usize,
+    },
     VerifierKeyTooLarge {
         actual: u64,
         limit: u64,
@@ -502,6 +559,16 @@ pub enum MalformedTransaction<D: DB> {
     BindingCommitmentOpeningInvalid,
     NotNormalized,
     FallibleWithoutCheckpoint,
+    TranscriptGasExceedsBlockLimits {
+        address: ContractAddress,
+        declared_compute_time: CostDuration,
+        declared_read_time: CostDuration,
+        compute_time_limit: CostDuration,
+        read_time_limit: CostDuration,
+    },
+    ContractDustTransfer {
+        address: ContractAddress,
+    },
     IllegallyDeclaredGuaranteed,
     ClaimReceiveFailed(coin::Commitment),
     ClaimSpendFailed(coin::Commitment),
@@ -538,6 +605,12 @@ pub enum MalformedTransaction<D: DB> {
     },
     MultipleDustRegistrationsForKey {
         key: SignatureVerifyingKey,
+    },
+    RepeatedCommitteeSignature {
+        signature: Signature,
+    },
+    RepeatedDustRegistration {
+        registration: Box<DustRegistration<(), D>>,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -889,6 +962,15 @@ impl<D: DB> Display for MalformedTransaction<D> {
                 formatter,
                 "transaction too large (size: {tx_size}, limit: {limit})"
             ),
+            TooManyPublicInputs {
+                address,
+                operation,
+                public_inputs,
+                limit,
+            } => write!(
+                formatter,
+                "call to {address:?}'s {operation:?} declares {public_inputs} public inputs, exceeding the limit of {limit}"
+            ),
             VerifierKeyTooLarge { actual, limit } => write!(
                 formatter,
                 "verifier key for operation too large for deserialization (size: {actual}, limit: {limit})"
@@ -909,6 +991,20 @@ impl<D: DB> Display for MalformedTransaction<D> {
             FallibleWithoutCheckpoint => write!(
                 formatter,
                 "fallible transcript did not start with a checkpoint"
+            ),
+            TranscriptGasExceedsBlockLimits {
+                address,
+                declared_compute_time,
+                declared_read_time,
+                compute_time_limit,
+                read_time_limit,
+            } => write!(
+                formatter,
+                "transcript for contract {address:?} declares gas exceeding the block limits (compute: {declared_compute_time:?}, limit: {compute_time_limit:?}; read: {declared_read_time:?}, limit: {read_time_limit:?})"
+            ),
+            ContractDustTransfer { address } => write!(
+                formatter,
+                "contract call to {address:?} attempted to receive or send Dust"
             ),
             NotNormalized => write!(formatter, "transaction is not in normal form"),
             ClaimReceiveFailed(com) => write!(
@@ -987,6 +1083,14 @@ impl<D: DB> Display for MalformedTransaction<D> {
             MultipleDustRegistrationsForKey { key } => write!(
                 formatter,
                 "multiple dust registrations for key in the same intent: {key:?}"
+            ),
+            RepeatedCommitteeSignature { signature } => write!(
+                formatter,
+                "committee signature used more than once in the transaction: {signature:?}"
+            ),
+            RepeatedDustRegistration { registration } => write!(
+                formatter,
+                "dust registration used more than once in the transaction: {registration:?}"
             ),
             InsufficientDustForRegistrationFee {
                 registration,
@@ -1493,7 +1597,7 @@ impl Error for DustLocalStateError {}
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum DustStateError {
-    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    InitialNonceAlreadyPresent(InitialNonce),
     MerkleTreeError(InvalidUpdate),
 }
 
@@ -1501,10 +1605,10 @@ impl Display for DustStateError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use DustStateError::*;
         match self {
-            GenerationInfoAlreadyPresent(gen_info) => write!(
+            InitialNonceAlreadyPresent(nonce) => write!(
                 f,
-                "attempted to insert new Dust generation info {:?}, but this already exists",
-                gen_info
+                "attempted to insert new Dust initial nonce {:?}, but this already exists",
+                nonce
             ),
             MerkleTreeError(err) => err.fmt(f),
         }
