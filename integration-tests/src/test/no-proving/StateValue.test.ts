@@ -59,17 +59,14 @@ describe('Ledger API - StateValue', () => {
   });
 
   /**
-   * Test creating StateValue with BoundedMerkleTree (currently failing).
+   * Test creating StateValue with an invalid BoundedMerkleTree height.
    *
-   * @given A StateBoundedMerkleTree with MAX_SAFE_INTEGER height
-   * @when Creating a StateValue with the tree
-   * @then Should have correct log size and height
+   * @given An invalid StateBoundedMerkleTree height
+   * @when Creating the tree before wrapping it in a StateValue
+   * @then Tree construction throws
    */
-  test.fails('should create state with BoundedMerkleTree', () => {
-    const stateValue = StateValue.newBoundedMerkleTree(new StateBoundedMerkleTree(Number.MAX_SAFE_INTEGER));
-
-    expect(stateValue.logSize()).toEqual(1);
-    expect(stateValue.asBoundedMerkleTree()?.height).toEqual(Number.MAX_SAFE_INTEGER);
+  test('should reject BoundedMerkleTree with invalid height', () => {
+    expect(() => StateValue.newBoundedMerkleTree(new StateBoundedMerkleTree(Number.MAX_SAFE_INTEGER))).toThrow();
   });
 
   /**

@@ -944,7 +944,8 @@ export class QueryResults {
  */
 export class StateBoundedMerkleTree {
   /**
-   * Create a blank tree with the given height
+   * Create a blank tree with the given height.
+   * @throws If the height is not an integer in 0..=255.
    */
   constructor(height: number);
 

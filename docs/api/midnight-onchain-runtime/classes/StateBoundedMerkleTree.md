@@ -17,7 +17,7 @@ are unknown
 new StateBoundedMerkleTree(height): StateBoundedMerkleTree
 ```
 
-Create a blank tree with the given height
+Create a blank tree with the given height.
 
 #### Parameters
 
@@ -28,6 +28,10 @@ Create a blank tree with the given height
 #### Returns
 
 [`StateBoundedMerkleTree`](StateBoundedMerkleTree.md)
+
+#### Throws
+
+If the height is not an integer in 0..=255.
 
 ## Properties
 
