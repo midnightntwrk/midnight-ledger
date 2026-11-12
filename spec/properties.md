@@ -12,11 +12,14 @@ be true.
 > - Contract *mint* operations (as witnessed by contained `Effects` in
 >   transcripts in each executed segment) create the recorded amount of
 >   funds in a token type specific to the issuing contract.
-> - Dust balances are *not* preserved, but rather, for a specific address:
->   - Monotonically approach a target value, proportional to the amount of
->     Night generating Dust for this address, within a fixed time window
->   - Decrease when spent to cover transaction fees, for which the total spent
->     Dust must cover at least the fees.
+> - Dust balances are *not* preserved. Instead, the following hold:
+>   - **(Supply cap.)** At any time, the sum of the updated values of all unspent Dust UTXOs is at most `night_dust_ratio` times the total Night supply.
+>   - **(Generation rate.)** Over any interval, the total Dust credited against a given source Night is at most `generation_decay_rate` times its value times the elapsed time, independent of how many transactions interact with it.
+>   - For a given Dust address, values:
+>     - Monotonically approach a target value, proportional to the amount of
+>       Night generating Dust for this address, within a fixed time window
+>     - Decrease when spent to cover transaction fees, for which the total spent
+>       Dust must cover at least the fees.
 > - Transactions with a net positive balance will be paid into the treasury.
 
 Importantly, the total in balance preservation is between the utxo sets, and
@@ -51,6 +54,62 @@ incorrectly at any point. This is provided by the following enforced checks:
   - The impossibility to interfere with the `Intent` Pedersen commitment is
     given by the Fiat-Shamir transform, guaranteeing the use of the generator,
     and the hardness of discrete logarithm.
+
+*Correctness Argument (Dust).* The argument above covers the conserved token
+types. Dust is not conserved, and the two bounds on it rest on separate
+mechanisms.
+
+For the **supply cap**, it suffices that each unspent Dust UTXO is bounded by the
+Night backing it, that backings are not shared, and that the backings of one
+Night principal do not accumulate:
+
+- `updated_value` clamps the generating phases to `vfull = gen.value *
+  night_dust_ratio`, and the decaying phase only subtracts from that. An
+  individual Dust UTXO therefore never exceeds `night_dust_ratio` times the value
+  recorded in its generation info, whatever its initial value.
+- Generation infos are unique: `fresh_dust_output` refuses to insert a
+  `DustGenerationUniquenessInfo` already present in `generating_set`, and each is
+  keyed by an `InitialNonce` derived from the intent hash and output number of the
+  Night output that created it. Distinct generation infos thus correspond to
+  distinct Night outputs, and the value recorded in each is that output's value.
+- Each generation info backs at most one unspent Dust UTXO at a time: exactly one
+  is created alongside it, and Dust spends are 1-to-1, consuming a nullifier and
+  producing a single commitment for the same owner and backing Night.
+- When Night moves, retiring and arriving generation infos offset exactly. Both
+  the cap and the rate are linear in `gen.value`; the input's `dtime` and the
+  output's `ctime` are both set to the block time; and Night itself is conserved
+  by the argument above. The decay of the retiring record therefore proceeds at
+  the same aggregate rate as the generation of the arriving ones, and their sum
+  does not increase.
+
+Summing over generation infos gives the bound, on the reading that "total Night
+supply" counts Night held in the treasury and Night bridged to Cardano. That
+reading is load-bearing: Dust outlives the movement of its backing Night by up to
+`night_dust_ratio / generation_decay_rate`, so an accounting in which Night can
+leave the total while its Dust is still decaying would violate the bound for that
+period.
+
+The **generation rate** bound follows from the crediting intervals of a single
+Night principal being disjoint:
+
+- A generation info credits Dust only over the `[ctime, dtime]` window of the
+  Dust UTXO chain it backs, at a slope of `gen.value * generation_decay_rate`.
+- Where one generation info retires and another is created for the same
+  principal, the first's `dtime` and the second's `ctime` are both the block time
+  of the transaction spending the Night. The two windows abut without overlapping;
+  in particular neither endpoint is the author-declared `DustActions.ctime`.
+- The only route to a Dust UTXO with a nonzero initial value — the registration
+  entitlement computed by `generationless_fee_availability` — is restricted to
+  Night inputs absent from `night_indices`, that is, to principals with no
+  generation info crediting them over the same period. The amount is bounded by
+  the time elapsed since the Night UTXO's own creation time as recorded in the
+  UTXO state, and clamped to `vfull`.
+- None of these endpoints depends on the number of intents, registrations, or
+  transactions involved, so the bound is independent of transaction frequency.
+
+For Night bridged from Cardano both endpoints are instead the times supplied by
+the system transaction, and the bounds hold only insofar as those times are
+consistent with the Cardano-side lifetime of the backing cNight.
 
 ## Binding
 

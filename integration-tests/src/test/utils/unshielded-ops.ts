@@ -134,7 +134,14 @@ export function encodeClaimedSpendKeyUser(color: string, userAddress: string): A
   const emptyPadding = new Uint8Array(0);
   // User = false tag, empty slot1, address in slot2
   return {
-    value: [ONE_VALUE, colorBytes, emptyPadding, emptyPadding, emptyPadding, addressBytes],
+    value: [
+      ONE_VALUE,
+      Static.trimTrailingZeros(colorBytes),
+      emptyPadding,
+      emptyPadding,
+      emptyPadding,
+      Static.trimTrailingZeros(addressBytes)
+    ],
     alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
   };
 }
@@ -166,7 +173,14 @@ export function encodeClaimedSpendKeyContract(color: string, contractAddress: st
   const emptyPadding = new Uint8Array(0);
   // Contract = true tag, address in slot1, empty slot2
   return {
-    value: [ONE_VALUE, colorBytes, emptyPadding, ONE_VALUE, addressBytes, emptyPadding],
+    value: [
+      ONE_VALUE,
+      Static.trimTrailingZeros(colorBytes),
+      emptyPadding,
+      ONE_VALUE,
+      Static.trimTrailingZeros(addressBytes),
+      emptyPadding
+    ],
     alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
   };
 }

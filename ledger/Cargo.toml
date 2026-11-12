@@ -19,17 +19,20 @@ mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
 
 [dependencies]
-coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+coin-structure = { version = "3.0.1", path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { version = "5.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
-base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
+zswap = { version = "9.0.1", path = "../zswap", package = "midnight-zswap" }
+base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "4.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
-storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
+storage = { version = "3.1.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
+midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
+# Temporary: ledger-10's zkir v3 work (verify_proof, transient-crypto 4) lives in
+# the in-repo zkir-v3 until it moves to the external midnight-zkir repo, as
+# ledger-9's zkir v3 already has.
 zkir_v3 = { version = "3.0.0-rc.2", path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
@@ -64,7 +67,7 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-ledger-v10 = { path = ".", features = ["test-utilities", "proptest", "fixed-point-custom-serde"] }
 onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
-storage = { path = "../storage", package = "midnight-storage", features = ["parity-db", "public-internal-structure"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["parity-db", "public-internal-structure", "test-utilities"] }
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities", "layout-v2", "gc-v1"] }
 tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }
 criterion = { version = "^0.5.1" }
