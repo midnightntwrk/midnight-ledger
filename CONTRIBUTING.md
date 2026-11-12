@@ -87,6 +87,8 @@ Signed-off-by: Your Name <your@email.com>
 
 By signing off, you agree to the [Developer Certificate of Origin (version 1.1)](https://developercertificate.org/).
 
+A `commit-msg` hook in `.githooks/` enforces this. `.envrc` installs it automatically when you use direnv; otherwise, run `git config --local core.hooksPath .githooks`.
+
 If you have forgotten to sign off past commits in a PR, you can amend them:
 
 ```bash
