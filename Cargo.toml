@@ -69,8 +69,8 @@ panic = "abort"
 [patch.crates-io]
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
-# The pinned midnight-zkir asks crates.io for transient-crypto 3.0.0, which is
-# unpublished; resolve it to the in-tree copy.
+# midnight-zkir v3 asks crates.io for transient-crypto ^3.0.0; resolve it to
+# the in-tree copy so both share one set of types.
 midnight-transient-crypto = { path = "transient-crypto" }
 
 [workspace.metadata.spellcheck]
