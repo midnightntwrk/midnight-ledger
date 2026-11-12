@@ -627,7 +627,6 @@
               cargo-audit
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_108
-              pkgs.pre-commit
             ];
             buildInputs = [packages.public-params];
 
@@ -644,7 +643,6 @@
             shellHook = ''
               rm -rf .build
               mkdir -p .build
-              pre-commit install >/dev/null
             '';
             #  ln -s ${compactc}/compiler/midnight-ledger.ss .build/midnight-ledger.ss
             #'';
