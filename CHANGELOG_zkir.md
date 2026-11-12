@@ -1,7 +1,16 @@
 # `zkir` Changelog
 
-## Version `2.3.0`
+## Version `2.2.0`
 
+- chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
+  This changes the verifier keys of V2 circuits that use `hash_to_curve`,
+  whose in-circuit `is_square` now rejects 0 as a non-square, and of
+  `zkir-v3` circuits that `encode` a Jubjub scalar. V0 and V1 keys are
+  unchanged.
+- fix: zkir-wasm `prove()` (and `provingProvider().prove`) now applies
+  `overwriteBindingInput` for `verifier-key[v6]` circuits. Previously the
+  override was dropped, so in-process Dust spend proofs were bound to a zero
+  binding input and rejected with `InvalidDustSpendProof` (#832).
 - breaking: remove `VersionedInnerPK` — `Zkir::ProverKey` is now `MidnightPK<IrSource>` (v2 only)
 - breaking: default `IrMinorVersion` changed from `V1` to `V2`
 - feat: `LocalProvingProvider` dynamically dispatches V0/V1 circuits through
@@ -12,8 +21,6 @@
   IR version tag, with separate `transient_crypto_old::proofs::ParamsProverProvider`
   implementation for v1 circuits
 - fix: precompile hash fixtures updated for new key format
-
-## Version `2.2.0`
 
 - feat: dual v1/v2 proving and verification pipeline
   - `VersionedInnerPK` enum holds either v1 (zk-stdlib v1) or v2 (zk-stdlib v2)

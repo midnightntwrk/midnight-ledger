@@ -226,8 +226,7 @@ pub async fn prove(
     let mut res = Vec::new();
     match tag.as_str() {
         "verifier-key[v6]" => {
-            let preimage: transient_crypto_old::proofs::ProofPreimage =
-                tagged_deserialize(&mut &ser_preimage.to_vec()[..])?;
+            let preimage = zkir::ir_v1::preimage_to_v1(&preimage);
             let proof = preimage
                 .prove::<IrSource>(OsRng, &provider, &provider)
                 .await

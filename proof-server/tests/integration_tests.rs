@@ -318,7 +318,7 @@ mod prove_tx_endpoint {
             .await
             .expect("Request failed");
 
-        assert_eq!(response.status(), 404);
+        assert_eq!(response.status(), 405);
 
         stop_server(server).await;
     }
@@ -709,7 +709,7 @@ mod k_endpoint {
             .await
             .expect("Request failed");
 
-        assert_eq!(response.status(), 404);
+        assert_eq!(response.status(), 405);
 
         stop_server(server).await;
     }
@@ -762,7 +762,7 @@ mod check_endpoint {
             .await
             .expect("Request failed");
 
-        assert_eq!(response.status(), 404);
+        assert_eq!(response.status(), 405);
 
         stop_server(server).await;
     }
@@ -844,7 +844,7 @@ mod prove_endpoint {
             .await
             .expect("Request failed");
 
-        assert_eq!(response.status(), 404);
+        assert_eq!(response.status(), 405);
 
         stop_server(server).await;
     }

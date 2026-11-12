@@ -61,6 +61,12 @@ impl<D: DB> ChildRef<D> {
     }
 }
 
+impl<D: DB> crate::map_key::HoldsKey<ArenaKey<D::Hasher>> for ChildRef<D> {
+    fn key(&self) -> &ArenaKey<D::Hasher> {
+        &self.child
+    }
+}
+
 impl<D: DB> Clone for ChildRef<D> {
     fn clone(&self) -> Self {
         ChildRef::new(self.child.clone())
@@ -388,6 +394,27 @@ pub(crate) mod tests {
             }
         }
         visited
+    }
+
+    // Contract states carry an `RcMap`, so a deployment's encoding can hold
+    // one whose maps share subtrees and so stand for 16^12 keys.
+    #[test]
+    fn shared_charged_keys_decode_quickly() {
+        use crate::storage::Map;
+        use crate::test::assert_completes_within;
+        use serialize::{tagged_deserialize, tagged_serialize};
+        let rc = RcMap::<InMemoryDB> {
+            rc_ge_1: Map::shared_full(&[0; 64 - 12], 12, 1),
+            rc_0: Map::new(),
+        };
+        let mut bytes = Vec::new();
+        tagged_serialize(&rc, &mut bytes).unwrap();
+        let res = assert_completes_within(std::time::Duration::from_secs(10), move || {
+            tagged_deserialize::<RcMap<InMemoryDB>>(&mut &bytes[..]).map(|rc| rc.rc_ge_1.size())
+        });
+        if let Ok(size) = res {
+            assert_eq!(size, 16usize.pow(12));
+        }
     }
 
     // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.

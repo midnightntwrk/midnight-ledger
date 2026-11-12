@@ -13,7 +13,9 @@
 
 //! ECDSA signature scheme over secp256k1.
 use crate::BinaryHashRepr;
+use crate::rng::RngCompat;
 use k256::ecdsa;
+use k256::elliptic_curve::Generate;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 use rand::distributions::{Distribution, Standard};
@@ -40,7 +42,7 @@ pub struct VerifyingKey(ecdsa::VerifyingKey);
 // so we implement them manually via the 33-byte SEC1 compressed encoding.
 impl Serialize for VerifyingKey {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(self.0.to_encoded_point(true).as_bytes())
+        serializer.serialize_bytes(self.0.to_sec1_point(true).as_bytes())
     }
 }
 
@@ -55,7 +57,7 @@ impl<'de> Deserialize<'de> for VerifyingKey {
 
 impl Hash for VerifyingKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write(self.0.to_encoded_point(true).as_bytes());
+        state.write(self.0.to_sec1_point(true).as_bytes());
     }
 }
 
@@ -67,8 +69,8 @@ impl PartialOrd for VerifyingKey {
 
 impl Ord for VerifyingKey {
     fn cmp(&self, other: &VerifyingKey) -> Ordering {
-        let left = self.0.to_encoded_point(true);
-        let right = other.0.to_encoded_point(true);
+        let left = self.0.to_sec1_point(true);
+        let right = other.0.to_sec1_point(true);
         left.as_bytes().cmp(right.as_bytes())
     }
 }
@@ -94,7 +96,7 @@ impl Debug for VerifyingKey {
 
 impl BinaryHashRepr for VerifyingKey {
     fn binary_repr<W: crate::MemWrite<u8>>(&self, writer: &mut W) {
-        writer.write(self.0.to_encoded_point(true).as_bytes());
+        writer.write(self.0.to_sec1_point(true).as_bytes());
     }
 
     fn binary_len(&self) -> usize {
@@ -126,7 +128,7 @@ tag_enforcement_test!(VerifyingKey);
 
 impl Serializable for VerifyingKey {
     fn serialize(&self, writer: &mut impl Write) -> io::Result<()> {
-        writer.write_all(self.0.to_encoded_point(true).as_bytes())
+        writer.write_all(self.0.to_sec1_point(true).as_bytes())
     }
 
     fn serialized_size(&self) -> usize {
@@ -171,7 +173,9 @@ tag_enforcement_test!(SigningKey);
 impl SigningKey {
     /// Samples a new secret key from secure randomness.
     pub fn sample<R: Rng + CryptoRng>(mut rng: R) -> Self {
-        SigningKey(ecdsa::SigningKey::random(&mut rng))
+        SigningKey(ecdsa::SigningKey::generate_from_rng(&mut RngCompat(
+            &mut rng,
+        )))
     }
 
     /// Returns the corresponding verifying public key.

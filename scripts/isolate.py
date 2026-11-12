@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Isolate a single workspace package, tag it, push the tag, and revert.
 
-Usage: scripts/isolate.py [-f] <pkg>-<version>   e.g. ledger-9.0.1.0-alpha.1
+Usage: scripts/isolate.py [-f] [--remote <remote>] <pkg>-<version>   e.g. ledger-9.0.1.0-alpha.1
 """
 
 import argparse
@@ -19,8 +19,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("tag", help="<pkg>-<version>, e.g. ledger-9.0.1.0-alpha.1")
     parser.add_argument(
-        "-f", "--force", action="store_true", help="overwrite an existing tag locally and on origin"
+        "-f", "--force", action="store_true", help="overwrite an existing tag locally and on the remote"
     )
+    parser.add_argument("--remote", default="origin", help="remote to push the tag to (default: origin)")
     args = parser.parse_args()
     tag = args.tag
 
@@ -63,8 +64,12 @@ def main():
 
     # `name` must really be a workspace member, but it need not be a
     # *default* member (e.g. `zkir-v3`), so default-members is overwritten
-    # rather than filtered.
-    text = rewrite_list(text, "members", require_member=True)
+    # rather than filtered. Path dependencies inside the workspace (e.g.
+    # `storage-macros`) are members without being listed.
+    is_path_dep = any(
+        f'path = "../{name}"' in p.read_text() for p in repo.glob("*/Cargo.toml")
+    )
+    text = rewrite_list(text, "members", require_member=not is_path_dep)
     text = rewrite_list(text, "default-members", require_member=False)
     root.write_text(text)
 
@@ -87,13 +92,13 @@ def main():
     sub_cargo.write_text("".join(out_lines))
 
     # 3. Commit, tag, push, revert.
-    # `ledger` is the headline package: the bare `ledger-<version>` tag is
-    # already used for the release commit, so isolated-crate tags get a
-    # `crate-` prefix to disambiguate.
-    git_tag = f"crate-{tag}" if name == "ledger" else tag
+    # `ledger` and `onchain-runtime` are already headline packages:
+    # the bare `ledger-<version>` tag is already used for the release commit,
+    # so isolated-crate tags get a `crate-` prefix to disambiguate.
+    git_tag = f"crate-{tag}" if name in ("ledger", "onchain-runtime") else tag
     msg = f"isolate {git_tag}"
     tag_cmd = ["git", "-C", str(repo), "tag", "-a", git_tag, "-m", msg]
-    push_cmd = ["git", "-C", str(repo), "push", "origin", git_tag]
+    push_cmd = ["git", "-C", str(repo), "push", args.remote, git_tag]
     if args.force:
         tag_cmd.insert(-2, "-f")
         push_cmd.insert(-2, "--force")

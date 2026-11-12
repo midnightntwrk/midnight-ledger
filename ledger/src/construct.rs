@@ -11,26 +11,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
+mod mock_tx;
+mod tx_shape;
+
+use mock_tx::{mock_calls, mock_tx};
+pub use tx_shape::TransactionShape;
+
+use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
+use crate::structure::EXPECTED_CONTRACT_DEPTH;
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent,
-    IntentSigningEnvelope, LedgerParameters, MIN_PROOF_SIZE, MaintenanceUpdate,
-    ProofPreimageMarker, ProofPreimageVersioned, Signature, SignatureKind, SignaturesValue,
-    SigningKey, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
-    UnshieldedOffer,
-};
-use crate::structure::{
-    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
-    FRESH_DUST_COMMITMENT_HASHES, UTXO_SIZE, VERIFIER_KEY_SIZE,
+    IntentSigningEnvelope, LedgerParameters, MaintenanceUpdate, ProofPreimageMarker,
+    ProofPreimageVersioned, Signature, SignatureKind, SignaturesValue, SigningKey, SingleUpdate,
+    StandardTransaction, Transaction, UnshieldedOffer,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::AlignedValue;
-use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::time::Timestamp;
-use coin_structure::coin::{NIGHT, TokenType};
 use coin_structure::contract::ContractAddress;
 use itertools::Itertools;
 use onchain_runtime::context::{Effects, QueryContext, QueryResults};
@@ -48,13 +48,14 @@ use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
 use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::curve::{FR_BYTES, Fr};
+use transient_crypto::curve::Fr;
 use transient_crypto::fab::{AlignedValueExt, ValueReprAlignedValue};
 use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
 use zswap::{
     Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput, Transient as ZswapTransient,
+    ZSWAP_TREE_HEIGHT,
 };
 
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
@@ -68,6 +69,30 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     ) -> Self {
         Self::new(network_id, intents, None, storage::storage::HashMap::new())
     }
+}
+
+/// Flags whether any of `items` are claimed by some call's *fallible* transcript, and so belong
+/// in the fallible Zswap offer rather than the guaranteed one. `claims` says what counts as
+/// a claim for the item type at hand.
+fn has_claims_in_fallible<T, D: DB>(
+    items: &[T],
+    fallible_effects: &[&Effects<D>],
+    claims: impl Fn(&Effects<D>, &T) -> bool,
+) -> Vec<bool> {
+    items
+        .iter()
+        .map(|item| fallible_effects.iter().any(|effects| claims(effects, item)))
+        .collect()
+}
+
+/// Return items whose fallibility flag matches `fallible`.
+fn with_fallibility<T: Clone>(items: &[T], is_fallible: &[bool], fallible: bool) -> Vec<T> {
+    items
+        .iter()
+        .zip(is_fallible)
+        .filter(|(_, f)| **f == fallible)
+        .map(|(item, _)| item.clone())
+        .collect()
 }
 
 impl<S: SignatureKind<D>, D: DB>
@@ -109,6 +134,70 @@ impl<S: SignatureKind<D>, D: DB>
     where
         P: ContractCallExt<D>,
     {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            |derived| {
+                derived.with_zswap_parts(
+                    zswap_inputs.len(),
+                    zswap_outputs.len(),
+                    zswap_transients.len(),
+                )
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_calls_with_tx_shape<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        expected_tx_shape: &TransactionShape,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            |_| expected_tx_shape.clone(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add_calls_inner<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
         let pre_transcripts = calls
             .iter()
             .map(|call| PreTranscript {
@@ -120,7 +209,7 @@ impl<S: SignatureKind<D>, D: DB>
                 ..call.pre_transcript.clone()
             })
             .collect::<Vec<_>>();
-        let partitioned = partition_transcripts(&pre_transcripts, params)?;
+        let partitioned = partition_transcripts_inner(&pre_transcripts, params, choose_tx_shape)?;
         let segment = match segment {
             SegmentSpecifier::First => 1,
             SegmentSpecifier::GuaranteedOnly
@@ -128,7 +217,9 @@ impl<S: SignatureKind<D>, D: DB>
             {
                 return Err(PartitionFailure::GuaranteedOnlyUnsatisfied);
             }
-            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => rng.r#gen(),
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => {
+                rng.gen_range(2..u16::MAX)
+            }
             SegmentSpecifier::Specific(GUARANTEED_SEGMENT) => {
                 return Err(PartitionFailure::IllegalSegmentZero);
             }
@@ -150,43 +241,30 @@ impl<S: SignatureKind<D>, D: DB>
                 key_location: call.key_location.clone(),
             })
             .collect::<Vec<_>>();
-        let zswap_input_is_fallible = zswap_inputs
+        let fallible_effects = prototypes
             .iter()
-            .map(|inp| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript
-                        .as_ref()
-                        .is_some_and(|pt| pt.effects.claimed_nullifiers.member(&inp.nullifier))
-                })
-            })
+            .filter_map(|proto| proto.fallible_public_transcript.as_ref())
+            .map(|transcript| &transcript.effects)
             .collect::<Vec<_>>();
-        let zswap_output_is_fallible = zswap_outputs
-            .iter()
-            .map(|out| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
-                        pt.effects
-                            .claimed_shielded_spends
-                            .union(&pt.effects.claimed_shielded_receives)
-                            .member(&out.coin_com)
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-        let zswap_transient_is_fallible = zswap_transients
-            .iter()
-            .map(|trans| {
-                prototypes.iter().any(|pt| {
-                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
-                        pt.effects
-                            .claimed_shielded_spends
-                            .union(&pt.effects.claimed_shielded_receives)
-                            .member(&trans.coin_com)
-                            || pt.effects.claimed_nullifiers.member(&trans.nullifier)
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
+        let zswap_input_is_fallible =
+            has_claims_in_fallible(zswap_inputs, &fallible_effects, |effects, inp| {
+                effects.claimed_nullifiers.member(&inp.nullifier)
+            });
+        let zswap_output_is_fallible =
+            has_claims_in_fallible(zswap_outputs, &fallible_effects, |effects, out| {
+                effects
+                    .claimed_shielded_spends
+                    .union(&effects.claimed_shielded_receives)
+                    .member(&out.coin_com)
+            });
+        let zswap_transient_is_fallible =
+            has_claims_in_fallible(zswap_transients, &fallible_effects, |effects, trans| {
+                effects
+                    .claimed_shielded_spends
+                    .union(&effects.claimed_shielded_receives)
+                    .member(&trans.coin_com)
+                    || effects.claimed_nullifiers.member(&trans.nullifier)
+            });
         let intent_before = self
             .intents
             .get(&segment)
@@ -196,62 +274,30 @@ impl<S: SignatureKind<D>, D: DB>
             .into_iter()
             .fold(intent_before, |i, proto| i.add_call::<P>(proto));
         let mut res = self.set_intent(segment, intent);
-        let guaranteed_coins = ZswapOffer::new(
-            zswap_inputs
-                .iter()
-                .zip(zswap_input_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(i, _)| i.clone())
-                .collect(),
-            zswap_outputs
-                .iter()
-                .zip(zswap_output_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(o, _)| o.clone())
-                .collect(),
-            zswap_transients
-                .iter()
-                .zip(zswap_transient_is_fallible.iter())
-                .filter(|(_, f)| !**f)
-                .map(|(t, _)| t.clone())
-                .collect(),
-        )
-        .map(|o| o.retarget_segment(GUARANTEED_SEGMENT));
-        let fallible_coins = ZswapOffer::new(
-            zswap_inputs
-                .iter()
-                .zip(zswap_input_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(i, _)| i.clone())
-                .collect(),
-            zswap_outputs
-                .iter()
-                .zip(zswap_output_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(o, _)| o.clone())
-                .collect(),
-            zswap_transients
-                .iter()
-                .zip(zswap_transient_is_fallible.iter())
-                .filter(|(_, f)| **f)
-                .map(|(t, _)| t.clone())
-                .collect(),
-        )
-        .map(|o| o.retarget_segment(segment));
+        let offer_with_fallibility = |fallible: bool| {
+            ZswapOffer::new(
+                with_fallibility(zswap_inputs, &zswap_input_is_fallible, fallible),
+                with_fallibility(zswap_outputs, &zswap_output_is_fallible, fallible),
+                with_fallibility(zswap_transients, &zswap_transient_is_fallible, fallible),
+            )
+        };
+        let guaranteed_coins =
+            offer_with_fallibility(false).map(|o| o.retarget_segment(GUARANTEED_SEGMENT));
+        let fallible_coins = offer_with_fallibility(true).map(|o| o.retarget_segment(segment));
+        let merge_into = |old: Option<&ZswapOffer<ProofPreimage, D>>,
+                          new: ZswapOffer<ProofPreimage, D>| {
+            match old {
+                Some(old) => old.merge(&new).map_err(PartitionFailure::Merge),
+                None => Ok(new),
+            }
+        };
         if let Some(offer) = guaranteed_coins {
-            res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
-                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
-            } else {
-                offer
-            }));
+            let merged = merge_into(res.guaranteed_coins.as_deref(), offer)?;
+            res.guaranteed_coins = Some(Sp::new(merged));
         }
         if let Some(offer) = fallible_coins {
-            let new_offer = if let Some(old_offer) = res.fallible_coins.get(&segment) {
-                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
-            } else {
-                offer
-            };
-            res.fallible_coins = res.fallible_coins.insert(segment, new_offer);
+            let merged = merge_into(res.fallible_coins.get(&segment).as_deref(), offer)?;
+            res.fallible_coins = res.fallible_coins.insert(segment, merged);
         }
         res.recompute_binding_randomness();
         Ok(res)
@@ -719,7 +765,32 @@ impl<D: DB> Clone for PreTranscript<D> {
     }
 }
 
+const LAST_COMMITMENT_INDEX: u64 = (1 << ZSWAP_TREE_HEIGHT) - 1;
+
 impl<D: DB> PreTranscript<D> {
+    /// The chain assigns an output's index on inclusion, so the client rehearses
+    /// with a stand-in, typically the output's ordinal. A contract that stores
+    /// the index then writes as many bytes as the stand-in takes, and the real
+    /// index may take more. Packing the indices onto the last leaves of the tree,
+    /// in their original order, makes each as wide as an index can get, so the
+    /// rehearsal declares enough bytes for any tree.
+    fn with_widest_commitment_indices(&self) -> Self {
+        let mut context = self.context.clone();
+        let mut by_index = context.call_context.com_indices.iter().collect::<Vec<_>>();
+        by_index.sort_by_key(|(commitment, index)| (**index, *commitment));
+        let last_leaves = (LAST_COMMITMENT_INDEX + 1 - by_index.len() as u64)..;
+        context.call_context.com_indices = by_index
+            .into_iter()
+            .map(|(commitment, _)| commitment)
+            .zip(last_leaves)
+            .collect();
+        PreTranscript {
+            context,
+            program: self.program.clone(),
+            comm_comm: self.comm_comm,
+        }
+    }
+
     fn no_checkpoints(&self) -> usize {
         self.program
             .iter()
@@ -749,17 +820,6 @@ impl<D: DB> PreTranscript<D> {
             .collect::<Vec<_>>();
         self.context
             .query(&prog, None, &params.cost_model.runtime_cost_model)
-    }
-
-    fn guaranteed_budget(&self, params: &LedgerParameters) -> CostDuration {
-        let est_size = MIN_PROOF_SIZE
-            + Serializable::serialized_size(&(
-                ContractAddress::default(),
-                Effects::<D>::default(),
-                &self.program.iter().collect::<Vec<_>>(),
-                &self.comm_comm,
-            ));
-        params.limits.time_to_dismiss_per_byte * est_size as u64
     }
 
     // 1-indexed!
@@ -799,7 +859,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(params, false, 0),
+                    gas: res.gas_heuristic(params, false),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -814,67 +874,37 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(
-        &self,
-        params: &LedgerParameters,
-        include_external: bool,
-        public_input_count: usize,
-    ) -> RunningCost;
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost;
 }
 
-// gas_heuristic and per_tx_cost_reserve together approximate
-// Transaction::cost() (= validation_cost + application_cost, defined in
-// structure.rs) for use during transcript partitioning, before the final
-// Transaction exists. They must be kept in sync when validation_cost or
-// application_cost change.
-//
-// The costs are split into per-call (in gas_heuristic, summed across calls)
-// and per-transaction (in per_tx_cost_reserve, subtracted from the budget
-// once) to avoid double-counting in multi-call transactions.
-//
-// gas_heuristic covers:
-//   From validation_cost: VK reads (cell_read + map_index for contract and
-//     operations depth, once per unique call), and ContractAction::Call proof
-//     verification (proof_verify + verifier_key_load). Parallelism is applied
-//     to the validation compute_time as in Transaction::cost.
-//   From application_cost: ContractAction::Call state fetch/store (map_index
-//     + map_insert for contract depth and sequence number) and
-//     stack_setup_cost for the call's effects.
-//
-// per_tx_cost_reserve covers:
-//   From validation_cost: baseline_cost, zswap input/output proof
-//     verifications (approximated via claimed_nullifiers/receives counts),
-//     Pedersen binding check + final ec_mul (deltas assumed balanced),
-//     unshielded offer signature verifications, and one heuristic dust spend
-//     proof. Parallelism applied.
-//   From application_cost: baseline_cost, replay protection, unshielded UTXO
-//     membership/removal/insertion, NIGHT-specific dust generation costs
-//     (dtime update, address table, generation tree, night indices,
-//     commitment tree, commitment hash), and one heuristic dust spend's
-//     nullifier + commitment processing.
+// gas_heuristic and the reserve, `mock_tx(calls, tx_shape).time_to_dismiss`,
+// together approximate Transaction::time_to_dismiss for use during transcript
+// partitioning, before the final Transaction exists. The reserve covers the
+// validation cost of every part, the calls' proof verification and VK reads
+// included, and the application cost of the non-call parts. gas_heuristic
+// covers, per call kept guaranteed, its gas with 20% overhead and its
+// application cost: state fetch/store and stack setup for its effects.
 
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(
-        &self,
-        params: &LedgerParameters,
-        include_external: bool,
-        public_input_count: usize,
-    ) -> RunningCost {
-        let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost {
+        const TIME_OVERHEAD: f64 = 1.2;
+        // Declared deletions are a lower bound, and any shortfall is priced as
+        // net growth; overhead is therefore applied to net growth, not churn.
+        const NET_WRITE_OVERHEAD: f64 = 1.2;
+        const DELETION_UNDERESTIMATE: f64 = 0.95;
+        let actual = self.gas_cost;
+        let churned = actual.bytes_written.min(actual.bytes_deleted);
+        let net_written = actual.bytes_written - churned;
+        let transcript_gas_cost_with_overhead = RunningCost {
+            bytes_written: churned
+                .saturating_add((net_written as f64 * NET_WRITE_OVERHEAD).ceil() as u64),
+            bytes_deleted: (actual.bytes_deleted as f64 * DELETION_UNDERESTIMATE).floor() as u64,
+            ..actual * TIME_OVERHEAD
+        };
         if !include_external {
             return transcript_gas_cost_with_overhead;
         }
         let model = &params.cost_model;
-
-        let mut validation = RunningCost::ZERO;
-        validation += model.cell_read(VERIFIER_KEY_SIZE as u64)
-            + model.map_index(EXPECTED_CONTRACT_DEPTH)
-            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
-        if public_input_count > 0 {
-            validation += model.proof_verify(public_input_count);
-            validation.compute_time += model.runtime_cost_model.verifier_key_load;
-        }
-        validation.compute_time = validation.compute_time * model.validation_factor;
 
         let mut application = RunningCost::ZERO;
         application += model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -884,117 +914,8 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
         application += model.stack_setup_cost_for_effects(&self.context.effects);
         application.compute_time = application.compute_time * model.guaranteed_factor;
 
-        transcript_gas_cost_with_overhead + validation + application
+        transcript_gas_cost_with_overhead + application
     }
-}
-
-/// Estimate per-transaction non-contract costs from the union of all calls'
-/// effects. Subtracted from the partition budget in `partition_transcripts`.
-///
-/// Effect sizes are summed across calls: exact for nullifiers/receives
-/// (disjoint), conservative overestimate for token types if calls overlap.
-fn per_tx_cost_reserve<D: DB>(
-    full_runs: &[QueryResults<ResultModeVerify, D>],
-    model: &TransactionCostModel,
-) -> CostDuration {
-    let zswap_inputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.claimed_nullifiers.size())
-        .sum();
-    let zswap_outputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.claimed_shielded_receives.size())
-        .sum();
-    let unshielded_inputs: usize = full_runs
-        .iter()
-        .map(|r| r.context.effects.unshielded_inputs.size())
-        .sum();
-    let unshielded_outputs: usize = full_runs
-        .iter()
-        .map(|r| {
-            r.context.effects.unshielded_outputs.size() + r.context.effects.unshielded_mints.size()
-        })
-        .sum();
-    let has_night_input = full_runs.iter().any(|r| {
-        r.context
-            .effects
-            .unshielded_inputs
-            .keys()
-            .any(|tt| tt == TokenType::Unshielded(NIGHT))
-    });
-    let has_night_output = full_runs.iter().any(|r| {
-        r.context
-            .effects
-            .unshielded_outputs
-            .keys()
-            .any(|tt| tt == TokenType::Unshielded(NIGHT))
-    });
-    let night_inputs = has_night_input as usize;
-    let night_outputs = has_night_output as usize;
-
-    // === Validation cost (parallelized) ===
-    let mut validation = model.baseline_cost;
-    // Zswap proof verifications
-    validation += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
-    validation += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
-    // Pedersen binding commitment check
-    if zswap_inputs + zswap_outputs > 0 {
-        validation.compute_time += model.runtime_cost_model.pedersen_valid;
-        validation.compute_time += model.runtime_cost_model.ec_mul;
-    }
-    // Unshielded offer signature verifications
-    validation.compute_time +=
-        model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
-    // Dust spend proof verification (heuristically assume 1)
-    validation += model.proof_verify(crate::dust::DUST_SPEND_PIS);
-    validation.compute_time = validation.compute_time * model.validation_factor;
-
-    // === Application cost ===
-    let mut application = model.baseline_cost;
-    // Replay protection
-    application += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
-    application +=
-        model.time_filter_map_insert(false) + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
-    // Unshielded UTXO processing
-    application += (model.map_index(EXPECTED_UTXO_DEPTH)
-        + model.map_remove(EXPECTED_UTXO_DEPTH, true)
-        + model.cell_delete(UTXO_SIZE as u64))
-        * unshielded_inputs;
-    application += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(UTXO_SIZE as u64, false))
-        * unshielded_outputs;
-    // NIGHT-specific dust generation costs
-    application += (model.merkle_tree_insert_unamortized(32, false)
-        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-        * night_inputs;
-    application +=
-        (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64)) * night_outputs;
-    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-    application += (model.merkle_tree_insert_amortized(32, false)
-        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-        * night_outputs;
-    application +=
-        (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(8, false)) * night_outputs;
-    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-    application += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false))
-        * night_outputs;
-    application += RunningCost::compute(
-        model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
-    );
-    // Dust spend application costs (1 spend)
-    application += model.map_index(32)
-        + model.map_insert(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false)
-        + model.cell_read(8)
-        + model.cell_write(8, true)
-        + model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-        + model.cell_write(FR_BYTES as u64, false)
-        + model.time_filter_map_lookup() * 2u64;
-
-    application.compute_time = application.compute_time * model.guaranteed_factor;
-    let total = validation + application;
-    CostDuration::max(total.compute_time, total.read_time)
 }
 
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
@@ -1010,7 +931,35 @@ pub fn partition_transcripts<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, |derived| derived)
+}
+
+/// Splits each call's transcript into its guaranteed and fallible parts.
+/// `expected_tx_shape`'s parts add their bytes to the time-to-dismiss allowance
+/// and their cost is reserved from it.
+pub fn partition_transcripts_with_tx_shape<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    expected_tx_shape: &TransactionShape,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, |_| expected_tx_shape.clone())
+}
+
+/// `choose_tx_shape` gets the shape the calls imply and returns the one to size
+/// the partition for.
+fn partition_transcripts_inner<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    if calls.is_empty() {
+        return Ok(Vec::new());
+    }
     let n = calls.len();
+    let calls = calls
+        .iter()
+        .map(PreTranscript::with_widest_commitment_indices)
+        .collect::<Vec<_>>();
     // Step 1: Generate a call graph between `calls`. Assert that this is a forest (no cycles,
     //      no multiple parents).
 
@@ -1092,24 +1041,35 @@ pub fn partition_transcripts<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let mut closure_budgets = closures
-        .iter()
-        .map(|closure| {
-            closure
-                .iter()
-                .map(|i| calls[*i].guaranteed_budget(params))
-                .sum::<CostDuration>()
-        })
-        .collect::<Vec<_>>();
-    // Reserve budget for per-transaction costs (validation baseline, zswap
-    // proofs, pedersen, replay protection, unshielded UTXO processing, dust).
-    // These don't scale per-call and are not included in the per-call heuristic.
-    let tx_reserve = per_tx_cost_reserve(&full_runs, &params.cost_model);
-    let spare_min_time_to_dismiss =
-        params.limits.min_time_to_dismiss - tx_reserve - closure_budgets.iter().copied().sum();
-    for budget in closure_budgets.iter_mut() {
-        *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
+    let tx_shape = choose_tx_shape(TransactionShape::for_effects(
+        full_runs
+            .iter()
+            .map(|run| (run.context.address, &run.context.effects)),
+    ));
+    let mock = mock_tx(&calls, &tx_shape);
+    let reserve = mock
+        .time_to_dismiss(params)
+        .expect("mock transactions are disjoint by construction");
+    let allowance = CostDuration::max(
+        params.limits.time_to_dismiss_per_byte * mock.serialized_size() as u64,
+        params.limits.min_time_to_dismiss,
+    );
+    if reserve >= allowance {
+        return Ok(calls
+            .iter()
+            .map(|call| call.split_at(0, params))
+            .collect::<Result<Vec<_>, _>>()?);
     }
+    let calls_budget = allowance - reserve;
+    let closure_sizes = closures
+        .iter()
+        .map(|closure| mock_calls(closure.iter().map(|i| &calls[*i])).serialized_size())
+        .collect::<Vec<_>>();
+    let total_size = closure_sizes.iter().sum::<usize>() as f64;
+    let closure_budgets = closure_sizes
+        .iter()
+        .map(|size| calls_budget * (*size as f64 / total_size))
+        .collect::<Vec<_>>();
 
     // Step 4: Partition the root nodes:
     //      4a: Split root nodes on `ckpt`s.
@@ -1147,15 +1107,10 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let public_input_count = calls[root].program.field_size() + 2;
-                let mut required_budget = partial_res
-                    .gas_heuristic(params, true, public_input_count)
-                    .max_time();
+                let mut required_budget = partial_res.gas_heuristic(params, true).max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next]
-                        .gas_heuristic(params, true, public_input_count)
-                        .max_time();
+                    required_budget += full_runs[next].gas_heuristic(params, true).max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {
@@ -1180,4 +1135,255 @@ pub fn partition_transcripts<D: DB>(
         .enumerate()
         .map(|(i, sections)| calls[i].split_at(sections, params))
         .collect::<Result<Vec<_>, _>>()?)
+}
+
+#[cfg(test)]
+mod partition_tests {
+    use super::{has_claims_in_fallible, with_fallibility};
+    use base_crypto::hash::HashOutput;
+    use coin_structure::coin::{Commitment as CoinCommitment, Nullifier};
+    use onchain_runtime::context::Effects;
+    use storage::db::InMemoryDB;
+
+    fn nul(b: u8) -> Nullifier {
+        Nullifier(HashOutput([b; 32]))
+    }
+
+    fn com(b: u8) -> CoinCommitment {
+        CoinCommitment(HashOutput([b; 32]))
+    }
+
+    /// Effects claiming one nullifier and one shielded spend.
+    fn effects(n: u8, c: u8) -> Effects<InMemoryDB> {
+        let mut e = Effects::<InMemoryDB>::default();
+        e.claimed_nullifiers = e.claimed_nullifiers.insert(nul(n));
+        e.claimed_shielded_spends = e.claimed_shielded_spends.insert(com(c));
+        e
+    }
+
+    #[test]
+    fn has_claims_in_fallible_matches_any_claiming_transcript() {
+        let a = effects(1, 10);
+        let b = effects(2, 20);
+        let all = [&a, &b];
+
+        // Claimed by the first, the second, and by neither.
+        let items = [nul(1), nul(2), nul(3)];
+        let flags = has_claims_in_fallible(&items, &all, |e, n| e.claimed_nullifiers.member(n));
+        assert_eq!(flags, vec![true, true, false]);
+
+        // No fallible transcripts at all => nothing is fallible.
+        let none: [&Effects<InMemoryDB>; 0] = [];
+        let flags = has_claims_in_fallible(&items, &none, |e, n| e.claimed_nullifiers.member(n));
+        assert_eq!(flags, vec![false, false, false]);
+    }
+
+    /// A nullifier claim must not make an output fallible, nor vice versa: the flags are
+    /// per-item-kind, and crossing them would move coins into the wrong offer.
+    #[test]
+    fn has_claims_in_fallible_does_not_cross_item_kinds() {
+        let a = effects(1, 10);
+        let all = [&a];
+
+        let commitments = [com(10), com(1)];
+        let flags = has_claims_in_fallible(&commitments, &all, |e, c| {
+            e.claimed_shielded_spends.member(c) || e.claimed_shielded_receives.member(c)
+        });
+        // com(1) shares its bytes with the claimed *nullifier*, but is not a claimed spend.
+        assert_eq!(flags, vec![true, false]);
+    }
+
+    #[test]
+    fn with_fallibility_partitions_and_preserves_order() {
+        let items = ['a', 'b', 'c', 'd'];
+        let flags = [false, true, false, true];
+        assert_eq!(with_fallibility(&items, &flags, false), vec!['a', 'c']);
+        assert_eq!(with_fallibility(&items, &flags, true), vec!['b', 'd']);
+
+        // Every item lands in exactly one of the two offers.
+        let guaranteed = with_fallibility(&items, &flags, false);
+        let fallible = with_fallibility(&items, &flags, true);
+        assert_eq!(guaranteed.len() + fallible.len(), items.len());
+    }
+}
+
+#[cfg(test)]
+mod gas_heuristic_tests {
+    use super::{LAST_COMMITMENT_INDEX, PreTranscript, QueryResultsExt};
+    use crate::structure::INITIAL_PARAMETERS;
+    use base_crypto::cost_model::{CostDuration, RunningCost, SyntheticCost};
+    use base_crypto::fab::AlignedValue;
+    use base_crypto::hash::HashOutput;
+    use coin_structure::coin::Commitment;
+    use coin_structure::contract::ContractAddress;
+    use onchain_runtime::context::{QueryContext, QueryResults};
+    use onchain_runtime::ops::{Key, Op, expect_checked};
+    use onchain_runtime::result_mode::ResultModeVerify;
+    use onchain_runtime::state::{ChargedState, StateValue};
+    use proptest::prelude::*;
+    use storage::arena::Sp;
+    use storage::db::InMemoryDB;
+    use storage::storage::Map;
+
+    fn declared(actual: RunningCost) -> RunningCost {
+        let res = QueryResults::<ResultModeVerify, InMemoryDB> {
+            context: QueryContext::new(
+                ChargedState::new(StateValue::Null),
+                ContractAddress::default(),
+            ),
+            events: Vec::new(),
+            gas_cost: actual,
+        };
+        res.gas_heuristic(&INITIAL_PARAMETERS, false)
+    }
+
+    proptest! {
+        // The declaration must survive the post-execution check. Padding writes in
+        // proportion to churn would price churned bytes as net growth.
+        #[test]
+        fn declared_writes_pad_net_growth_only(
+            written in 0u64..10_000_000,
+            deleted in 0u64..10_000_000,
+        ) {
+            let actual = RunningCost {
+                read_time: CostDuration::ZERO,
+                compute_time: CostDuration::ZERO,
+                bytes_written: written,
+                bytes_deleted: deleted,
+            };
+            let declared = declared(actual);
+            prop_assert!(declared.bytes_deleted <= actual.bytes_deleted);
+            prop_assert!(declared.bytes_written >= actual.bytes_written);
+
+            let actual_net = SyntheticCost::from(actual).bytes_written;
+            prop_assert!(declared.bytes_written <= actual.bytes_written + actual_net.div_ceil(5));
+        }
+    }
+
+    const CONTEXT_COM_INDICES: u8 = 1;
+
+    fn store_coin_index(commitment: Commitment) -> Vec<Op<ResultModeVerify, InMemoryDB>> {
+        vec![
+            Op::Dup { n: 2 },
+            Op::Idx {
+                cached: false,
+                push_path: false,
+                path: [
+                    Key::Value(CONTEXT_COM_INDICES.into()),
+                    Key::Value(expect_checked(AlignedValue::from(commitment))),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            Op::Addi { immediate: 0 },
+            Op::Swap { n: 0 },
+            Op::Pop,
+        ]
+    }
+
+    fn coin_context(
+        commitment: Commitment,
+        stored_index: u64,
+        context_index: u64,
+    ) -> QueryContext<InMemoryDB> {
+        let mut context = QueryContext::new(
+            ChargedState::new(StateValue::Cell(Sp::new(AlignedValue::from(stored_index)))),
+            ContractAddress::default(),
+        );
+        context.call_context.com_indices = Map::new().insert(commitment, context_index);
+        context
+    }
+
+    fn overwrite_coin_index(
+        context: QueryContext<InMemoryDB>,
+        commitment: Commitment,
+    ) -> RunningCost {
+        context
+            .query(
+                &store_coin_index(commitment),
+                None,
+                &INITIAL_PARAMETERS.cost_model.runtime_cost_model,
+            )
+            .unwrap()
+            .gas_cost
+    }
+
+    #[test]
+    fn declared_writes_cover_the_real_commitment_index() {
+        const HELD_COIN_INDEX: u64 = 1;
+        const OUTPUT_ORDINAL: u64 = 0;
+        const FRESH_TREE_INDEX: u64 = 2;
+
+        let commitment = Commitment(HashOutput([7; 32]));
+        let rehearsal = PreTranscript {
+            context: coin_context(commitment, HELD_COIN_INDEX, OUTPUT_ORDINAL),
+            program: store_coin_index(commitment),
+            comm_comm: None,
+        };
+        let ordinal_declared =
+            declared(overwrite_coin_index(rehearsal.context.clone(), commitment));
+        let widened_declared = declared(overwrite_coin_index(
+            rehearsal.with_widest_commitment_indices().context,
+            commitment,
+        ));
+
+        let fresh_tree = overwrite_coin_index(
+            coin_context(commitment, HELD_COIN_INDEX, FRESH_TREE_INDEX),
+            commitment,
+        );
+        assert!(fresh_tree.within_bounds(&widened_declared));
+        assert!(
+            fresh_tree.within_bounds(&ordinal_declared),
+            "this assertion is here just to bring attention, but it might be fine that this fails"
+        );
+        let full_tree = overwrite_coin_index(
+            coin_context(commitment, HELD_COIN_INDEX, LAST_COMMITMENT_INDEX),
+            commitment,
+        );
+        assert!(
+            !full_tree.within_bounds(&ordinal_declared),
+            "the ordinal stand-in alone does not cover the last tree index; if this fails adjust\
+            this test; consider removing 'with_widest_commitment_indices' if other code change now\
+            covers this case"
+        );
+        assert!(
+            full_tree.within_bounds(&widened_declared),
+            "declared {} written bytes, the last tree index writes {}",
+            widened_declared.bytes_written,
+            full_tree.bytes_written
+        );
+    }
+
+    #[test]
+    fn widest_commitment_indices_keep_their_order_and_end_at_the_last_leaf() {
+        let first = Commitment(HashOutput([1; 32]));
+        let second = Commitment(HashOutput([2; 32]));
+        let third = Commitment(HashOutput([3; 32]));
+        let mut context = QueryContext::new(
+            ChargedState::new(StateValue::Null),
+            ContractAddress::default(),
+        );
+        context.call_context.com_indices = Map::new()
+            .insert(first, 0)
+            .insert(second, 1)
+            .insert(third, LAST_COMMITMENT_INDEX);
+        let widened = PreTranscript {
+            context,
+            program: Vec::<Op<ResultModeVerify, InMemoryDB>>::new(),
+            comm_comm: None,
+        }
+        .with_widest_commitment_indices();
+
+        let index = |commitment| {
+            *widened
+                .context
+                .call_context
+                .com_indices
+                .get(&commitment)
+                .unwrap()
+        };
+        assert_eq!(index(first), LAST_COMMITMENT_INDEX - 2);
+        assert_eq!(index(second), LAST_COMMITMENT_INDEX - 1);
+        assert_eq!(index(third), LAST_COMMITMENT_INDEX);
+    }
 }
