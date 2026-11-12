@@ -130,7 +130,7 @@ describe.concurrent('Ledger API - ZswapLocalStateX [@slow][@proving]', () => {
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const state = new ZswapChainState();
 
-    const stateAfter = state.tryApply(proofErasedTransaction.guaranteedOffer!)[0].postBlockUpdate(new Date(0));
+    const stateAfter = state.tryApply(proofErasedTransaction.guaranteedOffer!)[0].postBlockUpdate(new Date(0), 1000n);
     const localState = new ZswapLocalState();
 
     const localStateAfter = localState.applyCollapsedUpdate(new MerkleTreeCollapsedUpdate(stateAfter, 0n, 1n));

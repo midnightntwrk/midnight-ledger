@@ -18,16 +18,18 @@ use base_crypto::rng::SplittableRng;
 use base_crypto::time::Timestamp;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
+use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::structure::{ContractAction, ContractDeploy, INITIAL_PARAMETERS, Transaction};
 use midnight_ledger::test_utilities::{
-    Resolver, TestState, test_intents, test_resolver, tx_prove, verifier_key,
+    Resolver, TestState, contract_operation, test_intents, test_resolver, tx_prove,
 };
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+use onchain_runtime::state::{ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serialize::Serializable;
@@ -66,7 +68,7 @@ async fn noop_dos() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = contract_operation(&RESOLVER, "count").await;
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -174,26 +176,10 @@ async fn noop_dos() {
         noop_dos.push(Op::Dup { n: 1 });
         noop_dos.push(Op::Pop);
     }
+
     match &mut tx {
         Transaction::Standard(stx) => {
-            let mut call_action = (*stx
-                .intents
-                .clone()
-                .into_iter()
-                .collect::<std::collections::HashMap<_, _>>()
-                .iter()
-                .flat_map(|i| i.1.actions.iter_deref().cloned())
-                .find_map(|action| {
-                    if let ContractAction::Call(call) = action {
-                        Some(call)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap())
-            .clone();
-
-            call_action.fallible_transcript = Some(Sp::new(
+            let noop_transcript = Sp::new(
                 partition_transcripts(
                     &[PreTranscript {
                         context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
@@ -206,14 +192,59 @@ async fn noop_dos() {
                     .1
                     .clone()
                     .unwrap(),
-            ));
-            dbg!(call_action);
+            );
+            // The mutated call has to go *back* into the transaction: the
+            // whole point is to make `well_formed` walk the hostile transcript.
+            let mut intents = stx.intents.clone();
+            let mut patched = false;
+            for (segment, intent) in stx.intents.clone().into_iter() {
+                let actions = intent
+                    .actions
+                    .iter_deref()
+                    .cloned()
+                    .map(|action| match action {
+                        ContractAction::Call(call) => {
+                            let mut call = (*call).clone();
+                            call.fallible_transcript = Some(noop_transcript.clone());
+                            patched = true;
+                            ContractAction::Call(Sp::new(call))
+                        }
+                        other => other,
+                    })
+                    .collect::<Vec<_>>();
+                let mut intent = intent.clone();
+                intent.actions = actions.into();
+                intents = intents.insert(segment, intent);
+            }
+            assert!(
+                patched,
+                "no contract call found to attach the transcript to"
+            );
+            stx.intents = intents;
         }
         _ => unreachable!(),
     }
     dbg!(Serializable::serialized_size(&tx));
+    // Assert *which* check rejects the transaction, so that an unrelated
+    // failure cannot make this pass without exercising the hostile path.
+
+    // With fees enforced, pricing the declared public inputs rejects it.
     let t0 = Instant::now();
-    dbg!(tx.well_formed(&state.ledger, strictness, state.time)).ok();
-    let t1 = Instant::now();
-    assert!(t1 - t0 < Duration::from_millis(100));
+    let res = tx.well_formed(&state.ledger, WellFormedStrictness::default(), state.time);
+    let elapsed = t0.elapsed();
+    assert!(
+        matches!(res, Err(MalformedTransaction::FeeCalculation(_))),
+        "expected a fee calculation failure, got {res:?}"
+    );
+    assert!(elapsed < Duration::from_millis(100), "took {elapsed:?}");
+
+    // With fees not enforced, the public-input cap rejects it.
+    let t0 = Instant::now();
+    let res = tx.well_formed(&state.ledger, strictness, state.time);
+    let elapsed = t0.elapsed();
+    assert!(
+        matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
+        "expected the public-input cap to reject it, got {res:?}"
+    );
+    assert!(elapsed < Duration::from_millis(100), "took {elapsed:?}");
 }

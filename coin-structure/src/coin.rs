@@ -18,7 +18,6 @@ use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAto
 use base_crypto::hash::persistent_hash;
 use base_crypto::hash::{BLANK_HASH, PERSISTENT_HASH_BYTES};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
-use base_crypto::schnorr::VerifyingKey;
 use fake::Dummy;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
@@ -59,6 +58,7 @@ use std::iter::once;
 #[tag = "zswap-nullifier[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Nullifier(pub HashOutput);
+serialize::encoding_shape_as!(Nullifier, [u8; 32]);
 tag_enforcement_test!(Nullifier);
 
 impl rand::distributions::Distribution<Nullifier> for rand::distributions::Standard {
@@ -91,6 +91,7 @@ randomised_serialization_test!(Nullifier);
 #[tag = "zswap-coin-commitment[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Commitment(pub HashOutput);
+serialize::encoding_shape_as!(Commitment, [u8; 32]);
 tag_enforcement_test!(Commitment);
 
 impl rand::distributions::Distribution<Commitment> for rand::distributions::Standard {
@@ -289,6 +290,37 @@ pub enum TokenType {
     Dust,
 }
 tag_enforcement_test!(TokenType);
+
+/// A position in a [`TokenType`] encoding.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum TokenTypeShapeState {
+    /// Before the tag.
+    Start,
+    /// Inside a hash payload, with this many bytes left.
+    Payload(u8),
+    /// A complete encoding.
+    Done,
+}
+
+impl serialize::EncodingShape for TokenType {
+    type State = TokenTypeShapeState;
+    fn start() -> Self::State {
+        TokenTypeShapeState::Start
+    }
+    fn step(state: &Self::State, byte: u8) -> Option<Self::State> {
+        use TokenTypeShapeState::*;
+        match (state, byte) {
+            (Start, 0 | 1) => Some(Payload(32)),
+            (Start, 2) => Some(Done),
+            (Payload(1), _) => Some(Done),
+            (Payload(n), _) => Some(Payload(n - 1)),
+            _ => None,
+        }
+    }
+    fn accepts(state: &Self::State) -> bool {
+        *state == TokenTypeShapeState::Done
+    }
+}
 
 impl Aligned for TokenType {
     fn alignment() -> Alignment {
@@ -881,6 +913,7 @@ impl PublicAddress {
 #[storable(base)]
 #[tag = "user-address[v1]"]
 pub struct UserAddress(pub HashOutput);
+serialize::encoding_shape_as!(UserAddress, [u8; 32]);
 tag_enforcement_test!(UserAddress);
 
 impl rand::distributions::Distribution<UserAddress> for rand::distributions::Standard {
@@ -889,9 +922,17 @@ impl rand::distributions::Distribution<UserAddress> for rand::distributions::Sta
     }
 }
 
-impl From<VerifyingKey> for UserAddress {
-    fn from(value: VerifyingKey) -> Self {
+impl From<base_crypto::schnorr::VerifyingKey> for UserAddress {
+    fn from(value: base_crypto::schnorr::VerifyingKey) -> Self {
         UserAddress(persistent_hash(value.binary_vec().as_slice()))
+    }
+}
+
+impl From<base_crypto::ecdsa::VerifyingKey> for UserAddress {
+    fn from(value: base_crypto::ecdsa::VerifyingKey) -> Self {
+        let mut repr = b"midnight:ecdsa:".to_vec();
+        value.binary_repr(&mut repr);
+        UserAddress(persistent_hash(repr.as_slice()))
     }
 }
 
@@ -910,6 +951,14 @@ hash_serde!(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn map_key_shapes_match_decoding() {
+        serialize::check_encoding_shape::<super::Commitment>();
+        serialize::check_encoding_shape::<super::Nullifier>();
+        serialize::check_encoding_shape::<super::TokenType>();
+        serialize::check_encoding_shape::<crate::contract::ContractAddress>();
+    }
+
     #[cfg(feature = "proptest")]
     use proptest::prelude::*;
 

@@ -22,22 +22,40 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
+
+      # Cheap, dependency-free guard placed before the Nix install.
+      # `zkir-precompiles` feeds the `local-params` derivation, but the
+      # crates embed a committed copy of that derivation's output from
+      # `*/static` via `include_bytes!`. Cargo never regenerates it, so a
+      # circuit change without a rebuild goes unnoticed until the data provider
+      # rejects the published artifacts.
+      - name: Check zkir-precompiles and committed static artifacts are in sync
+        run: ./scripts/check-zkir-precompiles-sync.sh
 
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -73,7 +91,8 @@ jobs:
 
       - name: Spellcheck comments
         run: |
-          nix develop .#ci -c cargo spellcheck -j1
+          df -h / /nix
+          nix develop .#ci-tools -c cargo spellcheck -j1
 
       # Run Cargo Clippy on the whole workspace with all features. This is important
       # to avoid bitrot of code that is feature gated behind non-default features
@@ -90,7 +109,11 @@ jobs:
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo doc --all-features --no-deps
 
       - name: Cargo audit
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci-tools -c cargo audit
+
+      - name: Report disk usage
+        if: always()
+        run: df -h / /nix
 
   build-wasm:
     strategy:
@@ -98,22 +121,31 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -160,6 +192,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
 
@@ -169,22 +208,31 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
@@ -227,28 +275,42 @@ jobs:
           jq -cR 'fromjson? | select( .type != "report" )' test-results.json | cargo2junit > ./target/test-results.xml
           cp test-results.json ./target/
 
+      - name: Test zkir-wasm (wasm32, node)
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: nix develop -c cargo test --release --target wasm32-unknown-unknown -p midnight-zkir-wasm
+
   build-proof-server:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Free up runner disk space
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          df -h /
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
+            # crates.io 403s any User-Agent starting with "curl/", which is what
+            # nixpkgs' fetchurl sends. Flake-local overlays cannot reach nixpkgs
+            # instantiated inside other flakes (the pinned zkir input), so override
+            # the agent for every fixed-output builder here. curl rejects
+            # --user-agent=X, and impure-env values cannot contain spaces, hence -A.
+            # The feature list is spelled out in full: install-nix-action skips its
+            # own "experimental-features = nix-command flakes" default whenever this
+            # block merely contains that substring (install-nix.sh:60).
+            experimental-features = nix-command flakes configurable-impure-env
+            impure-env = NIX_CURL_FLAGS=-Amidnight-ledger/1.0
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true

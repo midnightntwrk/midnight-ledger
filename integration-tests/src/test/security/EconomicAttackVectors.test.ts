@@ -20,6 +20,7 @@ import {
   ZswapChainState,
   ZswapInput,
   createShieldedCoinInfo,
+  SignatureEnabled,
   UnshieldedOffer,
   sampleIntentHash,
   sampleSigningKey,
@@ -193,7 +194,7 @@ describe('Economic Attack Vector Tests', () => {
             type: tokenType.raw
           }
         ],
-        [signData(signingKey, new Uint8Array(32))]
+        [new SignatureEnabled(signData(signingKey, new Uint8Array(32)))]
       );
 
       intent.guaranteedUnshieldedOffer = validOffer;

@@ -18,7 +18,6 @@
 use base_crypto::fab::{AlignedValue, Value};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure::contract::ContractAddress;
@@ -27,19 +26,21 @@ use futures::FutureExt;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
+use midnight_ledger::structure::Signature;
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofPreimageMarker, Transaction,
 };
-use midnight_ledger::test_utilities::{Resolver, verifier_key};
+use midnight_ledger::test_utilities::{Resolver, contract_operation};
 use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
 use midnight_ledger::test_utilities::{Tx, TxBound};
 use midnight_ledger::test_utilities::{test_intents, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+use onchain_runtime::state::{ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{CryptoRng, Rng, SeedableRng};
 use serialize::Serializable;
@@ -161,12 +162,12 @@ async fn micro_dao_inner(mode: TestMode) {
     let org_sk: HashOutput = rng.r#gen();
     let sep = b"lares:udao:pk";
     let org_pk = persistent_commit(sep, org_sk);
-    let advance_op = ContractOperation::new(verifier_key(&RESOLVER, "advance").await);
-    let buy_in_op = ContractOperation::new(verifier_key(&RESOLVER, "buyIn").await);
-    let cash_out_op = ContractOperation::new(verifier_key(&RESOLVER, "cashOut").await);
-    let set_topic_op = ContractOperation::new(verifier_key(&RESOLVER, "setTopic").await);
-    let vote_commit_op = ContractOperation::new(verifier_key(&RESOLVER, "voteCommit").await);
-    let vote_reveal_op = ContractOperation::new(verifier_key(&RESOLVER, "voteReveal").await);
+    let advance_op = contract_operation(&RESOLVER, "advance").await;
+    let buy_in_op = contract_operation(&RESOLVER, "buyIn").await;
+    let cash_out_op = contract_operation(&RESOLVER, "cashOut").await;
+    let set_topic_op = contract_operation(&RESOLVER, "setTopic").await;
+    let vote_commit_op = contract_operation(&RESOLVER, "voteCommit").await;
+    let vote_reveal_op = contract_operation(&RESOLVER, "voteReveal").await;
 
     dbg!(cfg!(feature = "proving"));
     // Initial states

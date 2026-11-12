@@ -39,7 +39,7 @@ struct Args {
     port: u16,
     #[arg(short, long, env = "MIDNIGHT_PROOF_SERVER_VERBOSE")]
     verbose: bool,
-    #[arg(long, default_value_t = 0, env = "MIDNIGHT_PROOF_SERVER_JOB_CAPACITY")]
+    #[arg(long, default_value_t = 10, env = "MIDNIGHT_PROOF_SERVER_JOB_CAPACITY")]
     job_capacity: usize,
     #[arg(long, default_value_t = 2, env = "MIDNIGHT_PROOF_SERVER_NUM_WORKERS")]
     num_workers: usize,

@@ -206,6 +206,9 @@ As some dimensions may be consistently less than 50% full other dimensions
 dominating demand, we do not wish these to become effectively free. To prevent
 this, we impose a lower bound on price adjustment, where any dimension's price
 must be at least a fixed fraction of the most expensive dimension's price.
+Futhermore, to prevent an exponential race to zero for fees overall on sparse
+environments, we impose a small, but non-trivial price floor on the overall
+price, governed by a parameter.
 
 Churn is priced 'the same' as storage cost at a relative level, but with much
 higher block capacity, meaning that in relative terms, is a fraction of the
@@ -274,7 +277,7 @@ impl FeePrices {
     //
     // It should be no less than the average value of the dimension in
     // `block_sum`.
-    fn update(self, block_sum: NormalizedCost, overall_fullness: FixedPoint) -> Self {
+    fn update(self, block_sum: NormalizedCost, overall_fullness: FixedPoint, params: LedgerParameters) -> Self {
         let mut updated = FeePrices {
             overall_price: self.overall_price * normalized_scaling_curve(overall_fullness),
             read_time: self.read_time * normalized_scaling_curve(block_sum.read_time),
@@ -295,6 +298,9 @@ impl FeePrices {
             // Normalize dimension average to 1, making these all factors to
             // the overall price.
             *dimension = *dimension / dim_average
+        }
+        if updated.overall_price < params.min_block_price {
+            updated.overall_proce = params.min_block_price;
         }
         updated
     }
@@ -499,6 +505,17 @@ split, the application stage should be split into the guaranteed segment and the
 cost. This is to allow enforcing separate bounds on the guaranteed segment
 execution time.
 
+The total cost is the sum of the guaranteed segment's cost and each fallible
+segment's cost, each converted to a `SyntheticCost` *separately*. Converting
+nets bytes written against bytes deleted, and a deletion may only offset writes
+that are certain to commit with it. Within a segment this holds: each
+transcript's actual deletions must be at least those it declared, and the
+segment commits or fails as a whole. Across segments it does not: a fallible
+segment may fail, discarding its deletions, while the guaranteed segment or
+another fallible segment still commits its writes. Netting the segments
+together would let declared deletions that never happen lower the priced net
+writes of the segments that do commit.
+
 ### Guaranteed Segment limits
 
 The execution time of the guaranteed segment is limited separately and for
@@ -524,6 +541,7 @@ struct LedgerLimits {
 struct LedgerParameters {
     limits: LedgerLimits,
     cost_model: CostModel,
+    min_block_price: FixedPoint,
     // ...
 }
 

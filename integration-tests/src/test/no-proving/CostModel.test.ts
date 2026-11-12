@@ -16,7 +16,6 @@ import {
   DustActions,
   Intent,
   LedgerParameters,
-  type SyntheticCost,
   type NormalizedCost,
   Transaction,
   TransactionCostModel,
@@ -175,12 +174,23 @@ describe('Ledger API - CostModel', () => {
     const state = TestState.new();
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
@@ -217,6 +227,17 @@ describe('Ledger API - CostModel', () => {
     for (let i = 0; i < ITERATIONS; i++) state.rewardsUnshielded(randomUnshieldedToken, REWARDS_AMOUNT);
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, {
       offerKind: 'guaranteed',
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
@@ -225,7 +246,7 @@ describe('Ledger API - CostModel', () => {
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
@@ -240,6 +261,17 @@ describe('Ledger API - CostModel', () => {
     for (let i = 0; i < ITERATIONS; i++) state.rewardsUnshielded(randomUnshieldedToken, REWARDS_AMOUNT);
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, {
       offerKind: 'fallible',
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
@@ -248,7 +280,7 @@ describe('Ledger API - CostModel', () => {
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
@@ -497,9 +529,10 @@ describe('Ledger API - CostModel', () => {
   /**
    * @given A initial state, then many consecutive empty blocks
    * @when  Fast-forwarding with zero utilization across all dimensions
-   * @then  All prices drift down monotonically and never go below zero
+   * @then  overallPrice is non-increasing and all factors stay non-negative
+   *        (overallPrice is clamped at the price floor under idle from a fresh state)
    */
-  test('prices drift down across empty blocks and stay non-negative', () => {
+  test('prices stay non-negative and non-increasing across empty blocks', () => {
     const ITERATIONS = 12;
     const state = TestState.new();
 
@@ -575,7 +608,6 @@ describe('Ledger API - CostModel', () => {
     state.fastForward(TEN_SECS, largeWrite);
     const B = state.ledger.parameters.feePrices;
 
-    console.log(B, A, largeWrite);
     expect(withinCap(B.overallPrice, A.overallPrice, maxAdj)).toBeTruthy();
     expect(B.overallPrice).toBeGreaterThanOrEqual(A.overallPrice - EPS);
     expect(B.writeFactor).toBeGreaterThanOrEqual(A.writeFactor - EPS);
@@ -656,34 +688,6 @@ describe('Ledger API - CostModel', () => {
       expect(cur.writeFactor).toBeGreaterThanOrEqual(0);
 
       prev = { ...cur };
-    }
-  });
-
-  /**
-   * @given A initial state
-   * @when  We apply many empty blocks
-   * @then  Prices approach zero but never cross below zero
-   */
-  test('very long empty run never produces negative prices', () => {
-    const ITERATIONS = 100;
-    const state = TestState.new();
-
-    const empty: NormalizedCost = {
-      readTime: 0,
-      computeTime: 0,
-      blockUsage: 0,
-      bytesWritten: 0,
-      bytesChurned: 0
-    };
-
-    for (let i = 0; i < ITERATIONS; i++) {
-      state.fastForward(TEN_SECS, empty);
-      const p = state.ledger.parameters.feePrices;
-      expect(p.overallPrice).toBeGreaterThanOrEqual(0);
-      expect(p.readFactor).toBeGreaterThanOrEqual(0);
-      expect(p.computeFactor).toBeGreaterThanOrEqual(0);
-      expect(p.blockUsageFactor).toBeGreaterThanOrEqual(0);
-      expect(p.writeFactor).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -834,5 +838,111 @@ describe('Ledger API - CostModel', () => {
     expect(end10.computeFactor - end60.computeFactor).toBeLessThanOrEqual(EPS);
     expect(end10.blockUsageFactor - end60.blockUsageFactor).toBeLessThanOrEqual(EPS);
     expect(end10.writeFactor - end60.writeFactor).toBeLessThanOrEqual(EPS);
+  });
+
+  /**
+   * @given A pre-spiked state, then a long run of empty blocks
+   * @when  overallPrice has fully drained
+   * @then  overallPrice drifts down monotonically each block, never falls below the floor,
+   *        converges to the floor (= INITIAL_FIXED_PRICE), and holds steady afterwards
+   */
+  test('overallPrice converges to and pins at the floor under sustained idle', () => {
+    const state = TestState.new();
+
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+
+    for (let i = 0; i < 5; i++) state.fastForward(TEN_SECS, spike);
+    const peak = state.ledger.parameters.feePrices.overallPrice;
+
+    expect(peak).toBeGreaterThan(INITIAL_FIXED_PRICE + EPS);
+
+    const empty: NormalizedCost = {
+      readTime: 0,
+      computeTime: 0,
+      blockUsage: 0,
+      bytesWritten: 0,
+      bytesChurned: 0
+    };
+
+    let prev = peak;
+    for (let i = 0; i < 200; i++) {
+      state.fastForward(TEN_SECS, empty);
+      const cur = state.ledger.parameters.feePrices.overallPrice;
+      expect(cur).toBeLessThanOrEqual(prev + EPS);
+      expect(cur).toBeGreaterThanOrEqual(INITIAL_FIXED_PRICE - EPS);
+      prev = cur;
+    }
+
+    // After a peak, and 200 empty blocks, overall price drops to INITIAL_FIXED_PRICE
+    expect(state.ledger.parameters.feePrices.overallPrice).toEqual(INITIAL_FIXED_PRICE);
+  });
+
+  /**
+   * @given A state idled to the floor (overallPrice == INITIAL_FIXED_PRICE)
+   * @when  A read-only pressure block is applied
+   * @then  readFactor still rises (the floor clamps overallPrice only —
+   *        per-dimension factor dynamics remain active)
+   */
+  test('floor clamps overallPrice only - per-dimension factor dynamics still respond', () => {
+    const state = TestState.new();
+
+    const empty: NormalizedCost = {
+      readTime: 0,
+      computeTime: 0,
+      blockUsage: 0,
+      bytesWritten: 0,
+      bytesChurned: 0
+    };
+    for (let i = 0; i < 30; i++) state.fastForward(TEN_SECS, empty);
+    expect(state.ledger.parameters.feePrices.overallPrice).toEqual(INITIAL_FIXED_PRICE);
+
+    const before = state.ledger.parameters.feePrices;
+
+    // Read-only pressure: readFactor must rise - the floor on overallPrice should be irrelevant to factor dynamics
+    const readSpike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 800_000_000_000n,
+      computeTime: 0n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+
+    state.fastForward(TEN_SECS, readSpike);
+    const after = state.ledger.parameters.feePrices;
+
+    expect(after.readFactor).toBeGreaterThan(before.readFactor + EPS);
+  });
+
+  /**
+   * @given A fresh state at the floor (overallPrice == INITIAL_FIXED_PRICE)
+   * @when  A compute spike is applied
+   * @then  overallPrice rises (the floor is a lower bound only, never a cap)
+   *        and the per-block change is bounded by maxPriceAdjustment
+   */
+  test('floor does not cap upward movement', () => {
+    const state = TestState.new();
+    const baseline = state.ledger.parameters.feePrices.overallPrice;
+
+    expect(baseline).toEqual(INITIAL_FIXED_PRICE);
+
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const after = state.ledger.parameters.feePrices.overallPrice;
+
+    expect(after).toBeGreaterThan(baseline + EPS);
+    expect(withinCap(after, baseline, maxAdj)).toBeTruthy();
   });
 });

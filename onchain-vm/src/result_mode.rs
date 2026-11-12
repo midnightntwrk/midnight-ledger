@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::error::OnchainProgramError;
+use crate::ops::VersionedLogItem;
 use base_crypto::fab::AlignedValue;
 use derive_where::derive_where;
-use runtime_state::state::StateValue;
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged};
 use std::fmt::Debug;
@@ -35,7 +35,7 @@ pub trait ResultMode<D: DB>: Clone + Debug + 'static {
         result: &Self::ReadResult,
         real: &AlignedValue,
     ) -> Result<Option<Self::Event>, OnchainProgramError<D>>;
-    fn process_log(event: &StateValue<D>) -> Option<Self::Event>;
+    fn process_log(event: VersionedLogItem<D>) -> Option<Self::Event>;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -43,7 +43,7 @@ pub struct ResultModeVerify;
 
 impl<D: DB> ResultMode<D> for ResultModeVerify {
     type ReadResult = AlignedValue;
-    type Event = StateValue<D>;
+    type Event = VersionedLogItem<D>;
     fn process_read(
         expected: &Self::ReadResult,
         actual: &AlignedValue,
@@ -57,8 +57,8 @@ impl<D: DB> ResultMode<D> for ResultModeVerify {
             Ok(None)
         }
     }
-    fn process_log(event: &StateValue<D>) -> Option<Self::Event> {
-        Some(event.clone())
+    fn process_log(event: VersionedLogItem<D>) -> Option<Self::Event> {
+        Some(event)
     }
 }
 
@@ -69,13 +69,13 @@ impl<D: DB> ResultMode<D> for ResultModeVerify {
     tag = "tag",
     content = "content",
     bound(
-        serialize = "StateValue<D>: Serialize",
-        deserialize = "StateValue<D>: Deserialize<'de>"
+        serialize = "VersionedLogItem<D>: Serialize",
+        deserialize = "VersionedLogItem<D>: Deserialize<'de>"
     )
 )]
 pub enum GatherEvent<D: DB> {
     Read(AlignedValue),
-    Log(StateValue<D>),
+    Log(VersionedLogItem<D>),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -90,7 +90,7 @@ impl<D: DB> ResultMode<D> for ResultModeGather {
     ) -> Result<Option<Self::Event>, OnchainProgramError<D>> {
         Ok(Some(GatherEvent::Read(real.clone())))
     }
-    fn process_log(event: &StateValue<D>) -> Option<Self::Event> {
-        Some(GatherEvent::Log(event.clone()))
+    fn process_log(event: VersionedLogItem<D>) -> Option<Self::Event> {
+        Some(GatherEvent::Log(event))
     }
 }

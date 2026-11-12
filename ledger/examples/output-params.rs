@@ -15,6 +15,7 @@
 //! transaction with the toolkit. This file serves a practical purpose to update the parameters,
 //! and as a paper-trail for why an update was performed.
 
+use midnight_ledger_v9 as midnight_ledger;
 use std::path::PathBuf;
 
 use base_crypto::{

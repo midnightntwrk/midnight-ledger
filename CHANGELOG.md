@@ -6,10 +6,221 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
+- feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
+
+## Ledger 9.1.0.2-rc.0
+
+- note: alongside the `ledger` crate `1.0.2`, this release candidate ships
+  `ledger-wasm` `1.0.2-rc.0`, `onchain-runtime-wasm` `4.0.2-rc.0` and the proof
+  server `9.0.2-rc.0`, with `storage` `3.1.0` and `transient-crypto` `3.1.0`.
+  Every other crate is unchanged from 9.1.0.1.
+- fix: the wasm API deserializes contract state containing a non-canonical
+  trie shape that `insert` produces in some cases, instead of rejecting it.
+- feat: add `TransactionShape`, the counts of a transaction's non-call parts;
+  `TransactionShape::for_calls` derives the balanced transaction's counts from
+  the calls.
+- feat: add `partition_transcripts_with_tx_shape` and `add_calls_with_tx_shape`
+  to partition calls against the final transaction's part counts.
+- feat: expose `TransactionShape` in the wasm API as a class obtained from
+  `TransactionShape.forCalls`, with an optional `expectedTxShape` argument to
+  `partitionTranscripts` and `Transaction.addCalls`.
+- feat: for transcript partitioning, the predicted transaction size and the
+  reserve are calculated from a mock transaction of the calls'
+  `TransactionShape`; `add_calls` folds the Zswap parts it is given into the
+  shape.
+- fix: transcript partitioning sizes the guaranteed section against the
+  predicted transaction's time-to-dismiss allowance,
+  `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus the
+  reserve, instead of a floor the reserve could not lower.
+- fix: transcript partitioning reserves every call's proof verification,
+  including calls that end up fully fallible, and prices each by the call's own
+  public inputs rather than its root call's.
+- fix: `partition_transcripts` rehearses each call with the widest commitment
+  tree indices the chain could assign, so a contract that stores a coin's
+  `mt_index` declares enough written bytes. Clients rehearse with an output's
+  ordinal in place of the index the chain assigns on inclusion; once the tree
+  had grown, the real index took more bytes than the ordinal, and the node
+  rejected the transaction for running out of gas budget.
+
+## Ledger 9.1.0.1
+
+- note: alongside the ledger crates, this release ships `ledger-wasm` `1.0.1`,
+  `onchain-runtime-wasm` `4.0.1` and the proof server `9.0.1`. `zkir-wasm`
+  and `zkir-v3-wasm` are unchanged from 9.1.0.0.
+- security: transaction pricing and `well_formed` take time linear in the
+  encoding, however storage nodes are shared. Previously a few hundred bytes
+  repeating entries through shared subtrees could force exponential work
+  before the fee check. Repeated entries are rejected first, then fees are
+  computed, and only then do the checks that walk every entry run.
+- security: committee signatures repeated in a transaction
+  (`MalformedTransaction::RepeatedCommitteeSignature`) and dust registrations
+  repeated in a transaction, compared without their signatures
+  (`MalformedTransaction::RepeatedDustRegistration`), are rejected. Pricing
+  rejects any repeated entry with `FeeCalculationError::RepeatedEntries`.
+- security: contracts hold at most `MAX_CONTRACT_OPERATIONS` (256)
+  operations. Larger deploys are malformed
+  (`MalformedContractDeploy::TooManyOperations`), and maintenance updates
+  exceeding the cap fail (`TransactionInvalid::ContractTooManyOperations`).
+- security: each deploy is charged for its full state, through a walk bounded
+  by the block's write and churn limits.
+- security: the time to dismiss counts every path to a call's effects, and a
+  call's public-input count includes its transcripts' program lengths.
+- breaking: `Transaction::application_cost` and `Transaction::time_to_dismiss`
+  take `&LedgerParameters` and return `Result<_, FeeCalculationError>`.
+- breaking: `FeeCalculationError` gains `RepeatedEntries` and is
+  `#[non_exhaustive]`.
+- security: `zswap` offers verify each distinct input, output and transient
+  once, however often sharing repeats it.
+- security: price each segment's writes separately. Previously, the guaranteed
+  and all fallible costs were summed before netting bytes written against bytes
+  deleted, so a fallible transcript declaring deletions it never performs could
+  offset the writes of segments that commit, lowering their fees and bypassing
+  the block limit on net bytes written.
+- fix: reject contract calls declaring more than `MAX_CALL_PUBLIC_INPUTS` public inputs, 
+  bounding the allocation on paths where fee enforcement is disabled.
+- breaking: `ContractCall::public_inputs` returns a `Result`, failing with
+  `TooManyPublicInputs` instead of materializing more than
+  `MAX_CALL_PUBLIC_INPUTS` field elements.
+- fix: don't draw the illegal segment 0 for the `random` and `guaranteedOnly`
+  segment specifiers in `addCalls`
+- security: contract call transcripts declaring `compute_time` or `read_time`
+  beyond the block limits are rejected as malformed, with the new
+  `MalformedTransaction::TranscriptGasExceedsBlockLimits`. Previously a
+  declaration of `2^63` ps or more was priced as zero compute, bypassing the
+  block compute limit and the time-to-dismiss check.
+- fix: `LedgerParameters::min_claimable_rewards` no longer drops to zero when a
+  night/dust ratio between 0.5 and 1 overflows `FixedPoint` division.
+- security: contract call transcripts listing `TokenType::Dust` in
+  `unshielded_inputs` or `unshielded_outputs` are rejected as malformed, with
+  the new `MalformedTransaction::ContractDustTransfer`. Previously a contract
+  could absorb the surplus Dust balance credited by a registration's
+  `allow_fee_payment`, while the registration still minted the full
+  entitlement to the registrant.
+- security: wallet event replay credits a Zswap output only if the recovered
+  coin opens the event's commitment. Previously a valid output could pair a
+  commitment with an unrelated ciphertext, so a wallet reported coins it could
+  not spend, or overwrote the tree index of a coin it held. On-chain state was
+  unaffected.
+- security: `CardanoBridge` claims must claim at least
+  `c_to_m_bridge_min_amount`, or the full, non-zero claimable balance, and
+  otherwise fail with `TransactionInvalid::BridgeClaimTooSmall`. Previously
+  zero-value claims passed validation without paying fees.
+- security: a cached `idx` succeeds only on a path the run has already read.
+  Placing persistent state in a new array, or overwriting a slot with `ins` or
+  `rem`, previously let later cached reads skip their read charge.
+- security: secret material is cleared more thoroughly. The hasher that
+  derives coin keys from the wallet seed clears its state on drop, and Zswap
+  preimage witness vectors are allocated at their exact size, so reallocation
+  no longer leaves copies of the witness in freed memory.
+
+## Ledger 9.1.0.0
+
+First full release of the `ledger-9` line, promoting `9.1.0.0-rc.7`.
+
+- fix: zkir-wasm `prove()` and `provingProvider().prove` apply
+  `overwriteBindingInput` for `verifier-key[v6]` circuits, so in-process Dust
+  spend proofs are no longer rejected with `InvalidDustSpendProof` (#832).
+- chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.0`.
+- chore: zkir v2 resolves `midnight-transient-crypto` `2.2.0` from crates.io
+  rather than a git tag.
+
+## Ledger 9.1.0.0-rc.7
+
+- fix: refine transcript gas accounting for transcripts that both write and
+  delete state.
+- breaking: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.
+  This changes the verifier keys of zkir V2 circuits that use `hash_to_curve`,
+  and of zkir v3 circuits that `encode` a Jubjub scalar. V0 and V1 keys are
+  unchanged.
+- chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.0-rc.2`.
+- chore: `zkir-wasm` moves to `2.2.0-rc.5`, skipping `2.2.0-rc.4` to match the
+  `zkir` crate tag.
+- chore: `base-crypto` moves to `k256` 0.14 and `signature` 3;
+  `transient-crypto` no longer depends on either.
+
+## Ledger 9.1.0.0-rc.6
+
+Security patch, carrying the mainnet `8.1.3` release onto the `ledger-9` line.
+
+- security: contract call transcripts must embed canonical field values, across
+  `base-crypto`, `onchain-state` and `onchain-vm`. A `field` atom encoding
+  `x + p` has the same proof public inputs as `x`, but the VM compares and
+  hashes it differently; such values in `push`, `pushs` and `idx`-style path
+  keys are now rejected. This narrows what is well-formed: an rc.6 node
+  rejects contract calls an rc.5 node accepts. See the per-crate changelogs
+  for the individual rules.
+- security: `noop 0` in a contract call transcript is rejected as not
+  normalized. It contributes no public inputs, but shifted `branch` and `jmp`
+  targets.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Rust code constructing
+  these directly must convert with `AlignedValueChecked::try_from`.
+
+## Ledger 9.1.0.0-rc.5
+
+Security patch, the `ledger-9` equivalent of the mainnet `8.1.2` release.
+Internal dependency requirements are pinned to the new exact versions so that
+consumers cannot resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an rc.5 node rejects data an rc.4 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
+- `storage` moves to `2.0.4` and `storage-core` to `1.2.2`, skipping the `2.0.3`
+  and `1.2.1` numbers that `8.1.2` published from the `ledger-8` line.
+
+## Ledger 9.1.0.0-rc.4
+
+- fix: dust registration accounting moved to block time, rather than declared
+  transaction time.
+
+## Ledger 9.1.0.0-rc.3
+
+- feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
+- breaking: unify the construction of signing envelopes
+- fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly
+- fix: `ContractOperationVersionedVerifierKey::V3` and `V4` serialize independently (no longer share a match arm)
+- feat: `IrInsert` / `IrRemove` wasm bindings with `IrBuf` support for IR field in contract operations
+- feat: `lookup_key` exposed in ledger-wasm proving path, allowing the prover to use the correct key version
+- feat: add explicit price floor, denominated in full blocks, and governed by
+  ledger parameters.
+- feat: add support for ECDSA signatures
+- feat: add `UnlockToTreasury` system transaction, moving funds from the locked
+  pool to the treasury.
+- feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
+  matching the new on-chain event format.
+- fix: correctly exclude the identity point during coin ciphertext decryption
+- feat: `ContractOperation` extended with `v3` field for zk-stdlib v2 verifier keys
+- feat: `ProofVersioned::V3` variant for proofs generated against zk-stdlib v2
+- feat: `proof_verify` dynamically dispatches v1 or v2 verification based on
+  proof version (V2 → `v1_verify`, V3 → current `vk.verify`)
+- feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
+  for the new v3 verifier key field
+- feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
+- feat: maintenance updates can insert and remove the IR of a contract operation
+  via the `SingleUpdate::IrInsert` / `SingleUpdate::IrRemove` variants (exposed in
+  ledger-wasm as `IrInsert` / `IrRemove`)
+
+## Unreleased (8.2)
+
 ## Ledger 8.2.0-rc.1
 
-- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
-- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update
+  package.json dependencies accordingly
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred
+  event generation.
 - feat: proof-server support for ZKIR 2.1
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
 - fix: fix potential panic in bridge fee processing
@@ -18,20 +229,67 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
 - fix: garbage collect `night_indices`, and remove a potential panic in processing wallet state
 
+## Ledger 8.1.3
+
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: contract call transcripts must embed canonical field values, across
+  `base-crypto`, `onchain-state` and `onchain-vm`. A `field` atom encoding
+  `x + p` has the same proof public inputs as `x`, but the VM compares and
+  hashes it differently; such values in `push`, `pushs` and `idx`-style path
+  keys are now rejected. This narrows what is well-formed: an 8.1.3 node
+  rejects contract calls an 8.1.2 node accepts. See the per-crate changelogs
+  for the individual rules.
+- security: `noop 0` in a contract call transcript is rejected as not
+  normalized. It contributes no public inputs, but shifted `branch` and `jmp`
+  targets.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Rust code constructing
+  these directly must convert with `AlignedValueChecked::try_from`.
+
+## Ledger 8.1.2
+
+Security patch. All bumps are patch-level so that the release reads as one, even
+where an individual change carries wider semver implications; internal dependency
+requirements are pinned to the new exact versions so that consumers cannot
+resolve past the fix.
+
+- security: hardening of low-level deserialization across `serialize`,
+  `base-crypto`, `storage`, `onchain-state`, `onchain-vm` and
+  `transient-crypto`. Encodings that are not canonical, and values violating
+  their type's invariant, are now rejected rather than decoded. This narrows what
+  deserializes: an 8.1.2 node rejects data an 8.1.1 node accepts. See the
+  per-crate changelogs for the individual rules.
+- fix: `DustParameters::time_to_cap` guards against a zero
+  `generation_decay_rate` instead of dividing by zero.
+- fix: Dust `seq` increments saturate.
+- fix: Zswap binding randomness extraction no longer panics on a proof preimage
+  with no witness to extract from.
+- fix: delta accumulation in `normalize_deltas` saturates.
+- fix: contract call cost accounting counts public inputs via
+  `ContractCall::public_inputs_len`, with saturating arithmetic, rather than
+  materializing the inputs to take their length.
+
 ## Ledger 8.1.1
 
-- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update package.json dependencies accordingly
+- note: npm packages are now published under the `@midnightntwrk` scope (previously `@midnight-ntwrk`); update
+  package.json dependencies accordingly
 - add array tests
 
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
 - feat: expose event contents to the extent that they are useful to the wallet in wasm bindings.
+- breaking: fix Zswap root retention period to match spec - global TTL param instead of hardcoded 1 hour;
+- breaking: adjust Zswap Ledger state API to take retention duration in the `post_block_update` hook
 
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
-  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use
   - account for proof verification time for processing budget
   - use the smaller of the possible proof sizes as the base for the budget
 - fix: correctly retarget newly added Zswap parts when using `addCalls`
@@ -48,10 +306,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: log non-proof-erased tx hashes
 - fix: resolve non-determinism and not-to-spec iteration order in sequencing
   check.
-- feat: add `with_genesis_settings` ledger state constructor, that allows providing initial parameters, and initial pool value allocations
+- feat: add `with_genesis_settings` ledger state constructor, that allows providing
+  initial parameters, and initial pool value allocations
 - bugfix: remove accidental structured logging of the full ledger state in some places
 - feat: pull in `storage-core` fix, lazy loading of embedded small nodes
-- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction` that applies every offer in a transaction as failed.
+- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction`
+  that applies every offer in a transaction as failed.
 - feat: proof server built natively on Arm
 - fix: Change divide-by-zero in `dust.rs` from panic to error
 
@@ -72,8 +332,14 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - Remove special-casing of validation behaviour depending on the
   `test-utilities` feature being present.
-- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
-- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to now hold its data value on the heap (to reduce Enum size), i.e. this variant is now defined as: `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
+- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`,
+  `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to hold their
+  data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as
+  `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`,
+  `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
+- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to hold its
+  data value on the heap (to reduce Enum size), i.e. this variant is now defined as:
+  `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
 - fix: correctly rehash generation Merkle tree on cNgD processing.
 - Pulled in updates to `midnight-zk`
 - bugfix: various fixes for `ClaimRewardsTransaction`

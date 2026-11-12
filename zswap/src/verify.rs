@@ -13,6 +13,8 @@
 
 #[cfg(feature = "proof-verifying")]
 use crate::ciphertext_to_field;
+#[cfg(any(feature = "proof-verifying", test))]
+use crate::compact_slots::*;
 use crate::error::MalformedOffer;
 #[cfg(any(feature = "proof-verifying", test))]
 use crate::filter_invalid;
@@ -63,14 +65,15 @@ const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref OUTPUT_VK: VerifierKey =
-        tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
+    pub static ref OUTPUT_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
             .expect("Zswap Output VK should be valid");
-    pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
             .expect("Zswap Spend VK should be valid");
-    pub static ref SIGN_VK: VerifierKey = tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
-        .expect("Zswap Sign VK should be valid");
+    pub static ref SIGN_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
+            .expect("Zswap Sign VK should be valid");
 }
 
 #[cfg(feature = "proof-verifying")]
@@ -92,6 +95,10 @@ pub fn with_outputs<
     })
 }
 
+/// Field-repr length of a `Cell_write` of a [`ContractAddress`] to
+/// [`ZSWAP_IDX_CONTRACT_ADDR`], used as `Op::Noop` padding when an input or output
+/// is not contract-owned. Depends on the encoding of that slot index, so it is
+/// pinned by `test_caddr_op` below.
 #[cfg(any(test, feature = "proof-verifying"))]
 const CADDR_OP_LEN: u32 = 12;
 
@@ -105,7 +112,7 @@ fn test_caddr_op() {
         InMemoryDB,
     >(
         Cell_write!(
-            [Key::Value(3u8.into())],
+            [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
             false,
             ContractAddress,
             ContractAddress::default()
@@ -128,7 +135,7 @@ impl AuthorizedClaim<Proof> {
         use storage::db::InMemoryDB;
 
         let prog: [Op<ResultModeVerify, InMemoryDB>; 5] = Cell_write!(
-            [Key::Value(4u8.into())],
+            [Key::Value(ZSWAP_IDX_PUBLIC_KEY.into())],
             false,
             CoinPublicKey,
             self.recipient
@@ -138,8 +145,15 @@ impl AuthorizedClaim<Proof> {
             op.field_repr(&mut statement);
         }
         SIGN_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
@@ -154,30 +168,34 @@ impl<D: DB> Input<Proof, D> {
     pub fn well_formed(&self, segment: u16) -> Result<(), MalformedOffer> {
         let mut prog = Vec::new();
         prog.extend::<[Op<ResultModeGather, InMemoryDB>; 6]>(HistoricMerkleTree_check_root!(
-            [Key::Value(0u8.into())],
+            [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
             false,
             32,
             [u8; 32],
             self.merkle_tree_root
         ));
         prog.extend(Set_insert!(
-            [Key::Value(1u8.into())],
+            [Key::Value(ZSWAP_IDX_NULLIFIERS.into())],
             false,
             [u8; 32],
             self.nullifier
         ));
         match &self.contract_address {
             Some(addr) => prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 *addr.deref()
             )),
             None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
         }
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_read!(
+            [Key::Value(ZSWAP_IDX_SEGMENT.into())],
+            false,
+            u16
+        ));
         prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             self.value_commitment.0
@@ -187,8 +205,15 @@ impl<D: DB> Input<Proof, D> {
             op.field_repr(&mut statement);
         }
         SPEND_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
@@ -224,7 +249,7 @@ impl<D: DB> Output<Proof, D> {
         }
         let mut prog = Vec::new();
         prog.extend::<[Op<_, InMemoryDB>; 17]>(HistoricMerkleTree_insert_hash!(
-            [Key::Value(0u8.into())],
+            [Key::Value(ZSWAP_IDX_MERKLE_TREE.into())],
             false,
             32,
             [u8; 32],
@@ -232,16 +257,20 @@ impl<D: DB> Output<Proof, D> {
         ));
         match &self.contract_address {
             Some(addr) => prog.extend(Cell_write!(
-                [Key::Value(3u8.into())],
+                [Key::Value(ZSWAP_IDX_CONTRACT_ADDR.into())],
                 false,
                 ContractAddress,
                 addr.deref()
             )),
             None => prog.push(Op::Noop { n: CADDR_OP_LEN }),
         }
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, u16));
+        prog.extend(Cell_read!(
+            [Key::Value(ZSWAP_IDX_SEGMENT.into())],
+            false,
+            u16
+        ));
         prog.extend(Cell_write!(
-            [Key::Value(2u8.into())],
+            [Key::Value(ZSWAP_IDX_VALUE_COM.into())],
             false,
             (Fr, Fr),
             self.value_commitment.0
@@ -255,8 +284,15 @@ impl<D: DB> Output<Proof, D> {
             op.field_repr(&mut statement);
         }
         OUTPUT_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
-            .map_err(MalformedOffer::InvalidProof)
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &transient_crypto_old::proofs::Proof(self.proof.0.clone()),
+                statement.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                }),
+            )
+            .map_err(|e| MalformedOffer::InvalidProof(anyhow::anyhow!("{e}")))
     }
 }
 
@@ -336,15 +372,19 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
 impl<D: DB> Offer<Proof, D> {
     #[instrument(skip(self))]
     pub fn well_formed(&self, segment: u16) -> Result<Pedersen, MalformedOffer> {
+        // Repeats share proof and statement, so each distinct entry is verified once.
         self.inputs
+            .distinct_values()
             .iter()
-            .try_for_each(|i| i.well_formed(segment))?;
+            .try_for_each(|(i, _)| i.well_formed(segment))?;
         self.outputs
+            .distinct_values()
             .iter()
-            .try_for_each(|o| o.well_formed(segment))?;
+            .try_for_each(|(o, _)| o.well_formed(segment))?;
         self.transient
+            .distinct_values()
             .iter()
-            .try_for_each(|t| t.well_formed(segment))?;
+            .try_for_each(|(t, _)| t.well_formed(segment))?;
         offer_well_formed_common(self, segment)
     }
 }

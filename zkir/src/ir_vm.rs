@@ -191,6 +191,9 @@ fn assemble_bytes(
     Ok(acc)
 }
 
+// `x`/`y` replace the deprecated coordinate getters, but may not keep the
+// verifier keys of deployed circuits.
+#[allow(deprecated)]
 fn ecc_from_parts(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
@@ -518,12 +521,17 @@ impl Relation for IrSource {
 
     type Witness = Preprocessed;
 
+    type Error = Error;
+
     fn format_instance(
         instance: &Self::Instance,
     ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
         Ok(instance.clone())
     }
 
+    // `x`/`y` replace the deprecated coordinate getters, but may not keep the
+    // verifier keys of deployed circuits.
+    #[allow(deprecated)]
     fn circuit(
         &self,
         std: &ZkStdLib,
@@ -781,7 +789,7 @@ impl Relation for IrSource {
                         ecc_from_parts(std, layouter, idx(&memory, *a_x)?, idx(&memory, *a_y)?)?;
                     let b =
                         ecc_from_parts(std, layouter, idx(&memory, *b_x)?, idx(&memory, *b_y)?)?;
-                    let c = std.jubjub().add(layouter, &a, &b)?;
+                    let c = EccInstructions::add(std.jubjub(), layouter, &a, &b)?;
                     mem_push(std.jubjub().x_coordinate(&c), &mut memory)?;
                     mem_push(std.jubjub().y_coordinate(&c), &mut memory)?;
                 }
@@ -863,7 +871,7 @@ impl Relation for IrSource {
             .any(|op| matches!(op, I::PersistentHash { .. }));
         let nr_pow2range_cols = match self.version {
             IrMinorVersion::V0 => 1,
-            IrMinorVersion::V1 => 4,
+            IrMinorVersion::V1 | IrMinorVersion::V2 => 4,
         };
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
@@ -875,7 +883,9 @@ impl Relation for IrSource {
             blake2b: false,
             nr_pow2range_cols,
             secp256k1: false,
+            p256: false,
             bls12_381: false,
+            curve25519: false,
             base64: false,
             automaton: false,
         }

@@ -18,6 +18,7 @@
 
 mod deserializable;
 mod serializable;
+mod shape;
 mod tagged;
 mod util;
 
@@ -25,6 +26,9 @@ pub use crate::deserializable::{
     Deserializable, RECURSION_LIMIT, peek_tag, tagged_deserialize, tagged_deserialize_sequence,
 };
 pub use crate::serializable::{GLOBAL_TAG, Serializable, tagged_serialize, tagged_serialized_size};
+#[cfg(feature = "proptest")]
+pub use crate::shape::check_encoding_shape;
+pub use crate::shape::{EncodingShape, ScaleState, SeqState};
 pub use crate::tagged::Tagged;
 #[cfg(feature = "proptest")]
 pub use crate::util::{NoSearch, NoStrategy};

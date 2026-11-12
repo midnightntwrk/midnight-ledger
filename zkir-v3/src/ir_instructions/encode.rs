@@ -12,6 +12,8 @@
 // limitations under the License.
 
 use midnight_circuits::{
+    CircuitField,
+    ecc::foreign::edwards_chip::AssignedForeignEdwardsPoint,
     field::foreign::params::MultiEmulationParams as MEP,
     instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
@@ -19,11 +21,9 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, secp256k1};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, curve25519, k256, p256};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
-use num_bigint::BigUint;
-use num_traits::Num;
 use transient_crypto::curve::Fr;
 
 use crate::{
@@ -59,10 +59,22 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         }
 
         IrValue::Secp256k1Point(p) => {
-            AssignedForeignPoint::<F, secp256k1::Secp256k1, MEP>::as_public_input(p)
+            AssignedForeignPoint::<F, k256::K256, MEP>::as_public_input(p)
         }
-        IrValue::Secp256k1Base(s) => AssignedField::<F, secp256k1::Fp, MEP>::as_public_input(s),
-        IrValue::Secp256k1Scalar(s) => AssignedField::<F, secp256k1::Fq, MEP>::as_public_input(s),
+        IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
+        IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
+
+        IrValue::Secp256r1Point(p) => AssignedForeignPoint::<F, p256::P256, MEP>::as_public_input(p),
+        IrValue::Secp256r1Base(s) => AssignedField::<F, p256::Fp, MEP>::as_public_input(s),
+        IrValue::Secp256r1Scalar(s) => AssignedField::<F, p256::Fq, MEP>::as_public_input(s),
+
+        IrValue::Curve25519Point(p) => {
+            AssignedForeignEdwardsPoint::<F, curve25519::Curve25519, MEP>::as_public_input(p)
+        }
+        IrValue::Curve25519Base(s) => AssignedField::<F, curve25519::Fp, MEP>::as_public_input(s),
+        IrValue::Curve25519Scalar(s) => {
+            AssignedField::<F, curve25519::Scalar, MEP>::as_public_input(s)
+        }
     };
     encoded
         .into_iter()
@@ -96,12 +108,28 @@ pub fn encode_incircuit(
             Ok(encoded[..1].to_vec())
         }
 
-        CircuitValue::Secp256k1Point(p) => std_lib.secp256k1_curve().as_public_input(layouter, p),
+        CircuitValue::Secp256k1Point(p) => std_lib.secp256k1().as_public_input(layouter, p),
         CircuitValue::Secp256k1Base(s) => {
-            (std_lib.secp256k1_curve().base_field_chip()).as_public_input(layouter, s)
+            (std_lib.secp256k1().base_field_chip()).as_public_input(layouter, s)
         }
         CircuitValue::Secp256k1Scalar(s) => {
-            (std_lib.secp256k1_curve().scalar_field_chip()).as_public_input(layouter, s)
+            (std_lib.secp256k1().scalar_field_chip()).as_public_input(layouter, s)
+        }
+
+        CircuitValue::Secp256r1Point(p) => std_lib.p256().as_public_input(layouter, p),
+        CircuitValue::Secp256r1Base(s) => {
+            (std_lib.p256().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Secp256r1Scalar(s) => {
+            (std_lib.p256().scalar_field_chip()).as_public_input(layouter, s)
+        }
+
+        CircuitValue::Curve25519Point(p) => std_lib.curve25519().as_public_input(layouter, p),
+        CircuitValue::Curve25519Base(s) => {
+            (std_lib.curve25519().base_field_chip()).as_public_input(layouter, s)
+        }
+        CircuitValue::Curve25519Scalar(s) => {
+            (std_lib.curve25519().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
@@ -145,18 +173,42 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
         }
 
         IrType::Secp256k1Point => {
-            AssignedForeignPoint::<F, secp256k1::Secp256k1, MEP>::from_public_input(&encoded)
+            AssignedForeignPoint::<F, k256::K256, MEP>::from_public_input(&encoded)
                 .map(IrValue::Secp256k1Point)
         }
 
-        IrType::Secp256k1Base => {
-            AssignedField::<F, secp256k1::Fp, MEP>::from_public_input(&encoded)
-                .map(IrValue::Secp256k1Base)
+        IrType::Secp256k1Base => AssignedField::<F, k256::Fp, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256k1Base),
+
+        IrType::Secp256k1Scalar => AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256k1Scalar),
+
+        IrType::Secp256r1Point => {
+            AssignedForeignPoint::<F, p256::P256, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256r1Point)
         }
 
-        IrType::Secp256k1Scalar => {
-            AssignedField::<F, secp256k1::Fq, MEP>::from_public_input(&encoded)
-                .map(IrValue::Secp256k1Scalar)
+        IrType::Secp256r1Base => AssignedField::<F, p256::Fp, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Base),
+
+        IrType::Secp256r1Scalar => AssignedField::<F, p256::Fq, MEP>::from_public_input(&encoded)
+            .map(IrValue::Secp256r1Scalar),
+
+        IrType::Curve25519Point => {
+            AssignedForeignEdwardsPoint::<F, curve25519::Curve25519, MEP>::from_public_input(
+                &encoded,
+            )
+            .map(IrValue::Curve25519Point)
+        }
+
+        IrType::Curve25519Base => {
+            AssignedField::<F, curve25519::Fp, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Base)
+        }
+
+        IrType::Curve25519Scalar => {
+            AssignedField::<F, curve25519::Scalar, MEP>::from_public_input(&encoded)
+                .map(IrValue::Curve25519Scalar)
         }
     }
     .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
@@ -178,14 +230,11 @@ pub fn jubjub_scalar_from_biguint(
     x: AssignedBigUint<F>,
 ) -> Result<AssignedScalarOfNativeCurve<JubjubExtended>, Error> {
     let jubjub_order = {
-        let p_str = "e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
-        let p = BigUint::from_str_radix(p_str, 16).unwrap();
+        let p = JubjubFr::modulus();
         std_lib.biguint().assign_fixed_biguint(layouter, p)?
     };
     let (_q, r) = std_lib.biguint().div_rem(layouter, &x, &jubjub_order)?;
 
     let r_le_bytes = std_lib.biguint().to_le_bytes(layouter, &r)?;
-    std_lib
-        .jubjub()
-        .scalar_from_reduced_le_bytes(layouter, &r_le_bytes)
+    std_lib.jubjub().scalar_from_le_bytes(layouter, &r_le_bytes)
 }

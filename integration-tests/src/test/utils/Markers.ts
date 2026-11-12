@@ -17,14 +17,21 @@ import type {
   NoProof,
   SignatureEnabled,
   SignatureErased,
+  SignatureKind,
   PreBinding,
   Binding,
-  NoBinding
+  NoBinding,
+  LogEventType
 } from '@midnightntwrk/ledger';
 
 export class SignatureMarker {
   static readonly signature: SignatureEnabled['instance'] = 'signature';
   static readonly signatureErased: SignatureErased['instance'] = 'signature-erased';
+}
+
+export class SignatureKindMarker {
+  static readonly schnorr: SignatureKind = 'schnorr';
+  static readonly ecdsa: SignatureKind = 'ecdsa';
 }
 
 export class ProofMarker {
@@ -37,4 +44,18 @@ export class BindingMarker {
   static readonly binding: Binding['instance'] = 'binding';
   static readonly preBinding: PreBinding['instance'] = 'pre-binding';
   static readonly noBinding: NoBinding['instance'] = 'no-binding';
+}
+
+export class LogEventTypeMarker {
+  static readonly shieldedSpend: LogEventType = 'shielded-spend';
+  static readonly shieldedReceive: LogEventType = 'shielded-receive';
+  static readonly shieldedMint: LogEventType = 'shielded-mint';
+  static readonly shieldedBurn: LogEventType = 'shielded-burn';
+  static readonly unshieldedSpend: LogEventType = 'unshielded-spend';
+  static readonly unshieldedReceive: LogEventType = 'unshielded-receive';
+  static readonly unshieldedMint: LogEventType = 'unshielded-mint';
+  static readonly unshieldedBurn: LogEventType = 'unshielded-burn';
+  static readonly paused: LogEventType = 'paused';
+  static readonly unpaused: LogEventType = 'unpaused';
+  static readonly misc: LogEventType = 'misc';
 }

@@ -13,15 +13,21 @@
 
 import {
   ChargedState,
+  ContractMaintenanceAuthority,
   ContractOperation,
   ContractState,
   CostModel,
-  StateValue,
-  ContractMaintenanceAuthority,
-  signatureVerifyingKey
+  type EncodedStateValue,
+  type LogEventType,
+  type Op,
+  signatureVerifyingKey,
+  StateBoundedMerkleTree,
+  StateValue
 } from '@midnightntwrk/ledger';
 import { Random } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
+import { arrayCell, intCell } from '@/test/utils/value-alignment';
+import { LogEventTypeMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - ContractState', () => {
   /**
@@ -180,5 +186,110 @@ describe('Ledger API - ContractState', () => {
 
     expect(contractState.maintenanceAuthority.toString()).toEqual(contractMaintenanceAuthority.toString());
     assertSerializationSuccess(contractState);
+  });
+
+  describe('query - log events', () => {
+    type LogContent = { version: number; eventType: LogEventType; data: EncodedStateValue };
+    type GatherLog = { tag: 'log'; content: LogContent };
+
+    // `query` returns [ContractState, GatherResult[]] despite the d.ts type.
+    const events = (result: unknown): GatherLog[] => (result as [unknown, GatherLog[]])[1];
+
+    const logProgram = (value: EncodedStateValue): Op<null>[] => [{ push: { storage: false, value } }, 'log'];
+
+    const versionedTuple = (version: bigint, type: bigint, payload: EncodedStateValue): EncodedStateValue =>
+      arrayCell([intCell(version, 4), intCell(type, 1), payload]);
+
+    /**
+     * Test that a bare cell value falls back to version 0 with eventType
+     * `misc` when queried through `ContractState.query`
+     *
+     * @given A bare u64 cell pushed as the log payload
+     * @when Querying with a program ending in `log`
+     * @then The gathered event is `{version: 0, eventType: 'misc', data: <cell>}`
+     */
+    test('bare cell value falls back to version 0 / misc with the value as data', () => {
+      const value = intCell(4n, 8);
+      const logs = events(new ContractState().query(logProgram(value), CostModel.initialCostModel()));
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].tag).toBe('log');
+      expect(logs[0].content.version).toBe(0);
+      expect(logs[0].content.eventType).toBe(LogEventTypeMarker.misc);
+      expect(logs[0].content.data).toEqual(value);
+    });
+
+    /**
+     * Test that a well-formed [u32 version, u8 type, payload] tuple decodes
+     * into the structured versioned event
+     *
+     * @given A 3-element tuple (version=2, type=8 Paused, payload=u64(4))
+     * @when Querying with a program ending in `log`
+     * @then The gathered event is `{version: 2, eventType: 'paused', data: <payload>}`
+     */
+    test('well-formed tuple decodes to versioned event', () => {
+      const payload = intCell(4n, 8);
+      const value = versionedTuple(2n, 8n, payload);
+      const logs = events(new ContractState().query(logProgram(value), CostModel.initialCostModel()));
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].content.version).toBe(2);
+      expect(logs[0].content.eventType).toBe(LogEventTypeMarker.paused);
+      expect(logs[0].content.data).toEqual(payload);
+    });
+
+    /**
+     * Test that an out-of-range event-type byte (>= 11) is rejected by the
+     * decoder - the whole array surfaces as the misc payload.
+     *
+     * @given A tuple with type=11 (no such LogEventType)
+     * @when Querying with a program ending in `log`
+     * @then The event is `{version: 0, eventType: 'misc', data: <array>}`
+     */
+    test('out-of-range event type (>= 11) falls back to misc with the whole array as data', () => {
+      const malformed = versionedTuple(0n, 11n, intCell(1n, 8));
+      const logs = events(new ContractState().query(logProgram(malformed), CostModel.initialCostModel()));
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].content.version).toBe(0);
+      expect(logs[0].content.eventType).toBe(LogEventTypeMarker.misc);
+      expect(logs[0].content.data).toEqual(malformed);
+    });
+
+    /**
+     * Test that a wrong-arity array (2 elements) is not decoded as a
+     * versioned tuple and instead surfaces as a misc payload
+     *
+     * @given A 2-element array
+     * @when Querying with a program ending in `log`
+     * @then The event is `{version: 0, eventType: 'misc', data: <array>}`
+     */
+    test('wrong-arity array (2 elements) falls back to misc with the array as data', () => {
+      const malformed = arrayCell([intCell(0n, 4), intCell(0n, 1)]);
+      const logs = events(new ContractState().query(logProgram(malformed), CostModel.initialCostModel()));
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].content.version).toBe(0);
+      expect(logs[0].content.eventType).toBe(LogEventTypeMarker.misc);
+      expect(logs[0].content.data).toEqual(malformed);
+    });
+
+    /**
+     * Test that a StateValue which is neither an array nor a cell (e.g. a
+     * BoundedMerkleTree) falls back to the misc path
+     *
+     * @given A BoundedMerkleTree encoded as the log payload
+     * @when Querying with a program ending in `log`
+     * @then The event is `{version: 0, eventType: 'misc', data: <value>}`
+     */
+    test('non-array, non-cell value (BoundedMerkleTree) falls back to misc', () => {
+      const value = StateValue.newBoundedMerkleTree(new StateBoundedMerkleTree(1)).encode();
+      const logs = events(new ContractState().query(logProgram(value), CostModel.initialCostModel()));
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].content.version).toBe(0);
+      expect(logs[0].content.eventType).toBe(LogEventTypeMarker.misc);
+      expect(logs[0].content.data).toEqual(value);
+    });
   });
 });

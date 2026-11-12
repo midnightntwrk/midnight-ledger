@@ -40,10 +40,11 @@ import {
   sampleUserAddress,
   type ShieldedCoinInfo,
   shieldedToken,
-  type SignatureEnabled,
+  SignatureEnabled,
   signatureVerifyingKey,
   signData,
   type SigningKey,
+  type SignatureVerifyingKey,
   type TokenType,
   Transaction,
   UnshieldedOffer,
@@ -106,7 +107,7 @@ export class Random {
 
   static signatureVerifyingKeyNew = () => signatureVerifyingKey(sampleSigningKey());
 
-  static signature = () => signData(sampleSigningKey(), new Uint8Array(32));
+  static signature = () => new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)));
 
   static tokenType = (tag: 'shielded' | 'unshielded' = 'shielded'): TokenType => ({
     tag,
@@ -335,7 +336,7 @@ export const keyMaterialProvider = new (class {
   async lookupWellKnownKey(type: string, keyLocation: string): Promise<Buffer | undefined> {
     // Ideally get this from /static/version, but I'm not sure if this gets run
     // against a consistent dir.
-    const staticVersionFile = path.resolve(new URL(import.meta.url).pathname, '../../../static/version');
+    const staticVersionFile = path.resolve(process.cwd(), '../static/version');
     const ver = await fs.readFile(staticVersionFile, 'utf-8');
     const pth = {
       'midnight/zswap/spend': `zswap/${ver}/spend`,
@@ -397,7 +398,7 @@ export const getQualifiedShieldedCoinInfo = (
 export const getNewUnshieldedOffer = (
   intentHash: IntentHash = sampleIntentHash(),
   token: UnshieldedTokenType = Random.unshieldedTokenType(),
-  svk: CoinPublicKey = Random.signatureVerifyingKeyNew()
+  svk: SignatureVerifyingKey = Random.signatureVerifyingKeyNew()
 ): UnshieldedOffer<SignatureEnabled> =>
   UnshieldedOffer.new(
     [
@@ -416,7 +417,7 @@ export const getNewUnshieldedOffer = (
         type: token.raw
       }
     ],
-    [signData(sampleSigningKey(), new Uint8Array(32))]
+    [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
   );
 
 export class TestResource {

@@ -18,6 +18,7 @@ use crate::result_mode::ResultMode;
 use crate::state_value_ext::*;
 use crate::vm_value::*;
 use base_crypto::cost_model::{CostDuration, RunningCost};
+use base_crypto::fab::ValueSlice;
 use base_crypto::fab::{AlignedValue, Alignment, InvalidBuiltinDecode, Value};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use rpds::{HashTrieMap, Vector};
@@ -34,15 +35,19 @@ use ValueStrength::*;
 // Maps initial stack positions to which parts of those stack objects are currently cached.
 struct Cache(Vec<InnerCache>);
 
-/// The size limit of the argument of the `log` instruction. Currently 512 kb
+/// The size limit of the argument of the `log` instruction. Currently 512 kB
 pub const MAX_LOG_SIZE: u64 = 1 << 19;
+
+/// The size limit over which `log` events are silently swallowed. This allows us to vary this
+/// without it being a technically breaking change. Currently 1 kB
+pub const MAX_LOG_EMITTED: u64 = 1 << 10;
 
 impl Cache {
     fn visit(&mut self, key: &CacheKey) -> bool {
         match &key.0 {
             None => true,
             Some((n, path)) => {
-                if *n > self.0.len() {
+                if *n >= self.0.len() {
                     false
                 } else {
                     path.iter()
@@ -65,15 +70,65 @@ impl Cache {
             }
         }
     }
+
+    /// Whether `key` has been visited, without recording a visit.
+    fn contains(&self, key: &CacheKey) -> bool {
+        let Some((n, path)) = &key.0 else {
+            return true;
+        };
+        let Some(mut cache) = self.0.get(*n) else {
+            return false;
+        };
+        for key in path.iter() {
+            match cache {
+                InnerCache(None) => return true,
+                InnerCache(Some(map)) => match map.get(key) {
+                    Some(child) => cache = child,
+                    None => return false,
+                },
+            }
+        }
+        true
+    }
+
+    /// The cached parts of the value at `key`, without recording a visit.
+    fn get(&self, key: &CacheKey) -> InnerCache {
+        let Some((n, path)) = &key.0 else {
+            return InnerCache(None);
+        };
+        let Some(mut cache) = self.0.get(*n) else {
+            return InnerCache(Some(HashTrieMap::new()));
+        };
+        for key in path.iter() {
+            match cache {
+                InnerCache(None) => break,
+                InnerCache(Some(map)) => match map.get(key) {
+                    Some(child) => cache = child,
+                    None => return InnerCache(Some(HashTrieMap::new())),
+                },
+            }
+        }
+        cache.clone()
+    }
+
+    fn key_for(&mut self, cache: InnerCache) -> CacheKey {
+        match cache {
+            InnerCache(None) => CacheKey(None),
+            cache => {
+                self.0.push(cache);
+                CacheKey(Some((self.0.len() - 1, Vector::new())))
+            }
+        }
+    }
 }
 
 // For a given data structure, either:
 //  - If None, indicates the entire data structure is cached.
 //  - If Some, maps keys in the data structure to the parts of those objects
 //    that are currently cached.
-// Note: If a value is copied *into another data structure*, it is no longer
-// linked to its source in the cache structure. This is _not_ the case if it is
-// copied through the stack.
+// Note: If a value is copied *into another data structure*, the result gets a
+// new root holding a snapshot of both cache states, and is no longer linked to
+// either source. This is _not_ the case if it is copied through the stack.
 #[derive(Clone)]
 struct InnerCache(Option<HashTrieMap<AlignedValue, InnerCache>>);
 
@@ -182,7 +237,10 @@ fn idx<D: DB>(
 ) -> Result<(VmValue<D>, CacheKey), OnchainProgramError<D>> {
     let cache_key = value.1.push_key(key);
     let cache_miss = !cache.visit(&cache_key);
-    match &value.0.value {
+    if cached && cache_miss {
+        return Err(OnchainProgramError::CacheMiss);
+    }
+    let res = match &value.0.value {
         StateValue::Array(arr) => {
             let idx: u8 = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
             if idx as usize >= arr.len() {
@@ -192,45 +250,66 @@ fn idx<D: DB>(
                     arr.len()
                 )))
             } else {
-                let res = arr.get(idx as usize).unwrap();
-                if cached && cache_miss {
-                    Err(OnchainProgramError::CacheMiss)
-                } else {
-                    Ok((VmValue::new(value.0.strength, res.clone()), cache_key))
-                }
+                Ok(arr.get(idx as usize).unwrap().clone())
             }
         }
-        StateValue::Map(map) => {
-            let res = map
-                .get(key)
-                .map(|sp| (*sp).clone())
-                .unwrap_or(StateValue::Null);
-            if cached && cache_miss {
-                Err(OnchainProgramError::CacheMiss)
-            } else {
-                Ok((VmValue::new(value.0.strength, res), cache_key))
-            }
-        }
+        StateValue::Map(map) => Ok(map
+            .get(key)
+            .map(|sp| (*sp).clone())
+            .unwrap_or(StateValue::Null)),
         StateValue::BoundedMerkleTree(tree) => {
             let key = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
-            if key >= (1u64 << tree.height() as u64) {
+            if 1u64.checked_shl(tree.height() as u32).is_some_and(|bound| key >= bound) {
                 Err(OnchainProgramError::MissingKey)
             } else {
-                Ok((
-                    match tree.index(key) {
-                        Some((hash, ())) => {
-                            VmValue::new(value.0.strength, StateValue::Cell(Sp::new(hash.into())))
-                        }
-                        None => VmValue::new(value.0.strength, StateValue::Null),
-                    },
-                    cache_key,
-                ))
+                Ok(match tree.index(key) {
+                    Some((hash, ())) => StateValue::Cell(Sp::new(hash.into())),
+                    None => StateValue::Null,
+                })
             }
         }
         _ => Err(OnchainProgramError::TypeError(
             "tried to idx, only map, array, and bmt are supported".to_string(),
         )),
+    }?;
+    Ok((VmValue::new(value.0.strength, res), cache_key))
+}
+
+impl TryFrom<&ValueSlice> for LogEventType {
+    type Error = InvalidBuiltinDecode;
+    fn try_from(value: &ValueSlice) -> Result<Self, Self::Error> {
+        u8::try_from(value)?.try_into()
     }
+}
+
+fn try_decode_event<D: DB>(value: &StateValue<D>) -> Option<VersionedLogItem<D>> {
+    let arr = match value {
+        StateValue::Array(arr) => arr,
+        _ => return None,
+    };
+    if arr.len() != 3 {
+        return None;
+    }
+    let version_raw: &AlignedValue = arr.get(0)?.as_cell_ref().ok()?;
+    let version = u32::try_from(&*version_raw.as_slice()).ok()?;
+    let event_type_raw: &AlignedValue = arr.get(1)?.as_cell_ref().ok()?;
+    let event_type = LogEventType::try_from(&*event_type_raw.as_slice()).ok()?;
+    let data = arr.get(2)?.clone();
+    Some(VersionedLogItem {
+        version,
+        event_type,
+        data,
+    })
+}
+
+fn decode_event<D: DB>(value: StateValue<D>) -> Option<VersionedLogItem<D>> {
+    let candidate = try_decode_event(&value).unwrap_or_else(|| VersionedLogItem {
+        version: 0,
+        event_type: LogEventType::Misc,
+        data: value,
+    });
+    Sp::new(candidate.data.clone()).serialize_to_node_list_bounded(MAX_LOG_EMITTED)?;
+    Some(candidate)
 }
 
 #[derive(Debug)]
@@ -417,7 +496,12 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     StateValue::Cell(_) => (0, cost_model.type_cell),
                     StateValue::Null => (1, cost_model.type_null),
                     StateValue::Map(_) => (2, cost_model.type_map),
-                    StateValue::Array(a) => (3 + a.len() as u8 * 8, cost_model.type_array),
+                    StateValue::Array(a) => {
+                        if a.len() > 16 {
+                            return Err(OnchainProgramError::TypeError("attempted to take type of illegal array with >16 entries".to_string()));
+                        }
+                        (3 + a.len() as u8 * 8, cost_model.type_array)
+                    }
                     StateValue::BoundedMerkleTree(t) => {
                         (4 + t.height().saturating_sub(1) * 8, cost_model.type_bmt)
                     }
@@ -555,7 +639,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         bytes_deleted: size,
                     },
                 )?;
-                if let Some(event) = M::process_log(&val) {
+                if let Some(event) = decode_event(val).and_then(M::process_log) {
                     events.push(event);
                 }
             }
@@ -629,7 +713,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     },
                 )?;
                 stack.push((
-                    vnew(if *storage { Strong } else { Weak }, value.clone()),
+                    vnew(if *storage { Strong } else { Weak }, value.clone().into()),
                     CacheKey(None),
                 ))
             }
@@ -732,7 +816,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         },
                     )?;
                 }
-                let cache_hit = cache.visit(&container.1.push_key(&key));
+                // Checked without visiting: `rem` never reads the old value, and
+                // copies of the container on the stack share its cache root.
+                let cache_hit = cache.contains(&container.1.push_key(&key));
                 if *cached && !cache_hit {
                     return Err(OnchainProgramError::CacheMiss);
                 }
@@ -783,7 +869,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         i += 1;
                         stack_keys.next().unwrap()
                     }
-                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone()))),
+                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone().into()))),
                 });
                 let mut curr = stack.pop().unwrap();
                 for key in refined_path {
@@ -890,6 +976,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
             // ins, insc
             Ins { cached, n } => {
                 let mut curr = stack.pop().unwrap();
+                let mut curr_cache = cache.get(&curr.1);
                 for _ in 0..*n {
                     let key = stack.pop().unwrap().0;
                     let container = stack.pop().unwrap();
@@ -951,7 +1038,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         strength: container_str,
                         value: container_val,
                     } = container.0;
-                    let cache_hit = cache.visit(&container.1.push_key(key_cell));
+                    // Checked without visiting: `ins` never reads the old value, and
+                    // copies of the container on the stack share its cache root.
+                    let cache_hit = cache.contains(&container.1.push_key(key_cell));
                     if *cached && !cache_hit {
                         if let StateValue::Array(_) = &container_val {
                             // The miss is okay. We're overwriting an array cell, we never need to read it.
@@ -977,7 +1066,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         }
                         StateValue::BoundedMerkleTree(t) => {
                             let idx = (&**AsRef::<Value>::as_ref(&key_cell)).try_into()?;
-                            if idx < (1u64 << t.height()) {
+                            if 1u64.checked_shl(t.height() as u32).is_none_or(|bound| idx < bound) {
                                 let cell_ref = curr.0.as_cell_ref().map_err(|e| {
                                     OnchainProgramError::TypeError(format!(
                                         "attempted to ins a non-cell value into a bmt: {e}"
@@ -1006,8 +1095,17 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         }
                     };
                     curr.0 = vnew(curr.0.strength & container_str, next);
-                    curr.1 = container.1;
+                    curr_cache = match (cache.get(&container.1), curr_cache) {
+                        (InnerCache(None), InnerCache(None)) => InnerCache(None),
+                        (InnerCache(None), inserted) => {
+                            InnerCache(Some(HashTrieMap::new().insert(key_cell.clone(), inserted)))
+                        }
+                        (InnerCache(Some(map)), inserted) => {
+                            InnerCache(Some(map.insert(key_cell.clone(), inserted)))
+                        }
+                    };
                 }
+                curr.1 = cache.key_for(curr_cache);
                 stack.push(curr);
             }
         }

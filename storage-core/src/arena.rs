@@ -20,6 +20,7 @@
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
+use crate::dag_memo::InvariantMemos;
 use crate::storable::{Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{
@@ -29,29 +30,23 @@ use crate::{
 };
 use crate::{Storable, WellBehavedHasher};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
-use derive_where::derive_where;
 #[allow(deprecated)]
-use digest::{Digest, OutputSizeUser, common::array::Array};
+use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
+use derive_where::derive_where;
 use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
 use serialize::{self, Deserializable, Serializable, Tagged};
 use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fmt::Display;
 use std::io;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::OnceLock;
 use std::{
-    any::Any,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    hash::Hash,
-    io::Read,
-    ops::Deref,
-    sync::Arc,
+    any::Any, collections::HashMap, fmt::Debug, hash::Hash, io::Read, ops::Deref, sync::Arc,
 };
 
 #[cfg(feature = "test-utilities")]
@@ -63,10 +58,20 @@ pub static TCONSTRUCT: std::sync::Mutex<
     Option<HashMap<&'static str, (usize, std::time::Duration)>>,
 > = std::sync::Mutex::new(None);
 
+#[cfg(test)]
+thread_local! {
+    /// Per-thread count of `hash()` calls, for the deserialize regression test. Each
+    /// test runs on its own thread, so this is isolated from parallel tests. See
+    /// `deserialize_hashes_each_node_once_not_per_reference`.
+    pub(crate) static HASH_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
     child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
 ) -> ArenaHash<H> {
+    #[cfg(test)]
+    HASH_CALLS.with(|c| c.set(c.get() + 1));
     let mut hasher = H::default();
     hasher.update((root_binary_repr.len() as u32).to_le_bytes());
     hasher.update(root_binary_repr);
@@ -121,7 +126,9 @@ impl<T: Tagged, H: WellBehavedHasher> Tagged for TypedArenaKey<T, H> {
     }
 }
 
-type HashArray<H> = Array<u8, <H as OutputSizeUser>::OutputSize>;
+// newtype is a hack to get the allow lint to work.
+#[allow(deprecated)]
+type HashArray<H> = GenericArray<u8, <H as OutputSizeUser>::OutputSize>;
 
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
@@ -159,7 +166,7 @@ impl<D: DB> Storable<D> for ArenaHash<D::Hasher> {
         Self: Sized,
     {
         #[allow(deprecated)]
-        let mut array = Array::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
+        let mut array = GenericArray::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
         reader.read_exact(&mut array)?;
         Ok(Self(array))
     }
@@ -182,10 +189,11 @@ impl<D: Digest> Hash for ArenaHash<D> {
     where
         Self: Sized,
     {
-        Array::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
+        #[allow(deprecated)]
+        GenericArray::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
             data.iter()
                 .map(|k| k.0.clone())
-                .collect::<std::vec::Vec<Array<u8, <D as OutputSizeUser>::OutputSize>>>()
+                .collect::<std::vec::Vec<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>>()
                 .as_slice(),
             state,
         )
@@ -206,6 +214,19 @@ impl<H: Digest> Serializable for ArenaHash<H> {
     }
 }
 
+impl<H: Digest> serialize::EncodingShape for ArenaHash<H> {
+    type State = usize;
+    fn start() -> usize {
+        0
+    }
+    fn step(read: &usize, _: u8) -> Option<usize> {
+        (*read < <H as Digest>::output_size()).then_some(read + 1)
+    }
+    fn accepts(read: &usize) -> bool {
+        *read == <H as Digest>::output_size()
+    }
+}
+
 impl<H: Digest> Deserializable for ArenaHash<H> {
     fn deserialize(
         reader: &mut impl std::io::Read,
@@ -214,14 +235,14 @@ impl<H: Digest> Deserializable for ArenaHash<H> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
         #[allow(deprecated)]
-        Ok(ArenaHash(Array::clone_from_slice(&res)))
+        Ok(ArenaHash(GenericArray::clone_from_slice(&res)))
     }
 }
 
 impl<H: Digest> Distribution<ArenaHash<H>> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaHash<H> {
         #[allow(deprecated)]
-        let mut bytes = Array::default();
+        let mut bytes = GenericArray::default();
         rng.fill_bytes(&mut bytes);
         ArenaHash(bytes)
     }
@@ -253,7 +274,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaHash<H> {
                     return Err(E::invalid_length(v.len(), &self));
                 }
                 #[allow(deprecated)]
-                Ok(ArenaHash(Array::clone_from_slice(v)))
+                Ok(ArenaHash(GenericArray::clone_from_slice(v)))
             }
 
             fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
@@ -274,7 +295,7 @@ impl<H: Digest> ArenaHash<H> {
     /// unspecified values will be filled in with zeros.
     pub(crate) fn _from_bytes(bs: &[u8]) -> Self {
         #[allow(deprecated)]
-        let mut bytes = Array::default();
+        let mut bytes = GenericArray::default();
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;
         }
@@ -483,6 +504,26 @@ type SpCache<D> =
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
+    /// The stored node behind `key`, or its inline contents.
+    fn node_at(&self, key: &ArenaKey<D::Hasher>) -> OnDiskObject<D::Hasher> {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
+        match key {
+            ArenaKey::Ref(key) => self
+                .lock_backend()
+                .borrow_mut()
+                .get(key)
+                .expect("Arena should contain current serialization target")
+                .clone(),
+            ArenaKey::Direct(d) => OnDiskObject {
+                data: d.data.as_ref().clone(),
+                #[cfg(not(feature = "layout-v2"))]
+                ref_count: 0,
+                children: d.children.as_ref().clone(),
+            },
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     fn lock_metadata(&self) -> MutexGuard<'_, RefCell<MetaData<D>>> {
         self.metadata.lock()
@@ -656,7 +697,15 @@ impl<D: DB> Arena<D> {
         let sp_cache_lock = self.lock_sp_cache();
         self.read_sp_cache_locked::<T>(&sp_cache_lock, key)
             .map(|arc| {
-                let child_repr = arc.as_child();
+                // The only caller, `IrLoader::get`, reaches here for a child it was handed
+                // as `Ref(key)`, so that is the child repr to return. `arc.as_child()` is
+                // not a substitute: a cached Arc may represent as `Direct` (e.g. a small
+                // node cached by `into_tracked`), which would make the result depend on
+                // local cache state. It also re-serializes and re-hashes the whole node --
+                // O(node size) on *every* cache hit, which is quadratic when one node is
+                // referenced many times (the fan-in that makes a bounded-size payload do
+                // unbounded reconstruction work).
+                let child_repr = ArenaKey::Ref(key.clone());
                 Sp::eager(self.clone(), key.clone(), arc, child_repr)
             })
     }
@@ -675,6 +724,15 @@ impl<D: DB> Arena<D> {
     /// recursing down to the leaves and building DAG up from there. If this is
     /// not acceptable, then use [`Self::get_lazy`] instead, which has no
     /// unbounded recursion, and instead loads nested `Sp`s on demand.
+    ///
+    /// This is only safe because the depth of anything *in* the arena is
+    /// bounded: values allocated in-process are as deep as the caller made
+    /// them, and values arriving over the wire go through
+    /// [`Self::deserialize_sp`], whose `IrLoader` refuses graphs nested deeper
+    /// than [`serialize::RECURSION_LIMIT`]. Anything that lets untrusted input
+    /// into the arena at an unbounded depth would make this path a stack
+    /// overflow; use [`BackendLoader::new`] with a `max_depth` for bounded
+    /// loading in that case.
     pub fn get<T: Storable<D>>(
         &self,
         key: &TypedArenaKey<T, D::Hasher>,
@@ -830,87 +888,81 @@ impl<D: DB> Arena<D> {
         recursive_depth: u32,
     ) -> Result<Sp<T, D>, std::io::Error> {
         let nodes: TopoSortedNodes = Deserializable::deserialize(reader, recursive_depth)?;
-        let mut existing_nodes: Vec<IntermediateRepr<D>> = Vec::with_capacity(nodes.nodes.len());
-        fn idx_existing_nodes<D: DB>(
-            n: &[IntermediateRepr<D>],
-            i: u64,
-        ) -> std::io::Result<&IntermediateRepr<D>> {
-            if i < n.len() as u64 {
-                Ok(&n[i as usize])
-            } else {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "error deserializing storage graph: child node index {i} out of range of processed nodes {}",
-                        n.len()
-                    ),
-                ))
-            }
-        }
-
-        let mut result = Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "no nodes",
-        ));
+        // Nodes are topologically sorted with every child *before* its parents, so one
+        // forward pass can memoize each node's hash by position. The previous code
+        // recomputed a referenced child's hash on every reference, in two separate loops:
+        // O(references x child size), so a bounded-size payload could declare unbounded
+        // hashing work -- a DoS on every path that deserializes caller-supplied bytes.
+        // This is a pure memoization of the same `hash(..)` calls in the same order, so
+        // every node hash -- and thus the committed state root -- is byte-for-byte
+        // unchanged; it is a performance fix, not a hard fork.
+        let node_count = nodes.nodes.len();
+        let mut existing_nodes: Vec<IntermediateRepr<D>> = Vec::with_capacity(node_count);
+        let mut node_hash: Vec<ArenaHash<D::Hasher>> = Vec::with_capacity(node_count);
+        let mut key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>> =
+            HashMap::new();
 
         for node in nodes.nodes.iter() {
-            let children = node
+            // A child index must point at an already-processed node -- strictly earlier in
+            // the topological order -- so its hash and arena key are already memoized.
+            let child_hashes = node
                 .child_indices
                 .iter()
-                .map(|i| {
-                    idx_existing_nodes(&existing_nodes, *i)
-                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
+                .map(|&i| {
+                    usize::try_from(i)
+                        .ok()
+                        .filter(|i| *i < node_hash.len())
+                        .map(|i| node_hash[i].clone())
+                        .ok_or_else(|| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!(
+                                    "error deserializing storage graph: child node index {i} out of range of processed nodes {}",
+                                    node_hash.len()
+                                ),
+                            )
+                        })
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-            let root = hash::<D::Hasher>(&node.data, children.iter());
-            let ir: IntermediateRepr<D> = IntermediateRepr {
-                binary_repr: node.data.clone(),
-                children,
-                db_type: PhantomData,
-            };
-            existing_nodes.push(ir);
-            result = Ok(root);
-        }
+                .collect::<std::io::Result<Vec<_>>>()?;
+            let root = hash::<D::Hasher>(&node.data, child_hashes.iter());
 
-        let mut key_to_child_repr: HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<D::Hasher>> =
-            std::collections::HashMap::new();
-        for node in nodes.nodes.iter() {
-            let children = node
-                .child_indices
-                .iter()
-                .map(|i| {
-                    idx_existing_nodes(&existing_nodes, *i)
-                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let root = hash::<D::Hasher>(&node.data, children.iter());
-            let children = children
+            let child_keys = child_hashes
                 .iter()
                 .map(|h| {
                     key_to_child_repr
                         .get(h)
-                        .ok_or(std::io::Error::other("child not in key_to_child_repr"))
+                        .cloned()
+                        .ok_or_else(|| std::io::Error::other("child not in key_to_child_repr"))
                 })
-                .map(|r| r.cloned())
-                .collect::<Result<Vec<_>, _>>()?;
-            key_to_child_repr.insert(root, child_from(&node.data, &children));
+                .collect::<std::io::Result<Vec<_>>>()?;
+            key_to_child_repr.insert(root.clone(), child_from(&node.data, &child_keys));
+
+            existing_nodes.push(IntermediateRepr {
+                binary_repr: node.data.clone(),
+                children: child_hashes,
+                db_type: PhantomData,
+            });
+            node_hash.push(root);
         }
 
-        let key = result?;
+        let key = node_hash
+            .last()
+            .cloned()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no nodes"))?;
+
         let res: Sp<T, D> = IrLoader {
             arena: self,
             all: &existing_nodes
                 .into_iter()
-                .map(|node| {
-                    (
-                        hash::<D::Hasher>(&node.binary_repr, node.children.iter()),
-                        node,
-                    )
-                })
+                .zip(node_hash)
+                .map(|(node, root)| (root, node))
                 .collect(),
             recursion_depth: recursive_depth,
-            visited: Rc::new(RefCell::new(HashSet::new())),
+            height: Cell::new(0),
+            visited: Rc::new(RefCell::new(HashMap::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1057,6 +1109,12 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     }
 }
 
+/// Memo table for in-lined values deserialized by a single [`IrLoader`],
+/// holding erased `Sp<T, D>`s and their heights, keyed by (hash,
+/// `TypeId::of::<T>()`).
+type InlineMemo<D> =
+    Rc<RefCell<HashMap<DynTypedArenaHash<<D as DB>::Hasher>, (Box<dyn Any + Send + Sync>, u32)>>>;
+
 /// A `Loader` that uses `IntermediateRepr` objects to get the binary data for
 /// deserialization.
 ///
@@ -1079,9 +1137,28 @@ pub(crate) struct IrLoader<'a, D: DB> {
     arena: &'a Arena<D>,
     all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
     recursion_depth: u32,
-    /// The keys we've already deserialized once.
-    visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
+    /// The height of the value currently being deserialized with this loader,
+    /// so far: one more than the greatest height of any child it has loaded
+    /// through [`Loader::get`], or zero if it has loaded none.
+    height: Cell<u32>,
+    /// The keys we've already deserialized once, with their heights.
+    ///
+    /// The height of a value is the length of its longest chain of
+    /// descendants, counting shared children once per path. A memoized value
+    /// is returned without recursing into it again, so its height must be
+    /// checked against the remaining recursion budget instead: otherwise a
+    /// graph that shares nodes could be first visited along short paths, and
+    /// yet decode to a value arbitrarily deeper than `RECURSION_LIMIT`.
+    visited: Rc<RefCell<HashMap<DynTypedArenaHash<D::Hasher>, u32>>>,
+    /// The in-lined ([`ArenaKey::Direct`]) values we've already deserialized
+    /// once.
+    ///
+    /// In-lined values get their own memo table because, unlike by-reference
+    /// values, they are not tracked in the arena's `Sp` cache (see
+    /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
+    inlined: InlineMemo<D>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
+    invariant_memos: Rc<RefCell<InvariantMemos<D>>>,
 }
 
 #[cfg(test)]
@@ -1095,14 +1172,69 @@ impl<'a, D: DB> IrLoader<'a, D> {
             arena,
             all,
             recursion_depth: 0,
-            visited: Rc::new(RefCell::new(HashSet::new())),
+            height: Cell::new(0),
+            visited: Rc::new(RefCell::new(HashMap::new())),
+            inlined: Rc::new(RefCell::new(HashMap::new())),
             key_to_child_repr: Rc::new(key_to_child_repr),
+            invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
+    }
+}
+
+impl<D: DB> IrLoader<'_, D> {
+    /// Notes that the value being deserialized has a child of height `height`.
+    fn record_child_height(&self, height: u32) {
+        self.height.set(self.height.get().max(height + 1));
+    }
+
+    /// Returns `depth + extra`, or an error if that exceeds the recursion
+    /// limit (or overflows).
+    fn within_limit(depth: u32, extra: u32) -> Result<u32, std::io::Error> {
+        depth
+            .checked_add(extra)
+            .filter(|&d| d <= serialize::RECURSION_LIMIT)
+            .ok_or_else(|| std::io::Error::other("Reached recursion limit".to_string()))
+    }
+
+    /// Returns the loader to deserialize a child with, one level deeper than
+    /// this one, or an error if that level would exceed the recursion limit.
+    ///
+    /// This is the single point at which `get` descends, for both in-lined and
+    /// by-reference children, so both are held to the same bound.
+    fn descend(&self) -> Result<Self, std::io::Error> {
+        Ok(IrLoader {
+            arena: self.arena,
+            all: self.all,
+            recursion_depth: Self::within_limit(self.recursion_depth, 1)?,
+            height: Cell::new(0),
+            visited: self.visited.clone(),
+            inlined: self.inlined.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
+            invariant_memos: self.invariant_memos.clone(),
+        })
+    }
+
+    /// Accounts for a memoized child of height `height`, failing if
+    /// deserializing it afresh here would have exceeded the recursion limit.
+    ///
+    /// A value of height `h` deserialized with a loader at depth `d` descends
+    /// to depth `d + 1 + h`, which `descend` rejects beyond `RECURSION_LIMIT`,
+    /// so this applies the same bound a fresh deserialization would.
+    fn reuse_height(&self, height: u32) -> Result<(), std::io::Error> {
+        Self::within_limit(self.recursion_depth, height.saturating_add(1))?;
+        self.record_child_height(height);
+        Ok(())
     }
 }
 
 impl<D: DB> Loader<D> for IrLoader<'_, D> {
     const CHECK_INVARIANTS: bool = true;
+
+    // Checks in one decode share memos, so shared children are checked once.
+    fn do_check<T: Storable<D>>(&self, obj: T) -> std::io::Result<T> {
+        obj.check_invariant_memoized(&mut self.invariant_memos.borrow_mut())?;
+        Ok(obj)
+    }
 
     /// Always forces deserialization of each key the first time we see it, so
     /// that `Sp` deserialization does not depend on the `Arena` state before
@@ -1113,26 +1245,53 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
-        let key = match child {
-            ArenaKey::Direct(child) => {
-                let value = T::from_binary_repr(
-                    &mut &child.data[..],
-                    &mut child.children.iter().cloned(),
-                    self,
-                )?;
-                return Ok(self.arena.alloc(value));
-            }
-            ArenaKey::Ref(key) => key,
-        };
+        // Every nesting level counts towards the recursion limit, whether the
+        // child is by-reference or in-lined: both arms below recurse into
+        // `Storable::from_binary_repr`, and so consume stack. Descending here,
+        // *before* either arm, keeps the recursion depth of this loader (and
+        // hence our stack usage) bounded by `RECURSION_LIMIT` for arbitrary input.
+        let loader = self.descend()?;
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
         //
         // Mistakes have been made:
         // https://shielded.atlassian.net/browse/PM-16347
-        let typed_key = (key.clone(), TypeId::of::<T>());
+        let typed_key = (child.hash().clone(), TypeId::of::<T>());
+        let key = match child {
+            ArenaKey::Direct(direct) => {
+                // In-lined values are memoized here, rather than via the `Sp`
+                // cache, since `Arena::alloc` doesn't put them there.
+                let memoized = self
+                    .inlined
+                    .borrow()
+                    .get(&typed_key)
+                    .and_then(|(sp, height)| {
+                        Some((sp.downcast_ref::<Sp<T, D>>()?.clone(), *height))
+                    });
+                if let Some((sp, height)) = memoized {
+                    assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+                    self.reuse_height(height)?;
+                    return Ok(sp);
+                }
+                let value = T::from_binary_repr(
+                    &mut &direct.data[..],
+                    &mut direct.children.iter().cloned(),
+                    &loader,
+                )?;
+                let sp = self.arena.alloc(value);
+                let height = loader.height.get();
+                self.record_child_height(height);
+                self.inlined
+                    .borrow_mut()
+                    .insert(typed_key, (Box::new(sp.clone()), height));
+                return Ok(sp);
+            }
+            ArenaKey::Ref(key) => key,
+        };
 
         // If we've visited this key before, then try to get it from the cache.
-        if self.visited.borrow().contains(&typed_key) {
+        let visited_height = self.visited.borrow().get(&typed_key).copied();
+        if let Some(height) = visited_height {
             // In a sane world we could assume that the Sp cache contained any
             // values we've already deserialized, but in theory someone could
             // implement a malicious/stupid `Storable::from_binary_repr` that
@@ -1141,6 +1300,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             // our own cache for the duration of this `IrLoader`.
             if let Some(sp) = self.arena.get_from_cache::<T>(key) {
                 assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+                self.reuse_height(height)?;
                 return Ok(sp);
             }
         }
@@ -1150,16 +1310,6 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             io::ErrorKind::NotFound,
             "IR not found in `all` map",
         ))?;
-        if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::other("Reached recursion limit".to_string()));
-        }
-        let loader = IrLoader {
-            arena: self.arena,
-            all: self.all,
-            recursion_depth: self.recursion_depth + 1,
-            visited: self.visited.clone(),
-            key_to_child_repr: self.key_to_child_repr.clone(),
-        };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
             &mut ir.children.clone().into_iter().map(|k| {
@@ -1171,7 +1321,9 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
-        self.visited.borrow_mut().insert(typed_key);
+        let height = loader.height.get();
+        self.record_child_height(height);
+        self.visited.borrow_mut().insert(typed_key, height);
         Ok(sp)
     }
 
@@ -1405,6 +1557,8 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
     /// Access the inner data, forcing initialization if necessary.
     fn deref(&self) -> &Self::Target {
+        #[cfg(feature = "test-utilities")]
+        crate::test::count_deref();
         self.force_as_arc()
     }
 }
@@ -1426,9 +1580,8 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr {
-            self.arena.increment_ref(&self.root);
-        }
+        // Cast before taking the metadata reference: a failed cast returns no
+        // `Sp`, so nothing would ever release it.
         let data: OnceLock<Arc<T>> = match self.data.get() {
             Some(arc) => {
                 let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
@@ -1436,6 +1589,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
             }
             None => OnceLock::new(),
         };
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
         Some(Sp {
             root: self.root.clone(),
             child_repr: self.child_repr.clone(),
@@ -1681,6 +1837,25 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         self.data.get().unwrap()
     }
 
+    /// Calls `f` with the data and child count of each distinct node of this
+    /// sub-graph, stopping as soon as `f` returns `false`. Returns whether
+    /// every node was visited.
+    pub fn try_visit_nodes(&self, mut f: impl FnMut(&[u8], usize) -> bool) -> bool {
+        let mut seen = std::collections::HashSet::new();
+        let mut frontier = vec![self.child_repr.clone()];
+        while let Some(key) = frontier.pop() {
+            if !seen.insert(key.hash().clone()) {
+                continue;
+            }
+            let node = self.arena.node_at(&key);
+            if !f(&node.data, node.children.len()) {
+                return false;
+            }
+            frontier.extend(node.children.iter().cloned());
+        }
+        true
+    }
+
     /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
     /// This will force and load all nodes in this sub-graph.
@@ -1715,20 +1890,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if disk_objects.contains_key(child.hash()) {
                 continue;
             }
-            let node = match child {
-                ArenaKey::Ref(ref key) => arena
-                    .lock_backend()
-                    .borrow_mut()
-                    .get(key)
-                    .expect("Arena should contain current serialization target")
-                    .clone(),
-                ArenaKey::Direct(ref d) => OnDiskObject {
-                    data: d.data.as_ref().clone(),
-                    #[cfg(not(feature = "layout-v2"))]
-                    ref_count: 0,
-                    children: d.children.as_ref().clone(),
-                },
-            };
+            let node = arena.node_at(&child);
             for child in node.children.iter() {
                 *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());
@@ -1949,6 +2111,13 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         T::check_invariant(self)
     }
+
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        T::check_invariant_memoized(self, memos)
+    }
 }
 
 impl<T: Storable<D>, D: DB> Serializable for Sp<T, D> {
@@ -2112,6 +2281,70 @@ mod tests {
             16,
             DefaultDB::default(),
         ))
+    }
+
+    /// Groups up to 16 references to one shared leaf; `id` keeps fans distinct so they
+    /// do not dedup, preserving the fan-in. Used by the deserialize regression test.
+    #[derive(Clone, Storable)]
+    #[tag = "hashcount-fan"]
+    struct HashCountFan {
+        id: u64,
+        leaves: Vec<Sp<[u8; SMALL_OBJECT_LIMIT]>>,
+    }
+
+    #[derive(Clone, Storable)]
+    #[tag = "hashcount-root"]
+    struct HashCountRoot {
+        fans: Vec<Sp<HashCountFan>>,
+    }
+
+    /// Regression guard for the issue-606 deserialization quadratics. Deserializing a
+    /// high-fan-in graph must hash each *unique* node O(1) times, never once per
+    /// *reference*. Both historic quadratics surface as `hash()` calls that scale with
+    /// the reference count: the old `deserialize_sp` recomputed a child's hash per
+    /// reference, and the old `get_from_cache` called `as_child` (which re-hashes) per
+    /// reference. This pins the count to unique-node scale. The companion
+    /// `benches/deserialize_fanin.rs` shows the wall-clock curve; this is the CI gate.
+    #[test]
+    fn deserialize_hashes_each_node_once_not_per_reference() {
+        use serialize::{tagged_deserialize, tagged_serialize};
+
+        // `[u8; SMALL_OBJECT_LIMIT]` serializes above the small-object limit, so it is a
+        // ref-tracked (cached) node -- the shape that exercised both quadratics.
+        let arena = &default_storage::<DefaultDB>().arena;
+        let shared = arena.alloc([0xABu8; SMALL_OBJECT_LIMIT]);
+
+        const FANS: u64 = 16;
+        const REFS_PER_FAN: usize = 16;
+        let references = FANS as usize * REFS_PER_FAN; // 256 references to one leaf
+
+        let fans: Vec<Sp<HashCountFan>> = (0..FANS)
+            .map(|id| {
+                arena.alloc(HashCountFan {
+                    id,
+                    leaves: vec![shared.clone(); REFS_PER_FAN],
+                })
+            })
+            .collect();
+        let root = arena.alloc(HashCountRoot { fans });
+
+        let mut bytes = Vec::new();
+        tagged_serialize(&*root, &mut bytes).expect("serialize");
+
+        // Count only the deserialize under test (build + serialize also hash).
+        HASH_CALLS.with(|c| c.set(0));
+        let _: HashCountRoot = tagged_deserialize(&mut &bytes[..]).expect("deserialize");
+        let calls = HASH_CALLS.with(|c| c.get());
+
+        // 18 unique nodes (1 leaf + 16 fans + 1 root); the fixed path hashes each a
+        // small, constant number of times. A regression to per-reference hashing pushes
+        // this to >= `references`. The bound is linear in unique nodes and far below
+        // `references`, so it catches either quadratic without being timing-dependent.
+        assert!(
+            calls < references,
+            "deserialize made {calls} hash() calls for {references} references to a shared \
+             node; expected O(unique nodes). A quadratic re-hash has regressed."
+        );
     }
 
     #[test]
@@ -2336,6 +2569,27 @@ mod tests {
                 "the weak reference should be gone after unloading sp2"
             );
         }
+    }
+
+    // A failed `Sp::downcast` must not leave the metadata reference count
+    // for its root incremented: nothing is returned, so no `Sp` drop ever
+    // decrements it, and the key can never be collected.
+    #[test]
+    fn metadata_downcast_failure() {
+        let arena = &new_arena();
+        let sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        let dyn_sp = sp.upcast();
+        assert_eq!(arena.size(), 1);
+
+        assert!(dyn_sp.downcast::<u64>().is_none());
+
+        drop(sp);
+        drop(dyn_sp);
+        assert_eq!(
+            arena.size(),
+            0,
+            "metadata entry should be gone once every Sp for it is dropped"
+        );
     }
 
     // Test that attempting to load the same value into the arena twice,

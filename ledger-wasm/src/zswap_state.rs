@@ -17,7 +17,7 @@ use crate::state_changes::ZswapStateChanges;
 use crate::tx::{Transaction, get_dyn_transaction};
 use crate::zswap_keys::ZswapSecretKeys;
 use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
-use base_crypto::time::Timestamp;
+use base_crypto::time::{Duration, Timestamp};
 use coin_structure::{
     coin::{
         Commitment, Info as CoinInfo, PublicKey as CoinPublicKey,
@@ -25,7 +25,7 @@ use coin_structure::{
     },
     contract::ContractAddress as Address,
 };
-use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
+use js_sys::{Array, BigInt, Date, JsString, Map, Set, Uint8Array};
 use ledger::events::{EventDetails, EventSource};
 use ledger::semantics::ZswapLocalStateExt;
 use ledger::zswap::WithZswapStateChanges;
@@ -482,11 +482,21 @@ impl ZswapChainState {
     }
 
     #[wasm_bindgen(js_name = "postBlockUpdate")]
-    pub fn post_block_update(&self, tblock: &Date) -> ZswapChainState {
-        ZswapChainState(
-            self.0
-                .post_block_update(Timestamp::from_secs(js_date_to_seconds(tblock))),
-        )
+    pub fn post_block_update(
+        &self,
+        tblock: &Date,
+        retention_duration: BigInt,
+    ) -> Result<ZswapChainState, JsError> {
+        let block_timestamp = Timestamp::from_secs(js_date_to_seconds(tblock));
+
+        let new_inner = {
+            let duration = i128::try_from(retention_duration)
+                .map_err(|_| JsError::new("retention_duration is out of range"))
+                .map(Duration::from_secs)?;
+            self.0.post_block_update(block_timestamp, duration)
+        };
+
+        Ok(ZswapChainState(new_inner))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {

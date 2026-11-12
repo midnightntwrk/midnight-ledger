@@ -15,28 +15,26 @@ use crate::conversions::*;
 use crate::events::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
-use crate::transcript::PreTranscript;
+use crate::transcript::{PreTranscript, expected_tx_shape_from_value};
 use crate::zswap_state::whitelist_from_value;
 use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
     ZswapOutputTypes, ZswapTransient, ZswapTransientTypes,
 };
-use base_crypto::schnorr;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
 use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
-use ledger::construct::SegmentSpecifier;
+use ledger::construct::{SegmentSpecifier, TransactionShape};
 use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
-    ProofVersioned, SignatureKind,
+    ProofVersioned, Signature, SignatureKind, SignatureVerifyingKey,
 };
 use onchain_runtime::state::EntryPointBuf;
 use onchain_runtime_wasm::context::CostModel;
-use onchain_runtime_wasm::conversions::token_type_to_value;
+use onchain_runtime_wasm::conversions::{PreSignature, token_type_to_value};
+use onchain_runtime_wasm::from_value_ser;
 use onchain_runtime_wasm::state::{ContractOperation, from_maybe_string};
-use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
@@ -47,7 +45,9 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
+use transient_crypto::proofs::{
+    KeyLocation, ProofPreimage, ProvingKeyMaterial, ProvingProvider, Resolver,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use zswap::Offer;
@@ -102,6 +102,7 @@ try_ref_for_exported!(PrePartitionContractCall);
 
 #[wasm_bindgen]
 impl PrePartitionContractCall {
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(constructor)]
     pub fn new(
         address: &str,
@@ -361,11 +362,70 @@ impl Transaction {
             .map_err(|_| {
                 JsError::new("expected proving provider property 'prove' to be a function")
             })?;
+        let lookup_key = js_sys::Reflect::get(&provider, &"lookupKey".into())
+            .map_err(|_| JsError::new("failed to get property 'lookupKey' on ProvingProvider"))?
+            .dyn_into::<Function>()
+            .map_err(|_| {
+                JsError::new("expected proving provider property 'lookupKey' to be a function")
+            })?;
         #[derive(Clone)]
         struct JsProvingProvider {
             this: JsValue,
             check: Function,
             prove: Function,
+            lookup_key: Function,
+        }
+        impl Resolver for JsProvingProvider {
+            async fn resolve_key(
+                &self,
+                key: KeyLocation,
+            ) -> std::io::Result<Option<ProvingKeyMaterial>> {
+                let arg_key_location = JsValue::from(JsString::from(key.0.as_ref()));
+                let promise = self
+                    .lookup_key
+                    .call1(&self.this, &arg_key_location)
+                    .map_err(|e| {
+                        std::io::Error::other(format!(
+                            "failed to call 'lookupKey': {}",
+                            try_to_string(e)
+                        ))
+                    })?
+                    .dyn_into::<Promise>()
+                    .map_err(|_| {
+                        std::io::Error::other("result of 'lookupKey' was not a promise")
+                    })?;
+                let result = JsFuture::from(promise).await.map_err(|e| {
+                    std::io::Error::other(format!(
+                        "'lookupKey' returned an error: {}",
+                        try_to_string(e)
+                    ))
+                })?;
+                if result.is_undefined() || result.is_null() {
+                    return Ok(None);
+                }
+                let getprop = |prop: &str| {
+                    Ok::<_, std::io::Error>(
+                        js_sys::Reflect::get(&result, &prop.into())
+                            .map_err(|_| {
+                                std::io::Error::other(format!(
+                                    "could not get property '{prop}' on ProvingKeyMaterial"
+                                ))
+                            })?
+                            .dyn_into::<Uint8Array>()
+                            .map_err(|_| {
+                                std::io::Error::other(format!(
+                                    "property '{prop}' on ProvingKeyMaterial is not a Uint8Array"
+                                ))
+                            })?
+                            .to_vec(),
+                    )
+                };
+                Ok(Some(ProvingKeyMaterial {
+                    prover_key: getprop("proverKey")?,
+                    verifier_key: getprop("verifierKey")?,
+                    ir_source: getprop("ir")?,
+                }))
+            }
         }
         impl ProvingProvider for JsProvingProvider {
             async fn check(
@@ -454,11 +514,15 @@ impl Transaction {
             fn split(&mut self) -> Self {
                 self.clone()
             }
+            fn resolver(&self) -> &impl Resolver {
+                self
+            }
         }
         let provider = JsProvingProvider {
             this: provider,
             check,
             prove,
+            lookup_key,
         };
         use TransactionTypes::*;
         match &self.0 {
@@ -927,6 +991,7 @@ impl Transaction {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(js_name = "addCalls")]
     pub fn add_calls(
         &self,
@@ -937,6 +1002,7 @@ impl Transaction {
         zswap_inputs: Option<Array>,
         zswap_outputs: Option<Array>,
         zswap_transient: Option<Array>,
+        expected_tx_shape: JsValue,
     ) -> Result<Transaction, JsError> {
         use TransactionTypes::*;
         use ledger::structure::Transaction::Standard;
@@ -953,6 +1019,7 @@ impl Transaction {
                 .ok_or_else(|| JsError::new(&format!("expected {}", std::any::type_name::<T>())))
         }
         let calls = array_mapper::<PrePartitionContractCall, _>(calls, |x| Ok(x.0.clone()))?;
+        let expected_tx_shape = expected_tx_shape_from_value(&expected_tx_shape)?;
         let zswap_inputs = zswap_inputs
             .map(|i| {
                 array_mapper::<ZswapInput, _>(i, |x| match &x.0 {
@@ -982,8 +1049,8 @@ impl Transaction {
             .unwrap_or_default();
         match &self.0 {
             UnprovenWithSignaturePreBinding(Standard(tx)) => {
-                let tx = tx.add_calls::<ProofPreimage>(
-                    &mut OsRng,
+                let tx = add_calls_with_optional_tx_shape(
+                    tx,
                     segment,
                     &calls,
                     params,
@@ -991,12 +1058,13 @@ impl Transaction {
                     &zswap_inputs,
                     &zswap_outputs,
                     &zswap_transient,
+                    expected_tx_shape.as_ref(),
                 )?;
                 Ok(Transaction(UnprovenWithSignaturePreBinding(Standard(tx))))
             }
             UnprovenWithSignatureErasedPreBinding(Standard(tx)) => {
-                let tx = tx.add_calls::<ProofPreimage>(
-                    &mut OsRng,
+                let tx = add_calls_with_optional_tx_shape(
+                    tx,
                     segment,
                     &calls,
                     params,
@@ -1004,6 +1072,7 @@ impl Transaction {
                     &zswap_inputs,
                     &zswap_outputs,
                     &zswap_transient,
+                    expected_tx_shape.as_ref(),
                 )?;
                 Ok(Transaction(UnprovenWithSignatureErasedPreBinding(
                     Standard(tx),
@@ -1150,6 +1219,47 @@ impl Transaction {
 
         Ok(())
     }
+}
+
+/// `add_calls`, or `add_calls_with_tx_shape` when given a shape.
+#[allow(clippy::too_many_arguments)]
+fn add_calls_with_optional_tx_shape<S: SignatureKind<InMemoryDB>>(
+    tx: &ledger::structure::StandardTransaction<S, ProofPreimageMarker, PreBinding, InMemoryDB>,
+    segment: SegmentSpecifier,
+    calls: &[ledger::construct::PrePartitionContractCall<InMemoryDB>],
+    params: &ledger::structure::LedgerParameters,
+    ttl: Timestamp,
+    zswap_inputs: &[zswap::Input<ProofPreimage, InMemoryDB>],
+    zswap_outputs: &[zswap::Output<ProofPreimage, InMemoryDB>],
+    zswap_transients: &[zswap::Transient<ProofPreimage, InMemoryDB>],
+    expected_tx_shape: Option<&TransactionShape>,
+) -> Result<
+    ledger::structure::StandardTransaction<S, ProofPreimageMarker, PreBinding, InMemoryDB>,
+    JsError,
+> {
+    Ok(match expected_tx_shape {
+        Some(expected_tx_shape) => tx.add_calls_with_tx_shape::<ProofPreimage>(
+            &mut OsRng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            expected_tx_shape,
+        )?,
+        None => tx.add_calls::<ProofPreimage>(
+            &mut OsRng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+        )?,
+    })
 }
 
 trait ClaimRewardable {
@@ -1476,12 +1586,19 @@ impl ClaimRewardsTransaction {
         signature_marker: &str,
         network_id: String,
         value: BigInt,
-        owner: &str,
+        owner: JsValue,
         nonce: &str,
         signature: JsValue,
         kind: JsValue,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner = match from_value::<PreSignature>(owner)? {
+            PreSignature::Schnorr(raw) => {
+                ledger::structure::SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?)
+            }
+            PreSignature::ECDSA(raw) => {
+                ledger::structure::SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?)
+            }
+        };
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = if kind.is_null() || kind.is_undefined() {
@@ -1527,11 +1644,18 @@ impl ClaimRewardsTransaction {
     pub fn new(
         network_id: String,
         value: BigInt,
-        owner: &str,
+        owner: JsValue,
         nonce: &str,
         kind: &str,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner = match from_value::<PreSignature>(owner)? {
+            PreSignature::Schnorr(raw) => {
+                ledger::structure::SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?)
+            }
+            PreSignature::ECDSA(raw) => {
+                ledger::structure::SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?)
+            }
+        };
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = text_to_claim_kind(kind)?;
@@ -1549,8 +1673,11 @@ impl ClaimRewardsTransaction {
     }
 
     #[wasm_bindgen(js_name = "addSignature")]
-    pub fn add_signature(&self, signature: &str) -> Result<ClaimRewardsTransaction, JsError> {
-        let signature: Signature = from_hex_ser(signature)?;
+    pub fn add_signature(&self, signature: JsValue) -> Result<ClaimRewardsTransaction, JsError> {
+        let signature = match from_value::<PreSignature>(signature)? {
+            PreSignature::Schnorr(raw) => Signature::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => Signature::ECDSA(from_hex_ser(&raw)?),
+        };
         use ClaimRewardsTransactionTypes::*;
         Ok(ClaimRewardsTransaction(SignatureClaimRewards(
             match &self.0 {
@@ -1641,12 +1768,16 @@ impl ClaimRewardsTransaction {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn owner(&self) -> Result<String, JsError> {
+    pub fn owner(&self) -> Result<JsValue, JsError> {
         use ClaimRewardsTransactionTypes::*;
-        match &self.0 {
-            SignatureClaimRewards(val) => to_hex_ser(&val.owner),
-            SignatureErasedClaimRewards(val) => to_hex_ser(&val.owner),
-        }
+        let owner = match &self.0 {
+            SignatureClaimRewards(val) => &val.owner,
+            SignatureErasedClaimRewards(val) => &val.owner,
+        };
+        Ok(to_value(&match owner {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(vk)?),
+        })?)
     }
 
     #[wasm_bindgen(getter)]

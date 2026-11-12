@@ -15,21 +15,22 @@ use crate::annotation::NightAnn;
 use crate::dust::DUST_GENERATION_INFO_SIZE;
 use crate::dust::DUST_SPEND_PIS;
 use crate::dust::DUST_SPEND_PROOF_SIZE;
+use crate::dust::DustActionsSigningEnvelope;
 use crate::dust::{DustActions, DustParameters, DustState, INITIAL_DUST_PARAMETERS};
 use crate::error::FeeCalculationError;
 use crate::error::InvariantViolation;
 use crate::error::MalformedTransaction;
+use crate::utils::OptionEnvelope;
 use crate::verify::ProofVerificationMode;
 use base_crypto::BinaryHashRepr;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::cost_model::price_adjustment_function;
 use base_crypto::cost_model::{CostDuration, FeePrices, FixedPoint, SyntheticCost};
+use base_crypto::envelope::Envelope;
 use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::MemWrite;
-use base_crypto::schnorr::Signature;
-use base_crypto::schnorr::{SigningKey, VerifyingKey};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::NIGHT;
 use coin_structure::coin::PublicAddress;
@@ -42,6 +43,7 @@ use introspection_derive::Introspection;
 use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue, Effects};
 use onchain_runtime::state::ChargedState;
 use onchain_runtime::state::ContractOperation;
+use onchain_runtime::state::IrBuf;
 use onchain_runtime::state::{ContractMaintenanceAuthority, ContractState, EntryPointBuf};
 use onchain_runtime::transcript::Transcript;
 use rand::{CryptoRng, Rng};
@@ -61,9 +63,10 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::{ArenaHash, ArenaKey, Sp};
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 use storage::db::InMemoryDB;
-use storage::merkle_patricia_trie::Annotation;
+use storage::merkle_patricia_trie::{Annotation, Monoid, Semigroup};
 use storage::storable::Loader;
 use storage::storage::Map;
 use storage::storage::{HashMap, HashSet, TimeFilterMap};
@@ -71,7 +74,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPe
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{Proof, ProofPreimage};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 use zswap::ZSWAP_TREE_HEIGHT;
@@ -84,7 +86,11 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
     type Signature<T>: Ord + Serializable + Deserializable + Storable<D> + Debug + Tagged;
 
     /// Verify a signature against a message
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Self::Signature<T>) -> bool;
+    fn signature_verify<T>(
+        msg: &[u8],
+        key: SignatureVerifyingKey,
+        signature: &Self::Signature<T>,
+    ) -> bool;
 
     fn sign<R: Rng + CryptoRng, T>(
         sk: &SigningKey,
@@ -96,7 +102,7 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
 impl<D: DB> SignatureKind<D> for () {
     type Signature<T> = ();
 
-    fn signature_verify<T>(_msg: &[u8], _key: VerifyingKey, _signature: &()) -> bool {
+    fn signature_verify<T>(_msg: &[u8], _key: SignatureVerifyingKey, _signature: &()) -> bool {
         true
     }
 
@@ -106,7 +112,7 @@ impl<D: DB> SignatureKind<D> for () {
 impl<D: DB> SignatureKind<D> for Signature {
     type Signature<T> = Signature;
 
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Signature) -> bool {
+    fn signature_verify<T>(msg: &[u8], key: SignatureVerifyingKey, signature: &Signature) -> bool {
         key.verify(msg, signature)
     }
 
@@ -287,7 +293,10 @@ impl ProofPreimageVersioned {
 #[tag = "proof-versioned"]
 #[non_exhaustive]
 pub enum ProofVersioned {
+    /// A proof generated against the v1 (zk-stdlib v1) Zkir trait.
     V2(Proof),
+    /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
+    V3(Proof),
 }
 
 impl Serializable for ProofVersioned {
@@ -297,11 +306,15 @@ impl Serializable for ProofVersioned {
                 Serializable::serialize(&1u8, writer)?;
                 proof.serialize(writer)
             }
+            ProofVersioned::V3(proof) => {
+                Serializable::serialize(&2u8, writer)?;
+                proof.serialize(writer)
+            }
         }
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
         }
     }
 }
@@ -315,6 +328,10 @@ impl Deserializable for ProofVersioned {
                 format!("invalid old discriminant for ProofVersioned: {discrim}"),
             )),
             1 => Ok(ProofVersioned::V2(Proof::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            2 => Ok(ProofVersioned::V3(Proof::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -383,13 +400,6 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        op: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -398,6 +408,8 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     >(
         tx: &Transaction<S, Self, B, D>,
     ) -> usize;
+    /// Extracts which contract operation version a proof should be verified against, if known.
+    fn proof_version_to_operation_version(p: &Self::Proof) -> Option<ContractOperationVersion>;
 }
 
 impl From<Proof> for ProofVersioned {
@@ -441,52 +453,58 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let vk = match &op.v2 {
-            Some(vk) => vk,
-            None => {
-                warn!("missing verifier key");
-                return Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
-                    address: call.address,
-                    operation: call.entry_point.clone(),
-                });
-            }
+        let inner_proof = match proof {
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
         };
 
-        if op.v2.is_some() && !matches!(proof, ProofVersioned::V2(_)) {
-            return Err(MalformedTransaction::<D>::UnsupportedProofVersion {
-                op_version: "V2".to_string(),
-            });
-        }
-
         match proof {
-            ProofVersioned::V2(proof) => match mode {
-                #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => vk
-                    .mock_verify(pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-                _ => vk
-                    .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-            },
-        }
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        vk: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => vk
-                .mock_verify(pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => vk
-                .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
+            ProofVersioned::V2(_) => {
+                let vk = op.v2_vk().ok_or_else(|| {
+                    warn!("missing v1 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
+                let old_pis = pis.into_iter().map(|f| {
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                });
+                match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(old_pis)
+                        .map_err(|e| anyhow::anyhow!("v1 mock verification: {e}"))
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(
+                            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                            &old_proof,
+                            old_pis,
+                        )
+                        .map_err(|e| anyhow::anyhow!("v1 verification: {e}"))
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                }
+            }
+            ProofVersioned::V3(_) => {
+                let vk = op.v3_vk().ok_or_else(|| {
+                    warn!("missing v2 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                }
+            }
         }
     }
     fn estimated_tx_size<
@@ -496,6 +514,12 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         tx.serialized_size()
+    }
+    fn proof_version_to_operation_version(proof: &Self::Proof) -> Option<ContractOperationVersion> {
+        Some(match proof {
+            ProofVersioned::V2(_) => ContractOperationVersion::V3,
+            ProofVersioned::V3(_) => ContractOperationVersion::V4,
+        })
     }
 }
 
@@ -529,15 +553,6 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -545,6 +560,9 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
         tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         <()>::estimated_tx_size(&tx.erase_proofs())
+    }
+    fn proof_version_to_operation_version(_: &Self::Proof) -> Option<ContractOperationVersion> {
+        None
     }
 }
 
@@ -572,46 +590,53 @@ impl<D: DB> ProofKind<D> for () {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
     >(
         tx: &Transaction<S, Self, B, D>,
     ) -> usize {
-        let size = tx.serialized_size();
-        let calls = tx.calls().count();
-        let dust_spends = tx
-            .intents()
-            .map(|(_, intent)| {
-                intent
-                    .dust_actions
-                    .as_ref()
-                    .map(|da| da.spends.len())
-                    .unwrap_or(0)
-            })
-            .sum::<usize>();
-        let (zswap_inputs, zswap_outputs) = if let Transaction::Standard(stx) = tx {
-            let transients = stx.transients().count();
-            (
-                stx.inputs().count() + transients,
-                stx.outputs().count() + transients,
-            )
-        } else {
-            (0, 0)
+        let Transaction::Standard(stx) = tx else {
+            return tx.serialized_size();
         };
-        size + calls * PROOF_SIZE
-            + zswap_inputs * zswap::INPUT_PROOF_SIZE
-            + zswap_outputs * zswap::OUTPUT_PROOF_SIZE
-            + dust_spends * DUST_SPEND_PROOF_SIZE
+        let calls = stx.fold_intents(
+            &mut DagMemo::<usize, D>::new(),
+            |_| 0,
+            |_, action| usize::from(matches!(action, ContractAction::Call(_))),
+        );
+        let dust_spends = count_sum(stx.intents.values().map(|intent| {
+            intent
+                .dust_actions
+                .as_ref()
+                .map(|da| da.spends.len())
+                .unwrap_or(0)
+        }));
+        let offers: Vec<_> = stx
+            .guaranteed_coins
+            .iter()
+            .map(|o| (**o).clone())
+            .chain(stx.fallible_coins.values())
+            .collect();
+        let zswap_inputs = count_sum(
+            offers
+                .iter()
+                .flat_map(|o| [o.inputs.len(), o.transient.len()]),
+        );
+        let zswap_outputs = count_sum(
+            offers
+                .iter()
+                .flat_map(|o| [o.outputs.len(), o.transient.len()]),
+        );
+        count_sum([
+            tx.serialized_size(),
+            calls.saturating_mul(PROOF_SIZE),
+            zswap_inputs.saturating_mul(zswap::INPUT_PROOF_SIZE),
+            zswap_outputs.saturating_mul(zswap::OUTPUT_PROOF_SIZE),
+            dust_spends.saturating_mul(DUST_SPEND_PROOF_SIZE),
+        ])
+    }
+    fn proof_version_to_operation_version(_: &Self::Proof) -> Option<ContractOperationVersion> {
+        None
     }
 }
 
@@ -663,17 +688,24 @@ pub struct OutputInstructionUnshielded {
 }
 tag_enforcement_test!(OutputInstructionUnshielded);
 
+#[derive(Serializable)]
+#[tag = "output-instruction-unshielded-with-token-type[v1]"]
+struct OutputInstructionUnshieldedWithTokenType {
+    token_type: UnshieldedTokenType,
+    instruction: OutputInstructionUnshielded,
+}
+
 impl OutputInstructionUnshielded {
     pub fn to_hash_data(self, tt: UnshieldedTokenType) -> Vec<u8> {
         let mut data = Vec::new();
-        data.extend(b"midnight:hash-output-instruction-unshielded:");
-        Serializable::serialize(&tt, &mut data).expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.amount, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.target_address, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.nonce, &mut data)
-            .expect("In-memory serialization should succeed");
+        tagged_serialize(
+            &OutputInstructionUnshieldedWithTokenType {
+                token_type: tt,
+                instruction: self,
+            },
+            &mut data,
+        )
+        .expect("In-memory serialization should succeed");
         data
     }
 
@@ -712,7 +744,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v6]"]
+#[tag = "system-transaction[v9]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -732,26 +764,24 @@ pub enum SystemTransaction {
         outputs: Vec<OutputInstructionUnshielded>,
         token_type: UnshieldedTokenType,
     },
-    DistributeReserve(u128),
+    DistributeReserve {
+        amount: u128,
+    },
     CNightGeneratesDustUpdate {
         events: Vec<CNightGeneratesDustEvent>,
+    },
+    UnlockToTreasury {
+        amount: u128,
+    },
+    UnlockToReserve {
+        amount: u128,
     },
 }
 tag_enforcement_test!(SystemTransaction);
 
-#[derive(Storable)]
-#[derive_where(Clone, PartialEq, Eq)]
-#[storable(db = D)]
-pub struct SegIntent<D: DB>(u16, ErasedIntent<D>);
-
-impl<D: DB> SegIntent<D> {
-    pub fn into_inner(&self) -> (u16, ErasedIntent<D>) {
-        (self.0, self.1.clone())
-    }
-}
-
-#[derive(Storable)]
-#[tag = "unshielded-offer[v1]"]
+#[derive(Storable, Envelope)]
+#[envelope(UnshieldedOfferSigningEnvelope<S, D>)]
+#[tag = "unshielded-offer[v2]"]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
 #[storable(db = D)]
 pub struct UnshieldedOffer<S: SignatureKind<D>, D: DB> {
@@ -762,9 +792,20 @@ pub struct UnshieldedOffer<S: SignatureKind<D>, D: DB> {
     pub outputs: storage::storage::Array<UtxoOutput, D>,
     // Note that for S = (), this has a fixed point of ().
     // This signs the intent, and the segment ID
-    pub signatures: storage::storage::Array<S::Signature<SegIntent<D>>, D>,
+    pub signatures: storage::storage::Array<S::Signature<IntentSigningEnvelope<D>>, D>,
 }
 tag_enforcement_test!(UnshieldedOffer<(), InMemoryDB>);
+
+#[derive(Storable)]
+#[tag = "unshielded-offer-signing-envelope[v2]"]
+#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
+#[storable(db = D)]
+pub struct UnshieldedOfferSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    pub inputs: storage::storage::Array<UtxoSpend, D>,
+    pub outputs: storage::storage::Array<UtxoOutput, D>,
+    pub signatures: PhantomData<storage::storage::Array<S::Signature<IntentSigningEnvelope<D>>, D>>,
+}
+tag_enforcement_test!(UnshieldedOfferSigningEnvelope<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> fmt::Debug for UnshieldedOffer<S, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -782,7 +823,7 @@ impl<S: SignatureKind<D>, D: DB> fmt::Debug for UnshieldedOffer<S, D> {
 impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
     pub fn add_signatures(
         &mut self,
-        signatures: Vec<<S as SignatureKind<D>>::Signature<SegIntent<D>>>,
+        signatures: Vec<<S as SignatureKind<D>>::Signature<IntentSigningEnvelope<D>>>,
     ) {
         for signature in signatures {
             self.signatures = self.signatures.push(signature);
@@ -837,11 +878,13 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
-#[derive(Storable)]
-#[tag = "intent[v6]"]
+#[derive(Storable, Envelope)]
+#[envelope(InnerIntentSigningEnvelope<S, P, B, D>)]
+#[envelope(InnerIntentPedersenEnvelope<S, P, B, D>)]
+#[tag = "intent[v9]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
-pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
+pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
     pub guaranteed_unshielded_offer: Option<Sp<UnshieldedOffer<S, D>, D>>,
     pub fallible_unshielded_offer: Option<Sp<UnshieldedOffer<S, D>, D>>,
     pub actions: storage::storage::Array<ContractAction<P, D>, D>,
@@ -851,11 +894,77 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
 }
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B, D> {
-    pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
-        let mut data = ContractAction::challenge_pre_for(Vec::from(&self.actions).as_slice());
-        let _ = Serializable::serialize(&segment_id, &mut data);
+#[derive(Serializable)]
+#[tag = "inner-intent-signing-envelope[v9]"]
+#[phantom(D)]
+// Note: This signing envelope is *not* just the erased intent in order to not count the number of
+// signatures in unshielded offers. For this same reason, no wrapper is required for contract
+// actions; these *already* have erased the signatures/proofs from them.
+pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
+    pub guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    pub fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    pub actions: storage::storage::Array<ContractAction<P, D>, D>,
+    pub dust_actions: OptionEnvelope<DustActionsSigningEnvelope<S, P, D>>,
+    pub ttl: Timestamp,
+    pub binding_commitment: B,
+}
+tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
+#[derive(Serializable)]
+#[tag = "intent-signing-envelope[v9]"]
+#[phantom(D)]
+pub struct IntentSigningEnvelope<D: DB> {
+    pub segment: u16,
+    pub intent: InnerIntentSigningEnvelope<(), (), Pedersen, D>,
+}
+tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "inner-intent-pedersen-challenge-envelope[v9]"]
+#[phantom(D)]
+// Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
+// binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
+// be used on the erased intent. This is not enforced at a type level due to the limitations of the
+// `Envelope` derive macro, which is considered required as the automated nature of this will flag
+// envelope mismatches.
+struct InnerIntentPedersenEnvelope<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Clone,
+    D: DB,
+> {
+    guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    actions: storage::storage::Array<ContractAction<P, D>, D>,
+    dust_actions: OptionEnvelope<DustActions<S, P, D>>,
+    ttl: Timestamp,
+    binding_commitment: PhantomData<B>,
+}
+tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "intent-pedersen-challenge-envelope[v9]"]
+#[phantom(D)]
+struct IntentPedersenEnvelope<D: DB> {
+    segment: u16,
+    intent: InnerIntentPedersenEnvelope<(), (), Pedersen, D>,
+}
+tag_enforcement_test!(IntentPedersenEnvelope<InMemoryDB>);
+
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D>,
+    D: DB,
+> Intent<S, P, B, D>
+{
+    pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
+        let mut data = Vec::new();
+        let envelope = IntentPedersenEnvelope {
+            segment: segment_id,
+            intent: self.erase_proofs().erase_signatures().into_envelope(),
+        };
+        tagged_serialize(&envelope, &mut data).expect("in-memory serialization must succeed");
         data
     }
 }
@@ -880,20 +989,6 @@ impl<S: SignatureKind<D> + Debug, P: ProofKind<D>, B: Storable<D>, D: DB> fmt::D
     }
 }
 
-fn to_hash_data<D: DB>(intent: Intent<(), (), Pedersen, D>, mut data: Vec<u8>) -> Vec<u8> {
-    Serializable::serialize(&intent.guaranteed_unshielded_offer, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.fallible_unshielded_offer, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.actions, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.ttl, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.binding_commitment, &mut data)
-        .expect("In-memory serialization should succeed");
-    data
-}
-
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D>,
@@ -908,12 +1003,7 @@ impl<
         Intent {
             guaranteed_unshielded_offer: self.guaranteed_unshielded_offer.clone(),
             fallible_unshielded_offer: self.fallible_unshielded_offer.clone(),
-            actions: self
-                .actions
-                .clone()
-                .iter()
-                .map(|x| x.erase_proof())
-                .collect(),
+            actions: self.actions.iter().map(|x| x.erase_proof()).collect(),
             dust_actions: self
                 .dust_actions
                 .as_ref()
@@ -982,10 +1072,12 @@ impl<
 impl<D: DB> Intent<(), (), Pedersen, D> {
     pub fn data_to_sign(&self, segment_id: u16) -> Vec<u8> {
         let mut data = Vec::new();
-        data.extend(b"midnight:hash-intent:");
-        Serializable::serialize(&segment_id, &mut data)
-            .expect("In-memory serialization should succeed");
-        to_hash_data::<D>(self.clone(), data)
+        let envelope = IntentSigningEnvelope {
+            segment: segment_id,
+            intent: self.into_envelope(),
+        };
+        tagged_serialize(&envelope, &mut data).expect("in-memory serialization must succeed");
+        data
     }
 }
 
@@ -1014,11 +1106,13 @@ impl<D: DB> Default for ReplayProtectionState<D> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Serialize, Deserialize)]
-#[tag = "transaction-cost-model[v4]"]
+#[tag = "transaction-cost-model[v5]"]
 pub struct TransactionCostModel {
     pub runtime_cost_model: onchain_runtime::cost_model::CostModel,
-    pub parallelism_factor: u64,
     pub baseline_cost: RunningCost,
+    pub validation_factor: FixedPoint,
+    pub guaranteed_factor: FixedPoint,
+    pub fallible_factor: FixedPoint,
 }
 
 impl TransactionCostModel {
@@ -1114,32 +1208,14 @@ impl TransactionCostModel {
         // they are constant by container, and then reduce that to a running cost using map
         // insert VM operations.
         const EXPECTED_COM_INDICES: usize = 16;
-        // (amount, key length)
-        let maps = [
-            (EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES),
-            (eff.claimed_nullifiers.size(), PERSISTENT_HASH_BYTES),
-            (eff.claimed_shielded_receives.size(), PERSISTENT_HASH_BYTES),
-            (eff.claimed_shielded_spends.size(), PERSISTENT_HASH_BYTES),
-            (
-                eff.claimed_contract_calls.size(),
-                PERSISTENT_HASH_BYTES * 2 + FR_BYTES + 8,
-            ),
-            (eff.shielded_mints.size(), PERSISTENT_HASH_BYTES),
-            (eff.unshielded_mints.size(), PERSISTENT_HASH_BYTES),
-            (eff.unshielded_inputs.size(), PERSISTENT_HASH_BYTES + 1),
-            (eff.unshielded_outputs.size(), PERSISTENT_HASH_BYTES + 1),
-            (
-                eff.claimed_unshielded_spends.size(),
-                PERSISTENT_HASH_BYTES * 2 + 1,
-            ),
-        ];
-        let time = maps
-            .iter()
+        let time = std::iter::once((EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES))
+            .chain(effect_set_sizes(eff))
             .map(|(n, key_len)| {
                 self.runtime_cost_model.ins_map_constant
                     + self.runtime_cost_model.ins_map_coeff_container_log_size
-                        * n.next_power_of_two().ilog2() as u64
-                    + self.runtime_cost_model.ins_map_coeff_key_size * *key_len
+                        * n.checked_next_power_of_two()
+                            .map_or(usize::BITS, |p| p.ilog2()) as u64
+                    + self.runtime_cost_model.ins_map_coeff_key_size * key_len
             })
             .sum();
         RunningCost::compute(time)
@@ -1147,20 +1223,45 @@ impl TransactionCostModel {
 }
 tag_enforcement_test!(TransactionCostModel);
 
+/// The number of entries in each of a transcript's effect sets, with the byte
+/// length of that set's keys.
+fn effect_set_sizes<D: DB>(eff: &Effects<D>) -> [(usize, usize); 9] {
+    [
+        (eff.claimed_nullifiers.size(), PERSISTENT_HASH_BYTES),
+        (eff.claimed_shielded_receives.size(), PERSISTENT_HASH_BYTES),
+        (eff.claimed_shielded_spends.size(), PERSISTENT_HASH_BYTES),
+        (
+            eff.claimed_contract_calls.size(),
+            PERSISTENT_HASH_BYTES * 2 + FR_BYTES + 8,
+        ),
+        (eff.shielded_mints.size(), PERSISTENT_HASH_BYTES),
+        (eff.unshielded_mints.size(), PERSISTENT_HASH_BYTES),
+        (eff.unshielded_inputs.size(), PERSISTENT_HASH_BYTES + 1),
+        (eff.unshielded_outputs.size(), PERSISTENT_HASH_BYTES + 1),
+        (
+            eff.claimed_unshielded_spends.size(),
+            PERSISTENT_HASH_BYTES * 2 + 1,
+        ),
+    ]
+}
+
 pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCostModel {
     runtime_cost_model: onchain_runtime::cost_model::INITIAL_COST_MODEL,
-    parallelism_factor: 4,
     baseline_cost: RunningCost {
         compute_time: CostDuration::from_picoseconds(100_000_000),
         read_time: CostDuration::ZERO,
         bytes_written: 0,
         bytes_deleted: 0,
     },
+    // NOTE: Carry-over from old parallelism_factor: 4
+    validation_factor: FixedPoint::from_u64_div(1, 4),
+    guaranteed_factor: FixedPoint::ONE,
+    fallible_factor: FixedPoint::ONE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable)]
 #[cfg_attr(feature = "fixed-point-custom-serde", derive(Serialize, Deserialize))]
-#[tag = "transaction-limits[v2]"]
+#[tag = "transaction-limits[v3]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
     pub time_to_dismiss_per_byte: CostDuration,
@@ -1174,6 +1275,8 @@ pub struct TransactionLimits {
         serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
     )]
     pub block_withdrawal_minimum_multiple: FixedPoint,
+    // A hard limit on the size of associated contract metadata.
+    pub max_contract_metadata_size: u64,
 }
 tag_enforcement_test!(TransactionLimits);
 
@@ -1189,6 +1292,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
         bytes_churned: 1_000_000,
     },
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
+    max_contract_metadata_size: 50_000,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
@@ -1196,7 +1300,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v5]"]
+#[tag = "ledger-parameters[v8]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1220,6 +1324,8 @@ pub struct LedgerParameters {
     pub cardano_to_midnight_bridge_fee_basis_points: u32,
     // Note: This is denominated in STARs (atomic night units)
     pub c_to_m_bridge_min_amount: u128,
+    // The minimum value for `fee_prices.overall_price`.
+    pub min_block_price: FixedPoint,
 }
 tag_enforcement_test!(LedgerParameters);
 
@@ -1276,16 +1382,17 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
         write_factor: FixedPoint::ONE,
     },
     global_ttl: Duration::from_secs(3600),
-    cardano_to_midnight_bridge_fee_basis_points: 500,
+    cardano_to_midnight_bridge_fee_basis_points: 100,
     cost_dimension_min_ratio: FixedPoint::from_u64_div(1, 4),
     price_adjustment_a_parameter: FixedPoint::from_u64_div(100, 1),
     c_to_m_bridge_min_amount: 1000,
+    min_block_price: FixedPoint::from_u64_div(10, 1),
 };
 
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v9]"]
+#[tag = "transaction[v12]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1298,6 +1405,7 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<D: DB> {
     pub(crate) inner: Transaction<(), (), Pedersen, D>,
     pub(crate) hash: TransactionHash,
+    pub(crate) fees: u128,
 }
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
@@ -1568,7 +1676,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v9]"]
+#[tag = "standard-transaction[v12]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -1742,19 +1850,32 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
 
 type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Clone, PartialEq, Eq; S)]
 #[storable(db = D)]
-#[tag = "claim-rewards-transaction[v1]"]
+#[envelope(ClaimRewardsTransactionSigningEnvelope<S, D>)]
+#[tag = "claim-rewards-transaction[v2]"]
 pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub network_id: String,
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub nonce: Nonce,
     pub signature: S::Signature<ErasedClaimRewardsTransaction<D>>,
     pub kind: ClaimKind,
 }
 tag_enforcement_test!(ClaimRewardsTransaction<(), InMemoryDB>);
+
+#[derive(Serializable)]
+#[phantom(S, D)]
+#[tag = "claim-rewards-transaction-signing-envelope[v2]"]
+struct ClaimRewardsTransactionSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    network_id: String,
+    value: u128,
+    owner: SignatureVerifyingKey,
+    nonce: Nonce,
+    signature: PhantomData<S::Signature<ErasedClaimRewardsTransaction<D>>>,
+    kind: ClaimKind,
+}
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
     pub fn add_signature(&self, signature: Signature) -> ClaimRewardsTransaction<Signature, D> {
@@ -1782,19 +1903,7 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 
 impl<D: DB> ClaimRewardsTransaction<(), D> {
     pub fn data_to_sign(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(b"midnight:sig-claim_rewards_transaction:");
-        Self::to_hash_data(self.clone(), data)
-    }
-
-    pub fn to_hash_data(rewards: ClaimRewardsTransaction<(), D>, mut data: Vec<u8>) -> Vec<u8> {
-        Serializable::serialize(&rewards.value, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&rewards.owner, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&rewards.nonce, &mut data)
-            .expect("In-memory serialization should succeed");
-        data
+        <Self as Envelope<ClaimRewardsTransactionSigningEnvelope<_, _>>>::envelope_data(self)
     }
 }
 
@@ -1814,12 +1923,346 @@ pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
 // should be an upper bound.
 pub(crate) const VERIFIER_KEY_SIZE: usize = 2875;
 pub(crate) const EXPECTED_CONTRACT_DEPTH: usize = 32;
+/// Most operations a contract may have. Maintenance checks walk all of them,
+/// at a cost pricing doesn't count.
+pub const MAX_CONTRACT_OPERATIONS: u64 = 256;
 pub(crate) const EXPECTED_UTXO_DEPTH: usize = 32;
 pub(crate) const EXPECTED_GENERATION_DEPTH: usize = 32;
 pub(crate) const EXPECTED_OPERATIONS_DEPTH: usize = 8;
 pub(crate) const EXPECTED_TOKEN_TYPE_DEPTH: usize = 8;
 pub(crate) const EXPECTED_TIME_FILTER_MAP_DEPTH: usize = 8;
 pub(crate) const FRESH_DUST_COMMITMENT_HASHES: usize = 6;
+
+/// The sum of entry counts, saturating. Counts come from size annotations,
+/// which a shared encoding can push towards `usize::MAX`; a wrapped sum would
+/// price a huge transaction as a small one.
+fn count_sum(counts: impl IntoIterator<Item = usize>) -> usize {
+    counts.into_iter().fold(0, usize::saturating_add)
+}
+
+/// A cost summed over every path to shared nodes, saturating as
+/// `RunningCost`'s own arithmetic does.
+#[derive(Clone, Copy)]
+struct CostSum(RunningCost);
+
+impl Semigroup for CostSum {
+    fn append(&self, other: &Self) -> Self {
+        CostSum(self.0 + other.0)
+    }
+}
+
+impl Monoid for CostSum {
+    fn empty() -> Self {
+        CostSum(RunningCost::ZERO)
+    }
+}
+
+/// Guaranteed and fallible application costs, summed as [`CostSum`] is.
+#[derive(Clone, Copy)]
+struct SegmentCosts {
+    guaranteed: RunningCost,
+    fallible: RunningCost,
+}
+
+impl Semigroup for SegmentCosts {
+    fn append(&self, other: &Self) -> Self {
+        SegmentCosts {
+            guaranteed: self.guaranteed + other.guaranteed,
+            fallible: self.fallible + other.fallible,
+        }
+    }
+}
+
+impl Monoid for SegmentCosts {
+    fn empty() -> Self {
+        SegmentCosts {
+            guaranteed: RunningCost::ZERO,
+            fallible: RunningCost::ZERO,
+        }
+    }
+}
+
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransaction<S, P, B, D> {
+    /// Sums `own` per intent and `action` per contract action over every path,
+    /// computing each distinct intent and action once.
+    fn fold_intents<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut own: impl FnMut(&Intent<S, P, B, D>) -> R,
+        mut action: impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
+    ) -> R {
+        self.intents.fold(memo, |memo, _, intent| {
+            Self::fold_intent(memo, intent, &mut own, &mut action)
+        })
+    }
+
+    /// [`Self::fold_intents`]'s result per segment. Linear, as decoding pins
+    /// each of the `HashMap`'s entries to its key's hash, so segments are leaves.
+    fn fold_intents_by_segment<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut own: impl FnMut(&Intent<S, P, B, D>) -> R,
+        mut action: impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
+    ) -> Vec<(Segment, R)> {
+        self.intents
+            .iter()
+            .map(|entry| {
+                let cost = Self::fold_intent(memo, &entry.1, &mut own, &mut action);
+                (*entry.0, cost)
+            })
+            .collect()
+    }
+
+    fn fold_intent<R: Monoid + Clone>(
+        memo: &mut DagMemo<R, D>,
+        intent: &Sp<Intent<S, P, B, D>, D>,
+        own: &mut impl FnMut(&Intent<S, P, B, D>) -> R,
+        action: &mut impl FnMut(&mut DagMemo<R, D>, &ContractAction<P, D>) -> R,
+    ) -> R {
+        memo.get_or_compute(intent, |memo, intent| {
+            own(intent).append(&intent.actions.fold(memo, |memo, a| {
+                memo.get_or_compute(a, |memo, a| action(memo, a))
+            }))
+        })
+    }
+}
+
+/// An intent's application costs, other than its contract actions'.
+fn intent_application_cost<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+    D: DB,
+>(
+    model: &TransactionCostModel,
+    intent: &Intent<S, P, B, D>,
+    night: &mut DagMemo<u64, D>,
+) -> SegmentCosts {
+    let mut g = RunningCost::ZERO;
+    let mut f = RunningCost::ZERO;
+    // Replay protection state update
+    g += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
+    g +=
+        model.time_filter_map_insert(false) + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
+    // utxo processing
+    for (cost, offer) in [
+        (&mut g, intent.guaranteed_unshielded_offer.as_ref()),
+        (&mut f, intent.fallible_unshielded_offer.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(c, o)| o.map(|o| (c, o)))
+    {
+        let inputs = offer.inputs.len();
+        let outputs = offer.outputs.len();
+        // UTXO membership test
+        *cost += model.map_index(EXPECTED_UTXO_DEPTH) * inputs;
+        // UTXO removal
+        *cost += (model.map_remove(EXPECTED_UTXO_DEPTH, true)
+            + model.cell_delete(UTXO_SIZE as u64))
+            * inputs;
+        // UTXO insertion
+        *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
+            + model.cell_write(UTXO_SIZE as u64, false))
+            * outputs;
+        let night_inputs = offer.inputs.fold(night, |_, i| u64::from(i.type_ == NIGHT));
+        let night_outputs = offer
+            .outputs
+            .fold(night, |_, o| u64::from(o.type_ == NIGHT));
+        // Generating dtime update
+        *cost += (model.merkle_tree_insert_unamortized(32, false)
+            + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+            * night_inputs;
+        // Night generates Dust address table read
+        *cost += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64))
+            * night_outputs;
+        // Generation tree insertion & first-free update
+        *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+        *cost += (model.merkle_tree_insert_amortized(32, false)
+            + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+            * night_outputs;
+        // Night indicies insertion
+        *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(8, false))
+            * night_outputs;
+        // Commitment merkle tree insertion & first-free update
+        *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+        *cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+            + model.cell_write(FR_BYTES as u64, false))
+            * night_outputs;
+        // Commitment computation
+        *cost += RunningCost::compute(
+            model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
+        );
+    }
+    let dust_spends = intent
+        .dust_actions
+        .as_ref()
+        .map(|a| a.spends.len())
+        .unwrap_or(0);
+    // Nullifier membership test
+    g += model.map_index(32) * dust_spends;
+    // Nullifier set insertion
+    g += (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(FR_BYTES as u64, false))
+        * dust_spends;
+    // Commitment merkle tree insertion & first-free update
+    g += (model.cell_read(8) + model.cell_write(8, true)) * dust_spends;
+    g += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(FR_BYTES as u64, false))
+        * dust_spends;
+    // Dust Merkle roots lookup
+    g += model.time_filter_map_lookup() * 2u64;
+    // Guaranteed night inputs per owner, for registrations to look up. These
+    // loops walk per path; `disjoint_check` has already rejected repeats.
+    let mut night_inputs_by_owner = std::collections::BTreeMap::new();
+    for i in intent
+        .guaranteed_unshielded_offer
+        .iter()
+        .flat_map(|o| o.inputs.iter_deref())
+        .filter(|i| i.type_ == NIGHT)
+    {
+        *night_inputs_by_owner.entry(i.owner.clone()).or_insert(0u64) += 1;
+    }
+    for reg in intent
+        .dust_actions
+        .iter()
+        .flat_map(|a| a.registrations.iter_deref())
+    {
+        // Update the dust address registration table
+        if reg.dust_address.is_some() {
+            g += model.map_insert(EXPECTED_GENERATION_DEPTH, false)
+                + model.cell_write(FR_BYTES as u64, false);
+        } else {
+            g += model.map_remove(EXPECTED_GENERATION_DEPTH, true)
+                + model.cell_delete(FR_BYTES as u64);
+        }
+        // For each guaranteed night input with a matching address in
+        // the intent, we read its ctime, and check it in the
+        // generation indicies table.
+        if reg.dust_address.is_some() {
+            let night_inputs = night_inputs_by_owner
+                .get(&reg.night_key)
+                .copied()
+                .unwrap_or(0);
+            // Night indicies set check
+            g += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(8)) * night_inputs;
+            // Generation tree index
+            g += (model.merkle_tree_index(EXPECTED_UTXO_DEPTH)
+                + model.cell_read(DUST_GENERATION_INFO_SIZE as u64))
+                * night_inputs;
+        }
+    }
+    SegmentCosts {
+        guaranteed: g,
+        fallible: f,
+    }
+}
+
+/// A contract action's application costs, with deployed states' copies priced
+/// by `copy`.
+fn action_application_cost<P: ProofKind<D>, D: DB>(
+    model: &TransactionCostModel,
+    action: &ContractAction<P, D>,
+    memo: &mut DagMemo<SegmentCosts, D>,
+    copy: &mut impl FnMut(&ContractState<D>) -> RunningCost,
+) -> SegmentCosts {
+    let (mut g, mut f) = (RunningCost::ZERO, RunningCost::ZERO);
+    match action {
+        ContractAction::Call(call) => {
+            let base_cost = if call.guaranteed_transcript.is_some() {
+                &mut g
+            } else {
+                &mut f
+            };
+            // Fetch / store state
+            *base_cost += model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_insert(EXPECTED_CONTRACT_DEPTH, true)
+                + model.map_index(1)
+                + model.map_insert(1, true);
+            // Declared transcript costs
+            //
+            // NOTE: This is taken at face-value here. During
+            // execution, the declared cost (A `RunningCost`) is
+            // checked against the real cost at each operation, and
+            // aborted if it exceeds it (with the exception of
+            // `bytes_deleted`, which is checked after completion,
+            // and must be *at least* as declared).
+            for (cost, transcript) in [
+                (&mut g, call.guaranteed_transcript.as_ref()),
+                (&mut f, call.fallible_transcript.as_ref()),
+            ]
+            .into_iter()
+            .filter_map(|(c, t)| t.map(|t| (c, t)))
+            {
+                *cost += transcript.gas;
+                // VM stack setup / destroy cost
+                // Left out of scope here to avoid going to deep into
+                // stack structure.
+                *cost += model.stack_setup_cost_for_effects(&transcript.effects);
+            }
+        }
+        ContractAction::Deploy(deploy) => {
+            // Contract exists check
+            f += model.map_index(EXPECTED_CONTRACT_DEPTH);
+            // Contract insert
+            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, false) + copy(&deploy.initial_state);
+        }
+        ContractAction::Maintain(upd) => {
+            // Contract state fetch
+            f += model.map_index(EXPECTED_CONTRACT_DEPTH);
+            // Maintainance update counter update
+            f += model.map_index(1) * 2u64
+                + model.map_insert(1, true) * 2u64
+                + model.cell_read(8)
+                + model.cell_write(8, true);
+            // Carrying out the updates
+            f += upd
+                .updates
+                .fold(memo, |memo, part| {
+                    memo.get_or_compute(part, |_, part| SegmentCosts {
+                        guaranteed: RunningCost::ZERO,
+                        fallible: update_application_cost::<D>(model, part),
+                    })
+                })
+                .fallible;
+            // Inserting the new state
+            f += model.map_insert(EXPECTED_CONTRACT_DEPTH, true);
+        }
+    }
+    SegmentCosts {
+        guaranteed: g,
+        fallible: f,
+    }
+}
+
+fn update_application_cost<D: DB>(
+    model: &TransactionCostModel,
+    part: &SingleUpdate,
+) -> RunningCost {
+    match part {
+        SingleUpdate::ReplaceAuthority(auth) => {
+            model.tree_copy::<_, D>(Sp::new(auth.clone())) + model.map_insert(1, true)
+        }
+        SingleUpdate::VerifierKeyRemove(..) => {
+            model.map_remove(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_delete(VERIFIER_KEY_SIZE as u64)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::VerifierKeyInsert(ep, vk) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, false)
+                + model.cell_write((ep.serialized_size() + vk.serialized_size()) as u64, false)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::IrRemove(ep) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_delete(ep.serialized_size() as u64)
+                + model.map_insert(1, true)
+        }
+        SingleUpdate::IrInsert(ep, ir) => {
+            model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                + model.cell_write((ep.serialized_size() + ir.serialized_size()) as u64, false)
+                + model.map_insert(1, true)
+        }
+    }
+}
 
 impl<
     S: SignatureKind<D>,
@@ -1857,69 +2300,91 @@ where
         Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
     }
 
-    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
-        match self {
+    fn validation_cost_impl(
+        &self,
+        model: &TransactionCostModel,
+        per_call_vk_read: impl Fn(
+            &ContractAddress,
+            &EntryPointBuf,
+            Option<ContractOperationVersion>,
+        ) -> RunningCost,
+    ) -> SyntheticCost {
+        let mut result = match self {
             Transaction::Standard(stx) => {
-                let vk_reads = self
-                    .calls()
-                    .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<BTreeSet<_>>()
-                    .len();
+                let mut public_inputs = DagMemo::new();
+                let mut unique_calls = BTreeSet::new();
                 let mut cost = model.baseline_cost;
-                cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)
-                    + model.map_index(EXPECTED_CONTRACT_DEPTH)
-                    + model.map_index(EXPECTED_OPERATIONS_DEPTH))
-                    * vk_reads;
                 let offers = stx
                     .guaranteed_coins
                     .iter()
                     .map(|o| (**o).clone())
                     .chain(stx.fallible_coins.values())
                     .collect::<Vec<_>>();
-                let zswap_inputs = offers
-                    .iter()
-                    .map(|offer| offer.inputs.len() + offer.transient.len())
-                    .sum::<usize>();
-                let zswap_outputs = offers
-                    .iter()
-                    .map(|offer| offer.outputs.len() + offer.transient.len())
-                    .sum::<usize>();
+                let zswap_inputs = count_sum(
+                    offers
+                        .iter()
+                        .flat_map(|offer| [offer.inputs.len(), offer.transient.len()]),
+                );
+                let zswap_outputs = count_sum(
+                    offers
+                        .iter()
+                        .flat_map(|offer| [offer.outputs.len(), offer.transient.len()]),
+                );
                 cost += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
                 cost += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
-                for intent in stx.intents.values() {
-                    // Binding commitment check
-                    cost.compute_time += model.runtime_cost_model.pedersen_valid;
-                    // Unshielded offer validation
-                    cost.compute_time += intent
-                        .guaranteed_unshielded_offer
-                        .iter()
-                        .chain(intent.fallible_unshielded_offer.iter())
-                        .map(|o| o.signatures.len())
-                        .sum::<usize>()
-                        * model.runtime_cost_model.signature_verify_constant;
-                    for action in intent.actions.iter() {
-                        match &*action {
-                            ContractAction::Call(call) => {
-                                cost.compute_time += model.runtime_cost_model.verifier_key_load;
-                                cost += model
-                                    .proof_verify(call.public_inputs(Default::default()).len());
-                            }
-                            ContractAction::Maintain(upd) => {
+                // Filled inside the memo, so each distinct call is collected once.
+                cost += stx
+                    .fold_intents(
+                        &mut DagMemo::new(),
+                        |intent| {
+                            let mut cost = RunningCost::ZERO;
+                            // Binding commitment check
+                            cost.compute_time += model.runtime_cost_model.pedersen_valid;
+                            // Unshielded offer validation
+                            cost.compute_time +=
+                                count_sum(
+                                    intent
+                                        .guaranteed_unshielded_offer
+                                        .iter()
+                                        .chain(intent.fallible_unshielded_offer.iter())
+                                        .map(|o| o.signatures.len()),
+                                ) * model.runtime_cost_model.signature_verify_constant;
+                            if let Some(dust_actions) = intent.dust_actions.as_ref() {
+                                cost +=
+                                    model.proof_verify(DUST_SPEND_PIS) * dust_actions.spends.len();
                                 cost.compute_time +=
                                     model.runtime_cost_model.signature_verify_constant
-                                        * upd.signatures.len();
+                                        * dust_actions.registrations.len();
                             }
-                            _ => {}
-                        }
-                    }
-                    if let Some(dust_actions) = intent.dust_actions {
-                        cost += model.proof_verify(DUST_SPEND_PIS) * dust_actions.spends.len();
-                        cost.compute_time += model.runtime_cost_model.signature_verify_constant
-                            * dust_actions.registrations.len();
-                    }
+                            CostSum(cost)
+                        },
+                        |_, action| {
+                            CostSum(match action {
+                                ContractAction::Call(call) => {
+                                    unique_calls.insert((
+                                        call.address,
+                                        call.entry_point.clone(),
+                                        P::proof_version_to_operation_version(&call.proof),
+                                    ));
+                                    RunningCost::compute(model.runtime_cost_model.verifier_key_load)
+                                        + model.proof_verify(
+                                            call.public_inputs_len_memoized(&mut public_inputs),
+                                        )
+                                }
+                                ContractAction::Maintain(upd) => RunningCost::compute(
+                                    model.runtime_cost_model.signature_verify_constant
+                                        * upd.signatures.len(),
+                                ),
+                                ContractAction::Deploy(_) => RunningCost::ZERO,
+                            })
+                        },
+                    )
+                    .0;
+                for (address, entry_point, version) in &unique_calls {
+                    cost += per_call_vk_read(address, entry_point, version.clone());
                 }
                 // Compute time for Pedersen check
-                cost.compute_time += offers.iter().map(|o| o.deltas.len()).sum::<usize>()
+                cost.compute_time += count_sum(offers.iter().map(|o| o.deltas.len()))
                     * (model.runtime_cost_model.hash_to_curve + model.runtime_cost_model.ec_mul);
                 cost.compute_time += model.runtime_cost_model.ec_mul;
                 let mut res = SyntheticCost::from(cost);
@@ -1931,196 +2396,144 @@ where
                 ..RunningCost::ZERO
             } + model.baseline_cost)
                 .into(),
-        }
+        };
+        result.compute_time = result.compute_time * model.validation_factor;
+        result
+    }
+
+    /// Time to walk every call's effects once per path, as the checks after the
+    /// fee do, at a map insertion per entry. Counts towards dismissal, not the fee.
+    fn effects_check_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+        let Transaction::Standard(stx) = self else {
+            return SyntheticCost::ZERO;
+        };
+        let per_entry = model.runtime_cost_model.ins_map_constant;
+        let mut cost = stx
+            .fold_intents(
+                &mut DagMemo::new(),
+                |_| CostSum(RunningCost::ZERO),
+                |_, action| {
+                    let ContractAction::Call(call) = action else {
+                        return CostSum(RunningCost::ZERO);
+                    };
+                    let entries = count_sum(
+                        call.guaranteed_transcript
+                            .iter()
+                            .chain(call.fallible_transcript.iter())
+                            .flat_map(|t| effect_set_sizes(&t.effects).map(|(n, _)| n)),
+                    );
+                    CostSum(RunningCost::compute(per_entry * entries as u64))
+                },
+            )
+            .0;
+        cost.compute_time = cost.compute_time * model.validation_factor;
+        cost.into()
+    }
+
+    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+        let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
+        self.validation_cost_impl(model, |_, _, _| per_call)
+    }
+
+    pub fn validation_cost_with_state(
+        &self,
+        model: &TransactionCostModel,
+        ledger: &LedgerState<D>,
+    ) -> SyntheticCost {
+        self.validation_cost_impl(model, |address, entry_point, ver| {
+            let (vk_size, ops_log_size) = ledger
+                .index(*address)
+                .and_then(|cstate| {
+                    let n = cstate.operations.size();
+                    // ceil(log2(n)): number of bits needed to distinguish n entries
+                    let ops_log_size = (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize;
+                    cstate.operations.get(entry_point).map(|op| {
+                        let vk_size = match ver {
+                            Some(ContractOperationVersion::V3) => {
+                                op.v2.as_ref().map(|vk| vk.serialized_size())
+                            }
+                            Some(ContractOperationVersion::V4) => {
+                                op.v3.as_ref().map(|vk| vk.serialized_size())
+                            }
+                            None => op
+                                .v3
+                                .as_ref()
+                                .map(|vk| vk.serialized_size())
+                                .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
+                        }
+                        .unwrap_or(VERIFIER_KEY_SIZE);
+                        (vk_size, ops_log_size)
+                    })
+                })
+                .unwrap_or((VERIFIER_KEY_SIZE, EXPECTED_OPERATIONS_DEPTH));
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(ops_log_size)
+        })
     }
 
     fn est_size(&self) -> usize {
         P::estimated_tx_size(self)
     }
 
-    pub fn application_cost(&self, model: &TransactionCostModel) -> (SyntheticCost, SyntheticCost) {
+    /// The guaranteed and total costs of applying the transaction.
+    ///
+    /// A transaction repeating an entry no valid transaction repeats is
+    /// rejected first, so the inputs and registrations walked here each cost
+    /// their own bytes.
+    pub fn application_cost(
+        &self,
+        params: &LedgerParameters,
+    ) -> Result<(SyntheticCost, SyntheticCost), FeeCalculationError> {
+        let model = &params.cost_model;
         let mut g_cost = model.baseline_cost;
-        let mut f_cost = RunningCost::ZERO;
-        for (_, intent) in self.intents() {
-            // Replay protection state update
-            g_cost +=
-                model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
-            g_cost += model.time_filter_map_insert(false)
-                + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
-            // utxo processing
-            for (cost, offer) in [
-                (&mut g_cost, intent.guaranteed_unshielded_offer.as_ref()),
-                (&mut f_cost, intent.fallible_unshielded_offer.as_ref()),
-            ]
-            .into_iter()
-            .filter_map(|(c, o)| o.map(|o| (c, o)))
-            {
-                let inputs = offer.inputs.len();
-                let outputs = offer.outputs.len();
-                // UTXO membership test
-                *cost += model.map_index(EXPECTED_UTXO_DEPTH) * inputs;
-                // UTXO removal
-                *cost += (model.map_remove(EXPECTED_UTXO_DEPTH, true)
-                    + model.cell_delete(UTXO_SIZE as u64))
-                    * inputs;
-                // UTXO insertion
-                *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(UTXO_SIZE as u64, false))
-                    * outputs;
-                let night_inputs = offer.inputs.iter().filter(|i| i.type_ == NIGHT).count();
-                let night_outputs = offer.outputs.iter().filter(|o| o.type_ == NIGHT).count();
-                // Generating dtime update
-                *cost += (model.merkle_tree_insert_unamortized(32, false)
-                    + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-                    * night_inputs;
-                // Night generates Dust address table read
-                *cost += (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64))
-                    * night_outputs;
-                // Generation tree insertion & first-free update
-                *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-                *cost += (model.merkle_tree_insert_amortized(32, false)
-                    + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
-                    * night_outputs;
-                // Night indicies insertion
-                *cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(8, false))
-                    * night_outputs;
-                // Commitment merkle tree insertion & first-free update
-                *cost += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
-                *cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-                    + model.cell_write(FR_BYTES as u64, false))
-                    * night_outputs;
-                // Commitment computation
-                *cost += RunningCost::compute(
-                    model.runtime_cost_model.transient_hash
-                        * FRESH_DUST_COMMITMENT_HASHES
-                        * night_outputs,
-                );
-            }
-            let dust_spends = intent
-                .dust_actions
-                .as_ref()
-                .map(|a| a.spends.len())
-                .unwrap_or(0);
-            // Nullifier membership test
-            g_cost += model.map_index(32) * dust_spends;
-            // Nullifier set insertion
-            g_cost += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
-                + model.cell_write(FR_BYTES as u64, false))
-                * dust_spends;
-            // Commitment merkle tree insertion & first-free update
-            g_cost += (model.cell_read(8) + model.cell_write(8, true)) * dust_spends;
-            g_cost += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
-                + model.cell_write(FR_BYTES as u64, false))
-                * dust_spends;
-            // Dust Merkle roots lookup
-            g_cost += model.time_filter_map_lookup() * 2u64;
-            for reg in intent
-                .dust_actions
-                .iter()
-                .flat_map(|a| a.registrations.iter())
-            {
-                // Update the dust address registration table
-                if reg.dust_address.is_some() {
-                    g_cost += model.map_insert(EXPECTED_GENERATION_DEPTH, false)
-                        + model.cell_write(FR_BYTES as u64, false);
-                } else {
-                    g_cost += model.map_remove(EXPECTED_GENERATION_DEPTH, true)
-                        + model.cell_delete(FR_BYTES as u64);
-                }
-                // For each guaranteed night input with a matching address in
-                // the intent, we read its ctime, and check it in the
-                // generation indicies table.
-                if reg.dust_address.is_some() {
-                    let night_inputs = intent
-                        .guaranteed_unshielded_offer
-                        .iter()
-                        .flat_map(|o| o.inputs.iter())
-                        .filter(|i| i.owner == reg.night_key && i.type_ == NIGHT)
-                        .count();
-                    // Night indicies set check
-                    g_cost +=
-                        (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(8)) * night_inputs;
-                    // Generation tree index
-                    g_cost += (model.merkle_tree_index(EXPECTED_UTXO_DEPTH)
-                        + model.cell_read(DUST_GENERATION_INFO_SIZE as u64))
-                        * night_inputs;
-                }
-            }
-            // Contract actions
-            for action in intent.actions.iter() {
-                match &*action {
-                    ContractAction::Call(call) => {
-                        let base_cost = if call.guaranteed_transcript.is_some() {
-                            &mut g_cost
-                        } else {
-                            &mut f_cost
-                        };
-                        // Fetch / store state
-                        *base_cost += model.map_index(EXPECTED_CONTRACT_DEPTH)
-                            + model.map_insert(EXPECTED_CONTRACT_DEPTH, true)
-                            + model.map_index(1)
-                            + model.map_insert(1, true);
-                        // Declared transcript costs
-                        //
-                        // NOTE: This is taken at face-value here. During
-                        // execution, the declared cost (A `RunningCost`) is
-                        // checked against the real cost at each operation, and
-                        // aborted if it exceeds it (with the exception of
-                        // `bytes_deleted`, which is checked after completion,
-                        // and must be *at least* as declared).
-                        for (cost, transcript) in [
-                            (&mut g_cost, call.guaranteed_transcript.as_ref()),
-                            (&mut f_cost, call.fallible_transcript.as_ref()),
-                        ]
-                        .into_iter()
-                        .filter_map(|(c, t)| t.map(|t| (c, t)))
-                        {
-                            *cost += transcript.gas;
-                            // VM stack setup / destroy cost
-                            // Left out of scope here to avoid going to deep into
-                            // stack structure.
-                            *cost += model.stack_setup_cost_for_effects(&transcript.effects);
+        // Each fallible segment commits or fails on its own, so its writes are
+        // netted only against its own deletions, never another segment's.
+        let mut f_costs = std::collections::BTreeMap::<Segment, RunningCost>::new();
+        if let Transaction::Standard(stx) = self {
+            stx.disjoint_check()
+                .map_err(|_| FeeCalculationError::RepeatedEntries)?;
+            let mut night = DagMemo::<u64, D>::new();
+            // Each deploy's state is charged in full, as checking the deploy
+            // walks it. Once the bytes charged exceed what a block may write
+            // and churn together, the fee check rejects whatever deletions are
+            // declared, so pricing stops walking and saturates.
+            let limits = &params.limits.block_limits;
+            let mut copy_budget = limits.bytes_written.saturating_add(limits.bytes_churned);
+            // A repeated state keeps its first price, exact or saturated; either
+            // way the total exceeds the budget exactly when exact prices would.
+            let mut copies = std::collections::HashMap::new();
+            let mut copy = |state: &ContractState<D>| {
+                let state = Sp::new(state.clone());
+                *copies.entry(state.hash()).or_insert_with(|| {
+                    match model
+                        .runtime_cost_model
+                        .tree_copy_bounded(&state, copy_budget)
+                    {
+                        Some(cost) => {
+                            copy_budget -= cost.bytes_written;
+                            cost
                         }
-                    }
-                    ContractAction::Deploy(deploy) => {
-                        // Contract exists check
-                        f_cost += model.map_index(EXPECTED_CONTRACT_DEPTH);
-                        // Contract insert
-                        f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, false)
-                            + model.tree_copy(Sp::new(deploy.initial_state.clone()));
-                    }
-                    ContractAction::Maintain(upd) => {
-                        // Contract state fetch
-                        f_cost += model.map_index(EXPECTED_CONTRACT_DEPTH);
-                        // Maintainance update counter update
-                        f_cost += model.map_index(1) * 2u64
-                            + model.map_insert(1, true) * 2u64
-                            + model.cell_read(8)
-                            + model.cell_write(8, true);
-                        // Carrying out the updates
-                        for part in upd.updates.iter() {
-                            match &*part {
-                                SingleUpdate::ReplaceAuthority(auth) => {
-                                    f_cost += model.tree_copy::<_, D>(Sp::new(auth.clone()))
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::VerifierKeyRemove(..) => {
-                                    f_cost += model.map_remove(EXPECTED_OPERATIONS_DEPTH, true)
-                                        + model.cell_delete(VERIFIER_KEY_SIZE as u64)
-                                        + model.map_insert(1, true)
-                                }
-                                SingleUpdate::VerifierKeyInsert(..) => {
-                                    f_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, false)
-                                        + model.cell_write(VERIFIER_KEY_SIZE as u64, false)
-                                        + model.map_insert(1, true)
-                                }
+                        None => {
+                            copy_budget = 0;
+                            RunningCost {
+                                bytes_written: u64::MAX,
+                                ..RunningCost::ZERO
                             }
                         }
-                        // Inserting the new state
-                        f_cost += model.map_insert(EXPECTED_CONTRACT_DEPTH, true);
                     }
-                }
+                })
+            };
+            let intents = stx.fold_intents_by_segment(
+                &mut DagMemo::new(),
+                |intent| intent_application_cost(model, intent, &mut night),
+                |memo, action| action_application_cost(model, action, memo, &mut copy),
+            );
+            for (segment, cost) in intents {
+                g_cost += cost.guaranteed;
+                *f_costs.entry(segment).or_default() += cost.fallible;
             }
         }
         match self {
@@ -2136,8 +2549,8 @@ where
                     );
                 for (segment, offer) in offers {
                     let mut offer_cost = RunningCost::ZERO;
-                    let inputs = offer.inputs.len() + offer.transient.len();
-                    let outputs = offer.outputs.len() + offer.transient.len();
+                    let inputs = offer.inputs.len().saturating_add(offer.transient.len());
+                    let outputs = offer.outputs.len().saturating_add(offer.transient.len());
                     // Roots set test
                     offer_cost += model.map_index(EXPECTED_TIME_FILTER_MAP_DEPTH) * inputs;
                     // Nullifier set test
@@ -2158,7 +2571,7 @@ where
                     if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
-                        f_cost += offer_cost;
+                        *f_costs.entry(segment).or_default() += offer_cost;
                         // Because we also try to apply it in the guaranteed segment.
                         g_cost.compute_time += offer_cost.compute_time;
                     }
@@ -2178,27 +2591,47 @@ where
                 g_cost += model.map_insert(EXPECTED_UTXO_DEPTH, false);
             }
         }
-        (g_cost.into(), (g_cost + f_cost).into())
+        g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
+        let g_cost = SyntheticCost::from(g_cost);
+        let total_cost = f_costs.into_values().fold(g_cost, |total, mut f_cost| {
+            f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
+            total + SyntheticCost::from(f_cost)
+        });
+        Ok((g_cost, total_cost))
     }
 
-    pub fn time_to_dismiss(&self, model: &TransactionCostModel) -> CostDuration {
-        let mut validation_cost = self.validation_cost(model);
-        validation_cost.compute_time = validation_cost.compute_time / model.parallelism_factor;
-        let guaranteed_cost = self.application_cost(model).0;
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
-        CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time)
-    }
-
-    pub fn cost(
+    pub fn time_to_dismiss(
         &self,
         params: &LedgerParameters,
+    ) -> Result<CostDuration, FeeCalculationError> {
+        let validation_cost = self.validation_cost(&params.cost_model);
+        let guaranteed_cost = self.application_cost(params)?.0;
+        Ok(self
+            .dismissal_cost(params, validation_cost, guaranteed_cost)
+            .max_time())
+    }
+
+    /// What dismissing the transaction costs: its validation, its guaranteed
+    /// segment's application, and the checks walking its effects.
+    fn dismissal_cost(
+        &self,
+        params: &LedgerParameters,
+        validation_cost: SyntheticCost,
+        guaranteed_cost: SyntheticCost,
+    ) -> SyntheticCost {
+        guaranteed_cost + validation_cost + self.effects_check_cost(&params.cost_model)
+    }
+
+    /// `validation_cost` plus the application cost, rejecting the transaction
+    /// if `enforce_time_to_dismiss` and it costs more to dismiss than its size allows.
+    fn checked_cost(
+        &self,
+        params: &LedgerParameters,
+        validation_cost: SyntheticCost,
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
-        let mut validation_cost = self.validation_cost(&params.cost_model);
-        validation_cost.compute_time =
-            validation_cost.compute_time / params.cost_model.parallelism_factor;
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let (guaranteed_cost, application_cost) = self.application_cost(params)?;
+        let cost_to_dismiss = self.dismissal_cost(params, validation_cost, guaranteed_cost);
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
@@ -2211,6 +2644,60 @@ where
             });
         }
         Ok(validation_cost + application_cost)
+    }
+
+    pub fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
+        let validation_cost = self.validation_cost(&params.cost_model);
+        self.checked_cost(params, validation_cost, enforce_time_to_dismiss)
+    }
+
+    pub fn cost_with_state(
+        &self,
+        params: &LedgerParameters,
+        ledger: &LedgerState<D>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
+        let validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
+        self.checked_cost(params, validation_cost, enforce_time_to_dismiss)
+    }
+
+    pub(crate) fn fees_with_impl(
+        &self,
+        params: &LedgerParameters,
+        get_op: impl Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
+        let model = &params.cost_model;
+        let validation_cost = self.validation_cost_impl(model, |address, entry_point, ver| {
+            let vk_size = get_op(*address, entry_point)
+                .and_then(|op| match ver {
+                    Some(ContractOperationVersion::V3) => {
+                        op.v2.as_ref().map(|vk| vk.serialized_size())
+                    }
+                    Some(ContractOperationVersion::V4) => {
+                        op.v3.as_ref().map(|vk| vk.serialized_size())
+                    }
+                    None => op
+                        .v3
+                        .as_ref()
+                        .map(|vk| vk.serialized_size())
+                        .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
+                })
+                .unwrap_or(VERIFIER_KEY_SIZE);
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(EXPECTED_OPERATIONS_DEPTH)
+        });
+        let synthetic = self.checked_cost(params, validation_cost, enforce_time_to_dismiss)?;
+        let normalized = synthetic
+            .normalize(params.limits.block_limits)
+            .ok_or(FeeCalculationError::BlockLimitExceeded)?;
+        let fees_fixed_point = params.fee_prices.overall_cost(&normalized);
+        Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
     }
 }
 
@@ -2259,7 +2746,7 @@ impl SystemTransaction {
                 // n offers
                 cost * outputs.len()
             }
-            PayBlockRewardsToTreasury { .. } => {
+            PayBlockRewardsToTreasury { .. } | UnlockToTreasury { .. } => {
                 let mut cost = RunningCost::ZERO;
                 cost += model.cell_read(16) + model.cell_write(16, true);
                 cost += model.map_index(EXPECTED_TOKEN_TYPE_DEPTH);
@@ -2308,7 +2795,7 @@ impl SystemTransaction {
                 );
                 cost
             }
-            DistributeReserve(..) => {
+            DistributeReserve { .. } | UnlockToReserve { .. } => {
                 // changing two pool balances
                 let cost = model.cell_read(16) + model.cell_write(16, true);
                 cost * 2u64
@@ -2519,7 +3006,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v4]"]
+#[tag = "contract-deploy[v6]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2544,7 +3031,10 @@ impl<D: DB> ContractDeploy<D> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersion {
+    /// The v2 field in ContractOperation (v1 zk-stdlib verifier keys).
     V3,
+    /// The v3 field in ContractOperation (v2 zk-stdlib verifier keys).
+    V4,
 }
 
 impl Serializable for ContractOperationVersion {
@@ -2552,13 +3042,14 @@ impl Serializable for ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => Serializable::serialize(&2u8, writer),
+            V::V4 => Serializable::serialize(&3u8, writer),
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersion as V;
         match self {
-            V::V3 => 1,
+            V::V3 | V::V4 => 1,
         }
     }
 }
@@ -2584,6 +3075,7 @@ impl Deserializable for ContractOperationVersion {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(V::V3),
+            3u8 => Ok(V::V4),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -2597,12 +3089,14 @@ impl ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2.is_some(),
+            V::V4 => co.v3.is_some(),
         }
     }
     pub(crate) fn rm_from(&self, co: &mut ContractOperation) {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2 = None,
+            V::V4 => co.v3 = None,
         }
     }
 }
@@ -2610,7 +3104,10 @@ impl ContractOperationVersion {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
-    V3(transient_crypto::proofs::VerifierKey),
+    /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
+    V3(transient_crypto_old::proofs::VerifierKey),
+    /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
+    V4(transient_crypto::proofs::VerifierKey),
 }
 
 impl ContractOperationVersionedVerifierKey {
@@ -2619,6 +3116,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(_) => V::V3,
+            VK::V4(_) => V::V4,
         }
     }
 
@@ -2626,6 +3124,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(vk) => co.v2 = Some(vk.clone()),
+            VK::V4(vk) => co.v3 = Some(vk.clone()),
         }
     }
 }
@@ -2638,6 +3137,10 @@ impl Serializable for ContractOperationVersionedVerifierKey {
                 Serializable::serialize(&2u8, writer)?;
                 Serializable::serialize(vk, writer)
             }
+            VK::V4(vk) => {
+                Serializable::serialize(&3u8, writer)?;
+                Serializable::serialize(vk, writer)
+            }
         }
     }
 
@@ -2645,6 +3148,7 @@ impl Serializable for ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V4(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }
@@ -2654,7 +3158,11 @@ impl Tagged for ContractOperationVersionedVerifierKey {
         "contract-operation-versioned-verifier-key".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],[],{}]", transient_crypto::proofs::VerifierKey::tag())
+        format!(
+            "[[],[],{},{}]",
+            transient_crypto_old::proofs::VerifierKey::tag(),
+            transient_crypto::proofs::VerifierKey::tag()
+        )
     }
 }
 tag_enforcement_test!(ContractOperationVersionedVerifierKey);
@@ -2673,6 +3181,10 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
                 reader,
                 recursion_depth,
             )?)),
+            3u8 => Ok(VK::V4(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -2683,7 +3195,7 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "maintenance-update-single-update[v1]"]
+#[tag = "maintenance-update-single-update[v3]"]
 pub enum SingleUpdate {
     /// Replaces the authority for this contract.
     /// Any subsequent updates in this update sequence are still carried out.
@@ -2694,12 +3206,16 @@ pub enum SingleUpdate {
     /// This operations *does not* replace existing keys, which must first be
     /// explicitly removed.
     VerifierKeyInsert(EntryPointBuf, ContractOperationVersionedVerifierKey),
+    /// Removes the IR associated with a given version and entry point.
+    IrRemove(EntryPointBuf),
+    /// Inserts new IR associated with a given version and entry point.
+    IrInsert(EntryPointBuf, IrBuf),
 }
 tag_enforcement_test!(SingleUpdate);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable, Debug)]
 #[storable(base)]
-#[tag = "maintenance-update-signatures-value[v1]"]
+#[tag = "maintenance-update-signatures-value[v2]"]
 // This type exists solely to work nicely with storage. It's the tuple of `(index, signature)` for the elements of `MaintenanceUpdate::signatures`
 pub struct SignaturesValue(pub u32, pub Signature);
 tag_enforcement_test!(SignaturesValue);
@@ -2710,9 +3226,10 @@ impl SignaturesValue {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
+#[envelope(MaintenanceUpdateSigningEnvelope<D>)]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[tag = "contract-maintenance-update[v1]"]
+#[tag = "contract-maintenance-update[v3]"]
 #[storable(db = D)]
 pub struct MaintenanceUpdate<D: DB> {
     pub address: ContractAddress,
@@ -2721,6 +3238,17 @@ pub struct MaintenanceUpdate<D: DB> {
     pub signatures: storage::storage::Array<SignaturesValue, D>,
 }
 tag_enforcement_test!(MaintenanceUpdate<InMemoryDB>);
+
+#[derive(Serializable)]
+#[phantom(D)]
+#[tag = "contract-maintenance-update-signing-envelope[v3]"]
+struct MaintenanceUpdateSigningEnvelope<D: DB> {
+    address: ContractAddress,
+    updates: storage::storage::Array<SingleUpdate, D>,
+    counter: u32,
+    signatures: PhantomData<storage::storage::Array<SignaturesValue, D>>,
+}
+tag_enforcement_test!(MaintenanceUpdateSigningEnvelope<InMemoryDB>);
 
 impl<D: DB> Debug for MaintenanceUpdate<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -2735,21 +3263,13 @@ impl<D: DB> Debug for MaintenanceUpdate<D> {
 
 impl<D: DB> MaintenanceUpdate<D> {
     pub fn data_to_sign(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(b"midnight:contract-update:");
-        Serializable::serialize(&self.address, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.updates, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.counter, &mut data)
-            .expect("In-memory serialization should succeed");
-        data
+        <Self as Envelope<MaintenanceUpdateSigningEnvelope<D>>>::envelope_data(self)
     }
 }
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v6]"]
+#[tag = "contract-action[v9]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -2801,32 +3321,6 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
             .map(ContractAction::erase_proof)
             .collect()
     }
-
-    pub fn challenge_pre_for(calls: &[ContractAction<P, D>]) -> Vec<u8> {
-        let mut data = Vec::new();
-        for cd in calls.iter() {
-            match cd {
-                ContractAction::Call(call) => {
-                    data.push(0u8);
-                    let _ = Serializable::serialize(&call.address, &mut data);
-                    let _ = Serializable::serialize(&call.entry_point, &mut data);
-
-                    let _ = Serializable::serialize(&call.guaranteed_transcript, &mut data);
-
-                    let _ = Serializable::serialize(&call.fallible_transcript, &mut data);
-                }
-                ContractAction::Deploy(deploy) => {
-                    data.push(1u8);
-                    let _ = Serializable::serialize(&deploy, &mut data);
-                }
-                ContractAction::Maintain(upd) => {
-                    data.push(2u8);
-                    let _ = Serializable::serialize(&upd, &mut data);
-                }
-            }
-        }
-        data
-    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serializable)]
@@ -2848,6 +3342,96 @@ impl Serialize for TransactionIdentifier {
 impl<'de> Deserialize<'de> for TransactionIdentifier {
     fn deserialize<D: serde::de::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         de.deserialize_bytes(BorshVisitor(PhantomData))
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serializable,
+    Storable,
+    Serialize,
+    Deserialize,
+)]
+#[storable(base)]
+#[tag = "signature-verifying-key[v2]"]
+pub enum SignatureVerifyingKey {
+    Schnorr(base_crypto::schnorr::VerifyingKey),
+    ECDSA(base_crypto::ecdsa::VerifyingKey),
+}
+
+impl Default for SignatureVerifyingKey {
+    fn default() -> Self {
+        SignatureVerifyingKey::Schnorr(Default::default())
+    }
+}
+
+impl From<SignatureVerifyingKey> for UserAddress {
+    fn from(value: SignatureVerifyingKey) -> Self {
+        match value {
+            SignatureVerifyingKey::Schnorr(vk) => UserAddress::from(vk),
+            SignatureVerifyingKey::ECDSA(vk) => UserAddress::from(vk),
+        }
+    }
+}
+
+tag_enforcement_test!(SignatureVerifyingKey);
+
+impl SignatureVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (SignatureVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::Schnorr(_), _) => false,
+            (SignatureVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::ECDSA(_), _) => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signature[v2]"]
+pub enum Signature {
+    Schnorr(base_crypto::schnorr::Signature),
+    ECDSA(base_crypto::ecdsa::Signature),
+}
+
+impl Default for Signature {
+    fn default() -> Self {
+        Signature::Schnorr(Default::default())
+    }
+}
+
+tag_enforcement_test!(Signature);
+
+#[derive(Clone, Debug, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signing-key[v2]"]
+pub enum SigningKey {
+    Schnorr(base_crypto::schnorr::SigningKey),
+    ECDSA(base_crypto::ecdsa::SigningKey),
+}
+
+tag_enforcement_test!(SigningKey);
+
+impl SigningKey {
+    pub fn sign(&self, rng: &mut (impl Rng + CryptoRng), msg: &[u8]) -> Signature {
+        match self {
+            SigningKey::Schnorr(sk) => Signature::Schnorr(sk.sign(rng, msg)),
+            SigningKey::ECDSA(sk) => Signature::ECDSA(sk.sign(msg)),
+        }
+    }
+
+    pub fn verifying_key(&self) -> SignatureVerifyingKey {
+        match self {
+            SigningKey::Schnorr(sk) => SignatureVerifyingKey::Schnorr(sk.verifying_key()),
+            SigningKey::ECDSA(sk) => SignatureVerifyingKey::ECDSA(sk.verifying_key()),
+        }
     }
 }
 
@@ -2899,10 +3483,10 @@ impl From<Utxo> for UtxoOutput {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable)]
 #[storable(base)]
-#[tag = "unshielded-utxo-spend"]
+#[tag = "unshielded-utxo-spend[v2]"]
 pub struct UtxoSpend {
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub type_: UnshieldedTokenType,
     pub intent_hash: IntentHash,
     pub output_no: u32,
@@ -2995,14 +3579,14 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v13]"]
+#[tag = "ledger-state[v18]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
     #[storable(child)]
     pub parameters: Sp<LedgerParameters, D>,
     pub locked_pool: u128,
-    pub bridge_receiving: Map<UserAddress, u128, D>,
+    pub bridge_receiving: Map<UserAddress, u128, D, NightAnn>,
     pub reserve_pool: u128,
     pub block_reward_pool: u128,
     pub unclaimed_block_rewards: Map<UserAddress, u128, D, NightAnn>,
@@ -3124,7 +3708,13 @@ impl<T: Deserializable> serde::de::Visitor<'_> for BorshVisitor<T> {
 pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    mod copy_cap;
+    mod cost_equivalence;
+    mod count_saturation;
+    mod pre_budget_work;
+    pub(crate) mod transactions;
+
     use storage::db::InMemoryDB;
 
     use super::*;
@@ -3134,6 +3724,17 @@ mod tests {
         let adj = f64::from(INITIAL_PARAMETERS.max_price_adjustment());
         assert!(1.045 <= adj);
         assert!(adj <= 1.047);
+    }
+
+    #[test]
+    fn min_claimable_rewards_does_not_collapse_with_extreme_parameters() {
+        let mut params = INITIAL_PARAMETERS;
+        // A claim that cannot fit the block prices at `FixedPoint::MAX`; dividing
+        // that by a night/dust ratio between 0.5 and 1 used to wrap negative.
+        params.limits.block_limits.compute_time = CostDuration::from_picoseconds(1);
+        params.limits.block_limits.read_time = CostDuration::from_picoseconds(1);
+        params.dust.night_dust_ratio = 3 * (SPECKS_PER_DUST / STARS_PER_NIGHT) as u64 / 4;
+        assert!(params.min_claimable_rewards() > u64::MAX as u128);
     }
 
     #[test]
@@ -3176,5 +3777,33 @@ mod tests {
         let mut ser = Vec::new();
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
+    }
+
+    /// The fee path prices a call by its *declared* public-input count
+    /// ([`ContractCall::public_inputs_len`]). A count that can be inflated via
+    /// `Op::Noop { n }` must therefore price the transaction out rather than
+    /// merely being counted cheaply: the cost arithmetic saturates, and a
+    /// saturated cost cannot be normalized against the block limits, so
+    /// `fees()` fails with `BlockLimitExceeded`.
+    #[test]
+    fn absurd_public_input_counts_are_priced_out() {
+        let model = &INITIAL_PARAMETERS.cost_model;
+        let limits = INITIAL_PARAMETERS.limits;
+
+        // What a single `Op::Noop { n: u32::MAX }` declares.
+        let inflated = u32::MAX as usize + 2;
+        let cost = SyntheticCost::from(model.proof_verify(inflated));
+        assert!(
+            cost.max_time() > limits.min_time_to_dismiss,
+            "an inflated public-input count must exceed the dismissal window"
+        );
+        assert!(
+            cost.normalize(limits.block_limits).is_none(),
+            "an inflated public-input count must exceed the block limits"
+        );
+
+        // A realistic count must not be priced out by the same arithmetic.
+        let realistic = SyntheticCost::from(model.proof_verify(64));
+        assert!(realistic.normalize(limits.block_limits).is_some());
     }
 }
