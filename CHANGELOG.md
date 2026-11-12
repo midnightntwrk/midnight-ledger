@@ -8,6 +8,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
+- feat: the proof server accepts `--max-k` (`MIDNIGHT_PROOF_SERVER_MAX_K`). `/prove` and `/prove-tx` reject circuits supplied in the request whose `k` exceeds it with HTTP 400, before queuing the job, and `/fetch-params/{k}` refuses larger `k`. Unset by default, which keeps the current unlimited behaviour.
+- fix: the proof server's `/prove-tx` and `/check` fetch public parameters that are not yet cached, instead of failing with `task join error` because their runtime had I/O disabled.
 
 ## Ledger 9.1.0.2-rc.0
 

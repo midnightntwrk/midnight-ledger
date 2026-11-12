@@ -19,7 +19,7 @@ use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use futures::future::join;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
-use midnight_proof_server::endpoints::PUBLIC_PARAMS;
+use midnight_proof_server::endpoints::{MaxK, PUBLIC_PARAMS};
 use midnight_proof_server::{server, worker_pool::WorkerPool};
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
@@ -55,6 +55,9 @@ struct Args {
         env = "MIDNIGHT_PROOF_SERVER_NO_FETCH_PARAMS"
     )]
     no_fetch_params: bool,
+    /// Reject proving requests for circuits larger than this `k`. Unlimited when unset.
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_MAX_K", value_parser = clap::value_parser!(u8).range(1..=25))]
+    max_k: Option<u8>,
 }
 
 #[actix_web::main]
@@ -90,8 +93,11 @@ async fn main() -> std::io::Result<()> {
         ks.into_iter().collect::<Result<Vec<_>, _>>()?;
         keys.into_iter().collect::<Result<Vec<_>, _>>()?;
     }
+    if let Some(max_k) = args.max_k {
+        info!("Rejecting proving requests for circuits above k={max_k}");
+    }
     let pool = WorkerPool::new(args.num_workers, args.job_capacity, args.job_timeout);
-    server(args.port, !args.no_fetch_params, pool)
+    server(args.port, !args.no_fetch_params, pool, MaxK(args.max_k))
         .unwrap()
         .0
         .await
