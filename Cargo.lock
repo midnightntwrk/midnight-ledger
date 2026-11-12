@@ -3296,7 +3296,7 @@ dependencies = [
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.1.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-zkir 3.2.1",
  "midnight-zswap",
  "pastey",
  "pprof",
@@ -3446,7 +3446,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.2-rc.0"
+version = "9.0.2-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3468,7 +3468,7 @@ dependencies = [
  "midnight-storage",
  "midnight-transient-crypto 3.1.0",
  "midnight-zkir 2.2.0",
- "midnight-zkir 3.2.0",
+ "midnight-zkir 3.2.1",
  "midnight-zswap",
  "rand 0.8.6",
  "regex",
@@ -3850,8 +3850,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir"
-version = "3.2.0"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-3.2.0#446c7fecc6bd41dab99ebe89ab404e9d077d11a9"
+version = "3.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4aaeb48ea50efc4ee1dfdeed72ab6f38a64a6bb76b05d95851306a8f4cfd5202"
 dependencies = [
  "anyhow",
  "const-hex",
@@ -3875,64 +3876,6 @@ dependencies = [
  "sha2 0.11.0",
  "sha3",
  "tracing",
-]
-
-[[package]]
-name = "midnight-zkir-v3"
-version = "3.0.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "clap",
- "console 0.16.3",
- "const-hex",
- "env_logger",
- "futures-executor",
- "group 0.13.0",
- "hex",
- "indicatif",
- "log",
- "midnight-base-crypto",
- "midnight-circuits 7.3.0",
- "midnight-curves 0.3.1",
- "midnight-proofs 0.8.2",
- "midnight-serialize",
- "midnight-transient-crypto 3.1.0",
- "midnight-zk-stdlib 2.4.0",
- "midnight-zkir-v3",
- "num-bigint",
- "num-traits",
- "pastey",
- "proptest",
- "proptest-derive",
- "rand 0.8.6",
- "rand_chacha 0.3.1",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_repr",
- "sha2 0.11.0",
- "sha3",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "midnight-zkir-v3-wasm"
-version = "3.0.0-rc.2"
-dependencies = [
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "hex",
- "js-sys",
- "midnight-serialize",
- "midnight-transient-crypto 3.1.0",
- "midnight-zkir-v3",
- "rand 0.8.6",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
