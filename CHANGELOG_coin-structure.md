@@ -1,9 +1,20 @@
 # `coin-structure` Changelog
 
+## Version `3.0.1`
+
+- feat: `Nullifier`, `Commitment`, `TokenType`, `UserAddress` and
+  `ContractAddress` implement `serialize::EncodingShape`, which `storage` 3
+  requires of `Map` keys.
+
 ## Version `2.1.0`
 
 - feat: add conversions from ECDSA keys to user addresses
 - breaking: updated ECDSA domain separator
+
+## Version `2.0.2`
+
+- pull in hardened `serialize`, `base-crypto`, `storage-core` and
+  `transient-crypto` deserialization.
 
 ## Version `2.0.0`
 

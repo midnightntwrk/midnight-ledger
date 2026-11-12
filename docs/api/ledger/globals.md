@@ -1,8 +1,8 @@
-[**@midnight/ledger v1.0.0-rc.4**](README.md)
+[**@midnight/ledger v1.0.2-rc.0**](README.md)
 
 ***
 
-# @midnight/ledger v1.0.0-rc.4
+# @midnight/ledger v1.0.2-rc.0
 
 ## Classes
 
@@ -61,6 +61,7 @@
 - [TransactionContext](classes/TransactionContext.md)
 - [TransactionCostModel](classes/TransactionCostModel.md)
 - [TransactionResult](classes/TransactionResult.md)
+- [TransactionShape](classes/TransactionShape.md)
 - [UnshieldedOffer](classes/UnshieldedOffer.md)
 - [UtxoMeta](classes/UtxoMeta.md)
 - [UtxoState](classes/UtxoState.md)

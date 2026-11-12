@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.4**](../README.md)
+[**@midnight/ledger v1.0.2-rc.0**](../README.md)
 
 ***
 
@@ -7,12 +7,18 @@
 # Function: partitionTranscripts()
 
 ```ts
-function partitionTranscripts(calls, params): PartitionedTranscript[];
+function partitionTranscripts(
+   calls, 
+   params, 
+   expectedTxShape?): PartitionedTranscript[];
 ```
 
 Finalizes a set of programs against their initial contexts,
 resulting in guaranteed and fallible [Transcript](../type-aliases/Transcript.md)s, optimally
 allocated, and heuristically covered for gas fees.
+
+`expectedTxShape` replaces the shape [TransactionShape.forCalls](../classes/TransactionShape.md#forcalls) would
+derive for `calls`.
 
 ## Parameters
 
@@ -23,6 +29,10 @@ allocated, and heuristically covered for gas fees.
 ### params
 
 [`LedgerParameters`](../classes/LedgerParameters.md)
+
+### expectedTxShape?
+
+[`TransactionShape`](../classes/TransactionShape.md)
 
 ## Returns
 

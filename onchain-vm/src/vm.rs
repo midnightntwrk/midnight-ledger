@@ -47,7 +47,7 @@ impl Cache {
         match &key.0 {
             None => true,
             Some((n, path)) => {
-                if *n > self.0.len() {
+                if *n >= self.0.len() {
                     false
                 } else {
                     path.iter()
@@ -70,15 +70,65 @@ impl Cache {
             }
         }
     }
+
+    /// Whether `key` has been visited, without recording a visit.
+    fn contains(&self, key: &CacheKey) -> bool {
+        let Some((n, path)) = &key.0 else {
+            return true;
+        };
+        let Some(mut cache) = self.0.get(*n) else {
+            return false;
+        };
+        for key in path.iter() {
+            match cache {
+                InnerCache(None) => return true,
+                InnerCache(Some(map)) => match map.get(key) {
+                    Some(child) => cache = child,
+                    None => return false,
+                },
+            }
+        }
+        true
+    }
+
+    /// The cached parts of the value at `key`, without recording a visit.
+    fn get(&self, key: &CacheKey) -> InnerCache {
+        let Some((n, path)) = &key.0 else {
+            return InnerCache(None);
+        };
+        let Some(mut cache) = self.0.get(*n) else {
+            return InnerCache(Some(HashTrieMap::new()));
+        };
+        for key in path.iter() {
+            match cache {
+                InnerCache(None) => break,
+                InnerCache(Some(map)) => match map.get(key) {
+                    Some(child) => cache = child,
+                    None => return InnerCache(Some(HashTrieMap::new())),
+                },
+            }
+        }
+        cache.clone()
+    }
+
+    fn key_for(&mut self, cache: InnerCache) -> CacheKey {
+        match cache {
+            InnerCache(None) => CacheKey(None),
+            cache => {
+                self.0.push(cache);
+                CacheKey(Some((self.0.len() - 1, Vector::new())))
+            }
+        }
+    }
 }
 
 // For a given data structure, either:
 //  - If None, indicates the entire data structure is cached.
 //  - If Some, maps keys in the data structure to the parts of those objects
 //    that are currently cached.
-// Note: If a value is copied *into another data structure*, it is no longer
-// linked to its source in the cache structure. This is _not_ the case if it is
-// copied through the stack.
+// Note: If a value is copied *into another data structure*, the result gets a
+// new root holding a snapshot of both cache states, and is no longer linked to
+// either source. This is _not_ the case if it is copied through the stack.
 #[derive(Clone)]
 struct InnerCache(Option<HashTrieMap<AlignedValue, InnerCache>>);
 
@@ -187,7 +237,10 @@ fn idx<D: DB>(
 ) -> Result<(VmValue<D>, CacheKey), OnchainProgramError<D>> {
     let cache_key = value.1.push_key(key);
     let cache_miss = !cache.visit(&cache_key);
-    match &value.0.value {
+    if cached && cache_miss {
+        return Err(OnchainProgramError::CacheMiss);
+    }
+    let res = match &value.0.value {
         StateValue::Array(arr) => {
             let idx: u8 = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
             if idx as usize >= arr.len() {
@@ -197,45 +250,29 @@ fn idx<D: DB>(
                     arr.len()
                 )))
             } else {
-                let res = arr.get(idx as usize).unwrap();
-                if cached && cache_miss {
-                    Err(OnchainProgramError::CacheMiss)
-                } else {
-                    Ok((VmValue::new(value.0.strength, res.clone()), cache_key))
-                }
+                Ok(arr.get(idx as usize).unwrap().clone())
             }
         }
-        StateValue::Map(map) => {
-            let res = map
-                .get(key)
-                .map(|sp| (*sp).clone())
-                .unwrap_or(StateValue::Null);
-            if cached && cache_miss {
-                Err(OnchainProgramError::CacheMiss)
-            } else {
-                Ok((VmValue::new(value.0.strength, res), cache_key))
-            }
-        }
+        StateValue::Map(map) => Ok(map
+            .get(key)
+            .map(|sp| (*sp).clone())
+            .unwrap_or(StateValue::Null)),
         StateValue::BoundedMerkleTree(tree) => {
             let key = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
             if 1u64.checked_shl(tree.height() as u32).is_some_and(|bound| key >= bound) {
                 Err(OnchainProgramError::MissingKey)
             } else {
-                Ok((
-                    match tree.index(key) {
-                        Some((hash, ())) => {
-                            VmValue::new(value.0.strength, StateValue::Cell(Sp::new(hash.into())))
-                        }
-                        None => VmValue::new(value.0.strength, StateValue::Null),
-                    },
-                    cache_key,
-                ))
+                Ok(match tree.index(key) {
+                    Some((hash, ())) => StateValue::Cell(Sp::new(hash.into())),
+                    None => StateValue::Null,
+                })
             }
         }
         _ => Err(OnchainProgramError::TypeError(
             "tried to idx, only map, array, and bmt are supported".to_string(),
         )),
-    }
+    }?;
+    Ok((VmValue::new(value.0.strength, res), cache_key))
 }
 
 impl TryFrom<&ValueSlice> for LogEventType {
@@ -676,7 +713,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     },
                 )?;
                 stack.push((
-                    vnew(if *storage { Strong } else { Weak }, value.clone()),
+                    vnew(if *storage { Strong } else { Weak }, value.clone().into()),
                     CacheKey(None),
                 ))
             }
@@ -779,7 +816,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         },
                     )?;
                 }
-                let cache_hit = cache.visit(&container.1.push_key(&key));
+                // Checked without visiting: `rem` never reads the old value, and
+                // copies of the container on the stack share its cache root.
+                let cache_hit = cache.contains(&container.1.push_key(&key));
                 if *cached && !cache_hit {
                     return Err(OnchainProgramError::CacheMiss);
                 }
@@ -830,7 +869,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         i += 1;
                         stack_keys.next().unwrap()
                     }
-                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone()))),
+                    Key::Value(v) => vnew(Weak, StateValue::Cell(Sp::new(v.clone().into()))),
                 });
                 let mut curr = stack.pop().unwrap();
                 for key in refined_path {
@@ -937,6 +976,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
             // ins, insc
             Ins { cached, n } => {
                 let mut curr = stack.pop().unwrap();
+                let mut curr_cache = cache.get(&curr.1);
                 for _ in 0..*n {
                     let key = stack.pop().unwrap().0;
                     let container = stack.pop().unwrap();
@@ -998,7 +1038,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         strength: container_str,
                         value: container_val,
                     } = container.0;
-                    let cache_hit = cache.visit(&container.1.push_key(key_cell));
+                    // Checked without visiting: `ins` never reads the old value, and
+                    // copies of the container on the stack share its cache root.
+                    let cache_hit = cache.contains(&container.1.push_key(key_cell));
                     if *cached && !cache_hit {
                         if let StateValue::Array(_) = &container_val {
                             // The miss is okay. We're overwriting an array cell, we never need to read it.
@@ -1053,8 +1095,17 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         }
                     };
                     curr.0 = vnew(curr.0.strength & container_str, next);
-                    curr.1 = container.1;
+                    curr_cache = match (cache.get(&container.1), curr_cache) {
+                        (InnerCache(None), InnerCache(None)) => InnerCache(None),
+                        (InnerCache(None), inserted) => {
+                            InnerCache(Some(HashTrieMap::new().insert(key_cell.clone(), inserted)))
+                        }
+                        (InnerCache(Some(map)), inserted) => {
+                            InnerCache(Some(map.insert(key_cell.clone(), inserted)))
+                        }
+                    };
                 }
+                curr.1 = cache.key_for(curr_cache);
                 stack.push(curr);
             }
         }

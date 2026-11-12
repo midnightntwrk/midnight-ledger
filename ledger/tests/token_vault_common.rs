@@ -32,6 +32,7 @@
 //! - `send_unshielded_ops()`: Generates ops for effects[7] (unshielded_outputs)
 //! - `claim_unshielded_spend_ops()`: Generates ops for effects[8] (claimed spends)
 //! - `unshielded_balance_lt_ops()`: Generates balance check ops (reads context[5])
+//! - `deploy_token_vault()`: Deploys the contract into a test state and pays its fee
 
 #![allow(dead_code)]
 
@@ -68,10 +69,12 @@ pub use midnight_ledger::test_utilities::{test_intents, test_resolver};
 pub use midnight_ledger::verify::WellFormedStrictness;
 pub use midnight_ledger_v9 as midnight_ledger;
 pub use onchain_runtime::context::QueryContext;
-pub use onchain_runtime::ops::{Key, Op, key};
+pub use onchain_runtime::ops::{Key, Op, expect_checked, key};
 pub use onchain_runtime::program_fragments::*;
 pub use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
-pub use onchain_runtime::state::{ContractState, StateValue, stval};
+pub use onchain_runtime::state::{
+    ContractOperation, ContractState, EntryPointBuf, StateValue, stval,
+};
 pub use rand::rngs::StdRng;
 pub use rand::{CryptoRng, Rng, SeedableRng};
 pub use serialize::Serializable;
@@ -197,6 +200,78 @@ pub fn init_crypto() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  CONTRACT DEPLOYMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// The circuits of token-vault.compact.
+pub const TOKEN_VAULT_ENTRY_POINTS: [&str; 6] = [
+    "depositShielded",
+    "withdrawShielded",
+    "depositUnshielded",
+    "withdrawUnshielded",
+    "getShieldedBalance",
+    "getUnshieldedBalance",
+];
+
+#[derive(Clone)]
+pub struct TokenVault {
+    pub addr: ContractAddress,
+    pub owner_sk: HashOutput,
+    pub operations: HashMap<EntryPointBuf, ContractOperation, InMemoryDB>,
+}
+
+impl TokenVault {
+    pub fn operation(&self, entry_point: &str) -> ContractOperation {
+        (*self.operations.get(&entry_point.as_bytes().into()).unwrap()).clone()
+    }
+}
+
+/// Deploys the token-vault contract with a fresh owner key into `state`, and
+/// pays the deployment's fee from it.
+pub async fn deploy_token_vault(rng: &mut StdRng, state: &mut TestState<InMemoryDB>) -> TokenVault {
+    let mut operations = HashMap::new();
+    for entry_point in TOKEN_VAULT_ENTRY_POINTS {
+        let operation = contract_operation(&RESOLVER, entry_point).await;
+        operations = operations.insert(entry_point.as_bytes().into(), operation);
+    }
+    let owner_sk: HashOutput = rng.r#gen();
+    let owner_pk = derive_public_key(owner_sk);
+    let contract = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()), // 0: shieldedVault
+            (false),                        // 1: hasShieldedTokens
+            (owner_pk),                     // 2: owner
+            {},                             // 3: authorized (empty set)
+            (0u64),                         // 4: totalShieldedDeposits
+            (0u64),                         // 5: totalShieldedWithdrawals
+            (0u64),                         // 6: totalUnshieldedDeposits
+            (0u64)                          // 7: totalUnshieldedWithdrawals
+        ]),
+        operations.clone(),
+        Default::default(),
+    );
+    let deploy = ContractDeploy::new(rng, contract);
+    let addr = deploy.address();
+    let deploy_tx = Transaction::from_intents(
+        "local-test",
+        test_intents(rng, Vec::new(), Vec::new(), vec![deploy], state.time),
+    );
+    let deploy_tx = tx_prove_bind(rng.split(), &deploy_tx, &RESOLVER)
+        .await
+        .unwrap();
+    let balanced = state
+        .balance_tx(rng.split(), deploy_tx, &RESOLVER)
+        .await
+        .unwrap();
+    state.assert_apply(&balanced, WellFormedStrictness::default());
+    TokenVault {
+        addr,
+        owner_sk,
+        operations,
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  UNSHIELDED TOKEN OPERATIONS - VM Op Sequence Generators
 // ═══════════════════════════════════════════════════════════════════════════════
 //
@@ -262,7 +337,7 @@ pub fn receive_unshielded_ops<D: DB>(
         // Push the token type as key
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         // Duplicate for member check
         Op::Dup {
@@ -276,7 +351,7 @@ pub fn receive_unshielded_ops<D: DB>(
         // Push the amount
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         // Swap and negate for branching
         Op::Swap {
@@ -349,7 +424,7 @@ pub fn send_unshielded_ops<D: DB>(
         },
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         Op::Dup {
             n: 1.try_into().unwrap(),
@@ -360,7 +435,7 @@ pub fn send_unshielded_ops<D: DB>(
         Op::Member,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         Op::Swap {
             n: 0.try_into().unwrap(),
@@ -449,7 +524,7 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         },
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(key_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(key_av.clone()))),
         },
         Op::Dup {
             n: 1.try_into().unwrap(),
@@ -460,7 +535,7 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         Op::Member,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av.clone()))),
         },
         Op::Swap {
             n: 0.try_into().unwrap(),
@@ -540,7 +615,7 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         // Push token type as key
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+            value: StateValue::Cell(Sp::new(expect_checked(token_type_av.clone()))),
         },
         // Check if key exists in balance map
         Op::Member,
@@ -552,7 +627,7 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         Op::Pop,
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(zero_av)),
+            value: StateValue::Cell(Sp::new(expect_checked(zero_av))),
         },
         // Jump past the "key exists" path
         Op::Jmp {
@@ -562,12 +637,12 @@ pub fn unshielded_balance_lt_ops<D: DB>(
         Op::Idx {
             cached: true,
             push_path: false,
-            path: vec![Key::Value(token_type_av)].try_into().unwrap(),
+            path: vec![Key::Value(expect_checked(token_type_av))].try_into().unwrap(),
         },
         // Push amount to compare
         Op::Push {
             storage: false,
-            value: StateValue::Cell(Sp::new(amount_av)),
+            value: StateValue::Cell(Sp::new(expect_checked(amount_av))),
         },
         // Less than comparison: balance < amount?
         Op::Lt,

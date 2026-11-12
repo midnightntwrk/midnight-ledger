@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-state"
-version = "4.0.0"
+version = "4.0.1"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -11,12 +11,12 @@ proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "s
 public-internal-structure = []
 
 [dependencies]
-coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
-transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+coin-structure = { version = "3.0.1", path = "../coin-structure", package = "midnight-coin-structure" }
+transient-crypto = { version = "3.1.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
-base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
-storage = { version = "2.0.2", path = "../storage", package = "midnight-storage" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
+storage = { version = "3.1.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
 
 hex = "^0.4.3"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
@@ -32,6 +32,8 @@ proptest-derive = { version = "0.8", optional = true }
 derive-where = "^1.6.1"
 
 [dev-dependencies]
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["test-utilities"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["test-utilities"] }
 midnight-onchain-state = { path = ".", features = ["proptest"] }
 rand = { version = "^0.8.5", features = ["getrandom"] }
 pastey = "0.2.1"

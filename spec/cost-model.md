@@ -505,6 +505,17 @@ split, the application stage should be split into the guaranteed segment and the
 cost. This is to allow enforcing separate bounds on the guaranteed segment
 execution time.
 
+The total cost is the sum of the guaranteed segment's cost and each fallible
+segment's cost, each converted to a `SyntheticCost` *separately*. Converting
+nets bytes written against bytes deleted, and a deletion may only offset writes
+that are certain to commit with it. Within a segment this holds: each
+transcript's actual deletions must be at least those it declared, and the
+segment commits or fails as a whole. Across segments it does not: a fallible
+segment may fail, discarding its deletions, while the guaranteed segment or
+another fallible segment still commits its writes. Netting the segments
+together would let declared deletions that never happen lower the priced net
+writes of the segments that do commit.
+
 ### Guaranteed Segment limits
 
 The execution time of the guaranteed segment is limited separately and for

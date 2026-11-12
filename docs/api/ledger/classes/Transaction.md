@@ -1,4 +1,4 @@
-[**@midnight/ledger v1.0.0-rc.4**](../README.md)
+[**@midnight/ledger v1.0.2-rc.0**](../README.md)
 
 ***
 
@@ -120,7 +120,8 @@ addCalls(
    ttl, 
    zswapInputs?, 
    zswapOutputs?, 
-zswapTransient?): Transaction<S, P, B>;
+   zswapTransient?, 
+expectedTxShape?): Transaction<S, P, B>;
 ```
 
 Adds a set of new calls to the transaction.
@@ -129,6 +130,9 @@ In contrast to [Intent.addCall](Intent.md#addcall), this takes calls *before*
 transcript partitioning ([partitionTranscripts](../functions/partitionTranscripts.md)), will create the
 target intent where needed, and will ensure that relevant Zswap parts are
 placed in the same section as contract interactions with them.
+
+`expectedTxShape` is passed on to [partitionTranscripts](../functions/partitionTranscripts.md); the
+default shape also counts the Zswap parts given.
 
 #### Parameters
 
@@ -159,6 +163,10 @@ placed in the same section as contract interactions with them.
 ##### zswapTransient?
 
 [`ZswapTransient`](ZswapTransient.md)\<[`PreProof`](PreProof.md)\>[]
+
+##### expectedTxShape?
+
+[`TransactionShape`](TransactionShape.md)
 
 #### Returns
 

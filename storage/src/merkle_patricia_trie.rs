@@ -24,16 +24,37 @@ use std::ops::Deref;
 use crate::DefaultDB;
 use crate::Storable;
 use crate::arena::{ArenaKey, Sp};
+use crate::dag_memo::DagMemo;
 use crate::db::DB;
 use crate::storable::{Loader, SizeAnn};
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
+pub use storage_core::monoid::{Monoid, Semigroup};
+
+scoped_tls::scoped_thread_local!(
+    /// While set, the trie invariants on the current thread accept a
+    /// [`Node::Extension`] with a path shorter than 255 nibbles whose child is
+    /// another [`Node::Extension`].
+    ///
+    /// `Node::insert` has produced such tries when splitting a 255-nibble
+    /// extension whose child is itself an extension, and they exist in chain
+    /// state. This lets clients load that state as-is, preserving its hash.
+    ///
+    /// <div class="warning">
+    ///
+    /// **Client-side mitigation only. NEVER set this in a node, or in any code
+    /// that validates data for consensus.** A node that deserializes under it
+    /// accepts wire data that every other node rejects, and splits from the
+    /// network.
+    ///
+    /// </div>
+    pub static ALLOW_SHORT_EXTENSION_CHAINS: ()
+);
 
 /// A Merkle Patricia Trie
 #[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[storable(db = D, invariant = MerklePatriciaTrie::canonicity)]
 pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
@@ -69,132 +90,26 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         MerklePatriciaTrie(Sp::new(Node::Empty))
     }
 
-    fn annotation_consistency(&self) -> Result<(), std::io::Error> {
-        fn err<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            ann: &A,
-            true_val: A,
-        ) -> Result<A, std::io::Error> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "MPT annotation isn't correctly calculated: Annotation {:?}, correct calculation: {:?}",
-                    ann, true_val
-                ),
-            ))
-        }
-
-        fn sum_ann<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            node: &Node<V, D, A>,
-        ) -> Result<A, std::io::Error> {
-            match node {
-                Node::Empty => Ok(A::empty()),
-                Node::Leaf { ann, value } => {
-                    let true_val = A::from_value(value);
-                    if ann != &A::from_value(value) {
-                        return err(ann, true_val);
-                    };
-                    Ok(true_val)
-                }
-                Node::Branch { ann, children } => {
-                    let true_val = children.iter().try_fold(A::empty(), |acc, x| {
-                        Ok::<A, std::io::Error>(acc.append(&sum_ann(&x.deref().clone())?))
-                    })?;
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-                Node::Extension { ann, child, .. } => {
-                    let true_val = sum_ann(&child.deref().clone())?;
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-                Node::MidBranchLeaf { ann, value, child } => {
-                    let true_val = sum_ann(&child.deref().clone())?.append(&A::from_value(value));
-                    if ann != &true_val {
-                        return err(ann, true_val);
-                    }
-                    Ok(true_val)
-                }
-            }
-        }
-
-        let _ = sum_ann(self.0.deref())?;
-        Ok(())
-    }
-
     /// Check that the trie is in canonical form, returning a description of the
     /// violated rule otherwise. A well-formed trie is *canonical*: its structure
     /// is uniquely determined by its key-value contents (see the type-level
-    /// docs). This is a hand-enumerated statement of the structural rules,
-    /// composed with the annotation-consistency check.
+    /// docs).
     ///
-    /// This is a pure inspection predicate: it is the oracle the property tests
-    /// use, and does not itself change what deserialization accepts.
+    /// Every rule is local to a node and its children, so deserialization
+    /// enforces this by checking each decoded node. This checks a trie built
+    /// in memory, visiting each distinct node once.
     pub fn canonicity(&self) -> Result<(), std::io::Error> {
-        fn err<T>(msg: &str) -> Result<T, std::io::Error> {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("canonicity: {msg}"),
-            ))
-        }
-
-        fn structure<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>>(
-            node: &Node<V, D, A>,
-        ) -> Result<(), std::io::Error> {
-            match node {
-                Node::Empty | Node::Leaf { .. } => Ok(()),
-                Node::Branch { children, .. } => {
-                    if children
-                        .iter()
-                        .filter(|child| !matches!(***child, Node::Empty))
-                        .count()
-                        < 2
-                    {
-                        return err("Node::Branch must have at least two non-empty children");
-                    }
-                    children
-                        .iter()
-                        .try_for_each(|child| structure(child.deref()))
-                }
-                Node::Extension {
-                    compressed_path,
-                    child,
-                    ..
-                } => {
-                    if compressed_path.is_empty() {
-                        return err("Node::Extension path must be non-empty");
-                    }
-                    if compressed_path.len() > 255 {
-                        return err("Node::Extension path may not be longer than 255");
-                    }
-                    if compressed_path.iter().any(|b| *b > 0x0f) {
-                        return err("Node::Extension path must consist of nibbles");
-                    }
-                    match child.deref() {
-                        Node::Empty => {
-                            return err("Node::Extension child must not be Node::Empty");
-                        }
-                        Node::Extension { .. } if compressed_path.len() != 255 => {
-                            return err(
-                                "Node::Extension may only have a Node::Extension child when its own path is of length 255",
-                            );
-                        }
-                        _ => {}
-                    }
-                    structure(child.deref())
-                }
-                Node::MidBranchLeaf { child, .. } => match child.deref() {
-                    Node::Branch { .. } | Node::Extension { .. } => structure(child.deref()),
-                    _ => err("Node::MidBranchLeaf may only have Node::Branch or Node::Extension children"),
-                },
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec![&self.0];
+        while let Some(sp) = stack.pop() {
+            if seen.insert(sp.hash()) {
+                Storable::<D>::check_invariant(&**sp).map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("canonicity: {e}"))
+                })?;
+                stack.extend(sp.non_empty_children());
             }
         }
-
-        structure(self.0.deref())?;
-        self.annotation_consistency()
+        Ok(())
     }
 
     /// Whether [`Self::canonicity`] holds.
@@ -251,6 +166,85 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
         Sp::into_inner(self.0)
             .into_iter()
             .flat_map(Node::into_inner_for_drop)
+    }
+
+    /// Combines `leaf` over every entry, in [`Self::iter`] order, counting an
+    /// entry once per path it is reached by. Each distinct node is visited
+    /// once, so a trie with shared subtrees folds in time linear in its
+    /// distinct nodes.
+    pub fn fold<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+    ) -> R {
+        Node::fold(&self.0, memo, &mut leaf, &|_, r| r)
+    }
+
+    /// Each distinct value with the number of entries holding it, saturating,
+    /// in an unspecified but deterministic order. Linear in the trie's distinct nodes, however
+    /// many entries they stand for.
+    pub fn distinct_values(&self) -> std::vec::Vec<(Sp<V, D>, u128)> {
+        Self::distinct_values_across([(self, 1)])
+    }
+
+    /// As [`Self::distinct_values`] over several tries, each counted `weight`
+    /// times. Linear in the distinct nodes of all of them together, so tries
+    /// sharing subtrees cost no more than one holding them all.
+    pub fn distinct_values_across<'a>(
+        tries: impl IntoIterator<Item = (&'a Self, u128)>,
+    ) -> std::vec::Vec<(Sp<V, D>, u128)>
+    where
+        Self: 'a,
+    {
+        type Key<D> = crate::arena::ArenaHash<<D as DB>::Hasher>;
+        let mut paths = std::collections::HashMap::<Key<D>, u128>::new();
+        // Reverse post-order visits every node after all of its parents.
+        let mut order = std::vec::Vec::new();
+        let mut seen = std::collections::HashSet::<Key<D>>::new();
+        for (trie, weight) in tries.into_iter().filter(|(_, weight)| *weight > 0) {
+            let count = paths.entry(trie.0.hash()).or_insert(0);
+            *count = count.saturating_add(weight);
+            let mut stack = vec![(trie.0.clone(), false)];
+            while let Some((node, expanded)) = stack.pop() {
+                if expanded {
+                    order.push(node);
+                } else if seen.insert(node.hash()) {
+                    stack.push((node.clone(), true));
+                    stack.extend(
+                        node.non_empty_children()
+                            .map(|child| (child.clone(), false)),
+                    );
+                }
+            }
+        }
+        let mut index = std::collections::HashMap::<Key<D>, usize>::new();
+        let mut values = std::vec::Vec::<(Sp<V, D>, u128)>::new();
+        for node in order.iter().rev() {
+            let n = paths[&node.hash()];
+            for child in node.non_empty_children() {
+                let count = paths.entry(child.hash()).or_insert(0);
+                *count = count.saturating_add(n);
+            }
+            if let Node::Leaf { value, .. } | Node::MidBranchLeaf { value, .. } = node.deref() {
+                let i = *index.entry(value.hash()).or_insert_with(|| {
+                    values.push((value.clone(), 0));
+                    values.len() - 1
+                });
+                values[i].1 = values[i].1.saturating_add(n);
+            }
+        }
+        values
+    }
+
+    /// As [`Self::fold`], with `under(path, r)` applied to the result `r` of
+    /// each subtree reached from its parent by the nibbles `path`.
+    pub(crate) fn fold_paths<R: Monoid + Clone>(
+        &self,
+        memo: &mut DagMemo<R, D>,
+        mut leaf: impl FnMut(&mut DagMemo<R, D>, &Sp<V, D>) -> R,
+        under: &impl Fn(&[u8], R) -> R,
+    ) -> R {
+        Node::fold(&self.0, memo, &mut leaf, under)
     }
 
     /// Generate iterator over leaves, `(path, &value)`
@@ -402,88 +396,6 @@ impl<T: Storable<D> + Tagged + 'static, D: DB, A: Storable<D> + Annotation<T> + 
 }
 tag_enforcement_test!(Node<(), DefaultDB, SizeAnn>);
 
-/// A `Semigroup` is a structure with an associative binary operator
-///
-/// Implementations are responsible for satisfying the law:
-///
-/// `∀ a b c. (a.append(b)).append(c) == a.append(b.append(c))`
-pub trait Semigroup {
-    /// The associative binary operator
-    fn append(&self, other: &Self) -> Self;
-}
-
-/// A `Monoid` is a `Semigroup` with an identity element.
-///
-/// The identity element, `empty`, can be combined with any other value
-/// using `Semigroup::append` without changing the other value.
-///
-/// For example, for numbers under addition, the identity element is `0`, since `n + 0 == n`.
-///
-/// Implementations are responsible for satisfying the laws:
-///
-/// Right identity: `∀ a. a.append(Self::empty()) == a`
-/// Left identity: `∀ a. Self::empty().append(a) == a`
-pub trait Monoid: Semigroup {
-    /// Returns the identity element
-    fn empty() -> Self;
-}
-
-impl Semigroup for () {
-    fn append(&self, _: &Self) -> Self {}
-}
-
-impl Monoid for () {
-    fn empty() -> Self {}
-}
-
-impl Semigroup for u64 {
-    fn append(&self, other: &Self) -> Self {
-        self.saturating_add(*other)
-    }
-}
-
-impl Monoid for u64 {
-    fn empty() -> Self {
-        0
-    }
-}
-
-impl Semigroup for u128 {
-    fn append(&self, other: &Self) -> Self {
-        self.saturating_add(*other)
-    }
-}
-
-impl Monoid for u128 {
-    fn empty() -> Self {
-        0
-    }
-}
-
-impl Semigroup for i64 {
-    fn append(&self, other: &Self) -> Self {
-        self.saturating_add(*other)
-    }
-}
-
-impl Monoid for i64 {
-    fn empty() -> Self {
-        0
-    }
-}
-
-impl Semigroup for i128 {
-    fn append(&self, other: &Self) -> Self {
-        self.saturating_add(*other)
-    }
-}
-
-impl Monoid for i128 {
-    fn empty() -> Self {
-        0
-    }
-}
-
 fn compress_nibbles(nibbles: &[u8]) -> std::vec::Vec<u8> {
     let mut compressed: std::vec::Vec<u8> = vec![0; (nibbles.len() / 2) + (nibbles.len() % 2)];
     for i in 0..nibbles.len() {
@@ -511,6 +423,33 @@ fn expand_nibbles(compressed: &[u8], len: usize) -> std::vec::Vec<u8> {
 }
 
 impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
+    fn fold<R: Monoid + Clone>(
+        sp: &Sp<Self, D>,
+        memo: &mut DagMemo<R, D>,
+        leaf: &mut impl FnMut(&mut DagMemo<R, D>, &Sp<T, D>) -> R,
+        under: &impl Fn(&[u8], R) -> R,
+    ) -> R {
+        memo.get_or_compute(sp, |memo, node| match node {
+            Node::Empty => R::empty(),
+            Node::Leaf { value, .. } => leaf(memo, value),
+            Node::Extension {
+                compressed_path,
+                child,
+                ..
+            } => under(compressed_path, Self::fold(child, memo, leaf, under)),
+            Node::Branch { children, .. } => children
+                .iter()
+                .enumerate()
+                .filter(|(_, child)| !matches!(***child, Node::Empty))
+                .fold(R::empty(), |acc, (i, child)| {
+                    acc.append(&under(&[i as u8], Self::fold(child, memo, leaf, under)))
+                }),
+            Node::MidBranchLeaf { value, child, .. } => {
+                Self::fold(child, memo, leaf, under).append(&leaf(memo, value))
+            }
+        })
+    }
+
     fn into_inner_for_drop(self) -> impl Iterator<Item = T> {
         let res: Box<dyn Iterator<Item = T>> = match self {
             Node::Empty => Box::new(empty()),
@@ -580,18 +519,6 @@ impl HasSize for SizeAnn {
 
     fn set_size(&self, x: u64) -> Self {
         SizeAnn(x)
-    }
-}
-
-impl Semigroup for SizeAnn {
-    fn append(&self, other: &Self) -> Self {
-        SizeAnn(self.0 + other.0)
-    }
-}
-
-impl Monoid for SizeAnn {
-    fn empty() -> Self {
-        SizeAnn(0)
     }
 }
 
@@ -1024,6 +951,20 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
         }
     }
 
+    /// The node's children, skipping empty ones.
+    pub(crate) fn non_empty_children(&self) -> impl Iterator<Item = &Sp<Node<T, D, A>, D>> {
+        let children: &[Sp<Node<T, D, A>, D>] = match self {
+            Node::Empty | Node::Leaf { .. } => &[],
+            Node::Branch { children, .. } => &children[..],
+            Node::Extension { child, .. } | Node::MidBranchLeaf { child, .. } => {
+                std::slice::from_ref(child)
+            }
+        };
+        children
+            .iter()
+            .filter(|child| !matches!(***child, Node::Empty))
+    }
+
     /// Return the annotation of the `Node`
     pub fn ann(sp: &Sp<Node<T, D, A>, D>) -> A {
         match &**sp {
@@ -1444,79 +1385,81 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         Ok(())
     }
 
+    /// Checks this node's canonicity rules against its children, which were
+    /// checked when decoded, so a decode checks each distinct node once.
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        match self {
-            Node::Empty | Node::Leaf { .. } => {}
+        fn err(msg: &str) -> Result<(), std::io::Error> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                msg.to_string(),
+            ))
+        }
+        fn size<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
+            node: &Sp<Node<T, D, A>, D>,
+        ) -> u64 {
+            Node::<T, D, A>::ann(node).get_size()
+        }
+        let (ann, true_ann, true_size) = match self {
+            Node::Empty => return Ok(()),
+            Node::Leaf { ann, value } => (ann, A::from_value(value), Some(1)),
             Node::Branch { ann, children } => {
                 let non_empty_children = children
                     .iter()
                     .filter(|child| !matches!(***child, Node::Empty))
                     .count();
                 if non_empty_children < 2 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Fewer than 2 non-empty children in Node::Branch".to_string(),
-                    ));
+                    return err("Fewer than 2 non-empty children in Node::Branch");
                 }
-                if ann.get_size()
-                    != children
-                        .iter()
-                        .map(|child| Self::size(child) as u64)
-                        .sum::<u64>()
-                {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded branch size doesn't match sum of children",
-                    ));
-                }
+                let true_ann = children
+                    .iter()
+                    .fold(A::empty(), |acc, child| acc.append(&Self::ann(child)));
+                let true_size = children
+                    .iter()
+                    .try_fold(0u64, |acc, child| acc.checked_add(size(child)));
+                (ann, true_ann, true_size)
             }
             Node::Extension {
                 ann,
                 compressed_path,
                 child,
             } => {
-                if matches!(child.deref(), Node::Extension { .. }) && compressed_path.len() != 255 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path must be of length 255 when having another Node::Extension child",
-                    ));
+                if compressed_path.is_empty() {
+                    return err("Node::Extension path must be non-empty");
                 }
                 if compressed_path.len() > 255 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path may not be longer than 255",
-                    ));
-                }
-                if ann.get_size() != Self::size(child) as u64 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded extension size doesn't match child size",
-                    ));
+                    return err("Node::Extension path may not be longer than 255");
                 }
                 if compressed_path.iter().any(|b| *b > 0x0f) {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Node::Extension path must consist of nibbles",
-                    ));
+                    return err("Node::Extension path must consist of nibbles");
                 }
-            }
-            Node::MidBranchLeaf { ann, child, .. } => {
                 match child.deref() {
-                    Node::Branch { .. } | Node::Extension { .. } => {}
-                    _ => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "Node::MidBranchLeaf may only have Node::Branch or Node::Extension children",
-                        ));
+                    Node::Empty => return err("Node::Extension child must not be Node::Empty"),
+                    Node::Extension { .. }
+                        if compressed_path.len() != 255 && !ALLOW_SHORT_EXTENSION_CHAINS.is_set() =>
+                    {
+                        return err(
+                            "Node::Extension path must be of length 255 when having another Node::Extension child",
+                        );
                     }
+                    _ => {}
                 }
-                if ann.get_size() != Self::size(child) as u64 + 1 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "Recorded mid-branch-leaf size isn't one greater than child size",
-                    ));
-                }
+                (ann, Self::ann(child), Some(size(child)))
             }
+            Node::MidBranchLeaf { ann, value, child } => {
+                if !matches!(child.deref(), Node::Branch { .. } | Node::Extension { .. }) {
+                    return err(
+                        "Node::MidBranchLeaf may only have Node::Branch or Node::Extension children",
+                    );
+                }
+                let true_ann = Self::ann(child).append(&A::from_value(value));
+                (ann, true_ann, size(child).checked_add(1))
+            }
+        };
+        if true_size.is_none() {
+            return err("MPT size overflows u64");
+        }
+        if Some(ann.get_size()) != true_size || *ann != true_ann {
+            return err("MPT annotation isn't correctly calculated");
         }
         Ok(())
     }
@@ -1527,19 +1470,23 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
         child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Node<T, D, A>, std::io::Error> {
-        let disc = u8::deserialize(reader, 0)?;
+        // Thread the loader's recursion depth through, rather than restarting
+        // from zero: resetting it at every node boundary would let a nested
+        // structure evade `midnight-serialize`'s recursion limit entirely.
+        let depth = loader.get_recursion_depth();
+        let disc = u8::deserialize(reader, depth)?;
 
         let node = match disc {
             0 => Node::Empty,
             1 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 Node::Leaf {
                     ann,
                     value: loader.get_next(child_hashes)?,
                 }
             }
             2 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let Ok(children) = (0..16)
                     .map(|_| loader.get_next(child_hashes))
                     .collect::<Result<Vec<_>, _>>()?
@@ -1554,9 +1501,9 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 }
             }
             3 => {
-                let ann = A::deserialize(reader, 0)?;
-                let len = u8::deserialize(reader, 0)? as usize;
-                let data = <std::vec::Vec<u8>>::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
+                let len = u8::deserialize(reader, depth)? as usize;
+                let data = <std::vec::Vec<u8>>::deserialize(reader, depth)?;
                 if data.len() != len.div_ceil(2) {
                     return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("inferred nibble byte length {} did not match actual data length of {}", len.div_ceil(2), data.len())));
                 };
@@ -1569,7 +1516,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 }
             }
             4 => {
-                let ann = A::deserialize(reader, 0)?;
+                let ann = A::deserialize(reader, depth)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
                 let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
                 Node::MidBranchLeaf { ann, value, child }
@@ -1594,6 +1541,9 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
 
 #[cfg(test)]
 mod tests {
+    mod canonicity;
+    mod fold;
+
     use sha2::Sha256;
 
     use crate::{
@@ -1659,6 +1609,46 @@ mod tests {
         assert_eq!(mpt.size(), 2);
         dbg!(&mpt.0.arena);
         assert_eq!(mpt.0.arena.size(), 1);
+    }
+
+    #[test]
+    fn short_extension_chains_load_when_allowed() {
+        fn key(diverge_at: usize) -> std::vec::Vec<u8> {
+            let mut key = vec![0u8; 300];
+            key[diverge_at] = 1;
+            key
+        }
+        fn bytes(mpt: &MerklePatriciaTrie<u8>) -> std::vec::Vec<u8> {
+            let mut bytes = std::vec::Vec::new();
+            Serializable::serialize(mpt, &mut bytes).unwrap();
+            bytes
+        }
+        // A 300-nibble key forms Extension(255) -> Extension(45) -> Leaf, and
+        // diverging at nibble 10 splits the 255-nibble extension, leaving an
+        // Extension(244) -> Extension(45) chain.
+        let mpt = MerklePatriciaTrie::<u8>::new()
+            .insert(&[0; 300], 1)
+            .insert(&key(10), 2);
+        let encoded = bytes(&mpt);
+
+        assert!(
+            <MerklePatriciaTrie<u8> as Deserializable>::deserialize(&mut &encoded[..], 0).is_err()
+        );
+        let loaded: MerklePatriciaTrie<u8> = ALLOW_SHORT_EXTENSION_CHAINS
+            .set(&(), || Deserializable::deserialize(&mut &encoded[..], 0))
+            .unwrap();
+        assert!(!ALLOW_SHORT_EXTENSION_CHAINS.is_set());
+        assert_eq!(bytes(&loaded), encoded);
+
+        // The loaded trie must evolve exactly as the in-memory one does.
+        assert_eq!(
+            bytes(&loaded.insert(&key(100), 3)),
+            bytes(&mpt.insert(&key(100), 3))
+        );
+        assert_eq!(
+            bytes(&loaded.remove(&key(10))),
+            bytes(&mpt.remove(&key(10)))
+        );
     }
 
     #[test]

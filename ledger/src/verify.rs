@@ -24,7 +24,7 @@ use crate::structure::{
     MaintenanceUpdate, PedersenDowngradeable, ProofKind, Signature, SignatureVerifyingKey,
     SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
-use crate::structure::{SignatureKind, VerifiedTransaction};
+use crate::structure::{MAX_CONTRACT_OPERATIONS, SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
@@ -46,13 +46,13 @@ use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
 use storage::arena::{ArenaHash, Sp};
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::hash_to_curve;
 use transient_crypto::merkle_tree::MerkleTreeDigest;
 use transient_crypto::repr::FieldRepr;
-use zswap::Transient;
 
 pub trait ContractStateExt<D: DB> {
     #[allow(clippy::result_large_err)]
@@ -643,6 +643,26 @@ where
                     stx.ttl_check_weak(tblock, params.global_ttl)
                         .map_err(MalformedTransaction::TransactionApplicationError)
                 })?;
+                // Repeats, then fees, before any check whose work grows with entries.
+                // Pricing rejects repeats too; this reports which entry repeats, and
+                // still rejects when balancing isn't enforced.
+                ref_state.stateless_check(|| stx.disjoint_check())?;
+                let mut fees = 0;
+                ref_state.param_check(true, |params| {
+                    ref_state.fees_check(|get_op| {
+                        fees = match self.fees_with_impl(params, get_op, true) {
+                            Ok(fees) => fees,
+                            Err(e) => {
+                                if strictness.enforce_balancing {
+                                    return Err(MalformedTransaction::FeeCalculation(e));
+                                } else {
+                                    0
+                                }
+                            }
+                        };
+                        Ok(())
+                    })
+                })?;
                 ref_state.stateless_check(|| {
                     stx.guaranteed_coins
                         .as_ref()
@@ -660,28 +680,12 @@ where
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
                     }
-                    stx.disjoint_check()?;
                     stx.effects_check()?;
                     stx.sequencing_check()?;
                     stx.pedersen_check()
                 })?;
 
-                let mut fees = 0;
-                ref_state.param_check(true, |params| {
-                    ref_state.fees_check(|get_op| {
-                        fees = match self.fees_with_impl(params, get_op, true) {
-                            Ok(fees) => fees,
-                            Err(e) => {
-                                if strictness.enforce_balancing {
-                                    return Err(MalformedTransaction::FeeCalculation(e));
-                                } else {
-                                    0
-                                }
-                            }
-                        };
-                        stx.balancing_check(strictness, fees)
-                    })
-                })?;
+                stx.balancing_check(strictness, fees)?;
 
                 for segment_intent in stx.intents.sorted_iter() {
                     if *segment_intent.0 == GUARANTEED_SEGMENT {
@@ -1209,18 +1213,16 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
     Ok(callers_for_addr)
 }
 
-impl<
-    S: SignatureKind<D>,
-    P: ProofKind<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
-    D: DB,
-> StandardTransaction<S, P, B, D>
-{
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransaction<S, P, B, D> {
+    /// Rejects entries no valid transaction repeats: each spends one coin, or is
+    /// bound to one intent, segment or maintenance counter. Runs before fees, so
+    /// its work is linear in the encoding however nodes are shared.
     #[allow(clippy::mutable_key_type)]
-    fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
+    pub(crate) fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = BTreeSet::new();
         let mut shielded_outputs = BTreeSet::new();
         let mut unshielded_inputs = BTreeSet::new();
+        let mut registrations = std::collections::HashSet::new();
         let shielded_offers = self
             .guaranteed_coins
             .clone()
@@ -1229,11 +1231,22 @@ impl<
             .chain(self.fallible_coins.values());
 
         for offer in shielded_offers {
-            let mut inputs: BTreeSet<_> = offer.inputs.iter_deref().cloned().collect();
-            inputs.extend(offer.transient.iter_deref().map(Transient::as_input));
+            let mut inputs: BTreeSet<_> = offer
+                .inputs
+                .distinct_values()
+                .into_iter()
+                .map(|(input, _)| (*input).clone())
+                .collect();
+            let transients = offer.transient.distinct_values();
+            inputs.extend(transients.iter().map(|(t, _)| t.as_input()));
 
-            let mut outputs: BTreeSet<_> = offer.outputs.iter_deref().cloned().collect();
-            outputs.extend(offer.transient.iter_deref().map(Transient::as_output));
+            let mut outputs: BTreeSet<_> = offer
+                .outputs
+                .distinct_values()
+                .into_iter()
+                .map(|(output, _)| (*output).clone())
+                .collect();
+            outputs.extend(transients.iter().map(|(t, _)| t.as_output()));
 
             if !(shielded_inputs.is_disjoint(&inputs)) {
                 return Err(MalformedTransaction::DisjointCheckFailure(
@@ -1259,36 +1272,90 @@ impl<
                 ));
             }
 
-            shielded_inputs = shielded_inputs.union(&inputs).cloned().collect();
-            shielded_outputs = shielded_outputs.union(&outputs).cloned().collect();
+            shielded_inputs.extend(inputs);
+            shielded_outputs.extend(outputs);
         }
 
-        let intents = self.intents();
-
-        let unshielded_offers = intents.flat_map(|(_, intent)| {
-            [
-                intent.guaranteed_unshielded_offer.clone(),
-                intent.fallible_unshielded_offer.clone(),
-            ]
-            .into_iter()
-        });
-        for offer in unshielded_offers {
-            let inputs = offer
-                .map(|o| o.inputs.iter_deref().cloned().collect())
-                .unwrap_or(BTreeSet::new());
-            if !(unshielded_inputs.is_disjoint(&inputs)) {
-                return Err(MalformedTransaction::<D>::DisjointCheckFailure(
-                    DisjointCheckError::UnshieldedInputsDisjointFailure {
-                        unshielded_inputs,
-                        offer_inputs: inputs,
-                    },
-                ));
+        // Visits a shared intent once per segment. This is linear only because a
+        // `HashMap` pins each entry to its key's hash; a plain `Map` would not.
+        for entry in self.intents.iter() {
+            let intent = &*entry.1;
+            let offers = [
+                intent.guaranteed_unshielded_offer.as_ref(),
+                intent.fallible_unshielded_offer.as_ref(),
+            ];
+            for offer in offers.into_iter().flatten() {
+                let distinct = offer.inputs.distinct_values();
+                let repeated: Vec<_> = distinct
+                    .iter()
+                    .filter(|(_, n)| *n > 1)
+                    .map(|(input, _)| (**input).clone())
+                    .collect();
+                if !repeated.is_empty() {
+                    return Err(MalformedTransaction::DuplicateInputs(repeated));
+                }
+                let inputs: BTreeSet<_> = distinct
+                    .into_iter()
+                    .map(|(input, _)| (*input).clone())
+                    .collect();
+                if !(unshielded_inputs.is_disjoint(&inputs)) {
+                    return Err(MalformedTransaction::<D>::DisjointCheckFailure(
+                        DisjointCheckError::UnshieldedInputsDisjointFailure {
+                            unshielded_inputs,
+                            offer_inputs: inputs,
+                        },
+                    ));
+                }
+                unshielded_inputs.extend(inputs);
             }
-            unshielded_inputs = unshielded_inputs.union(&inputs).cloned().collect();
+            for dust_actions in intent.dust_actions.iter() {
+                for (reg, n) in dust_actions.registrations.distinct_values() {
+                    // Keyed without the signature, so pricing an erased transaction
+                    // agrees with checking the signed one.
+                    let erased = Sp::<_, D>::new(reg.erase_signatures());
+                    if n > 1 || !registrations.insert(erased.hash()) {
+                        return Err(MalformedTransaction::RepeatedDustRegistration {
+                            registration: Box::new((*erased).clone()),
+                        });
+                    }
+                }
+            }
+        }
+        self.committee_signatures_check()
+    }
+
+    // Each signature is verified once per path to it, so sharing would let
+    // verification work outgrow the bytes paying for it.
+    fn committee_signatures_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let intents: Vec<_> = self.intents.iter().map(|entry| entry.1.clone()).collect();
+        let actions = storage::storage::Array::distinct_values_across(
+            intents.iter().map(|i| (&i.actions, 1)),
+        );
+        let signatures = storage::storage::Array::distinct_values_across(
+            actions.iter().filter_map(|(action, n)| match &**action {
+                ContractAction::Maintain(upd) => Some((&upd.signatures, *n)),
+                _ => None,
+            }),
+        );
+        let mut seen = BTreeSet::new();
+        for (sig, n) in signatures {
+            if n > 1 || !seen.insert(sig.1.clone()) {
+                return Err(MalformedTransaction::RepeatedCommitteeSignature {
+                    signature: sig.1.clone(),
+                });
+            }
         }
         Ok(())
     }
+}
 
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    D: DB,
+> StandardTransaction<S, P, B, D>
+{
     pub fn sequencing_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut adjacencies: std::collections::BTreeMap<CallNode, Vec<CallNode>> =
             std::collections::BTreeMap::new();
@@ -1766,6 +1833,15 @@ impl<D: DB> ContractDeploy<D> {
         &self,
         ref_state: &impl StateReference<D>,
     ) -> Result<(), MalformedTransaction<D>> {
+        let operations = self.initial_state.operations.size() as u64;
+        if operations > MAX_CONTRACT_OPERATIONS {
+            return Err(MalformedTransaction::MalformedContractDeploy(
+                MalformedContractDeploy::TooManyOperations {
+                    operations,
+                    limit: MAX_CONTRACT_OPERATIONS,
+                },
+            ));
+        }
         self.initial_state.well_formed(self.address())?;
 
         // Or we could change the types. Current (pre-this-ticket) ContractState could be renamed to
@@ -1876,6 +1952,13 @@ impl<D: DB> MaintenanceUpdate<D> {
     }
 }
 
+/// Re-exported from `onchain-runtime`, so that consumers outside the ledger can
+/// apply the same bound before materializing a call's public inputs. Fee
+/// calculation rejects transcripts far below this bound long before it is
+/// reached (see [`ContractCall::public_inputs_len`]); in the ledger it exists to
+/// bound the allocation on paths where fee enforcement is disabled.
+pub use onchain_runtime::transcript::MAX_CALL_PUBLIC_INPUTS;
+
 impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     pub(crate) fn well_formed(
         &self,
@@ -1883,6 +1966,8 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
+        // Checked before anything materializes the public inputs below.
+        self.public_inputs_len_check()?;
         if let Some(fallible) = &self.fallible_transcript
             && fallible.program.get(0) != Some(&Op::Ckpt)
             && self.guaranteed_transcript.is_some()
@@ -1896,11 +1981,63 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         .into_iter()
         .flatten()
         {
-            for window in Vec::from(&transcript.program).windows(2) {
+            // Dust is not transferable, so contracts may neither hold nor release it. Otherwise
+            // the Dust balance credited by a registration's `allow_fee_payment` could be absorbed
+            // by a contract instead of paying fees, while the registration still mints the full
+            // entitlement to the registrant.
+            if transcript
+                .effects
+                .unshielded_inputs
+                .contains_key(&TokenType::Dust)
+                || transcript
+                    .effects
+                    .unshielded_outputs
+                    .contains_key(&TokenType::Dust)
+            {
+                return Err(MalformedTransaction::ContractDustTransfer {
+                    address: self.address,
+                });
+            }
+            let program = Vec::from(&transcript.program);
+            // `noop 0` contributes nothing to the proof's public inputs, but still shifts the
+            // targets of `branch` and `jmp`, which count operations.
+            if program.iter().any(|op| matches!(op, Op::Noop { n: 0 })) {
+                return Err(MalformedTransaction::NotNormalized);
+            }
+            for window in program.windows(2) {
                 if let (Op::Noop { .. }, Op::Noop { .. }) = (&window[0], &window[1]) {
                     return Err(MalformedTransaction::NotNormalized);
                 }
             }
+        }
+
+        // Declared gas is the VM's execution ceiling, and is priced at face value. Bound it
+        // by the block limits, so that no transcript can declare more work than could ever
+        // fit into a block, and cannot push fee arithmetic into overflow.
+        if strictness.enforce_limits {
+            ref_state.param_check(true, |params| {
+                let limits = &params.limits.block_limits;
+                for transcript in [
+                    self.guaranteed_transcript.as_ref(),
+                    self.fallible_transcript.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if transcript.gas.compute_time > limits.compute_time
+                        || transcript.gas.read_time > limits.read_time
+                    {
+                        return Err(MalformedTransaction::TranscriptGasExceedsBlockLimits {
+                            address: self.address,
+                            declared_compute_time: transcript.gas.compute_time,
+                            declared_read_time: transcript.gas.read_time,
+                            compute_time_limit: limits.compute_time,
+                            read_time_limit: limits.read_time,
+                        });
+                    }
+                }
+                Ok(())
+            })?;
         }
 
         if strictness.verify_contract_proofs {
@@ -1932,7 +2069,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 P::proof_verify(
                     op,
                     &self.proof,
-                    self.public_inputs(parent.binding_commitment),
+                    self.public_inputs(parent.binding_commitment)?,
                     self,
                     strictness.proof_verification_mode
                 )?;
@@ -1943,17 +2080,27 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         Ok(())
     }
 
-    // NOTE: The proof should receive the following inputs for binding purposes:
-    //  - The contract address
-    //  - The contract entry point
-    //  - Both transcript parts's declared gas costs, and effects
-    //  - The count of instructions in the guaranteed transcript
-    //  - The parent ContractCalls's `binding_commitment.commitment`.
-    // These need to be *truely* binding (see note at the bottom of this file!)
-    // In addition, it should receive
-    //  - The communication commitment
-    //  - The transcript
-    pub fn public_inputs(&self, binding_com: Pedersen) -> Vec<Fr> {
+    /// Builds the public input vector this call's proof will be validated against.
+    ///
+    /// NOTE: The proof should receive the following inputs for binding purposes:
+    ///  - The contract address
+    ///  - The contract entry point
+    ///  - Both transcript parts's declared gas costs, and effects
+    ///  - The count of instructions in the guaranteed transcript
+    ///  - The parent ContractCalls's `binding_commitment.commitment`.
+    ///
+    /// These need to be *truely* binding (see note at the bottom of this file!)
+    ///
+    /// In addition, it should receive
+    ///  - The communication commitment
+    ///  - The transcript
+    ///
+    /// Fails without allocating if the call declares more than
+    /// [`MAX_CALL_PUBLIC_INPUTS`] public inputs: `Op::Noop { n }` lets a 9-byte
+    /// op name an arbitrarily large statement, so this must not trust callers
+    /// to have checked well-formedness first.
+    pub fn public_inputs(&self, binding_com: Pedersen) -> Result<Vec<Fr>, MalformedTransaction<D>> {
+        self.public_inputs_len_check()?;
         let mut res = vec![self.binding_input(binding_com)];
         res.push(self.communication_commitment);
         if let Some(guaranteed) = self.guaranteed_transcript.as_ref() {
@@ -1966,11 +2113,39 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 op.field_repr(&mut res);
             }
         }
-        res
+        Ok(res)
     }
 
+    /// The number of field elements [`Self::public_inputs`] would produce,
+    /// computed without materializing them. Each transcript counts at least
+    /// its program length, so programs padded with `noop 0` are bounded too.
     pub fn public_inputs_len(&self) -> usize {
-        2usize.saturating_add(self.guaranteed_transcript.iter().chain(self.fallible_transcript.iter()).flat_map(|t| t.program.iter()).map(|op| op.field_size()).fold(0, |a, b| a.saturating_add(b)))
+        self.public_inputs_len_memoized(&mut DagMemo::new())
+    }
+
+    /// As [`Self::public_inputs_len`], visiting each distinct op and pushed
+    /// node once across every call sharing `memo`.
+    pub fn public_inputs_len_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
+        self.guaranteed_transcript
+            .iter()
+            .chain(self.fallible_transcript.iter())
+            // Only the ill-formed `noop 0` adds no input, so no valid count changes.
+            .map(|t| t.public_inputs_len_memoized(memo).max(t.program.len()))
+            // The binding input and the communication commitment.
+            .fold(2, usize::saturating_add)
+    }
+
+    fn public_inputs_len_check(&self) -> Result<(), MalformedTransaction<D>> {
+        let public_inputs = self.public_inputs_len();
+        if public_inputs > MAX_CALL_PUBLIC_INPUTS {
+            return Err(MalformedTransaction::TooManyPublicInputs {
+                address: self.address,
+                operation: self.entry_point.clone(),
+                public_inputs,
+                limit: MAX_CALL_PUBLIC_INPUTS,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
@@ -2237,6 +2412,454 @@ mod sparse_unshielded_signature_tests {
 
         let check = offer.well_formed(1, &parent).unwrap();
         assert!(check().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod well_formed_tests {
+    use super::*;
+    use coin_structure::contract::ContractAddress;
+    use onchain_runtime::context::Effects;
+    use onchain_runtime::result_mode::ResultModeVerify;
+    use onchain_runtime::state::EntryPointBuf;
+    use onchain_runtime::transcript::Transcript;
+    use storage::{arena::Sp, db::InMemoryDB};
+    use transient_crypto::curve::Fr;
+
+    #[test]
+    fn contract_call_rejects_zero_length_noop() {
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let state = LedgerState::<InMemoryDB>::new("local-test");
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            .. WellFormedStrictness::default()
+        };
+        let call_with = |program: Vec<Op<ResultModeVerify, InMemoryDB>>| ContractCall::<
+            (),
+            InMemoryDB,
+        > {
+            address: ContractAddress::default(),
+            entry_point: EntryPointBuf(b"count".to_vec()),
+            guaranteed_transcript: None,
+            fallible_transcript: Some(Sp::new(Transcript {
+                gas: Default::default(),
+                effects: Default::default(),
+                program: program.into(),
+                version: None,
+            })),
+            communication_commitment: Fr::from(0u64),
+            proof: (),
+        };
+
+        assert!(
+            call_with(vec![Op::Noop { n: 1 }])
+                .well_formed(&state, strictness, &parent)
+                .is_ok()
+        );
+        assert!(matches!(
+            call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent),
+            Err(MalformedTransaction::NotNormalized)
+        ));
+    }
+
+    #[test]
+    fn contract_call_with_shared_push_is_rejected_quickly() {
+        use onchain_runtime::state::{AlignedValueChecked, StateValue};
+        use std::time::Duration;
+        use storage::test::assert_completes_within;
+
+        // Each level is a 16-wide array whose entries all share one child, so
+        // the value stays a few hundred bytes while its tree has 16^12 leaves.
+        let value = (0..12).fold(
+            StateValue::<InMemoryDB, AlignedValueChecked>::Null,
+            |v, _| StateValue::Array(vec![v; 16].into()),
+        );
+        let res = assert_completes_within(Duration::from_secs(10), move || {
+            let parent: ErasedIntent<InMemoryDB> = Intent {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                actions: storage::storage::Array::new(),
+                dust_actions: None,
+                ttl: Timestamp::from_secs(0),
+                binding_commitment: Default::default(),
+            };
+            let state = LedgerState::<InMemoryDB>::new("local-test");
+            let strictness = WellFormedStrictness {
+                verify_contract_proofs: false,
+                ..WellFormedStrictness::default()
+            };
+            let call = ContractCall::<(), InMemoryDB> {
+                address: ContractAddress::default(),
+                entry_point: EntryPointBuf(b"count".to_vec()),
+                guaranteed_transcript: None,
+                fallible_transcript: Some(Sp::new(Transcript {
+                    gas: Default::default(),
+                    effects: Default::default(),
+                    program: vec![Op::Push {
+                        storage: false,
+                        value,
+                    }]
+                    .into(),
+                    version: None,
+                })),
+                communication_commitment: Fr::from(0u64),
+                proof: (),
+            };
+            call.well_formed(&state, strictness, &parent)
+        });
+        assert!(
+            matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
+            "{res:?}"
+        );
+    }
+
+    #[test]
+    fn contract_call_rejects_dust_transfer() {
+        let parent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions: storage::storage::Array::new(),
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let state = LedgerState::<InMemoryDB>::new("local-test");
+        let strictness = WellFormedStrictness {
+            verify_contract_proofs: false,
+            ..WellFormedStrictness::default()
+        };
+        let call_with = |effects: Effects<InMemoryDB>, guaranteed: bool| {
+            let transcript = Some(Sp::new(Transcript {
+                gas: Default::default(),
+                effects,
+                program: vec![Op::Noop { n: 1 }].into(),
+                version: None,
+            }));
+            let (guaranteed_transcript, fallible_transcript) = if guaranteed {
+                (transcript, None)
+            } else {
+                (None, transcript)
+            };
+            ContractCall::<(), InMemoryDB> {
+                address: ContractAddress::default(),
+                entry_point: EntryPointBuf(b"count".to_vec()),
+                guaranteed_transcript,
+                fallible_transcript,
+                communication_commitment: Fr::from(0u64),
+                proof: (),
+            }
+        };
+        let night = TokenType::Unshielded(coin_structure::coin::NIGHT);
+        let inputs = |tt| Effects {
+            unshielded_inputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+        let outputs = |tt| Effects {
+            unshielded_outputs: storage::storage::HashMap::new().insert(tt, 5),
+            ..Default::default()
+        };
+
+        for guaranteed in [true, false] {
+            // Non-Dust token transfers remain allowed.
+            assert!(
+                call_with(inputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            assert!(
+                call_with(outputs(night), guaranteed)
+                    .well_formed(&state, strictness, &parent)
+                    .is_ok()
+            );
+            // Contracts may neither receive nor send Dust.
+            for effects in [inputs(TokenType::Dust), outputs(TokenType::Dust)] {
+                assert!(matches!(
+                    call_with(effects, guaranteed).well_formed(&state, strictness, &parent),
+                    Err(MalformedTransaction::ContractDustTransfer { .. })
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod disjoint_tests {
+    //! `disjoint_check` rejects exactly what the per-entry checks it replaces
+    //! rejected, plus registrations and committee signatures reached twice,
+    //! however entries are shared.
+
+    use super::*;
+    use crate::structure::tests::transactions::{Entries, Recipe, build, recipe, transaction};
+    use base_crypto::hash::HashOutput;
+    use proptest::prelude::*;
+    use std::sync::Arc;
+    use storage::db::InMemoryDB;
+    use storage::storage::{Array, HashMap};
+    use zswap::{Input, Offer, Output, Transient};
+
+    type D = InMemoryDB;
+    type Stx = StandardTransaction<(), (), Pedersen, D>;
+
+    /// Per offer, its inputs, outputs and transients, and how it shares the
+    /// previous offer's inputs: 0 not at all, 1 the same array, 2 that array plus
+    /// one more entry.
+    type ShieldedRecipe = Vec<(Entries, Entries, Entries, u8)>;
+
+    fn shielded() -> impl Strategy<Value = ShieldedRecipe> {
+        let entries = || prop::collection::vec((0u8..6, 0u8..4), 0..4);
+        prop::collection::vec((entries(), entries(), entries(), 0u8..3), 0..4)
+    }
+
+    fn input(kind: u8) -> Input<(), D> {
+        Input {
+            nullifier: Nullifier(HashOutput([kind; 32])),
+            value_commitment: Default::default(),
+            contract_address: None,
+            merkle_tree_root: Default::default(),
+            proof: Arc::new(()),
+        }
+    }
+
+    fn offers(r: &[(Entries, Entries, Entries, u8)]) -> Vec<Offer<(), D>> {
+        let mut out: Vec<Offer<(), D>> = Vec::new();
+        for (inputs, outputs, transients, sharing) in r {
+            let mut inputs: Array<_, D> = build(inputs, input).into();
+            if let (Some(prev), 1 | 2) = (out.last(), sharing) {
+                inputs = prev.inputs.clone();
+                if *sharing == 2 {
+                    inputs = inputs.push(input(7));
+                }
+            }
+            let outputs = build(outputs, |kind| Output {
+                coin_com: Commitment(HashOutput([kind; 32])),
+                value_commitment: Default::default(),
+                contract_address: None,
+                ciphertext: None,
+                proof: Arc::new(()),
+            });
+            // Transients of kinds 2j and 2j + 1 share their input but not their
+            // output, so input collisions are not always output collisions.
+            let transient = build(transients, |kind| Transient {
+                nullifier: Nullifier(HashOutput([kind / 2; 32])),
+                coin_com: Commitment(HashOutput([kind / 2; 32])),
+                value_commitment_input: Default::default(),
+                value_commitment_output: match kind % 2 {
+                    0 => Default::default(),
+                    _ => Pedersen(EmbeddedGroupAffine::generator()),
+                },
+                contract_address: None,
+                ciphertext: None,
+                proof_input: Arc::new(()),
+                proof_output: Arc::new(()),
+            });
+            out.push(Offer {
+                inputs,
+                outputs: outputs.into(),
+                transient: transient.into(),
+                deltas: Array::new(),
+            });
+        }
+        out
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum Intents {
+        None,
+        Distinct,
+        FirstRepeated,
+    }
+
+    /// With `actions_only`, intents keep only their actions, whose committee
+    /// signatures are otherwise mostly masked by repeated inputs or
+    /// registrations.
+    fn standard(
+        r: &Recipe,
+        shielded: &ShieldedRecipe,
+        intents: Intents,
+        actions_only: bool,
+    ) -> Stx {
+        let Transaction::Standard(mut stx) = transaction(r) else {
+            unreachable!()
+        };
+        if let Intents::None = intents {
+            stx.intents = HashMap::new();
+        }
+        if actions_only {
+            for (segment, mut intent) in stx.intents().collect::<Vec<_>>() {
+                intent.guaranteed_unshielded_offer = None;
+                intent.fallible_unshielded_offer = None;
+                intent.dust_actions = None;
+                stx.intents = stx.intents.insert(segment, intent);
+            }
+        }
+        let shielded = if actions_only { &[][..] } else { &shielded[..] };
+        let mut offers = offers(shielded).into_iter();
+        stx.guaranteed_coins = offers.next().map(Sp::new);
+        for (segment, offer) in (1u16..).zip(offers) {
+            stx.fallible_coins = stx.fallible_coins.insert(segment, offer);
+        }
+        if let Intents::FirstRepeated = intents {
+            let first = stx.intents.get(&1).map(|i| (*i).clone()).unwrap();
+            stx.intents = stx.intents.insert(100, first);
+        }
+        stx
+    }
+
+    /// The checks `disjoint_check` replaces, over every entry as reached, plus
+    /// registration uniqueness by node and committee signature uniqueness.
+    fn accepts_per_entry(stx: &Stx) -> bool {
+        let mut shielded_inputs = BTreeSet::new();
+        let mut shielded_outputs = BTreeSet::new();
+        let offers = stx
+            .guaranteed_coins
+            .iter()
+            .map(|o| (**o).clone())
+            .chain(stx.fallible_coins.values());
+        for offer in offers {
+            let mut inputs: BTreeSet<_> = offer.inputs.iter_deref().cloned().collect();
+            inputs.extend(offer.transient.iter_deref().map(Transient::as_input));
+            let mut outputs: BTreeSet<_> = offer.outputs.iter_deref().cloned().collect();
+            outputs.extend(offer.transient.iter_deref().map(Transient::as_output));
+            if !shielded_inputs.is_disjoint(&inputs) || !shielded_outputs.is_disjoint(&outputs) {
+                return false;
+            }
+            shielded_inputs.extend(inputs);
+            shielded_outputs.extend(outputs);
+        }
+        let mut unshielded_inputs = BTreeSet::new();
+        let mut registrations = Vec::new();
+        let mut committee_signatures = Vec::new();
+        for (_, intent) in stx.intents() {
+            for action in intent.actions.iter_deref() {
+                if let ContractAction::Maintain(upd) = action {
+                    committee_signatures
+                        .extend(upd.signatures.iter_deref().map(|sig| sig.1.clone()));
+                }
+            }
+            let offers = [
+                intent.guaranteed_unshielded_offer.clone(),
+                intent.fallible_unshielded_offer.clone(),
+            ];
+            for offer in offers.into_iter().flatten() {
+                let ins = Vec::from(&offer.inputs);
+                if !no_duplicates(&ins) {
+                    return false;
+                }
+                let ins: BTreeSet<_> = ins.into_iter().collect();
+                if !unshielded_inputs.is_disjoint(&ins) {
+                    return false;
+                }
+                unshielded_inputs.extend(ins);
+            }
+            for dust_actions in intent.dust_actions.iter() {
+                registrations.extend(dust_actions.registrations.iter().map(|reg| reg.hash()));
+            }
+        }
+        no_duplicates(&registrations) && no_duplicates(&committee_signatures)
+    }
+
+    /// Actions shared by many segments are counted once per distinct node, not
+    /// walked once per segment.
+    #[test]
+    fn actions_shared_by_many_segments_are_checked_quickly() {
+        let actions: Array<ContractAction<(), D>, D> = (0..4000)
+            .map(|counter| {
+                ContractAction::Maintain(MaintenanceUpdate {
+                    address: Default::default(),
+                    updates: Array::new(),
+                    counter,
+                    signatures: Array::new(),
+                })
+            })
+            .collect();
+        let intent = Intent::<(), (), Pedersen, D> {
+            guaranteed_unshielded_offer: None,
+            fallible_unshielded_offer: None,
+            actions,
+            dust_actions: None,
+            ttl: Timestamp::from_secs(0),
+            binding_commitment: Default::default(),
+        };
+        let stx: Stx = StandardTransaction {
+            network_id: "local-test".into(),
+            intents: (1..=4000).fold(HashMap::new(), |m, seg| m.insert(seg, intent.clone())),
+            guaranteed_coins: None,
+            fallible_coins: HashMap::new(),
+            binding_randomness: Default::default(),
+        };
+        storage::test::assert_completes_within(std::time::Duration::from_secs(5), move || {
+            assert!(stx.disjoint_check().is_ok())
+        });
+    }
+
+    /// Erasing signatures, as pricing a verified transaction does, must not
+    /// turn an accepted transaction into one with repeats.
+    #[test]
+    fn registrations_differing_only_in_signature_repeat() {
+        use crate::dust::{DustActions, DustRegistration};
+        use crate::structure::{Signature, SigningKey};
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(0);
+        let key = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut rng));
+        let mut stx: StandardTransaction<Signature, (), Pedersen, D> = StandardTransaction {
+            network_id: String::new(),
+            intents: HashMap::new(),
+            guaranteed_coins: None,
+            fallible_coins: HashMap::new(),
+            binding_randomness: Default::default(),
+        };
+        for segment in [1u16, 2] {
+            let registration = DustRegistration {
+                night_key: key.verifying_key(),
+                dust_address: None,
+                allow_fee_payment: 0,
+                signature: Some(Sp::new(key.sign(&mut rng, &segment.to_le_bytes()))),
+            };
+            let dust_actions = DustActions {
+                spends: Array::new(),
+                registrations: vec![registration].into(),
+                ctime: Timestamp::from_secs(0),
+            };
+            let intent = Intent {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                actions: Array::new(),
+                dust_actions: Some(Sp::new(dust_actions)),
+                ttl: Timestamp::from_secs(0),
+                binding_commitment: Pedersen::default(),
+            };
+            stx.intents = stx.intents.insert(segment, intent);
+        }
+        assert!(matches!(
+            stx.disjoint_check(),
+            Err(MalformedTransaction::RepeatedDustRegistration { .. })
+        ));
+    }
+
+    proptest! {
+        #[test]
+        fn disjoint_check_matches_per_entry_checks(
+            r in recipe(),
+            s in shielded(),
+            // Intents are usually rejected for their own entries; drop them half
+            // the time to test the shielded checks alone.
+            intents in prop_oneof![
+                2 => Just(Intents::None),
+                1 => Just(Intents::Distinct),
+                1 => Just(Intents::FirstRepeated),
+            ],
+            actions_only in any::<bool>(),
+        ) {
+            let stx = standard(&r, &s, intents, actions_only);
+            prop_assert_eq!(stx.disjoint_check().is_ok(), accepts_per_entry(&stx));
+        }
     }
 }
 

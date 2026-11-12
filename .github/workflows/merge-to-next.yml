@@ -8,20 +8,20 @@ on:
 
 jobs:
   create-merge-pr:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout ledger-8
+      - name: Checkout ledger-9
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ledger-8
+          ref: ledger-9
           fetch-depth: 0
 
       - name: Check for new commits
         id: check
         run: |
-          git fetch origin ledger-9
-          if git merge-base --is-ancestor ledger-8 origin/ledger-9; then
-            echo "No new commits on ledger-8 since last merge."
+          git fetch origin ledger-10
+          if git merge-base --is-ancestor ledger-9 origin/ledger-10; then
+            echo "No new commits on ledger-9 since last merge."
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
           else
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -32,22 +32,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MERGE_BRANCH="merge/ledger-8-into-ledger-9"
+          MERGE_BRANCH="merge/ledger-9-into-ledger-10"
 
           # Check if an open PR already exists
-          existing=$(gh pr list --base ledger-9 --head "$MERGE_BRANCH" --state open --json number --jq '.[0].number')
+          existing=$(gh pr list --base ledger-10 --head "$MERGE_BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             echo "PR #$existing already open, skipping."
             exit 0
           fi
 
-          # Create a branch from ledger-8. The reviewer is responsible for
-          # merging ledger-9 into this branch to satisfy branch protection.
-          git checkout -b "$MERGE_BRANCH" ledger-8
+          # Create a branch from ledger-9. The reviewer is responsible for
+          # merging ledger-10 into this branch to satisfy branch protection.
+          git checkout -b "$MERGE_BRANCH" ledger-9
           git push origin "$MERGE_BRANCH" --force
 
           gh pr create \
-            --base ledger-9 \
+            --base ledger-10 \
             --head "$MERGE_BRANCH" \
-            --title "Merge ledger-8 into ledger-9" \
-            --body "Automated weekly PR to merge \`ledger-8\` into \`ledger-9\`."
+            --title "Merge ledger-9 into ledger-10" \
+            --body "Automated weekly PR to merge \`ledger-9\` into \`ledger-10\`."

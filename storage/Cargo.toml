@@ -1,7 +1,7 @@
 [package]
 name = "midnight-storage"
 edition = "2024"
-version = "2.0.2"
+version = "3.1.0"
 license.workspace = true
 repository.workspace = true
 description = "Provides data structures and storage primitives for Midnight's ledger."
@@ -14,17 +14,18 @@ stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion", "dep:serde_json"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
+test-utilities = ["storage-core/test-utilities"]
 
 [dependencies]
-storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
-base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+storage-core = { version = "1.2.3", path = "../storage-core", package = "midnight-storage-core" }
+base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 derive-where = "^1.6.1"
-digest = "^0.11.2"
-crypto = "0.5.1"
+crypto = { version = "0.5.1", features = ["digest"] }
 parking_lot = "^0.12.4"
-sha2 = "0.11.0"
+scoped-tls = "^1.0.1"
+sha2 = "0.10.9"
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }
 proptest = { version = "~1.6.0", optional = true }
@@ -37,6 +38,7 @@ criterion = { version = "^0.5.1", optional = true }
 sysinfo = "0.39.1"
 
 [dev-dependencies]
+midnight-storage = { path = ".", features = ["test-utilities", "proptest"] }
 pastey = "0.2.1"
 rayon = "^1.10.0"
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }

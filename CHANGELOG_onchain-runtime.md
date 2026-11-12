@@ -1,14 +1,72 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `4.0.1`
+
+- security: sizing shared transcript programs and state values takes time
+  linear in their distinct nodes, through `Transcript::public_inputs_len_memoized`
+  and `onchain-state`'s `StateValue::field_size_memoized`.
+- feat: `onchain-vm`'s cost model gains `tree_copy_bounded`, which prices a
+  copy but stops walking once it exceeds a byte budget.
+- feat: `Transcript::public_inputs_len` counts the field elements a transcript
+  contributes to a contract call's public inputs without materializing them,
+  and `transcript::MAX_CALL_PUBLIC_INPUTS` exposes the ledger's per-call bound,
+  so consumers outside the ledger can apply the same check.
+- security: the field representation of `noop n` is written in fixed-size
+  chunks instead of first allocating `n` zero elements, so materializing it
+  no longer needs a transient buffer proportional to the untrusted `n`.
+- security: `onchain-vm` tracks cache state through `ins` and through cached
+  `idx` on bounded Merkle trees, and `ins` and `rem` no longer mark a slot
+  read, so a cached `idx` cannot skip the read charge of a path the run has
+  not read.
+
 ## Version `4.0.0`
 
 - feat: `ContractOperation` includes ir field
 - feat: add support for ECDSA signatures.
 - feat: Changed the structure of logged events according to events MIP (link tbd).
+- security: `Op` deserialization rejects operands outside their legal encoding
+  bound: `dup`, `swap` and `ins` with `n >= 16`, and `idx` with a path length
+  outside `1..=16`.
+- security: serde `StateValue` deserialization now enforces the type's
+  invariant.
+- security: taking the `type` of an array with more than 16 entries is a type
+  error instead of producing an out-of-range tag byte.
+- fix: the Merkle tree bound checks in `idx` and `ins` no longer overflow for
+  large tree heights.
 
 ## Unreleased (3.2)
 
 - fix: `communication_commitment` now hashes the value-only representation of its inputs.
+
+## Version `3.1.2`
+
+Covers `onchain-state` `3.0.2` and `onchain-vm` `3.1.2`.
+
+- security: values embedded in a program (`push`, `pushs` and `idx`-style path
+  keys) must be canonical: every `field` atom must be less than the field
+  order, and any Merkle tree must be blank. Non-canonical values are rejected
+  on construction and deserialization.
+- feat: `onchain-state` adds `AlignedValueChecked`, and `StateValue` takes a
+  value-type parameter defaulting to `AlignedValue`; `StateValue<D,
+  AlignedValueChecked>` is obtained with `StateValue::try_into_checked`.
+- note: `onchain-vm`'s `Key::Value` and `Op::Push` now hold
+  `AlignedValueChecked` in place of `AlignedValue`. Released as a patch
+  regardless, as a security fix; serialization is unchanged.
+  
+## Version `3.1.1`
+
+Covers `onchain-state` `3.0.1` and `onchain-vm` `3.1.1`.
+
+- security: `Op` deserialization rejects operands outside their legal encoding
+  bound: `dup`, `swap` and `ins` with `n >= 16`, and `idx` with a path length
+  outside `1..=16`.
+- security: serde `StateValue` deserialization now enforces the type's
+  invariant.
+- security: taking the `type` of an array with more than 16 entries is a type
+  error instead of producing an out-of-range tag byte.
+- fix: the Merkle tree bound checks in `idx` and `ins` no longer overflow for
+  large tree heights.
+- pull in hardened `serialize`, `base-crypto` and `storage` deserialization.
 
 ## Version `3.1.0`
 

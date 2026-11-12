@@ -19,12 +19,13 @@ use derive_where::derive_where;
 use proptest::prelude::*;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
-use runtime_state::state::StateValue;
+use runtime_state::state::{AlignedValueChecked, StateValue};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::fmt::Debug;
+use storage::dag_memo::DagMemo;
 use storage::db::DB;
 #[cfg(feature = "proptest")]
 use storage::db::InMemoryDB;
@@ -40,7 +41,7 @@ use transient_crypto::repr::FieldRepr;
 #[serde(tag = "tag", content = "value", rename_all = "camelCase")]
 #[tag = "impact-idx-key"]
 pub enum Key {
-    Value(AlignedValue),
+    Value(AlignedValueChecked),
     Stack,
 }
 tag_enforcement_test!(Key);
@@ -54,7 +55,7 @@ impl Debug for Key {
     }
 }
 
-impl TryFrom<Key> for AlignedValue {
+impl TryFrom<Key> for AlignedValueChecked {
     type Error = ();
     fn try_from(value: Key) -> Result<Self, Self::Error> {
         match value {
@@ -62,6 +63,42 @@ impl TryFrom<Key> for AlignedValue {
             Key::Stack => Err(()),
         }
     }
+}
+
+impl TryFrom<Key> for AlignedValue {
+    type Error = ();
+    fn try_from(value: Key) -> Result<Self, Self::Error> {
+        AlignedValueChecked::try_from(value).map(Into::into)
+    }
+}
+
+/// Converts a value into its checked aligned form, panicking if it has no canonical field
+/// encoding.
+///
+/// Used by the generated program fragments, whose arguments are typed values, keys, or fixed
+/// literals, all of which are canonical by construction.
+pub fn expect_checked<T: TryInto<AlignedValue>>(value: T) -> AlignedValueChecked
+where
+    T::Error: Debug,
+{
+    let value = value
+        .try_into()
+        .expect("program fragment argument should convert to an aligned value");
+    AlignedValueChecked::try_from(value)
+        .expect("program fragment argument should have a canonical field encoding")
+}
+
+/// Converts a state value into its checked form, panicking if it contains a non-canonical field
+/// encoding or a non-empty Merkle tree.
+///
+/// Used by the generated program fragments. Must not be used on the critical path; see
+/// [`StateValue::try_into_checked`].
+pub fn expect_checked_state_value<D: DB>(
+    value: StateValue<D>,
+) -> StateValue<D, AlignedValueChecked> {
+    value
+        .try_into_checked()
+        .expect("program fragment state value should be checkable")
 }
 
 impl FieldRepr for Key {
@@ -192,7 +229,7 @@ pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
     },
     Push {
         storage: bool,
-        value: StateValue<D>,
+        value: StateValue<D, AlignedValueChecked>,
     },
     Branch {
         #[cfg_attr(
@@ -266,7 +303,7 @@ macro_rules! key {
         Key::Stack
     };
     ($val:expr_2021) => {
-        Key::Value($val.into())
+        Key::Value($crate::ops::expect_checked($val))
     };
 }
 
@@ -469,7 +506,17 @@ impl<D: DB> FieldRepr for Op<ResultModeVerify, D> {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
         use Op::*;
         match self {
-            Noop { n } => writer.write(&vec![0x00.into(); *n as usize]),
+            Noop { n } => {
+                // `n` is untrusted, so write the zeros in fixed-size chunks
+                // rather than allocating them all up front.
+                let zeros: [Fr; 256] = [0x00.into(); 256];
+                let mut left = *n as usize;
+                while left > 0 {
+                    let chunk = left.min(zeros.len());
+                    writer.write(&zeros[..chunk]);
+                    left -= chunk;
+                }
+            }
             Lt => writer.write(&[0x01.into()]),
             Eq => writer.write(&[0x02.into()]),
             Type => writer.write(&[0x03.into()]),
@@ -564,6 +611,17 @@ impl<D: DB> FieldRepr for Op<ResultModeVerify, D> {
     }
 }
 
+impl<D: DB> Op<ResultModeVerify, D> {
+    /// [`FieldRepr::field_size`], visiting each distinct node of pushed values
+    /// once across every op sharing `memo`.
+    pub fn field_size_memoized(&self, memo: &mut DagMemo<usize, D>) -> usize {
+        match self {
+            Op::Push { value, .. } => 1usize.saturating_add(value.field_size_memoized(memo)),
+            op => op.field_size(),
+        }
+    }
+}
+
 pub use {key, op, ops, ops_int};
 
 #[cfg(test)]
@@ -586,5 +644,20 @@ mod tests {
         let op2: Op<ResultModeGather, DefaultDB> =
             serialize::Deserializable::deserialize(&mut &ser[..], 0).unwrap();
         assert_eq!(op, op2);
+    }
+
+    #[test]
+    fn noop_field_repr_is_n_zeros_across_chunk_boundaries() {
+        use crate::result_mode::ResultModeVerify;
+        use transient_crypto::curve::Fr;
+        use transient_crypto::repr::FieldRepr;
+
+        for n in [0u32, 1, 255, 256, 257, 513] {
+            let op: Op<ResultModeVerify, DefaultDB> = Op::Noop { n };
+            let repr = op.field_vec();
+            assert_eq!(repr.len(), n as usize);
+            assert_eq!(repr.len(), op.field_size());
+            assert!(repr.iter().all(|f| *f == Fr::from(0u64)));
+        }
     }
 }
