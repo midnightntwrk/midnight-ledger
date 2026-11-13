@@ -2363,7 +2363,7 @@ mod tests {
 mod root_count_tests {
     use crate::{
         DefaultHasher,
-        arena::{Arena, ArenaHash, ArenaKey},
+        arena::{Arena, ArenaHash},
         backend::{OnDiskObject, StorageBackend},
         db::{DB, DummyArbitrary, InMemoryDB, Update},
     };
@@ -2497,10 +2497,7 @@ mod root_count_tests {
         fn batch_get_children<I>(
             &self,
             keys: I,
-        ) -> Vec<(
-            ArenaHash<DefaultHasher>,
-            Option<Vec<ArenaKey<DefaultHasher>>>,
-        )>
+        ) -> Vec<(ArenaHash<DefaultHasher>, Vec<ArenaHash<DefaultHasher>>)>
         where
             I: Iterator<Item = ArenaHash<DefaultHasher>>,
         {

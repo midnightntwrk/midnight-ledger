@@ -95,10 +95,7 @@ impl RunningBenchmark {
 fn check_reported_children<D: DB>(
     db: &D,
     batch: &[ArenaHash<D::Hasher>],
-    reported: &[(
-        ArenaHash<D::Hasher>,
-        Option<Vec<crate::arena::ArenaKey<D::Hasher>>>,
-    )],
+    reported: &[(ArenaHash<D::Hasher>, Vec<ArenaHash<D::Hasher>>)],
 ) {
     use std::collections::HashMap;
     let objects = db.batch_get_nodes(batch.iter().cloned());
@@ -117,11 +114,7 @@ fn check_reported_children<D: DB>(
         let Some(stored) = stored.get(key) else {
             continue;
         };
-        let children = children
-            .iter()
-            .flatten()
-            .flat_map(|child| child.refs_iter())
-            .collect::<HashSet<_>>();
+        let children = children.iter().collect::<HashSet<_>>();
         assert!(
             children.is_empty() || children == *stored,
             "batch_get_children reported children for {key:?} that differ from its stored object's"
@@ -242,9 +235,9 @@ impl<D: DB> GcState<D> {
             self.mark_set.extend(batch);
             for (parent, children) in batch_read {
                 self.mark_set.insert(parent);
-                for child in children.iter().flatten().flat_map(|c| c.refs_iter()) {
-                    if !self.mark_set.contains(child) && !self.grey_set.contains(child) {
-                        self.grey_set.insert(child.clone());
+                for child in children {
+                    if !self.mark_set.contains(&child) && !self.grey_set.contains(&child) {
+                        self.grey_set.insert(child);
                     }
                 }
             }
@@ -490,10 +483,7 @@ mod tests {
         fn batch_get_children<I>(
             &self,
             keys: I,
-        ) -> Vec<(
-            ArenaHash<DefaultHasher>,
-            Option<Vec<ArenaKey<DefaultHasher>>>,
-        )>
+        ) -> Vec<(ArenaHash<DefaultHasher>, Vec<ArenaHash<DefaultHasher>>)>
         where
             I: Iterator<Item = ArenaHash<DefaultHasher>>,
         {
@@ -501,21 +491,17 @@ mod tests {
             keys.filter(|key| self.omit.map(hash).as_ref() != Some(key))
                 .map(|key| {
                     self.children_asked.lock().unwrap().push(key.clone());
-                    // As refs only, like a backend storing them apart from the objects.
-                    let mut children = self.inner.get_node(&key).map(|object| {
-                        if pinned.contains(&key) {
-                            return vec![];
-                        }
-                        object
+                    let mut children = match self.inner.get_node(&key) {
+                        Some(_) if pinned.contains(&key) => vec![],
+                        Some(object) => object
                             .children
                             .iter()
-                            .flat_map(|child| child.refs_iter().cloned().map(ArenaKey::Ref))
-                            .collect::<Vec<_>>()
-                    });
+                            .flat_map(|child| child.refs_iter().cloned())
+                            .collect(),
+                        None => vec![],
+                    };
                     if self.stale.map(hash).as_ref() == Some(&key) {
-                        children.iter_mut().for_each(|children| {
-                            children.pop();
-                        });
+                        children.pop();
                     }
                     (key, children)
                 })
@@ -523,12 +509,7 @@ mod tests {
                     let copies = if self.noisy { 2 } else { 1 };
                     std::iter::repeat_n(entry, copies)
                 })
-                .chain(self.noisy.then(|| {
-                    (
-                        hash(2),
-                        Some(vec![ArenaKey::Ref(hash(3)), ArenaKey::Ref(hash(4))]),
-                    )
-                }))
+                .chain(self.noisy.then(|| (hash(2), vec![hash(3), hash(4)])))
                 .collect()
         }
     }

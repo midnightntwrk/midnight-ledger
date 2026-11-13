@@ -330,29 +330,31 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     }
 
     #[cfg(feature = "gc-v1")]
-    /// Children-only [`batch_get_nodes`](DB::batch_get_nodes); `None` for a missing key, which may
-    /// also be left out. The default loads whole objects; override where children are stored apart
+    /// The by-reference children ([`ArenaKey::refs`]) of each of `keys`; a key that is not stored
+    /// may be left out. The default loads whole objects; override where children are stored apart
     /// from the payload.
     ///
-    /// Reachability is determined from these lists, so each must have the same
-    /// [`refs`](ArenaKey::refs) as the stored children, which an override may return as
-    /// [`ArenaKey::Ref`]s. The exception: a node never returned by [`DB::scan_keys`], with all its
-    /// descendants, may report none, and must stay excluded until any garbage collection relying
-    /// on that completes.
+    /// Reachability is determined from these lists, so they must be exact. The exception: a node
+    /// never returned by [`DB::scan_keys`], with all its descendants, may report none, and must
+    /// stay excluded until any garbage collection relying on that completes.
     #[allow(clippy::type_complexity)]
     fn batch_get_children<I>(
         &self,
         keys: I,
-    ) -> std::vec::Vec<(
-        ArenaHash<Self::Hasher>,
-        Option<std::vec::Vec<ArenaKey<Self::Hasher>>>,
-    )>
+    ) -> Vec<(ArenaHash<Self::Hasher>, Vec<ArenaHash<Self::Hasher>>)>
     where
         I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         self.batch_get_nodes(keys)
             .into_iter()
-            .map(|(key, node)| (key, node.map(|node| node.children)))
+            .map(|(key, node)| {
+                let children = node
+                    .iter()
+                    .flat_map(|node| node.children.iter())
+                    .flat_map(|child| child.refs_iter().cloned())
+                    .collect();
+                (key, children)
+            })
             .collect()
     }
 }
@@ -1046,8 +1048,9 @@ mod tests {
     }
 
     /// `scan_keys` yields exactly the keys `scan` yields, across resumes, and
-    /// `batch_get_children` yields exactly the children `batch_get_nodes` yields,
-    /// `None` included. Overrides of `batch_get_children` need only match the children's refs.
+    /// `batch_get_children` yields exactly the references of the children `batch_get_nodes` yields
+    /// for every stored key, and none for a missing key, which it may also leave out. Backends
+    /// overriding either must keep this.
     #[cfg(feature = "gc-v1")]
     fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
         let leaf = RawNode::new(&[0], 0, vec![]);
@@ -1090,11 +1093,23 @@ mod tests {
             .chain([missing.clone()])
             .collect();
         let objs = db.batch_get_nodes(keys.iter().cloned());
-        let children = db.batch_get_children(keys.iter().cloned());
-        assert_eq!(objs.len(), children.len());
-        for ((k1, obj), (k2, ch)) in objs.into_iter().zip(children) {
-            assert_eq!(k1, k2);
-            assert_eq!(obj.map(|o| o.children), ch);
+        let children = db
+            .batch_get_children(keys.iter().cloned())
+            .into_iter()
+            .collect::<HashMap<_, _>>();
+        for (key, obj) in objs {
+            let refs = obj
+                .iter()
+                .flat_map(|o| o.children.iter())
+                .flat_map(|c| c.refs_iter().cloned())
+                .collect::<Vec<_>>();
+            match obj {
+                Some(_) => assert_eq!(children.get(&key), Some(&refs), "stored key"),
+                None => assert!(
+                    children.get(&key).is_none_or(Vec::is_empty),
+                    "missing key reports no children"
+                ),
+            }
         }
         assert!(db.get_node(&missing).is_none());
     }
