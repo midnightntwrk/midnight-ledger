@@ -10,6 +10,52 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 - chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.1`, now resolved from crates.io.
 - chore: remove the vestigial in-tree `zkir-v3` and `zkir-v3-wasm` crates; zkir v3 lives in the separate `midnight-zkir` repository, which `test-artifacts` now takes its v3 `zkir` binary from.
+- feat: `TransactionShape` counts the fallible sections' unshielded and Zswap
+  parts in new `fallible_*` fields; the existing counts are the guaranteed
+  section's. A fallible part's application cost is not charged to the time to
+  dismiss, so counting a part as fallible lowers the reserve. The mock
+  transaction places fallible counts in a fallible unshielded offer and a
+  fallible Zswap offer.
+- feat: add `TransactionShape::of`, counting the non-call parts of a
+  transaction as it is, and `TransactionShape::merge`, adding up the shapes of
+  parts built separately.
+- feat: add `TransactionShape::estimate_from_calls`; `for_calls` is deprecated
+  in its favour and still works.
+- fix: `Transaction::add_calls` partitions new calls against the contract
+  actions the transaction already holds, so an expensive guaranteed call
+  already there no longer lets a new call stay guaranteed in a transaction
+  that then fails its time to dismiss.
+- fix: `Transaction::add_calls` counts the Zswap parts it is given in the
+  section they land in, partitioning a second time when its first partition
+  places some in the fallible section, instead of reserving every part as
+  guaranteed. Fallible parts reserve less, so more of the calls can stay
+  guaranteed.
+- feat: add `TransactionShapeRange`, for a final transaction whose counts are
+  known only to lie between two shapes, with
+  `partition_transcripts_with_tx_shape_range` and
+  `add_calls_with_tx_shape_range`; `partition_transcripts_for_tx` takes one
+  too. Partitioning for a range reserves the cost of its largest counts and
+  allows for the bytes of its smallest, so it fits every transaction in
+  between. Overstating a count of an exact shape is not always safe: a Zswap
+  part or a Dust spend allows more time than it costs. In the wasm API,
+  `expectedTxShape` also takes a pair of shapes.
+- fix: partitioning for a shape, or a range reaching one, that no transaction
+  within `transaction_byte_limit` could have keeps every call fallible instead
+  of building a mock transaction of that size; the wasm `TransactionShape`
+  setters reject negative and fractional counts, which were wrapped and
+  truncated.
+- feat: add `partition_transcripts_for_tx`, which partitions calls against the
+  contract actions of the transaction they will join, and an optional `tx`
+  argument to the wasm `partitionTranscripts`.
+- feat: add `TransactionShape::check_tx` (`checkTx` in the wasm API), which
+  checks the final transaction against its time to dismiss before it is
+  proven and, on failure, returns `TxShapeCheckError::OutsideTimeToDismiss`
+  with the expected and actual shapes, so the calls can be partitioned again
+  for the actual one. Call proofs count at their smallest size, as in
+  partitioning, so the check is conservative.
+- feat: the wasm `TransactionShape` adds `fallible*` accessors,
+  `TransactionShape.of`, `merge`, `checkTx` and `estimateFromCalls`;
+  `forCalls` is deprecated and still works.
 
 ## Ledger 9.1.0.2-rc.0
 

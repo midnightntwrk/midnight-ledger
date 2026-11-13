@@ -1242,23 +1242,53 @@ export type SegmentSpecifier = { tag: 'first' } | { tag: 'guaranteedOnly' } | { 
  * {@link partitionTranscripts} reserves from the guaranteed budget.
  *
  * Pass the counts of the final transaction, so the guaranteed section is
- * sized for it rather than for the derived default. Raising a count moves the
- * calls toward the fallible section, except for Dust spends, Dust
- * deregistrations, Dust registrations when no NIGHT is spent, Zswap parts and
- * non-NIGHT outputs: their bytes can add more allowance than they cost.
- * Overstating those is caught by `wellFormed`.
+ * sized for it rather than for the estimate. Every part costs time to dismiss
+ * and adds bytes, which raise the time the transaction is allowed. Some parts
+ * cost more than their bytes allow, such as NIGHT spends; others, such as
+ * Zswap parts and Dust spends, can allow more than they cost. Overstating a
+ * count is therefore not always the cautious choice: where a count is not
+ * known exactly, pass a {@link TransactionShapeRange} instead.
  *
- * Obtained from {@link TransactionShape.forCalls}. Adjust a count
- * by assigning to it; a count added in a later version keeps its derived
- * default.
+ * Where a part sits within the transaction does not change its cost, except
+ * for whether it is in the guaranteed or a fallible section: a fallible part's
+ * application cost is not charged to the time to dismiss. The unprefixed
+ * unshielded and Zswap counts are the intents' guaranteed unshielded offers
+ * and the guaranteed Zswap offer; the `fallible*` counts are the intents'
+ * fallible unshielded offers and the fallible Zswap offers. Counting a
+ * guaranteed part as fallible understates the reserve.
+ *
+ * Building a transaction with calls goes: describe the final transaction as a
+ * shape, or a range where counts are uncertain; partition the calls for it
+ * with {@link Transaction.addCalls} or {@link partitionTranscripts}, passing
+ * the transaction they join; balance; then, before proving,
+ * {@link TransactionShape.checkTx} the result, and partition again for the
+ * shape it reports if it does not fit. Counts must be non-negative integers.
+ *
+ * Start from {@link TransactionShape.estimateFromCalls} and set the counts the
+ * estimate gets wrong, or from {@link TransactionShape.of} to count a
+ * transaction already built. {@link TransactionShape.merge} adds up the shapes
+ * of parts built separately. Adjust a count by assigning to it. There is no
+ * empty shape to start from: a count added in a later version would read 0 in
+ * it, while both constructors give it a value.
  */
+/**
+ * The shapes the final transaction may take, when its counts are not known
+ * exactly: every count from the smaller of the two shapes' to the larger, in
+ * either order.
+ *
+ * Neither overstating nor understating a count is safe in general.
+ * Partitioning for a range reserves the cost of the larger counts and allows
+ * for the bytes of the smaller ones; a transaction's cost and size both only
+ * grow with each count, so the partition fits every transaction in between.
+ */
+export type TransactionShapeRange = [TransactionShape, TransactionShape];
+
 export class TransactionShape {
   private constructor();
 
   /**
-   * Runs each call once and derives the shape that
-   * {@link partitionTranscripts} assumes by default, the balanced
-   * transaction the calls imply:
+   * Runs each call once and estimates the shape of the balanced transaction
+   * the calls imply, which {@link partitionTranscripts} assumes by default:
    *
    * - two intents, the calls' and the fee intent, with one Dust spend;
    * - one UTXO output per unshielded send the calls claim to a user;
@@ -1266,12 +1296,51 @@ export class TransactionShape {
    * - per token type, one UTXO spend by the wallet when the calls receive
    *   more than is claimed to them, or claim more than they send or mint;
    * - for NIGHT, a change output when the wallet spends it or the calls
-   *   send out more than they claim.
+   *   send out more than they claim;
+   * - every part in the guaranteed section.
    *
-   * Change for other tokens is not counted; set `nonNightUnshieldedOutputs`
-   * to expect it.
+   * The estimate does not count change for other tokens, more than one
+   * wallet spend per token type, intents beyond two or fallible parts; set
+   * those counts to expect them.
+   */
+  static estimateFromCalls(calls: PreTranscript[], params: LedgerParameters): TransactionShape;
+
+  /**
+   * @deprecated Renamed to {@link TransactionShape.estimateFromCalls}.
    */
   static forCalls(calls: PreTranscript[], params: LedgerParameters): TransactionShape;
+
+  /**
+   * Counts the non-call parts of `tx` as it is. Contract calls, deploys and
+   * maintenance updates are not counted.
+   */
+  static of(tx: Transaction<Signaturish, Proofish, Bindingish>): TransactionShape;
+
+  /**
+   * The shape of a transaction made of the parts both shapes count. Intents
+   * are added too, which is right for parts in separate intents; if both
+   * shapes count parts of one intent, lower `intents` to match.
+   */
+  merge(other: TransactionShape): TransactionShape;
+
+  /**
+   * Checks `tx`, the final transaction of calls partitioned for this shape,
+   * against the time to dismiss the node allows it, before it is proven.
+   *
+   * The wallet may build a different transaction than the shape described,
+   * spending more UTXOs or adding change. If `tx` takes longer to dismiss than
+   * its size allows, this throws, naming the counts that differ: partition the
+   * calls again for {@link TransactionShape.of}`(tx)` and rebuild.
+   *
+   * Each call proof counts at its smallest size, as in
+   * {@link partitionTranscripts}, so this passes no transaction the node
+   * rejects for its time to dismiss, but may reject a proven one whose larger
+   * proofs the node accepts. For a proven transaction,
+   * {@link Transaction.cost}`(params, true)` gives the node's own verdict.
+   *
+   * @throws If `tx` takes longer to dismiss than its size allows, or has no fee.
+   */
+  checkTx(tx: Transaction<Signaturish, Proofish, Bindingish>, params: LedgerParameters): void;
 
   intents: number;
   nightSpends: number;
@@ -1284,6 +1353,14 @@ export class TransactionShape {
   zswapTransients: number;
   dustRegistrations: number;
   dustDeregistrations: number;
+
+  fallibleNightSpends: number;
+  fallibleNightOutputs: number;
+  fallibleNonNightUnshieldedSpends: number;
+  fallibleNonNightUnshieldedOutputs: number;
+  fallibleZswapInputs: number;
+  fallibleZswapOutputs: number;
+  fallibleZswapTransients: number;
 
   toString(compact?: boolean): string;
 }
@@ -1356,7 +1433,9 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    * placed in the same section as contract interactions with them.
    *
    * `expectedTxShape` is passed on to {@link partitionTranscripts}; the
-   * default shape also counts the Zswap parts given.
+   * default shape also counts the Zswap parts given, each in the section it
+   * lands in beside the transcripts claiming it. The calls are
+   * partitioned against the contract actions this transaction already holds.
    *
    * @throws If called on bound, proven, or proof-erased transactions.
    */
@@ -1368,7 +1447,7 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
     zswapInputs?: ZswapInput<PreProof>[],
     zswapOutputs?: ZswapOutput<PreProof>[],
     zswapTransient?: ZswapTransient<PreProof>[],
-    expectedTxShape?: TransactionShape,
+    expectedTxShape?: TransactionShape | TransactionShapeRange,
   ): Transaction<S, P, B>;
 
   /**
@@ -1544,10 +1623,23 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
  * resulting in guaranteed and fallible {@link Transcript}s, optimally
  * allocated, and heuristically covered for gas fees.
  *
- * `expectedTxShape` replaces the shape {@link TransactionShape.forCalls} would
- * derive for `calls`.
+ * `expectedTxShape` replaces the shape {@link TransactionShape.estimateFromCalls}
+ * would estimate for `calls`.
+ *
+ * `tx` is the transaction the calls will join: its contract actions, its
+ * calls, deploys and maintenance updates, are reserved from the time to
+ * dismiss along with the calls. Without it, the calls are partitioned as if
+ * they were the transaction's only actions, which keeps too much guaranteed
+ * beside an expensive call. Actions added later are not reserved;
+ * {@link TransactionShape.checkTx} finds out if the final transaction needs
+ * them to be.
  */
-export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters, expectedTxShape?: TransactionShape): PartitionedTranscript[];
+export function partitionTranscripts(
+  calls: PreTranscript[],
+  params: LedgerParameters,
+  expectedTxShape?: TransactionShape | TransactionShapeRange,
+  tx?: Transaction<Signaturish, Proofish, Bindingish>,
+): PartitionedTranscript[];
 
 /**
  * The hash of a transaction, as a hex-encoded 256-bit bytestring
