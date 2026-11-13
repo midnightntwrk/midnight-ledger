@@ -465,6 +465,59 @@ impl Display for FeeCalculationError {
 
 impl Error for FeeCalculationError {}
 
+/// Why [`TransactionShape::check_tx`](crate::construct::TransactionShape::check_tx)
+/// rejected a final transaction.
+#[derive(Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TxShapeCheckError {
+    /// The transaction, with each call proof at its smallest size, takes
+    /// longer to dismiss than its size allows. Its calls were partitioned for
+    /// `expected`; partitioning them again for `actual` sizes them for this
+    /// transaction.
+    OutsideTimeToDismiss {
+        expected: Box<crate::construct::TransactionShape>,
+        actual: Box<crate::construct::TransactionShape>,
+        time_to_dismiss: CostDuration,
+        allowed_time_to_dismiss: CostDuration,
+    },
+    /// The transaction has no fee to check against.
+    FeeCalculation(FeeCalculationError),
+}
+
+impl Display for TxShapeCheckError {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        match self {
+            TxShapeCheckError::OutsideTimeToDismiss {
+                expected,
+                actual,
+                time_to_dismiss,
+                allowed_time_to_dismiss,
+            } => {
+                write!(
+                    formatter,
+                    "the transaction would take {time_to_dismiss:?} to dismiss, but its size allows at most {allowed_time_to_dismiss:?}; its calls were partitioned for a different shape"
+                )?;
+                let differences = expected
+                    .counts()
+                    .into_iter()
+                    .zip(actual.counts())
+                    .filter(|((_, expected), (_, actual))| expected != actual)
+                    .map(|((name, expected), (_, actual))| {
+                        format!("{name}: expected {expected}, got {actual}")
+                    })
+                    .collect::<Vec<_>>();
+                if !differences.is_empty() {
+                    write!(formatter, " ({})", differences.join(", "))?;
+                }
+                Ok(())
+            }
+            TxShapeCheckError::FeeCalculation(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl Error for TxShapeCheckError {}
+
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MalformedContractDeploy {
