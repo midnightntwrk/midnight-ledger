@@ -18,20 +18,21 @@
 use crate::curve::{Fr, outer};
 use base_crypto::hash::{HashOutput, persistent_hash};
 use derive_where::derive_where;
+use group::GroupEncoding;
 use group::ff::Field;
-use group::{Group, GroupEncoding};
 use lazy_static::lazy_static;
 use lru::LruCache;
 use midnight_circuits::types::Instantiable;
-use midnight_circuits::verifier::{
-    Accumulator, AssignedAccumulator, BlstrsEmulation, Msm, SelfEmulation,
-};
+use midnight_circuits::verifier::{Accumulator, AssignedAccumulator, AssignedG1, Msm, Point};
 use midnight_curves::Bls12;
 use midnight_proofs::{
-    poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    poly::{
+        PolynomialLabel,
+        kzg::params::{ParamsKZG, ParamsVerifierKZG},
+    },
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightVK, Relation};
+use midnight_zk_stdlib::{KZG, MidnightVK, Relation};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -387,18 +388,12 @@ impl<T: Zkir> Deserializable for ProverKey<T> {
     }
 }
 
-/// Self-emulation used for in-circuit BLS12-381 proof verification, and for
-/// reconstructing/finalizing the deferred KZG accumulators such proofs produce.
-pub type InnerSelfEmulation = BlstrsEmulation;
-
 /// Number of public-input field elements occupied by one fully-collapsed,
 /// single-point-per-side accumulator: two points and two scalars, encoded as
 /// field elements per the [`Instantiable`] impl of [`AssignedAccumulator`].
 pub fn accumulator_pi_len() -> usize {
-    <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
-        &Accumulator::<InnerSelfEmulation>::trivial(&[]),
-    )
-    .len()
+    let trivial = Accumulator::<Bls12>::trivial(&[]);
+    <AssignedAccumulator<Bls12> as Instantiable<outer::Scalar>>::as_public_input(&trivial).len()
 }
 
 /// Reconstructs a single-point-per-side accumulator from its public-input
@@ -407,18 +402,18 @@ pub fn accumulator_pi_len() -> usize {
 /// `None` on a wrong field count, or a side whose point fields do not decode to
 /// a curve point in the prime-order subgroup. Does not check that the
 /// accumulator is collapsed.
-pub fn reconstruct_accumulator(
-    fields: &[outer::Scalar],
-) -> Option<Accumulator<InnerSelfEmulation>> {
+pub fn reconstruct_accumulator(fields: &[outer::Scalar]) -> Option<Accumulator<Bls12>> {
     if fields.len() != accumulator_pi_len() {
         return None;
     }
-    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<InnerSelfEmulation>> {
+    let reconstruct_side = |side: &[outer::Scalar]| -> Option<Msm<Bls12>> {
         let (point_fields, scalar) = side.split_at(side.len() - 1);
-        let base = <<InnerSelfEmulation as SelfEmulation>::AssignedPoint as Instantiable<
-            outer::Scalar,
-        >>::from_public_input(point_fields)?;
-        Some(Msm::new(&[base], &[scalar[0]], &BTreeMap::new()))
+        let base = AssignedG1::<Bls12>::from_public_input(point_fields)?;
+        Some(Msm::new(
+            &[Point::Variable(base)],
+            &[scalar[0]],
+            &[PolynomialLabel::NoLabel],
+        ))
     };
     let half = fields.len() / 2;
     let lhs = reconstruct_side(&fields[..half])?;
@@ -449,24 +444,29 @@ impl DeferredAccumulator {
 
     /// Rebuilds the accumulator midnight-circuits works with, restoring the
     /// scalars that `collapse` had set to one.
-    pub fn to_accumulator(self) -> Accumulator<InnerSelfEmulation> {
-        let side =
-            |p: outer::Affine| Msm::new(&[p.into()], &[outer::Scalar::ONE], &BTreeMap::new());
+    pub fn to_accumulator(self) -> Accumulator<Bls12> {
+        let side = |p: outer::Affine| {
+            Msm::new(
+                &[Point::Variable(p.into())],
+                &[outer::Scalar::ONE],
+                &[PolynomialLabel::NoLabel],
+            )
+        };
         Accumulator::new(side(self.lhs), side(self.rhs))
     }
 
     /// `None` unless `acc` is collapsed and fixed-base-resolved: one base per
-    /// side, its scalar one, and no fixed-base scalars left.
-    pub fn new(acc: &Accumulator<InnerSelfEmulation>) -> Option<Self> {
-        let side = |msm: Msm<InnerSelfEmulation>| -> Option<outer::Affine> {
+    /// side, its scalar one, and that base not a fixed one.
+    pub fn new(acc: &Accumulator<Bls12>) -> Option<Self> {
+        let side = |msm: Msm<Bls12>| -> Option<outer::Affine> {
             let (bases, scalars) = (msm.bases(), msm.scalars());
             if bases.len() != 1 || scalars.len() != 1 || scalars[0] != outer::Scalar::ONE {
                 return None;
             }
-            if !msm.fixed_base_scalars().is_empty() {
-                return None;
+            match bases[0] {
+                Point::Variable(p) => Some(p.into()),
+                Point::Fixed => None,
             }
-            Some(bases[0].into())
         };
         Some(DeferredAccumulator {
             lhs: side(acc.lhs())?,
@@ -477,7 +477,7 @@ impl DeferredAccumulator {
     /// The public-input encoding the outer circuit constrained, which the
     /// verifier prepends to its own statement.
     pub fn as_public_input(self) -> Vec<outer::Scalar> {
-        <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
+        <AssignedAccumulator<Bls12> as Instantiable<outer::Scalar>>::as_public_input(
             &self.to_accumulator(),
         )
     }
@@ -554,12 +554,13 @@ impl Arbitrary for DeferredAccumulator {
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
     fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use group::Group;
         use proptest::prelude::*;
         // Scaled from the generator rather than built from bytes, so every
         // value lands in the subgroup, as deserialization insists on.
         any::<(u64, u64)>()
             .prop_map(|(a, b)| {
-                let g = <InnerSelfEmulation as SelfEmulation>::C::generator();
+                let g = midnight_curves::G1Projective::generator();
                 DeferredAccumulator {
                     lhs: (g * outer::Scalar::from(a)).into(),
                     rhs: (g * outer::Scalar::from(b)).into(),
@@ -596,8 +597,8 @@ impl Distribution<VerifierKey> for Standard {
     }
 }
 
-impl From<MidnightVK> for VerifierKey {
-    fn from(vk: MidnightVK) -> Self {
+impl From<MidnightVK<KZG>> for VerifierKey {
+    fn from(vk: MidnightVK<KZG>) -> Self {
         let mut raw = Vec::new();
         vk.write(&mut raw, SerdeFormat::Processed)
             .expect("in-memory serialize");
@@ -615,7 +616,7 @@ pub(crate) enum InnerVerifierKey {
     /// serialization stays a function of the value and does not change when a
     /// key is initialized in place (initialization is shared across clones via
     /// the `Arc<Mutex>`).
-    Initialized(MidnightVK, Vec<u8>),
+    Initialized(MidnightVK<KZG>, Vec<u8>),
 }
 
 impl Clone for VerifierKey {
@@ -728,7 +729,7 @@ impl VerifierKey {
 
     // warning! This grabs the lock! Make sure to drop the result before re-running!
     #[allow(dead_code)] // Some features don't try to initialize
-    pub(crate) fn force_init(&self) -> Result<MidnightVK, VerifyingError> {
+    pub(crate) fn force_init(&self) -> Result<MidnightVK<KZG>, VerifyingError> {
         let mut mutex = self.0.lock().expect("mutex is not poisoned");
         let data = match &*mutex {
             InnerVerifierKey::Initialized(key, _) => {
@@ -790,7 +791,7 @@ impl VerifierKey {
             .collect();
         pi.extend(statement.map(|f| f.0));
         trace!(statement = ?pi, "verifying proof against statement");
-        midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash>(
+        midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash, KZG>(
             &params.0,
             &vk,
             &pi,
@@ -857,7 +858,7 @@ impl VerifierKey {
             acc_blocks_per_proof.push(proof.accumulators.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
+        batch_verify::<TranscriptHash, KZG>(&params.0, &vks, &pis, &proofs)
             .map_err(|_| anyhow::anyhow!("Invalid proof"))?;
 
         for accs in &acc_blocks_per_proof {
@@ -1114,26 +1115,29 @@ mod accumulator_discharge_tests {
     use super::*;
     use group::Group;
 
-    type C = <InnerSelfEmulation as SelfEmulation>::C;
+    type C = midnight_curves::G1Projective;
+
+    /// A one-term MSM.
+    fn msm(base: Point<Bls12>, scalar: outer::Scalar) -> Msm<Bls12> {
+        Msm::new(&[base], &[scalar], &[PolynomialLabel::NoLabel])
+    }
 
     /// A collapsed accumulator that does *not* satisfy the pairing invariant.
-    fn non_pairing_accumulator() -> Accumulator<InnerSelfEmulation> {
+    fn non_pairing_accumulator() -> Accumulator<Bls12> {
         let one = outer::Scalar::from(1u64);
         Accumulator::new(
-            Msm::new(&[C::generator()], &[one], &BTreeMap::new()),
-            Msm::new(&[C::identity()], &[one], &BTreeMap::new()),
+            msm(Point::Variable(C::generator()), one),
+            msm(Point::Variable(C::identity()), one),
         )
     }
 
-    fn encode(acc: &Accumulator<InnerSelfEmulation>) -> Vec<outer::Scalar> {
-        <AssignedAccumulator<InnerSelfEmulation> as Instantiable<outer::Scalar>>::as_public_input(
-            acc,
-        )
+    fn encode(acc: &Accumulator<Bls12>) -> Vec<outer::Scalar> {
+        <AssignedAccumulator<Bls12> as Instantiable<outer::Scalar>>::as_public_input(acc)
     }
 
     #[test]
     fn a_carried_accumulator_that_does_not_pair_is_rejected() {
-        let trivial = Accumulator::<InnerSelfEmulation>::trivial(&[]);
+        let trivial = Accumulator::<Bls12>::trivial(&[]);
         assert!(
             trivial.check(&PARAMS_VERIFIER.0, &BTreeMap::new()),
             "the trivial accumulator must pair; a guarded-off instruction exposes it"
@@ -1147,7 +1151,7 @@ mod accumulator_discharge_tests {
     #[test]
     fn every_exposed_accumulator_is_checked_on_its_own() {
         let carried = [
-            DeferredAccumulator::new(&Accumulator::<InnerSelfEmulation>::trivial(&[]))
+            DeferredAccumulator::new(&Accumulator::<Bls12>::trivial(&[]))
                 .expect("the trivial accumulator is collapsed"),
             DeferredAccumulator::new(&non_pairing_accumulator())
                 .expect("collapsed, but does not pair"),
@@ -1172,7 +1176,7 @@ mod accumulator_discharge_tests {
     #[test]
     fn the_public_input_encoding_round_trips() {
         for acc in [
-            Accumulator::<InnerSelfEmulation>::trivial(&[]),
+            Accumulator::<Bls12>::trivial(&[]),
             non_pairing_accumulator(),
         ] {
             let fields = encode(&acc);
@@ -1263,16 +1267,14 @@ mod accumulator_discharge_tests {
     fn a_non_collapsed_accumulator_is_refused() {
         let two = outer::Scalar::from(2u64);
         let scaled = Accumulator::new(
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[two], &BTreeMap::new()),
+            msm(Point::Variable(C::generator()), two),
+            msm(Point::Variable(C::generator()), two),
         );
         assert!(DeferredAccumulator::new(&scaled).is_none());
 
-        let mut fixed = BTreeMap::new();
-        fixed.insert("unresolved".to_owned(), outer::Scalar::ONE);
         let unresolved = Accumulator::new(
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &BTreeMap::new()),
-            Msm::new(&[C::generator()], &[outer::Scalar::ONE], &fixed),
+            msm(Point::Variable(C::generator()), outer::Scalar::ONE),
+            msm(Point::Fixed, outer::Scalar::ONE),
         );
         assert!(DeferredAccumulator::new(&unresolved).is_none());
     }

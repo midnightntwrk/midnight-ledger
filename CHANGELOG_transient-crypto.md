@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- breaking: require `midnight-zk-stdlib` 3.0.0-rc.1, `midnight-circuits`
+  8.0.0-rc.1, `midnight-proofs` 0.9.0-rc.1 and `midnight-curves` 0.4.0-rc.1.
+  Keys and proofs use the `KZG` commitment scheme: `VerifierKey` converts from
+  `MidnightVK<KZG>`.
+- breaking: remove `InnerSelfEmulation`; accumulators are parametrised by the
+  pairing engine, `midnight_curves::Bls12`.
+
 ## Version `3.1.0`
 
 - feat: add `PureGeneratorPedersen::smallest_representable`, for bounding

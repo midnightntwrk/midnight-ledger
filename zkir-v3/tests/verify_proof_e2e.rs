@@ -39,7 +39,7 @@ use midnight_proofs::plonk;
 use midnight_proofs::poly::kzg::params::ParamsKZG;
 use midnight_proofs::utils::SerdeFormat;
 use midnight_zk_stdlib::{
-    MidnightVK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
+    KZG, MidnightVK, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -239,12 +239,13 @@ async fn prove_inner<R: Relation>(
     instance: &R::Instance,
     witness: R::Witness,
     rng: &mut ChaCha20Rng,
-) -> (Vec<u8>, MidnightVK) {
+) -> (Vec<u8>, MidnightVK<KZG>) {
     let srs = params.params_for(optimal_k(relation) as u8);
     let vk = setup_vk(srs.as_ref(), relation);
     let pk = setup_pk(relation, &vk);
-    let proof = prove::<R, PoseidonState<Fq>>(srs.as_ref(), &pk, relation, instance, witness, rng)
-        .expect("inner prove");
+    let proof =
+        prove::<R, PoseidonState<Fq>, KZG>(srs.as_ref(), &pk, relation, instance, witness, rng)
+            .expect("inner prove");
     (proof, vk)
 }
 
