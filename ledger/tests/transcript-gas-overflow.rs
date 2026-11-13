@@ -21,7 +21,7 @@ use midnight_ledger::error::{FeeCalculationError, MalformedTransaction};
 use midnight_ledger::structure::{INITIAL_PARAMETERS, ProofPreimageMarker, Signature, Transaction};
 use midnight_ledger::test_utilities::{TestState, test_intents};
 use midnight_ledger::verify::WellFormedStrictness;
-use midnight_ledger_v9 as midnight_ledger;
+use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::context::Effects;
 use onchain_runtime::ops::Op;
 use onchain_runtime::state::ContractOperation;
@@ -69,6 +69,7 @@ fn call(
         Segment::Fallible => (None, Some(t)),
     };
     ContractCallPrototype {
+        inner_proofs: vec![],
         address: rng.r#gen(),
         entry_point: b"run"[..].into(),
         op: ContractOperation::new(None, None),

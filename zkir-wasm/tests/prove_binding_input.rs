@@ -118,6 +118,7 @@ fn serialized_preimage() -> Uint8Array {
         binding_input: Default::default(),
         communications_commitment: None,
         key_location: KeyLocation(Cow::Borrowed("test/minimal")),
+        inner_proofs: vec![],
     };
     let mut ser = Vec::new();
     tagged_serialize(&preimage, &mut ser).unwrap();
@@ -167,16 +168,16 @@ async fn prove_applies_binding_input_override_for_verifier_key_v6() {
     assert!(verify(0).is_err());
 }
 
-// Control: the verifier-key[v7] branch already applies the override.
+// Control: the verifier-key[v8] branch already applies the override.
 #[wasm_bindgen_test]
-async fn prove_applies_binding_input_override_for_verifier_key_v7() {
+async fn prove_applies_binding_input_override_for_verifier_key_v8() {
     let ir = minimal_ir(2);
     let (pk, vk) = ZkirNew::keygen(&ir, &FsParams).await.unwrap();
     let mut pk_ser = Vec::new();
     IrSource::serialize_prover_key_to_tagged(IrMinorVersion::V2, &pk, &mut pk_ser).unwrap();
     let mut vk_ser = Vec::new();
     tagged_serialize(&vk, &mut vk_ser).unwrap();
-    assert!(vk_ser.starts_with(b"midnight:verifier-key[v7]:"));
+    assert!(vk_ser.starts_with(b"midnight:verifier-key[v8]:"));
 
     let proof = prove(
         serialized_preimage(),

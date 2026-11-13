@@ -70,7 +70,7 @@ pub(crate) fn mock_calls<'a, D: DB + 'a>(
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
                 })),
                 communication_commitment: call.comm_comm.unwrap_or_default(),
-                proof: ProofVersioned::V2(Proof(vec![0; MIN_PROOF_SIZE])),
+                proof: ProofVersioned::V2(transient_crypto_old::proofs::Proof(vec![0; MIN_PROOF_SIZE])),
             }))
         })
         .collect()
@@ -169,7 +169,7 @@ fn mock_dust_actions<D: DB>(
             v_fee: 0,
             old_nullifier: DustNullifier(Fr::from(i)),
             new_commitment: DustCommitment(Fr::from(0u64)),
-            proof: Proof(vec![0; DUST_SPEND_PROOF_SIZE]),
+            proof: Proof::from_bytes(vec![0; DUST_SPEND_PROOF_SIZE]),
         })
         .collect::<Vec<_>>();
     // A deregistration is a registration without a Dust address. Deregistrations
@@ -200,8 +200,8 @@ fn mock_dust_actions<D: DB>(
 }
 
 fn mock_zswap_offer<D: DB>(tx_shape: &TransactionShape) -> Option<Sp<ZswapOffer<Proof, D>, D>> {
-    let input_proof = Arc::new(Proof(vec![0; zswap::INPUT_PROOF_SIZE]));
-    let output_proof = Arc::new(Proof(vec![0; zswap::OUTPUT_PROOF_SIZE]));
+    let input_proof = Arc::new(Proof::from_bytes(vec![0; zswap::INPUT_PROOF_SIZE]));
+    let output_proof = Arc::new(Proof::from_bytes(vec![0; zswap::OUTPUT_PROOF_SIZE]));
     let inputs = (0..tx_shape.zswap_inputs)
         .map(|i| ZswapInput {
             nullifier: Nullifier(distinct_hash(i)),

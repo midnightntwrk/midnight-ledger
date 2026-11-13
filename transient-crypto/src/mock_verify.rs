@@ -22,15 +22,18 @@
 //! otherwise the conditions under which the measurements are taken won't be representative
 use crate::curve::{Fr, outer};
 use crate::proofs::{
-    KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof, ProofPreimage,
-    ProverKey, ProvingError, ProvingKeyMaterial, Resolver, TranscriptHash, VerifierKey,
-    VerifyingError, Zkir,
+    InnerSelfEmulation, KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof,
+    ProofPreimage, ProverKey, ProvingError, ProvingKeyMaterial, Resolver, TranscriptHash,
+    VerifierKey, VerifyingError, Zkir,
 };
 use futures::executor::block_on;
+use group::Group;
 use midnight_circuits::{
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
+    verifier::{Accumulator, Msm},
 };
+use midnight_curves::G1Projective;
 use midnight_zk_stdlib::{MidnightPK, Relation};
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -38,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged, tagged_deserialize, tagged_serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::fs;
 use std::hint::black_box;
 use std::io::BufReader;
@@ -60,13 +64,21 @@ pub struct CalibrationRecord {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct CalibrationFile(Vec<CalibrationRecord>);
+struct CalibrationFile {
+    points: Vec<CalibrationRecord>,
+    /// Burn iterations equivalent to one inner-proof accumulator pairing check,
+    /// as performed by [`VerifierKey::verify`] outside `midnight_zk_stdlib::verify`
+    /// for each `verify_proof` instruction the circuit carries.
+    pairing_iters: u64,
+}
 
 #[derive(Debug, Clone)]
 /// Model of verification performance for a number of proofs
 pub struct Calibration {
     /// The number of public inputs of each proof and its performance impact during verification
     pub points: Vec<CalibrationRecord>,
+    /// Burn iterations equivalent to one inner-proof accumulator pairing check.
+    pub pairing_iters: u64,
 }
 
 impl Calibration {
@@ -75,8 +87,11 @@ impl Calibration {
         File::open(p)?.read_to_string(&mut s)?;
         let mut file: CalibrationFile = serde_json::from_str(&s)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        file.0.sort_by_key(|r| r.circuit_inputs);
-        Ok(Self { points: file.0 })
+        file.points.sort_by_key(|r| r.circuit_inputs);
+        Ok(Self {
+            points: file.points,
+            pairing_iters: file.pairing_iters,
+        })
     }
 
     // Find the indices of the two calibration run `circuit_inputs` points that bracket a given
@@ -152,14 +167,24 @@ fn dummy_verify(calibrated_iterations: u64) -> Result<(), VerifyingError> {
     Ok(())
 }
 
-/// Simulates proof verification for a given public-input length using the global calibration
-pub fn mock_verify_for(public_input_len: usize) -> Result<(), VerifyingError> {
-    dummy_verify(iters_for_len(public_input_len))
+/// Simulates proof verification for a proof with the given public-input length
+/// and the given number of inner-proof accumulators, using the global calibration.
+pub fn mock_verify_for(
+    public_input_len: usize,
+    accumulator_count: usize,
+) -> Result<(), VerifyingError> {
+    dummy_verify(iters_for_len(public_input_len) + iters_for_pairings(accumulator_count))
 }
 
 /// Computes the simulated iteration count for a given public-input length
 pub fn iters_for_len(public_input_len: usize) -> u64 {
     calibration().median_iters(public_input_len)
+}
+
+/// Computes the simulated iteration count for `count` inner-proof accumulator
+/// pairing checks.
+pub fn iters_for_pairings(count: usize) -> u64 {
+    calibration().pairing_iters.saturating_mul(count as u64)
 }
 
 /// Run calibration required for proof verification mocks
@@ -248,6 +273,7 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
             private_transcript: vec![],
             public_transcript_inputs: inp.clone(),
             public_transcript_outputs: vec![],
+            inner_proofs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
 
@@ -294,9 +320,22 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
         });
     }
 
-    let calibration_json =
-        serde_json::to_string_pretty(&CalibrationFile(calibration_results.clone()))
-            .expect("serialising calibration data");
+    // Measure one deferred pairing check. `mock_verify_for` multiplies this by
+    // the accumulator count so the mock also charges the per-`verify_proof`
+    // pairing cost that `VerifierKey::verify` performs outside
+    // `midnight_zk_stdlib::verify`.
+    let _ = dummy_verify(100);
+    let t0 = Instant::now();
+    dummy_verify(CPU_BURN_ITERS).unwrap();
+    let dummy_ns_per_iter = t0.elapsed().as_nanos() as f64 / CPU_BURN_ITERS as f64;
+    let pairing_iters = measure_pairing_iters(dummy_ns_per_iter);
+    println!("pairing check ≈ {pairing_iters} burn iterations");
+
+    let calibration_json = serde_json::to_string_pretty(&CalibrationFile {
+        points: calibration_results.clone(),
+        pairing_iters,
+    })
+    .expect("serialising calibration data");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("creating target/ directory");
     }
@@ -305,7 +344,31 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
     println!("✔  calibration file written to {}", path.display());
     Calibration {
         points: calibration_results,
+        pairing_iters,
     }
+}
+
+/// Times a single `Accumulator::check` and converts the median to burn
+/// iterations.
+fn measure_pairing_iters(dummy_ns_per_iter: f64) -> u64 {
+    let g = G1Projective::generator();
+    let one = outer::Scalar::from(1u64);
+    let lhs = Msm::<InnerSelfEmulation>::new(&[g], &[one], &BTreeMap::new());
+    let rhs = Msm::<InnerSelfEmulation>::new(&[g], &[one], &BTreeMap::new());
+    let acc = Accumulator::<InnerSelfEmulation>::new(lhs, rhs);
+
+    let _ = black_box(acc.check(&PARAMS_VERIFIER.0, &BTreeMap::new()));
+
+    const PAIRING_SAMPLES: usize = 20;
+    let mut samples = Vec::with_capacity(PAIRING_SAMPLES);
+    for _ in 0..PAIRING_SAMPLES {
+        let t0 = Instant::now();
+        let _ = black_box(acc.check(&PARAMS_VERIFIER.0, &BTreeMap::new()));
+        samples.push(t0.elapsed());
+    }
+    samples.sort_unstable();
+    let median_ns = samples[samples.len() / 2].as_nanos() as f64;
+    (median_ns / dummy_ns_per_iter).round() as u64
 }
 
 fn calibration_path() -> PathBuf {
@@ -375,7 +438,7 @@ impl Zkir for TestIr {
         let proof =
             prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, self.clone(), rng)?;
         Ok((
-            Proof(proof),
+            Proof::from_bytes(proof),
             preimage.public_transcript_inputs.clone(),
             vec![],
         ))
@@ -439,7 +502,10 @@ mod tests {
                 median_iters: 400,
             },
         ];
-        Calibration { points }
+        Calibration {
+            points,
+            pairing_iters: 50,
+        }
     }
 
     #[test]
@@ -467,6 +533,14 @@ mod tests {
     #[test]
     fn mock_verify_for_executes_successfully() {
         let _ = CALIBRATION.set(test_calibration());
-        mock_verify_for(8).expect("mock verify should succeed");
+        mock_verify_for(8, 0).expect("mock verify should succeed");
+    }
+
+    #[test]
+    fn pairing_iters_scale_linearly() {
+        let _ = CALIBRATION.set(test_calibration());
+        assert_eq!(iters_for_pairings(0), 0);
+        assert_eq!(iters_for_pairings(1), 50);
+        assert_eq!(iters_for_pairings(3), 150);
     }
 }

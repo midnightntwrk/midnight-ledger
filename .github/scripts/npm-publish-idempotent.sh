@@ -7,9 +7,9 @@
 # overwritten so FORCE on registry.npmjs.org errors out.
 #
 # Args:
-#   $1  tgz path           e.g. midnight-ledger-v9-0.1.0-alpha.1.tgz
+#   $1  tgz path           e.g. midnight-ledger-v10-0.1.0-alpha.1.tgz
 #   $2  registry URL       e.g. https://npm.pkg.github.com/midnightntwrk
-#   $3  package full name  e.g. @midnightntwrk/ledger-v9
+#   $3  package full name  e.g. @midnightntwrk/ledger-v10
 #   $4  package version    e.g. 0.1.0-alpha.1
 #
 # The dist-tag is derived from the version's semver pre-release identifier:
@@ -49,7 +49,7 @@ is_published() {
 if [ "${FORCE:-false}" = "true" ]; then
   case "$REG_HOST" in
     npm.pkg.github.com)
-      # @scope/name -> scope=midnightntwrk name=ledger-v9
+      # @scope/name -> scope=midnightntwrk name=ledger-v10
       ORG="${PKG#@}"; ORG="${ORG%%/*}"
       NAME="${PKG##*/}"
       echo "force=true: looking up $PKG@$VER on GH Packages"

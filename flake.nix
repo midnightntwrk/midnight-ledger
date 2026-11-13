@@ -19,7 +19,6 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
-    zkir-v3.url = "github:midnightntwrk/midnight-zkir/zkir-3.2.1";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -33,7 +32,6 @@
     utils,
     fenix,
     inclusive,
-    zkir-v3,
     #compactc,
     ...
   }:
@@ -71,6 +69,7 @@
           ./proof-server
           ./storage
           ./zkir
+          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -339,6 +338,7 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -359,7 +359,7 @@
               pkgs.jq
               packages.public-params
               self.packages.${system}.zkir
-              zkir-v3.packages.${system}.zkir
+              self.packages.${system}.zkir-v3
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -375,7 +375,7 @@
                 if [[ "$VERSION" == "2" ]]; then
                   ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${zkir-v3.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 fi
               done
             '';
@@ -434,10 +434,11 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v5"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v9"; package-name = "ledger-v9"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -477,6 +478,32 @@
               ];
               doCheck = false;
             };
+          packages.zkir-v3 = ({
+              "x86_64-linux" = pkgsStatic;
+              "x86_64-darwin" = pkgs;
+              "aarch64-linux" = pkgsStatic;
+              "aarch64-darwin" = pkgs;
+          }.${system}.makeRustPlatform {
+            rustc = packages.rust-build-toolchain;
+            cargo = packages.rust-build-toolchain;
+          }).buildRustPackage rec {
+              pname = "zkir-v3";
+              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
+              src = rustWorkspaceSrc;
+              cargoLock.lockFile = ./Cargo.lock;
+              cargoLock.allowBuiltinFetchGit = true;
+
+              MIDNIGHT_PP = "${packages.public-params}";
+
+              buildInputs = [
+                packages.public-params
+              ];
+              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
+              nativeBuildInputs = [
+                packages.rust-build-toolchain
+              ];
+              doCheck = false;
+            };
           packages.public-params = let
               param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {
@@ -502,6 +529,8 @@
               (pkgs.fetchurl { url = param-for 15; hash = "sha256-ckx8PXeRSLsRPH7pwDSy8n2xbmvfMV/ekBBam60Asd4="; })
               (pkgs.fetchurl { url = param-for 16; hash = "sha256-Cch3IW1libNwJj4Yr0CgMKkBtBp6fDfvWMmQHbQfBcY="; })
               (pkgs.fetchurl { url = param-for 17; hash = "sha256-Sp72x8Bhmqt07t5EsT51PjulRQigLdO3EGqUmqu3O3Q="; })
+              # A circuit holding a `verify_proof` lands at k=18.
+              (pkgs.fetchurl { url = param-for 18; hash = "sha256-6ENtxdi1mPFpwSfHRRNdiJdEAH5tOE/xJt+NEzJSL4Y="; })
             ];
 
             dontUnpack = true;
