@@ -917,7 +917,11 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
     group.finish();
 
     let mut group = mk_group(c, "push");
-    let mut bench = |value, json| {
+    let mut bench = |value: StateValue, json| {
+        // Pushes only carry checked values, so trees other than blank ones cannot be pushed.
+        let Ok(value) = value.try_into_checked() else {
+            return;
+        };
         let stack = vec![];
         let op = Op::Push {
             storage: false,
@@ -933,7 +937,11 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
     group.finish();
 
     let mut group = mk_group(c, "pushs");
-    let mut bench = |value, json| {
+    let mut bench = |value: StateValue, json| {
+        // Pushes only carry checked values, so trees other than blank ones cannot be pushed.
+        let Ok(value) = value.try_into_checked() else {
+            return;
+        };
         let stack = vec![];
         let op = Op::Push {
             storage: true,

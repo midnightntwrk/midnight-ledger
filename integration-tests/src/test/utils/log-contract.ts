@@ -83,7 +83,7 @@ export function applyDoLogCall(
     ENTRY_POINT,
     operation,
     {
-      gas: { readTime: 0n, computeTime: 10_000_000_000n, bytesWritten: gasBytes, bytesDeleted: gasBytes },
+      gas: { readTime: 0n, computeTime: 10_000_000_000n, bytesWritten: gasBytes, bytesDeleted: 0n },
       effects: EMPTY_EFFECTS,
       program
     },

@@ -22,7 +22,7 @@ import {
   PreTranscript,
   QueryContext
 } from '@midnightntwrk/ledger';
-import { TestResource } from '@/test-objects';
+import { Static, TestResource } from '@/test-objects';
 import { kernelSelf, programWithResults } from '@/test/utils/onchain-runtime-program-fragments';
 import { deployOperation, firstCall, noopCallTx } from '@/test/utils/contracts';
 import { ATOM_BYTES_32 } from '@/test/utils/value-alignment';
@@ -51,7 +51,7 @@ describe('Ledger API - PrePartitionContractCall', () => {
   test('should print out information as string', () => {
     const program = programWithResults(
       [...kernelSelf()],
-      [{ value: [encodeContractAddress(addr)], alignment: [ATOM_BYTES_32] }]
+      [{ value: [Static.trimTrailingZeros(encodeContractAddress(addr))], alignment: [ATOM_BYTES_32] }]
     );
     const context = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
     const emptyAligned = { value: [], alignment: [] };
