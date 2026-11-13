@@ -265,10 +265,10 @@ pub(crate) enum InnerProverKey<T: Zkir> {
 
 impl<T: Zkir + Tagged> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
-        Cow::Owned(format!("prover-key[v7]({})", T::tag()))
+        Cow::Owned(format!("prover-key[v8]({})", T::tag()))
     }
     fn tag_unique_factor() -> String {
-        format!("prover-key[v7]({})", T::tag())
+        format!("prover-key[v8]({})", T::tag())
     }
 }
 
