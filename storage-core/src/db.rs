@@ -311,26 +311,6 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
         let (nodes, handle) = self.scan(resume_from, batch_size);
         (nodes.into_iter().map(|(k, _)| k).collect(), handle)
     }
-
-    #[cfg(feature = "gc-v1")]
-    /// Children-only [`batch_get_nodes`](DB::batch_get_nodes); `None` for a missing key. The
-    /// default loads whole objects; override where children are stored apart from the payload.
-    #[allow(clippy::type_complexity)]
-    fn batch_get_children<I>(
-        &self,
-        keys: I,
-    ) -> std::vec::Vec<(
-        ArenaHash<Self::Hasher>,
-        Option<std::vec::Vec<ArenaKey<Self::Hasher>>>,
-    )>
-    where
-        I: Iterator<Item = ArenaHash<Self::Hasher>>,
-    {
-        self.batch_get_nodes(keys)
-            .into_iter()
-            .map(|(key, node)| (key, node.map(|node| node.children)))
-            .collect()
-    }
 }
 
 /// A dubious default implementation of `DB::batch_update`.
@@ -1021,11 +1001,10 @@ mod tests {
         assert_eq!(db.get_node(&k1).unwrap(), n2.into_obj());
     }
 
-    /// `scan_keys` yields exactly the keys `scan` yields, across resumes, and
-    /// `batch_get_children` yields exactly the children `batch_get_nodes` yields,
-    /// `None` included. Backends overriding either must keep this.
+    /// `scan_keys` yields exactly the keys `scan` yields, across resumes. Backends overriding
+    /// it must keep this.
     #[cfg(feature = "gc-v1")]
-    fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
+    fn test_scan_keys_matches_scan<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
         let leaf = RawNode::new(&[0], 0, vec![]);
         let mut nodes = vec![leaf];
         for i in 1..60u8 {
@@ -1058,34 +1037,19 @@ mod tests {
             assert_eq!(from_scan, from_keys, "batch {batch}");
             assert_eq!(from_keys.len(), nodes.len());
         }
-
-        let missing = ArenaHash::<DefaultHasher>::_from_bytes(&[0xff; 32]);
-        let keys: Vec<_> = nodes
-            .iter()
-            .map(|n| n.key.clone())
-            .chain([missing.clone()])
-            .collect();
-        let objs = db.batch_get_nodes(keys.iter().cloned());
-        let children = db.batch_get_children(keys.iter().cloned());
-        assert_eq!(objs.len(), children.len());
-        for ((k1, obj), (k2, ch)) in objs.into_iter().zip(children) {
-            assert_eq!(k1, k2);
-            assert_eq!(obj.map(|o| o.children), ch);
-        }
-        assert!(db.get_node(&missing).is_none());
     }
 
     #[cfg(feature = "gc-v1")]
     #[test]
-    fn keys_and_children_match_objects_inmemorydb() {
+    fn scan_keys_matches_scan_inmemorydb() {
         let mut db = InMemoryDB::<DefaultHasher>::default();
-        test_keys_and_children_match_objects(&mut db);
+        test_scan_keys_matches_scan(&mut db);
     }
 
     #[cfg(all(feature = "gc-v1", feature = "sqlite"))]
     #[test]
-    fn keys_and_children_match_objects_sqldb() {
+    fn scan_keys_matches_scan_sqldb() {
         let mut db = crate::db::SqlDB::<DefaultHasher>::memory();
-        test_keys_and_children_match_objects(&mut db);
+        test_scan_keys_matches_scan(&mut db);
     }
 }
