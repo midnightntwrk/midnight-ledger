@@ -100,8 +100,16 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     }
 
     /// Clears the cache
+    #[cfg(test)]
     pub(crate) fn clear(&mut self) {
         self.cache.clear();
+    }
+
+    /// Remove and return every entry, in the order of [`Self::iter`], most recently used first.
+    pub(crate) fn drain(&mut self) -> Vec<(K, V)> {
+        let mut entries = std::iter::from_fn(|| self.cache.pop_lru()).collect::<Vec<_>>();
+        entries.reverse();
+        entries
     }
 
     /// Returns an iterator over the cache key-values.
@@ -124,6 +132,19 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
 mod tests {
     use super::*;
     use rand::seq::SliceRandom;
+
+    /// Test that `drain` empties the cache and returns its entries in `iter` order.
+    #[test]
+    fn drain_returns_entries_in_iter_order() {
+        let mut cache = Cache::unbounded();
+        for i in 0..5 {
+            cache.set(i, i * 10);
+        }
+        cache.promote(&1);
+        let iterated = cache.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>();
+        assert_eq!(cache.drain(), iterated);
+        assert_eq!(cache.len(), 0);
+    }
 
     /// Test that the least-recently-used value gets dropped when the cache is
     /// full and a new value is inserted.
