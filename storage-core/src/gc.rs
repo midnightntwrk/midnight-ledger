@@ -21,7 +21,6 @@ use crate::{
     backend::OnDiskObject,
     db::{DB, Update},
 };
-// `OnDiskObject` is still needed for the in-cache mark (`cache_read`).
 
 // A through-origin linear regression, we just keep the sum of x and y values.
 #[derive(Debug, Default)]
@@ -186,7 +185,6 @@ impl<D: DB> GcState<D> {
             let batch_start = Instant::now();
             let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
             let batch_size = batch.len();
-            // Children only: marking never needs an object's data.
             let batch_read = db.batch_get_children(batch.iter().cloned());
             self.mark_set.extend(batch);
             for (parent, children) in batch_read {
@@ -214,7 +212,6 @@ impl<D: DB> GcState<D> {
         let mut cull_set = vec![];
         while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
-            // Keys only: the sweep never needs the objects.
             let (keys, handle) = db.scan_keys(self.sweep_resume.clone(), batch_size);
             self.sweep_resume = handle;
             let batch_size = keys.len();

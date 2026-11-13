@@ -301,11 +301,8 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     );
 
     #[cfg(feature = "gc-v1")]
-    /// Keys-only variant of [`scan`](DB::scan), for the garbage collector's sweep phase, which
-    /// never needs the objects. Same resume semantics as `scan`.
-    ///
-    /// The default implementation scans objects and drops them; backends that can enumerate
-    /// keys without loading values should override it.
+    /// Keys-only [`scan`](DB::scan), with the same resume semantics. The default loads and
+    /// drops the objects; override where keys can be enumerated without loading values.
     fn scan_keys(
         &self,
         resume_from: Option<Self::ScanResumeHandle>,
@@ -316,11 +313,8 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     }
 
     #[cfg(feature = "gc-v1")]
-    /// Children-only variant of [`batch_get_nodes`](DB::batch_get_nodes), for the garbage
-    /// collector's mark phase, which never needs an object's data. `None` for a missing key.
-    ///
-    /// The default implementation loads whole objects and keeps the children; backends that
-    /// store child references separately from the payload should override it.
+    /// Children-only [`batch_get_nodes`](DB::batch_get_nodes); `None` for a missing key. The
+    /// default loads whole objects; override where children are stored apart from the payload.
     #[allow(clippy::type_complexity)]
     fn batch_get_children<I>(
         &self,
