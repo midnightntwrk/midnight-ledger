@@ -605,8 +605,8 @@ dependencies = [
 
 [[package]]
 name = "blake2b_halo2"
-version = "0.2.0"
-source = "git+https://github.com/eryxcoop/blake2b_halo2?rev=9cc1f4f#9cc1f4f497c177303de390d4a32c6794bcad42bb"
+version = "0.3.0-rc.1"
+source = "git+https://github.com/eryxcoop/blake2b_halo2?rev=6d9828c#6d9828c922f5cecf0d4f0666a119581abe7ff950"
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
@@ -3164,14 +3164,14 @@ dependencies = [
  "rand 0.8.6",
  "rustc-hash",
  "sha2 0.10.9",
- "sha3-circuit 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha3-circuit 0.1.0",
  "subtle",
 ]
 
 [[package]]
 name = "midnight-circuits"
 version = "8.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#c05d95ad21f6623ee7f0a3ae3a43fcdb8ec2c80e"
+source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
 dependencies = [
  "base64 0.13.1",
  "ff 0.13.1",
@@ -3241,7 +3241,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.4.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#c05d95ad21f6623ee7f0a3ae3a43fcdb8ec2c80e"
+source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
 dependencies = [
  "bitvec",
  "blst",
@@ -3511,7 +3511,7 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.9.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#c05d95ad21f6623ee7f0a3ae3a43fcdb8ec2c80e"
+source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
@@ -3782,17 +3782,17 @@ dependencies = [
  "rand 0.8.6",
  "rayon",
  "sha2 0.10.9",
- "sha3-circuit 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha3-circuit 0.1.0",
 ]
 
 [[package]]
 name = "midnight-zk-stdlib"
 version = "3.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#c05d95ad21f6623ee7f0a3ae3a43fcdb8ec2c80e"
+source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
- "blake2b_halo2 0.2.0",
+ "blake2b_halo2 0.3.0-rc.1",
  "blake2b_simd",
  "ff 0.13.1",
  "group 0.13.0",
@@ -3805,7 +3805,7 @@ dependencies = [
  "rand 0.8.6",
  "rayon",
  "sha2 0.10.9",
- "sha3-circuit 0.1.0 (git+https://github.com/alexandroszacharakis8/sha3-circuit?rev=38f7492)",
+ "sha3-circuit 0.3.0-rc.1",
 ]
 
 [[package]]
@@ -5566,8 +5566,8 @@ dependencies = [
 
 [[package]]
 name = "sha3-circuit"
-version = "0.1.0"
-source = "git+https://github.com/alexandroszacharakis8/sha3-circuit?rev=38f7492#38f7492b74453ed712e9cd335d1bf781967f0de9"
+version = "0.3.0-rc.1"
+source = "git+https://github.com/alexandroszacharakis8/sha3-circuit?rev=a66a403#a66a403a55bc9531d9084eef2923c6353d763edf"
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
