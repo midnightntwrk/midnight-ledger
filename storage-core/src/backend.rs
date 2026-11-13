@@ -404,9 +404,16 @@ impl<D: DB> StorageBackend<D> {
     /// `unpersist` calls.
     ///
     /// This is an O(1) DB point read (plus a cache lookup), unlike
-    /// [`Self::get_roots`], which iterates the whole root column. It is
-    /// intended for GC-root bookkeeping by consumers, e.g. to decide how many
-    /// times a key must be unpersisted to release it completely.
+    /// [`Self::get_roots`], which iterates the whole root column.
+    ///
+    /// A consumer that releases roots concurrently with readers uses it to
+    /// make a read safe: a held `Sp` is a GC root for every collection slice,
+    /// so a reader first loads the state it wants (e.g. `Arena::get_lazy`, which
+    /// reads nothing) and then checks that a root reaching that state still has
+    /// a non-zero count. If it does, nothing the state reaches has been
+    /// collected, and the held `Sp` keeps it so after the root is released.
+    /// The check must be made after loading, in a separate
+    /// `Arena::with_backend` call (loading takes the backend itself).
     pub fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);
         let mem_root_delta = match self.peek_from_memory(key) {
@@ -637,24 +644,6 @@ impl<D: DB> StorageBackend<D> {
     /// Un-mark `key` as GC root. See [`Self::persist`].
     pub fn unpersist(&mut self, key: &ArenaHash<D::Hasher>) {
         self.update_counts(&[ArenaKey::Ref(key.clone())], Delta::new_root_delta(-1));
-    }
-
-    /// Release every GC-root reference held on `key`, returning the number of
-    /// releases applied (`0` if `key` was not a root).
-    ///
-    /// The key stops being a GC root; the node is reclaimed by a later `gc()`
-    /// if nothing else reaches it. This is idempotent: a second call returns
-    /// `0` and changes nothing. Unlike a blind [`Self::unpersist`], it can never
-    /// drive the root count negative.
-    pub fn unpersist_fully(&mut self, key: &ArenaHash<D::Hasher>) -> u32 {
-        let count = self.get_root_count(key);
-        if count > 0 {
-            self.update_counts(
-                &[ArenaKey::Ref(key.clone())],
-                Delta::new_root_delta(-(count as i32)),
-            );
-        }
-        count
     }
 
     /// Mark `key` as a GC root, meaning it will be persisted across GC runs,
@@ -1524,93 +1513,14 @@ mod tests {
         assert_eq!(backend.get_root_count(&key), 1);
     }
 
-    fn unpersist_fully_releases_and_is_idempotent<D: DB>() {
-        let (mut backend, key) = root_count_backend::<D>();
-        backend.persist(&key);
-        backend.flush_all_changes_to_db();
-        backend.persist(&key);
-        backend.persist(&key);
-        assert_eq!(backend.unpersist_fully(&key), 3);
-        assert_eq!(backend.get_root_count(&key), 0);
-        assert_eq!(backend.unpersist_fully(&key), 0);
-        assert!(!backend.get_roots().contains_key(&key));
-        backend.flush_all_changes_to_db();
-        assert!(!backend.get_roots().contains_key(&key));
-        assert_eq!(backend.get_root_count(&key), 0);
-        assert_eq!(backend.unpersist_fully(&key), 0);
-        backend.flush_all_changes_to_db();
-
-        // Also from a fully flushed state.
-        backend.persist(&key);
-        backend.persist(&key);
-        backend.flush_all_changes_to_db();
-        assert_eq!(backend.unpersist_fully(&key), 2);
-        backend.flush_all_changes_to_db();
-        assert!(!backend.get_roots().contains_key(&key));
-        assert_eq!(backend.unpersist_fully(&key), 0);
-    }
-
-    fn unpersist_fully_on_non_root_is_noop<D: DB>() {
-        let (mut backend, key) = root_count_backend::<D>();
-        assert_eq!(backend.unpersist_fully(&key), 0);
-        backend.flush_all_changes_to_db();
-        assert_eq!(backend.get_root_count(&key), 0);
-        assert!(backend.get_roots().is_empty());
-        let (unknown, _) = in_database_repr::<D, u32>(11);
-        assert_eq!(backend.unpersist_fully(&unknown), 0);
-        backend.flush_all_changes_to_db();
-        assert!(backend.get_roots().is_empty());
-    }
-
     #[test]
     fn get_root_count_reflects_pending_deltas_inmemorydb() {
         get_root_count_reflects_pending_deltas::<InMemoryDB>();
-    }
-    #[test]
-    fn unpersist_fully_releases_and_is_idempotent_inmemorydb() {
-        unpersist_fully_releases_and_is_idempotent::<InMemoryDB>();
-    }
-    #[test]
-    fn unpersist_fully_on_non_root_is_noop_inmemorydb() {
-        unpersist_fully_on_non_root_is_noop::<InMemoryDB>();
     }
     #[cfg(feature = "parity-db")]
     #[test]
     fn get_root_count_reflects_pending_deltas_paritydb() {
         get_root_count_reflects_pending_deltas::<crate::db::ParityDb>();
-    }
-    #[cfg(feature = "parity-db")]
-    #[test]
-    fn unpersist_fully_releases_and_is_idempotent_paritydb() {
-        unpersist_fully_releases_and_is_idempotent::<crate::db::ParityDb>();
-    }
-    #[cfg(feature = "parity-db")]
-    #[test]
-    fn unpersist_fully_on_non_root_is_noop_paritydb() {
-        unpersist_fully_on_non_root_is_noop::<crate::db::ParityDb>();
-    }
-
-    #[cfg(feature = "gc-v1")]
-    #[test]
-    fn unpersist_fully_then_gc_deletes_unreachable_node() {
-        let (mut backend, key) = root_count_backend::<InMemoryDB>();
-        backend.persist(&key);
-        backend.persist(&key);
-        backend.flush_all_changes_to_db();
-        assert_eq!(backend.database.size(), 1);
-        assert_eq!(backend.unpersist_fully(&key), 2);
-        backend.flush_all_changes_to_db();
-        // Drop the in-memory (arena-style) reference too, so only the root
-        // count was keeping the node alive.
-        backend.uncache(&key);
-        for _ in 0..100 {
-            backend.gc(std::time::Duration::from_secs(1));
-            if backend.database.size() == 0 {
-                break;
-            }
-        }
-        assert_eq!(backend.database.size(), 0);
-        assert!(backend.get(&key).is_none());
     }
 
     #[test]

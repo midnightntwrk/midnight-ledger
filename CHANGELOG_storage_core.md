@@ -3,7 +3,7 @@
 ## Unreleased
 
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
-- feat: expose StorageBackend::get_root_count (exact per-key GC-root count) and add unpersist_fully, an idempotent release of a key's root count to zero
+- feat: expose `StorageBackend::get_root_count`, the exact per-key GC-root count including pending in-memory updates, so a reader can check after loading a state that a root still reaches it
 
 ## Version `1.2.3`
 

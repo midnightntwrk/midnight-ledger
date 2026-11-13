@@ -3133,4 +3133,73 @@ mod tests {
             "both children deduplicate to the same leaf index"
         );
     }
+
+    /// Number of nodes of a `BinTree`, forcing every lazy child (a missing node
+    /// panics).
+    #[cfg(feature = "gc-v1")]
+    fn bin_tree_nodes(t: &super::bin_tree::BinTree<DefaultDB>) -> usize {
+        1 + t.left.as_ref().map_or(0, |l| bin_tree_nodes(l))
+            + t.right.as_ref().map_or(0, |r| bin_tree_nodes(r))
+    }
+
+    /// The read pattern documented on `StorageBackend::get_root_count`: load a
+    /// state lazily, then check a root reaching it is still counted. The held
+    /// `Sp` then keeps the whole state through collections that run after the
+    /// root is released, and the state is collected once it is dropped.
+    #[cfg(feature = "gc-v1")]
+    #[test]
+    fn held_sp_keeps_state_after_its_root_is_released() {
+        use super::bin_tree::{BinTree, counting_tree};
+        use std::time::Duration;
+        let arena = new_arena();
+        let gc = |arena: &Arena<DefaultDB>| {
+            arena.with_backend(|b| {
+                b.flush_all_changes_to_db();
+                b.gc(Duration::from_secs(10))
+            })
+        };
+
+        // A root (`wrapper`) reaching a state (`state`) of 255 nodes; nothing
+        // else holds them.
+        let (wrapper, state) = {
+            let state = counting_tree(&arena, 8);
+            let mut wrapper = arena.alloc(BinTree::new(0, Some(state.clone()), None));
+            wrapper.persist();
+            (wrapper.hash(), state.as_typed_key())
+        };
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        let count = |arena: &Arena<DefaultDB>| arena.with_backend(|b| b.get_root_count(&wrapper));
+        assert_eq!(count(&arena), 1);
+
+        // Reader: load first (nothing is read), then check the root.
+        let held = arena.get_lazy(&state).unwrap();
+        assert_eq!(
+            count(&arena),
+            1,
+            "the root still reaches the state: the read may go on"
+        );
+
+        // The root is released and collections run; the wrapper goes, the held
+        // state stays complete.
+        arena.with_backend(|b| b.unpersist(&wrapper));
+        assert_eq!(count(&arena), 0);
+        for _ in 0..3 {
+            gc(&arena);
+        }
+        assert!(
+            arena.with_backend(|b| b.get(&wrapper).is_none()),
+            "the wrapper is collected"
+        );
+        assert_eq!(bin_tree_nodes(&held), 255);
+
+        // A reader arriving now is refused by the check.
+        assert_eq!(count(&arena), 0);
+
+        // Dropped, the state is collected.
+        drop(held);
+        for _ in 0..3 {
+            gc(&arena);
+        }
+        assert!(arena.with_backend(|b| b.get(state.key.hash()).is_none()));
+    }
 }
