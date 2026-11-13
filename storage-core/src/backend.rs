@@ -399,8 +399,9 @@ impl<D: DB> StorageBackend<D> {
         self.peek_from_memory(key).and_then(|cv| cv.get_obj())
     }
 
-    /// Get the root count for `key`, incorporating any pending in-memory updates.
-    pub(crate) fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
+    /// Get the root count for `key`, including pending in-memory updates.
+    /// One DB point read, unlike [`Self::get_roots`].
+    pub fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);
         let mem_root_delta = match self.peek_from_memory(key) {
             Some(CacheValue::Read { .. }) => 0,
@@ -1476,6 +1477,37 @@ mod tests {
             .expect("Failed to serialize to 'std::vec::Vec<u8>'!");
         let key = hash::<D::Hasher>(&bytes, val.children().iter().map(ArenaKey::hash));
         (key, bytes)
+    }
+
+    fn root_count_backend<D: DB>() -> (StorageBackend<D>, ArenaHash<D::Hasher>) {
+        let mut backend = StorageBackend::new(16, D::default());
+        let (key, bytes) = in_database_repr::<D, u32>(10);
+        backend.cache(key.clone(), bytes, vec![]);
+        (backend, key)
+    }
+
+    fn get_root_count_reflects_pending_deltas<D: DB>() {
+        let (mut backend, key) = root_count_backend::<D>();
+        assert_eq!(backend.get_root_count(&key), 0);
+        backend.persist(&key);
+        backend.persist(&key);
+        assert_eq!(backend.get_root_count(&key), 2);
+        backend.flush_all_changes_to_db();
+        assert_eq!(backend.get_root_count(&key), 2);
+        backend.unpersist(&key);
+        assert_eq!(backend.get_root_count(&key), 1);
+        backend.flush_all_changes_to_db();
+        assert_eq!(backend.get_root_count(&key), 1);
+    }
+
+    #[test]
+    fn get_root_count_reflects_pending_deltas_inmemorydb() {
+        get_root_count_reflects_pending_deltas::<InMemoryDB>();
+    }
+    #[cfg(feature = "parity-db")]
+    #[test]
+    fn get_root_count_reflects_pending_deltas_paritydb() {
+        get_root_count_reflects_pending_deltas::<crate::db::ParityDb>();
     }
 
     #[test]
