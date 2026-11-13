@@ -12,12 +12,16 @@
 // limitations under the License.
 
 //! Provides mechanisms to fetch Midnight proof-related parameters and keys.
+//!
+//! Downloading is behind the non-default `fetch` feature; without it this serves the local cache
+//! only, so consumers that never prove do not pay for an HTTP stack.
 
-use futures::StreamExt;
+use crate::hash::hexhash;
 #[cfg(feature = "cli")]
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::MultiProgress;
+#[cfg(all(feature = "cli", feature = "fetch"))]
+use indicatif::{ProgressBar, ProgressStyle};
 use lazy_static::lazy_static;
-use reqwest::Url;
 use sha2::Digest;
 use sha2::Sha256;
 use std::env;
@@ -26,11 +30,13 @@ use std::io;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
-use std::io::Write;
 use std::path::PathBuf;
-use std::time::Duration;
-use std::time::Instant;
-use tracing::{info, warn};
+
+use tracing::warn;
+use url::Url;
+
+#[cfg(feature = "fetch")]
+use {futures::StreamExt, std::io::Write, std::time::Duration, std::time::Instant, tracing::info};
 
 /// Retrieves various static cryptographic artifacts from a data server.
 /// This keeps a local file system cache of the parameters, prover keys, verifier keys, and IR, that
@@ -67,14 +73,6 @@ pub struct MidnightDataProvider {
 lazy_static! {
     /// The default base URL to use for the Midnight data provider.
     pub static ref BASE_URL: Url = Url::parse(&std::env::var("MIDNIGHT_PARAM_SOURCE").unwrap_or("https://srs.midnight.network/".to_owned())).expect("$MIDNIGHT_PARAM_SOURCE should be a valid URL");
-}
-
-/// Parse a 256-bit hex hash at const time.
-pub const fn hexhash(hex: &[u8]) -> [u8; 32] {
-    match const_hex::const_decode_to_array(hex) {
-        Ok(hash) => hash,
-        Err(_) => panic!("hash should be correct format"),
-    }
 }
 
 const EXPECTED_DATA: &[(&str, [u8; 32], &str)] = &[
@@ -309,6 +307,7 @@ impl MidnightDataProvider {
         Ok(Some(file))
     }
 
+    #[cfg(feature = "fetch")]
     async fn get_or_fetch(&self, name: &str) -> io::Result<BufReader<File>> {
         if let Some(data) = self.get_local(name)? {
             return Ok(data);
@@ -332,7 +331,33 @@ impl MidnightDataProvider {
         Ok(BufReader::new(rfile))
     }
 
+    /// Serves `name` from the local cache only; downloading is compiled out.
+    ///
+    /// Enable the `fetch` feature to get the downloading variant of this method.
+    #[cfg(not(feature = "fetch"))]
+    async fn get_or_fetch(&self, name: &str) -> io::Result<BufReader<File>> {
+        if let Some(data) = self.get_local(name)? {
+            return Ok(data);
+        };
+        let desc = self.description(name)?;
+        warn!("Missing {desc}, and this build cannot download it.");
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!(
+                "'{name}' ({desc}) is not in the local cache at {}, and midnight-base-crypto was \
+                 built without the `fetch` feature, so it cannot be downloaded.\n\
+                 help: enable the `fetch` feature, or pre-populate the cache from {} and point \
+                 $MIDNIGHT_PP at it.",
+                self.dir.display(),
+                self.base_url,
+            ),
+        ))
+    }
+
     /// Fetches a given item.
+    ///
+    /// Without the `fetch` feature this only checks the local cache, and errors if the item is
+    /// absent.
     pub async fn fetch(&self, name: &str) -> io::Result<()> {
         self.get_or_fetch(name).await?;
         Ok(())
@@ -350,6 +375,7 @@ impl MidnightDataProvider {
 
     // Only arise due to feature gates.
     #[allow(irrefutable_let_patterns)]
+    #[cfg(feature = "fetch")]
     async fn fetch_data_to(
         &self,
         name: &str,

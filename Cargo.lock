@@ -3086,13 +3086,11 @@ name = "midnight-base-crypto"
 version = "1.1.1"
 dependencies = [
  "actix-rt",
- "anyhow",
  "atomic-write-file",
  "const-hex",
  "ethnum",
  "fake",
  "ff 0.13.1",
- "flate2",
  "futures",
  "group 0.13.0",
  "indicatif",
@@ -3114,6 +3112,7 @@ dependencies = [
  "signature 3.0.0",
  "subtle",
  "tracing",
+ "url",
  "zeroize",
 ]
 
@@ -3928,6 +3927,7 @@ dependencies = [
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.1.0",
  "midnight-zkir 2.2.0",
+ "midnight-zswap",
  "pastey",
  "rand 0.8.6",
  "rayon",

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- breaking: `impl ParamsProverProvider for MidnightDataProvider` is now behind
+  the new, non-default `fetch` feature. It was the only tie between this crate
+  and `base-crypto`'s data provider, and verifiers have no use for prover
+  parameters.
+
 ## Version `3.1.0`
 
 - feat: add `PureGeneratorPedersen::smallest_representable`, for bounding

@@ -190,6 +190,14 @@ consumers cannot resolve past the fix.
 
 ## Ledger 9.1.0.0-rc.3
 
+- breaking: `ledger`'s `proving` feature is no longer a no-op marker. It now
+  gates `dust::DustResolver` and `prove::Resolver`, and pulls in
+  `zswap/proving`, `transient-crypto/fetch` and `base-crypto/fetch`. Verifying
+  consumers no longer compile the built-in prover-key resolvers; provers add
+  `features = ["proving"]`. `test-utilities` implies it, so the `proving`-gated
+  tests - which nothing had been enabling - now actually run.
+- breaking: `zswap`'s `ZswapResolver` moves behind a new, non-default `proving`
+  feature, for the same reason.
 - feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
 - breaking: unify the construction of signing envelopes
 - fix: remove `zkir-old` dependency — v1 verification now dispatches through `transient-crypto-old` directly
