@@ -880,12 +880,9 @@ impl<D: DB> StorageBackend<D> {
 
     /// Push all pending writes to the DB.
     pub fn flush_all_changes_to_db(&mut self) {
-        let writes = self
-            .write_cache
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<std::vec::Vec<_>>();
-        self.write_cache.clear();
+        // Moving the entries out, rather than cloning them and clearing the cache, spares a copy
+        // of every pending object.
+        let writes = self.write_cache.drain();
         self.flush_to_db(writes);
     }
 
