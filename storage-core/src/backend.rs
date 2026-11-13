@@ -399,21 +399,8 @@ impl<D: DB> StorageBackend<D> {
         self.peek_from_memory(key).and_then(|cv| cv.get_obj())
     }
 
-    /// Get the exact current root count for `key`: the count stored in the DB
-    /// plus any pending in-memory delta from not-yet-flushed `persist` /
-    /// `unpersist` calls.
-    ///
-    /// This is an O(1) DB point read (plus a cache lookup), unlike
-    /// [`Self::get_roots`], which iterates the whole root column.
-    ///
-    /// A consumer that releases roots concurrently with readers uses it to
-    /// make a read safe: a held `Sp` is a GC root for every collection slice,
-    /// so a reader first loads the state it wants (e.g. `Arena::get_lazy`, which
-    /// reads nothing) and then checks that a root reaching that state still has
-    /// a non-zero count. If it does, nothing the state reaches has been
-    /// collected, and the held `Sp` keeps it so after the root is released.
-    /// The check must be made after loading, in a separate
-    /// `Arena::with_backend` call (loading takes the backend itself).
+    /// Get the root count for `key`, including pending in-memory updates.
+    /// One DB point read, unlike [`Self::get_roots`].
     pub fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);
         let mem_root_delta = match self.peek_from_memory(key) {

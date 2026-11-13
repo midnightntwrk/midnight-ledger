@@ -3142,10 +3142,8 @@ mod tests {
             + t.right.as_ref().map_or(0, |r| bin_tree_nodes(r))
     }
 
-    /// The read pattern documented on `StorageBackend::get_root_count`: load a
-    /// state lazily, then check a root reaching it is still counted. The held
-    /// `Sp` then keeps the whole state through collections that run after the
-    /// root is released, and the state is collected once it is dropped.
+    /// A held `Sp` keeps its state through collections after the root
+    /// reaching it is released.
     #[cfg(feature = "gc-v1")]
     #[test]
     fn held_sp_keeps_state_after_its_root_is_released() {
