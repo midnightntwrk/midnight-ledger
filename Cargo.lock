@@ -3171,7 +3171,7 @@ dependencies = [
 [[package]]
 name = "midnight-circuits"
 version = "8.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
 dependencies = [
  "base64 0.13.1",
  "ff 0.13.1",
@@ -3241,7 +3241,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.4.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
 dependencies = [
  "bitvec",
  "blst",
@@ -3511,7 +3511,7 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.9.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
@@ -3788,7 +3788,7 @@ dependencies = [
 [[package]]
 name = "midnight-zk-stdlib"
 version = "3.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?rev=8b3e851de29c7a7b03697709f1d4a63a13128cea#8b3e851de29c7a7b03697709f1d4a63a13128cea"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",

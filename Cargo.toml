@@ -70,12 +70,11 @@ panic = "abort"
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
 # midnight-zk-stdlib 3.0.0-rc.1 and its sibling crates are not published to
-# crates.io. The rev is the rc.1 tag with sha3-circuit and blake2b_halo2 moved to
-# versions crates.io does not also have, which nix's vendoring requires.
-midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", rev = "8b3e851de29c7a7b03697709f1d4a63a13128cea" }
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", rev = "8b3e851de29c7a7b03697709f1d4a63a13128cea" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", rev = "8b3e851de29c7a7b03697709f1d4a63a13128cea" }
-midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", rev = "8b3e851de29c7a7b03697709f1d4a63a13128cea" }
+# crates.io; resolve them from the midnight-zk release tag.
+midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
