@@ -15,6 +15,8 @@
 
 use crate::DefaultDB;
 use crate::Storable;
+#[cfg(feature = "gc-v1")]
+use crate::arena::ArenaKey;
 use crate::arena::{Arena, ArenaHash, Sp};
 #[cfg(feature = "gc-v1")]
 use crate::backend::OnDiskObject;
@@ -361,6 +363,20 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         batch_size: usize,
     ) -> (Vec<ArenaHash<Self::Hasher>>, Option<Self::ScanResumeHandle>) {
         self.db.scan_keys(resume_from, batch_size)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn batch_get_children<I>(
+        &self,
+        keys: I,
+    ) -> std::vec::Vec<(
+        ArenaHash<Self::Hasher>,
+        Option<std::vec::Vec<ArenaKey<Self::Hasher>>>,
+    )>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        self.db.batch_get_children(keys)
     }
 }
 

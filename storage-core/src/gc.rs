@@ -185,16 +185,12 @@ impl<D: DB> GcState<D> {
             let batch_start = Instant::now();
             let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
             let batch_size = batch.len();
-            let batch_read = db.batch_get_nodes(batch.iter().cloned());
+            let batch_read = db.batch_get_children(batch.iter().cloned());
             self.mark_set.extend(batch);
-            for (parent, obj) in batch_read {
+            for (parent, children) in batch_read {
                 self.grey_set.remove(&parent);
                 self.mark_set.insert(parent);
-                for child in obj
-                    .iter()
-                    .flat_map(|o| o.children.iter())
-                    .flat_map(|c| c.refs().into_iter())
-                {
+                for child in children.iter().flatten().flat_map(|c| c.refs().into_iter()) {
                     if !self.mark_set.contains(child) && !self.grey_set.contains(child) {
                         self.grey_set.insert(child.clone());
                     }
