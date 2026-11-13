@@ -4,6 +4,7 @@
 
 - feat(gc-v1): `DB::scan_keys` and `DB::batch_get_children`, with default implementations over `scan` and `batch_get_nodes`. The garbage collector's sweep now asks for keys only and its mark phase for child references only, so a backend that can serve those without loading objects can override them (#782, #783).
 - feat(gc-v1): `DB::batch_get_children` may report children as `ArenaKey::Ref`s, and no children for nodes a backend never returns from `DB::scan_keys`, with their descendants, so gc neither sweeps nor marks below them. A key it leaves out no longer stalls the mark, and debug builds check every report against the stored objects.
+- perf: flushing reads the stored root counts of all changed roots in one `DB::batch_get_root_counts` call rather than one `DB::get_root_count` per root, so a backend on a database server can read them in one round trip. It defaults to `DB::get_root_count` per key, and `WrappedDB` passes it through.
 - fix: a failed `Sp::downcast` no longer leaks a metadata reference count for its root, which kept the key out of reach of the garbage collector.
 
 ## Version `1.2.3`

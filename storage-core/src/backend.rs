@@ -117,7 +117,35 @@ enum CacheValue<H: WellBehavedHasher> {
     Dummy,
 }
 
+/// The stored root count of `key`: from `batch`, the counts `flush_to_db` read in one call, or
+/// from the database if the batch did not cover it.
+fn batched_root_count<D: DB>(
+    database: &D,
+    batch: &std::collections::HashMap<ArenaHash<D::Hasher>, u32>,
+    key: &ArenaHash<D::Hasher>,
+) -> i32 {
+    batch
+        .get(key)
+        .copied()
+        .unwrap_or_else(|| database.get_root_count(key)) as i32
+}
+
 impl<H: WellBehavedHasher> CacheValue<H> {
+    /// Whether `flush_to_db` reads this value's stored root count: when it applies a root delta
+    /// to a node that may already be in the database.
+    fn reads_db_root_count_on_flush(&self) -> bool {
+        use CacheValue::*;
+        match self {
+            Update { delta } | ReadAndUpdate { delta, .. } => delta.root_delta != 0,
+            // Without layout-v2 a `Create*` node is new, so its root count is its delta; layout-v2
+            // caches stored nodes as `Create*` too, so their stored count must be read.
+            CreateAndUpdate { delta, .. } | CreateAndDelete { delta, .. } => {
+                cfg!(feature = "layout-v2") && delta.root_delta != 0
+            }
+            Read { .. } | Create { .. } | Dummy => false,
+        }
+    }
+
     /// Return reference to contained `OnDiskObject`.
     fn get_obj(&self) -> Option<&OnDiskObject<H>> {
         match self {
@@ -698,10 +726,21 @@ impl<D: DB> StorageBackend<D> {
     /// cache as `CacheValue::Read` values, in order to keep them cached in
     /// memory if possible. In particular, this means they must be removed from
     /// the cache before calling this function!
-    fn flush_to_db<I>(&mut self, writes: I)
-    where
-        I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
-    {
+    fn flush_to_db(
+        &mut self,
+        writes: std::vec::Vec<(ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
+    ) {
+        // Read the stored root counts the root deltas below apply to in one batch, rather than one
+        // `get_root_count` per changed root. The keys of `writes` are distinct, and nothing below
+        // writes a root count before reading it, so these are the values the reads would return.
+        // A key the batch did not cover, because a backend left it out or because
+        // `reads_db_root_count_on_flush` missed a case, is read on its own, as before batching.
+        let db_root_counts = self.database.batch_get_root_counts(
+            writes
+                .iter()
+                .filter(|(_, v)| v.reads_db_root_count_on_flush())
+                .map(|(k, _)| k.clone()),
+        );
         let mut updates = vec![];
         #[allow(unused_mut, reason = "feature flags complicate this")]
         for (k, mut v) in writes {
@@ -756,7 +795,7 @@ impl<D: DB> StorageBackend<D> {
                     if delta.root_delta != 0 {
                         // Can't use self.get_root_count here, since `v` has
                         // already been removed from DB.
-                        let db_root_count = self.database.get_root_count(&k) as i32;
+                        let db_root_count = batched_root_count(&self.database, &db_root_counts, &k);
                         let root_count = db_root_count + delta.root_delta;
                         assert!(
                             root_count >= 0,
@@ -776,7 +815,8 @@ impl<D: DB> StorageBackend<D> {
                         // DB. Read the existing root_count and add the delta.
                         #[cfg(feature = "layout-v2")]
                         let root_count = {
-                            let db_root_count = self.database.get_root_count(&k) as i32;
+                            let db_root_count =
+                                batched_root_count(&self.database, &db_root_counts, &k);
                             let root_count = db_root_count + delta.root_delta;
                             assert!(root_count >= 0, "root count can't be negative (for {k:?})");
                             root_count as u32
@@ -801,7 +841,7 @@ impl<D: DB> StorageBackend<D> {
                     if delta.root_delta != 0 {
                         // Can't use self.get_root_count here, since `v` has
                         // already been removed from DB.
-                        let db_root_count = self.database.get_root_count(&k) as i32;
+                        let db_root_count = batched_root_count(&self.database, &db_root_counts, &k);
                         let root_count = db_root_count + delta.root_delta;
                         assert!(
                             root_count >= 0,
@@ -831,24 +871,22 @@ impl<D: DB> StorageBackend<D> {
         if self.cache_size == 0 {
             return;
         }
-        let mut evictions = HashMap::new();
+        let mut evictions = vec![];
         while self.write_cache.len() > self.cache_size {
-            let (k, v) = self.write_cache.pop_lru().unwrap();
-            evictions.insert(k, v);
+            evictions.push(self.write_cache.pop_lru().unwrap());
         }
-        self.flush_to_db(evictions.into_iter());
+        self.flush_to_db(evictions);
     }
 
     /// Push all pending writes to the DB.
     pub fn flush_all_changes_to_db(&mut self) {
-        let iter = self
+        let writes = self
             .write_cache
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect::<std::vec::Vec<_>>()
-            .into_iter();
+            .collect::<std::vec::Vec<_>>();
         self.write_cache.clear();
-        self.flush_to_db(iter);
+        self.flush_to_db(writes);
     }
 
     #[cfg(feature = "gc-v1")]
@@ -2290,5 +2328,237 @@ mod tests {
         let obj = backend.get(&key).cloned();
         assert!(obj.is_some());
         assert_eq!(obj.unwrap().data, bytes);
+    }
+}
+
+#[cfg(all(test, feature = "layout-v2"))]
+mod root_count_tests {
+    use crate::{
+        DefaultHasher,
+        arena::{Arena, ArenaHash, ArenaKey},
+        backend::{OnDiskObject, StorageBackend},
+        db::{DB, DummyArbitrary, InMemoryDB, Update},
+    };
+    use std::{
+        collections::HashMap,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::Relaxed},
+        },
+    };
+
+    /// Counts single and batched root count reads, and calls to its other batch overrides. With
+    /// `omit_batch`, the batch read returns no counts at all, as an override that leaves keys out
+    /// would.
+    #[derive(Clone, Debug, Default)]
+    struct RootCountingDb {
+        inner: InMemoryDB,
+        omit_batch: bool,
+        single_reads: Arc<AtomicUsize>,
+        batch_reads: Arc<AtomicUsize>,
+        other_overrides: Arc<AtomicUsize>,
+    }
+
+    impl DummyArbitrary for RootCountingDb {}
+
+    #[cfg(feature = "proptest")]
+    impl proptest::arbitrary::Arbitrary for RootCountingDb {
+        type Parameters = ();
+        type Strategy = proptest::strategy::Just<Self>;
+
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            unimplemented!()
+        }
+    }
+
+    impl DB for RootCountingDb {
+        type Hasher = DefaultHasher;
+        #[cfg(feature = "gc-v1")]
+        type ScanResumeHandle = <InMemoryDB as DB>::ScanResumeHandle;
+
+        fn get_node(&self, key: &ArenaHash<DefaultHasher>) -> Option<OnDiskObject<DefaultHasher>> {
+            self.inner.get_node(key)
+        }
+
+        fn insert_node(
+            &mut self,
+            key: ArenaHash<DefaultHasher>,
+            object: OnDiskObject<DefaultHasher>,
+        ) {
+            self.inner.insert_node(key, object)
+        }
+
+        fn delete_node(&mut self, key: &ArenaHash<DefaultHasher>) {
+            self.inner.delete_node(key)
+        }
+
+        fn batch_update<I>(&mut self, iter: I)
+        where
+            I: Iterator<Item = (ArenaHash<DefaultHasher>, Update<DefaultHasher>)>,
+        {
+            self.inner.batch_update(iter)
+        }
+
+        fn batch_get_nodes<I>(
+            &self,
+            keys: I,
+        ) -> Vec<(
+            ArenaHash<DefaultHasher>,
+            Option<OnDiskObject<DefaultHasher>>,
+        )>
+        where
+            I: Iterator<Item = ArenaHash<DefaultHasher>>,
+        {
+            self.inner.batch_get_nodes(keys)
+        }
+
+        fn get_root_count(&self, key: &ArenaHash<DefaultHasher>) -> u32 {
+            self.single_reads.fetch_add(1, Relaxed);
+            self.inner.get_root_count(key)
+        }
+
+        fn batch_get_root_counts<I>(&self, keys: I) -> HashMap<ArenaHash<DefaultHasher>, u32>
+        where
+            I: Iterator<Item = ArenaHash<DefaultHasher>>,
+        {
+            self.batch_reads.fetch_add(1, Relaxed);
+            if self.omit_batch {
+                return HashMap::new();
+            }
+            self.inner.batch_get_root_counts(keys)
+        }
+
+        fn set_root_count(&mut self, key: ArenaHash<DefaultHasher>, count: u32) {
+            self.inner.set_root_count(key, count)
+        }
+
+        fn get_roots(&self) -> HashMap<ArenaHash<DefaultHasher>, u32> {
+            self.inner.get_roots()
+        }
+
+        fn size(&self) -> usize {
+            self.inner.size()
+        }
+
+        #[cfg(feature = "gc-v1")]
+        fn scan(
+            &self,
+            resume_from: Option<Self::ScanResumeHandle>,
+            batch_size: usize,
+        ) -> (
+            Vec<(ArenaHash<DefaultHasher>, OnDiskObject<DefaultHasher>)>,
+            Option<Self::ScanResumeHandle>,
+        ) {
+            self.inner.scan(resume_from, batch_size)
+        }
+
+        #[cfg(feature = "gc-v1")]
+        fn scan_keys(
+            &self,
+            resume_from: Option<Self::ScanResumeHandle>,
+            batch_size: usize,
+        ) -> (
+            Vec<ArenaHash<DefaultHasher>>,
+            Option<Self::ScanResumeHandle>,
+        ) {
+            self.other_overrides.fetch_add(1, Relaxed);
+            self.inner.scan_keys(resume_from, batch_size)
+        }
+
+        #[cfg(feature = "gc-v1")]
+        fn batch_get_children<I>(
+            &self,
+            keys: I,
+        ) -> Vec<(
+            ArenaHash<DefaultHasher>,
+            Option<Vec<ArenaKey<DefaultHasher>>>,
+        )>
+        where
+            I: Iterator<Item = ArenaHash<DefaultHasher>>,
+        {
+            self.other_overrides.fetch_add(1, Relaxed);
+            self.inner.batch_get_children(keys)
+        }
+    }
+
+    #[test]
+    fn flush_reads_root_counts_in_one_batch() {
+        let db = RootCountingDb::default();
+        let (single_reads, batch_reads) = (db.single_reads.clone(), db.batch_reads.clone());
+        let arena = Arena::new_from_backend(StorageBackend::new(16, db));
+        let mut roots = (0..10u64).map(|i| arena.alloc(i)).collect::<Vec<_>>();
+
+        // Each flush reads the stored counts of all its changed roots in one batch, the second
+        // one reading counts the first one stored.
+        for expected in 1..=2 {
+            roots.iter_mut().for_each(|root| root.persist());
+            arena.with_backend(|b| b.flush_all_changes_to_db());
+            assert_eq!(batch_reads.load(Relaxed), expected);
+            assert_eq!(single_reads.load(Relaxed), 0);
+            let counts = arena.with_backend(|b| b.database.get_roots());
+            assert_eq!(counts.len(), roots.len());
+            assert!(counts.values().all(|count| *count == expected as u32));
+        }
+    }
+
+    #[test]
+    fn flush_reads_root_counts_a_batch_left_out_one_by_one() {
+        let db = RootCountingDb {
+            omit_batch: true,
+            ..Default::default()
+        };
+        let single_reads = db.single_reads.clone();
+        let arena = Arena::new_from_backend(StorageBackend::new(16, db));
+        let mut roots = (0..10u64).map(|i| arena.alloc(i)).collect::<Vec<_>>();
+
+        for expected in 1..=2 {
+            roots.iter_mut().for_each(|root| root.persist());
+            arena.with_backend(|b| b.flush_all_changes_to_db());
+            assert_eq!(single_reads.load(Relaxed), expected * roots.len());
+            let counts = arena.with_backend(|b| b.database.get_roots());
+            assert_eq!(counts.len(), roots.len());
+            assert!(counts.values().all(|count| *count == expected as u32));
+        }
+    }
+
+    #[test]
+    fn flush_batches_root_counts_of_stored_and_dropped_nodes() {
+        use crate::backend::raw_node::RawNode;
+        let db = RootCountingDb::default();
+        let (single_reads, batch_reads) = (db.single_reads.clone(), db.batch_reads.clone());
+        let mut backend = StorageBackend::new(16, db);
+        // A stored node not in memory gets an `Update` when persisted, and a new node persisted
+        // then uncached a `CreateAndDelete`: both flush a root count the batch must cover.
+        let stored = RawNode::new(&[1], 0, vec![]);
+        stored.insert_into_db(&mut backend.database);
+        backend.persist(&stored.key);
+        let dropped = RawNode::new(&[2], 0, vec![]);
+        dropped.cache_into_backend(&mut backend);
+        backend.persist(&dropped.key);
+        backend.uncache(&dropped.key);
+
+        backend.flush_all_changes_to_db();
+        assert_eq!(
+            (batch_reads.load(Relaxed), single_reads.load(Relaxed)),
+            (1, 0)
+        );
+        let counts = backend.database.get_roots();
+        assert_eq!(counts.get(&stored.key), Some(&1));
+        assert_eq!(counts.get(&dropped.key), Some(&1));
+    }
+
+    #[test]
+    #[cfg(feature = "gc-v1")]
+    fn wrapped_db_passes_batch_overrides_through() {
+        use crate::storage::WrappedDB;
+        let db = RootCountingDb::default();
+        let (batch_reads, other_overrides) = (db.batch_reads.clone(), db.other_overrides.clone());
+        let wrapped = WrappedDB::<_, ()>::wrap(db);
+        let key = ArenaHash::_from_bytes(&[1]);
+        wrapped.batch_get_root_counts(std::iter::once(key.clone()));
+        wrapped.scan_keys(None, 1);
+        wrapped.batch_get_children(std::iter::once(key));
+        assert_eq!(batch_reads.load(Relaxed), 1);
+        assert_eq!(other_overrides.load(Relaxed), 2);
     }
 }

@@ -270,6 +270,23 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// root. Returns 0 if the node is not a GC root.
     fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32;
 
+    /// The root count of each of `keys`, as [`DB::get_root_count`] gives it.
+    ///
+    /// The default calls [`DB::get_root_count`] per key. Backends with a per-query cost, such as a
+    /// round trip to a database server, should override it to read the counts together.
+    ///
+    /// The result should contain every key, with 0 for a key that is not a root.
+    fn batch_get_root_counts<I>(&self, keys: I) -> HashMap<ArenaHash<Self::Hasher>, u32>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        keys.map(|key| {
+            let count = self.get_root_count(&key);
+            (key, count)
+        })
+        .collect()
+    }
+
     /// Set the root count of the node with key `key` to `count`. If `count` is
     /// 0, the node will no longer be a GC root.
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32);

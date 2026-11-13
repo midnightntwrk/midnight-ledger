@@ -294,6 +294,16 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db.get_root_count(key)
     }
 
+    fn batch_get_root_counts<I>(
+        &self,
+        keys: I,
+    ) -> std::collections::HashMap<ArenaHash<Self::Hasher>, u32>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        self.db.batch_get_root_counts(keys)
+    }
+
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         self.db.set_root_count(key, count)
     }
