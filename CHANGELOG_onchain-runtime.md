@@ -3,12 +3,13 @@
 ## Version `5.0.0`
 
 - breaking: pull in breaking transient-crypto changes. A verifier key in
-  `ContractOperation`'s `v3` slot is now one whose proofs carry the deferred
-  accumulators a `verify_proof` instruction exposes: `verifier-key[v8]` against
-  `proof[v6]`, where it was `[v7]` against `proof[v5]`. The key's own bytes are
-  unchanged, so a stored contract operation still decodes.
-- breaking: `ContractOperation.verifierKey` takes a `verifier-key[v8]` key, and
-  refuses the `[v7]` it took before.
+  `ContractOperation`'s `v3` slot is now a `midnight-zk-stdlib` 3 key whose
+  proofs carry the deferred accumulators a `verify_proof` instruction exposes:
+  `verifier-key[v9]` against `proof[v6]`, where it was `[v7]` against
+  `proof[v5]`. A stored contract operation still decodes, as the key is a
+  length-prefixed blob, but a `[v7]` or `[v8]` key in it no longer loads.
+- breaking: `ContractOperation.verifierKey` takes a `verifier-key[v9]` key, and
+  refuses the `[v7]` and `[v8]` keys it took before.
 - feat: `proofDataIntoSerializedPreimage` takes the inner proofs a circuit's
   `verify_proof` instructions consume, and emits a `proof-preimage[v2]`.
 

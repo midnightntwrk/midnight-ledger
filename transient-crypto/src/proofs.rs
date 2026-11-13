@@ -580,10 +580,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v8]")
+        Cow::Borrowed("verifier-key[v9]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v8]".into()
+        "verifier-key[v9]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
