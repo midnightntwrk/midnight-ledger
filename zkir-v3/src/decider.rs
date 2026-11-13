@@ -24,23 +24,22 @@ use std::io;
 
 use anyhow::{anyhow, bail};
 use group::ff::Field;
+use midnight_circuits::hash::poseidon::PoseidonChip;
 use midnight_circuits::instructions::{
-    AssertionInstructions, AssignmentInstructions, ControlFlowInstructions, PublicInputInstructions,
+    AssertionInstructions, AssignmentInstructions, ControlFlowInstructions,
 };
 use midnight_circuits::types::{AssignedBit, AssignedNative, Instantiable};
-use midnight_circuits::verifier::{Accumulator, AssignedAccumulator, SelfEmulation};
+use midnight_circuits::verifier::{Accumulator, AssignedAccumulator, AssignedG1};
+use midnight_curves::{Bls12, G1Projective};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
+    poly::PolynomialLabel,
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightVK, ZkStdLib};
+use midnight_zk_stdlib::{KZG, MidnightVK, ZkStdLib};
 use transient_crypto::curve::outer;
-use transient_crypto::proofs::{
-    InnerSelfEmulation as S, accumulator_pi_len, reconstruct_accumulator,
-};
-
-type AssignedPoint = <S as SelfEmulation>::AssignedPoint;
+use transient_crypto::proofs::{accumulator_pi_len, reconstruct_accumulator};
 
 /// Which deferred obligation, if any, an inner proof carries into the proof that
 /// verifies it.
@@ -86,14 +85,14 @@ impl DeciderKind {
 }
 
 /// Encodes an inner verifying key as `[tag] | MidnightVK::write(Processed)`.
-pub fn serialize_vk(vk: &MidnightVK, kind: DeciderKind) -> io::Result<Vec<u8>> {
+pub fn serialize_vk(vk: &MidnightVK<KZG>, kind: DeciderKind) -> io::Result<Vec<u8>> {
     let mut blob = vec![kind.tag()];
     vk.write(&mut blob, SerdeFormat::Processed)?;
     Ok(blob)
 }
 
 /// Inverse of [`serialize_vk`].
-pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> {
+pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK<KZG>)> {
     let (tag, vk_bytes) = blob
         .split_first()
         .ok_or_else(|| anyhow!("empty `verify_proof_vks` entry"))?;
@@ -101,8 +100,8 @@ pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> 
     let mut vk_bytes = vk_bytes;
     let vk = MidnightVK::read(&mut vk_bytes, SerdeFormat::Processed)
         .map_err(|e| anyhow!("reading inner verifying key: {e}"))?;
-    // The blob's digest names the key's fixed bases, so padding it would give
-    // the same key a second identity, and the circuit a second shape.
+    // An instruction names its key by the blob's digest, so padding it would
+    // give the same key a second identity.
     if !vk_bytes.is_empty() {
         bail!(
             "`verify_proof_vks` entry has {} trailing bytes after its verifying key",
@@ -113,14 +112,14 @@ pub fn deserialize_vk(blob: &[u8]) -> anyhow::Result<(DeciderKind, MidnightVK)> 
 }
 
 /// Public-input encoding of a resolved, collapsed accumulator.
-pub fn accumulator_pis(acc: &Accumulator<S>) -> Vec<outer::Scalar> {
-    <AssignedAccumulator<S> as Instantiable<outer::Scalar>>::as_public_input(acc)
+pub fn accumulator_pis(acc: &Accumulator<Bls12>) -> Vec<outer::Scalar> {
+    <AssignedAccumulator<Bls12> as Instantiable<outer::Scalar>>::as_public_input(acc)
 }
 
 /// Encoding of the accumulator a guarded-off `verify_proof` exposes: the
 /// trivial one, which satisfies the pairing invariant by construction.
 pub fn trivial_accumulator_pis() -> Vec<outer::Scalar> {
-    accumulator_pis(&Accumulator::<S>::trivial(&[]))
+    accumulator_pis(&Accumulator::<Bls12>::trivial(&[]))
 }
 
 /// The last [`accumulator_pi_len`] entries of an inner proof's instance.
@@ -141,7 +140,7 @@ fn accumulator_tail<T>(instance: &[T]) -> anyhow::Result<&[T]> {
 
 /// Reads the accumulator a `Collapsed` inner proof carries in the tail of its
 /// instance, and checks it is collapsed.
-fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator<S>> {
+fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator<Bls12>> {
     let tail = accumulator_tail(instance)?;
     let acc = reconstruct_accumulator(tail).ok_or_else(|| {
         anyhow!(
@@ -153,8 +152,8 @@ fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator
 
     // The encoding is `lhs_point || lhs_scalar || rhs_point || rhs_scalar`, so
     // each side's scalar is the last field of its half. A collapsed accumulator
-    // has both equal to one, and `assign_collapsed_accumulator` constrains them
-    // to one.
+    // has both equal to one, and `AssignedAccumulator::assign_collapsed`
+    // constrains them to one.
     let half = tail.len() / 2;
     if tail[half - 1] != outer::Scalar::ONE || tail[tail.len() - 1] != outer::Scalar::ONE {
         bail!("a carried accumulator is not collapsed: both side scalars must be one");
@@ -170,15 +169,16 @@ fn carried_accumulator(instance: &[outer::Scalar]) -> anyhow::Result<Accumulator
 /// never reaches here, `verify_proof_offcircuit` returns early instead.
 pub fn decide_offcircuit(
     kind: DeciderKind,
-    own_acc: Accumulator<S>,
-    bases: &BTreeMap<String, <S as SelfEmulation>::C>,
+    own_acc: Accumulator<Bls12>,
+    bases: &BTreeMap<PolynomialLabel, G1Projective>,
     instance: &[outer::Scalar],
-) -> anyhow::Result<Accumulator<S>> {
+) -> anyhow::Result<Accumulator<Bls12>> {
     let mut acc = match kind {
         DeciderKind::None => own_acc,
-        DeciderKind::Collapsed => {
-            Accumulator::accumulate(&[own_acc, carried_accumulator(instance)?])
-        }
+        DeciderKind::Collapsed => Accumulator::accumulate::<PoseidonChip<outer::Scalar>>(&[
+            own_acc,
+            carried_accumulator(instance)?,
+        ]),
     };
 
     acc.resolve_fixed_bases(bases);
@@ -196,12 +196,11 @@ pub fn decide_incircuit(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
     kind: DeciderKind,
-    own_acc: AssignedAccumulator<S>,
-    bases: &BTreeMap<String, AssignedPoint>,
+    own_acc: AssignedAccumulator<Bls12>,
+    bases: &BTreeMap<PolynomialLabel, AssignedG1<Bls12>>,
     instance: &[AssignedNative<outer::Scalar>],
     guard: &AssignedBit<outer::Scalar>,
 ) -> Result<(), Error> {
-    let verifier = std.verifier();
     let bls = std.bls12_381();
     let scalar_chip = bls.scalar_field_chip();
 
@@ -211,7 +210,13 @@ pub fn decide_incircuit(
         DeciderKind::None => own_acc,
         DeciderKind::Collapsed => {
             let carried = compute_carried_accumulator(std, layouter, instance, guard)?;
-            verifier.accumulate(layouter, &[own_acc, carried])?
+            AssignedAccumulator::accumulate(
+                layouter,
+                bls,
+                scalar_chip,
+                std.poseidon_chip(),
+                &[own_acc, carried],
+            )?
         }
     };
 
@@ -220,7 +225,7 @@ pub fn decide_incircuit(
     AssignedAccumulator::scale_by_bit(layouter, scalar_chip, guard, &mut acc)?;
     acc.collapse(layouter, bls, scalar_chip)?;
 
-    verifier.constrain_as_public_input(layouter, &acc)
+    acc.constrain_as_public_input(layouter, bls, scalar_chip)
 }
 
 /// Reconstructs, in-circuit, the accumulator an inner proof carries in
@@ -230,7 +235,8 @@ fn compute_carried_accumulator(
     layouter: &mut impl Layouter<outer::Scalar>,
     instance: &[AssignedNative<outer::Scalar>],
     guard: &AssignedBit<outer::Scalar>,
-) -> Result<AssignedAccumulator<S>, Error> {
+) -> Result<AssignedAccumulator<Bls12>, Error> {
+    let bls = std.bls12_381();
     let tail = accumulator_tail(instance).map_err(|e| Error::Synthesis(e.to_string()))?;
 
     let mut selected_limbs = Vec::with_capacity(tail.len());
@@ -252,14 +258,18 @@ fn compute_carried_accumulator(
                 })
             })?;
 
-        let assigned_accumulator =
-            std.verifier()
-                .assign_collapsed_accumulator(layouter, &[], accumulator)?;
+        let assigned_accumulator = AssignedAccumulator::assign_collapsed(
+            layouter,
+            bls,
+            bls.scalar_field_chip(),
+            &[],
+            accumulator,
+        )?;
 
-        for (selected, assigned) in selected_limbs.iter().zip(
-            std.verifier()
-                .as_public_input(layouter, &assigned_accumulator)?,
-        ) {
+        for (selected, assigned) in selected_limbs
+            .iter()
+            .zip(assigned_accumulator.in_circuit_as_public_input(layouter, bls)?)
+        {
             std.assert_equal(layouter, selected, &assigned)?;
         }
         assigned_accumulator

@@ -12,10 +12,7 @@
 // limitations under the License.
 
 use group::Group;
-use midnight_circuits::{
-    ecc::curves::CircuitCurve,
-    instructions::{EccInstructions, ZeroInstructions},
-};
+use midnight_circuits::{ecc::curves::CircuitCurve, instructions::EccInstructions};
 
 use midnight_curves::{JubjubExtended, curve25519};
 use midnight_proofs::{circuit::Layouter, plonk};
@@ -92,9 +89,6 @@ pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue)
 /// # Errors
 ///
 /// Errors if the input is not a supported type.
-// `x`/`y` would assert that Weierstrass points are not the identity, which
-// changes verifier keys.
-#[allow(deprecated)]
 pub fn into_coordinates_incircuit(
     std_lib: &ZkStdLib,
     layouter: &mut impl Layouter<F>,
@@ -105,24 +99,23 @@ pub fn into_coordinates_incircuit(
         JubjubPoint(p) => {
             let jubjub = std_lib.jubjub();
             Ok((
-                Native(jubjub.x_coordinate(p)),
-                Native(jubjub.y_coordinate(p)),
+                Native(jubjub.x(layouter, p)?),
+                Native(jubjub.y(layouter, p)?),
             ))
         }
         Secp256k1Point(p) => {
+            // `x` and `y` constrain the point not to be the identity.
             let curve = std_lib.secp256k1();
-            curve.assert_non_zero(layouter, p)?;
             Ok((
-                Secp256k1Base(curve.x_coordinate(p)),
-                Secp256k1Base(curve.y_coordinate(p)),
+                Secp256k1Base(curve.x(layouter, p)?),
+                Secp256k1Base(curve.y(layouter, p)?),
             ))
         }
         Secp256r1Point(p) => {
             let curve = std_lib.p256();
-            curve.assert_non_zero(layouter, p)?;
             Ok((
-                Secp256r1Base(curve.x_coordinate(p)),
-                Secp256r1Base(curve.y_coordinate(p)),
+                Secp256r1Base(curve.x(layouter, p)?),
+                Secp256r1Base(curve.y(layouter, p)?),
             ))
         }
         Curve25519Point(p) => {
@@ -130,8 +123,8 @@ pub fn into_coordinates_incircuit(
             // identity, so no non-zero assertion is needed.
             let curve = std_lib.curve25519();
             Ok((
-                Curve25519Base(curve.x_coordinate(p)),
-                Curve25519Base(curve.y_coordinate(p)),
+                Curve25519Base(curve.x(layouter, p)?),
+                Curve25519Base(curve.y(layouter, p)?),
             ))
         }
         _ => Err(plonk::Error::Synthesis(format!(

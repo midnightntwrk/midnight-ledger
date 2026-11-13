@@ -1,5 +1,16 @@
 # `zkir` Changelog
 
+## Unreleased
+
+- breaking: require `midnight-zk-stdlib` 3.0.0-rc.1 and `midnight-circuits`
+  8.0.0-rc.1, proving with the `KZG` commitment scheme. This changes the
+  verifier keys of V2 and `zkir-v3` circuits; V0 and V1 keys are unchanged.
+- breaking: `zkir-v3`'s `verify_proof_vks` entries hold stdlib 3 keys, whose
+  bytes start with a commitment-scheme id, so stdlib 2 entries no longer load.
+- breaking: V2 and `zkir-v3` prover keys are tagged `prover-key[v8](...)`. V0
+  and V1 prover keys keep their tags, and `LocalProvingProvider` now loads them
+  with the v1 pipeline's own loader.
+
 ## Version `2.2.0`
 
 - chore: require `midnight-circuits` 7.3.0 and `midnight-zk-stdlib` 2.4.0.

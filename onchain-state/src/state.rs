@@ -1136,7 +1136,7 @@ impl<D: DB> Default for ContractState<D> {
 pub struct ContractOperation {
     /// v1 (zk-stdlib v1) verifier key.
     pub v2: Option<transient_crypto_old::proofs::VerifierKey>,
-    /// v2 (zk-stdlib v2) verifier key.
+    /// v2 (zk-stdlib v3) verifier key.
     pub v3: Option<VerifierKey>,
     /// The IR associated with this contract operation.
     pub ir: Option<Sp<IrBuf>>,

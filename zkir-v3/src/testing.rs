@@ -21,7 +21,9 @@ use midnight_circuits::types::AssignedNative;
 use midnight_curves::Fq;
 use midnight_proofs::circuit::{Layouter, Value};
 use midnight_proofs::plonk;
-use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk};
+use midnight_zk_stdlib::{
+    KZG, Relation, ZkStdLib, ZkStdLibArch, optimal_k, prove, setup_pk, setup_vk,
+};
 use rand::{CryptoRng, Rng};
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::ParamsProverProvider;
@@ -92,7 +94,7 @@ pub async fn echo_proof(
     let srs = params.get_params(optimal_k(&Echo) as u8).await?;
     let vk = setup_vk(srs.as_ref(), &Echo);
     let pk = setup_pk(&Echo, &vk);
-    let proof = prove::<Echo, PoseidonState<Fq>>(srs.as_ref(), &pk, &Echo, &value.0, (), rng)?;
+    let proof = prove::<Echo, PoseidonState<Fq>, KZG>(srs.as_ref(), &pk, &Echo, &value.0, (), rng)?;
     Ok(InnerProof {
         vk_blob: serialize_vk(&vk, DeciderKind::None)?,
         proof,
