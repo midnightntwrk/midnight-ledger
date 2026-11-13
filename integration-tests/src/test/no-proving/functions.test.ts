@@ -23,6 +23,8 @@ import {
   communicationCommitment,
   communicationCommitmentRandomness,
   CostModel,
+  createCheckPayload,
+  createProvingPayload,
   createShieldedCoinInfo,
   decodeCoinPublicKey,
   decodeContractAddress,
@@ -52,6 +54,8 @@ import {
   partitionTranscripts,
   persistentCommit,
   persistentHash,
+  PreProof,
+  proofDataIntoSerializedPreimage,
   PreTranscript,
   QueryContext,
   rawTokenType,
@@ -1392,6 +1396,75 @@ describe('Ledger API - functions', () => {
       const program: Op<null>[] = [{ push: { storage: false, value: huge } }, 'log'];
 
       expect(() => runProgram(new VmStack(), program, CostModel.initialCostModel(), undefined)).toThrow();
+    });
+  });
+
+  describe('proofDataIntoSerializedPreimage', () => {
+    const BARE_TAG = 'midnight:proof-preimage[v2]:';
+    const VERSIONED_TAG = 'midnight:proof-preimage-versioned[v2]:';
+    const V2 = 1;
+
+    const preimage = (innerProofs?: Uint8Array[]): Uint8Array =>
+      proofDataIntoSerializedPreimage(Static.alignedValue, Static.alignedValue, [], [], 'circuit', innerProofs);
+
+    // The function emits a bare preimage; `PreProof` reads the versioned wrapper around one.
+    const versioned = (bare: Uint8Array): Buffer =>
+      Buffer.concat([Buffer.from(VERSIONED_TAG, 'latin1'), Buffer.from([V2]), bare.subarray(BARE_TAG.length)]);
+    const asPreProof = (bare: Uint8Array): PreProof => PreProof.deserialize(versioned(bare));
+
+    /**
+     * @given Call inputs, outputs and empty transcripts
+     * @when Building the serialized preimage
+     * @then Should start with the proof-preimage[v2] tag
+     */
+    test('should emit a proof-preimage[v2]', () => {
+      expect(Buffer.from(preimage().subarray(0, BARE_TAG.length)).toString('latin1')).toEqual(BARE_TAG);
+    });
+
+    /**
+     * @given Two inner proofs, one of them empty
+     * @when Building the serialized preimage
+     * @then Should list both in order along with the key location
+     */
+    test('should carry the inner proofs in order, empty ones included', () => {
+      const preProof = asPreProof(preimage([new Uint8Array([1, 2, 3]), new Uint8Array()]));
+
+      expect(preProof.toString(true)).toContain('inner_proofs: [Direct([1, 2, 3]), Direct([])]');
+      expect(preProof.toString(true)).toContain('key_location: KeyLocation("circuit")');
+    });
+
+    /**
+     * @given No inner proofs
+     * @when Building the serialized preimage
+     * @then Should have an empty inner proof list
+     */
+    test('should carry no inner proofs when none are given', () => {
+      expect(asPreProof(preimage()).toString(true)).toContain('inner_proofs: []');
+    });
+
+    /**
+     * @given A serialized preimage wrapped as a versioned PreProof
+     * @when Deserializing it, and constructing one from the hex of its untagged body
+     * @then Both should serialize back to the wrapped bytes
+     */
+    test('should round trip through PreProof', () => {
+      const wrapped = versioned(preimage([new Uint8Array([1])]));
+      const body = wrapped.subarray(VERSIONED_TAG.length).toString('hex');
+
+      expect(Buffer.from(PreProof.deserialize(wrapped).serialize())).toEqual(wrapped);
+      expect(Buffer.from(new PreProof(body).serialize())).toEqual(wrapped);
+    });
+
+    /**
+     * @given A serialized preimage with an inner proof
+     * @when Building the proving and check payloads
+     * @then Should not throw
+     */
+    test('should be accepted by the proving and check payload builders', () => {
+      const serialized = preimage([new Uint8Array([1])]);
+
+      expect(() => createProvingPayload(serialized, undefined)).not.toThrow();
+      expect(() => createCheckPayload(serialized)).not.toThrow();
     });
   });
 });

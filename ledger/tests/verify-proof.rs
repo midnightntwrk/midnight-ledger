@@ -32,8 +32,12 @@ use base_crypto::rng::SplittableRng;
 use base_crypto::time::Timestamp;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::dust::{DUST_EXPECTED_FILES, DustResolver};
-use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, ProofVersioned, Transaction};
-use midnight_ledger::test_utilities::{PUBLIC_PARAMS, Resolver, TestState, test_intents, tx_prove};
+use midnight_ledger::structure::{
+    ContractDeploy, INITIAL_PARAMETERS, ProofVersioned, Signature, Transaction,
+};
+use midnight_ledger::test_utilities::{
+    PUBLIC_PARAMS, Resolver, TestState, Tx, test_intents, tx_prove,
+};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v10 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
@@ -139,8 +143,11 @@ fn resolver(materials: StdHashMap<String, ProvingKeyMaterial>) -> Resolver {
     )
 }
 
-#[tokio::test]
-async fn contract_call_verifying_an_inner_proof() {
+type ProvenTx = Tx<Signature, InMemoryDB>;
+
+/// Deploys the contract and proves a call to it. The returned state has the
+/// deploy applied, and not the call.
+async fn deploy_and_call() -> (TestState<InMemoryDB>, ProvenTx, ProvenTx) {
     let mut rng = StdRng::seed_from_u64(0x42);
 
     // The proof the contract will verify. It cannot come from ZKIR: a ZKIR
@@ -161,15 +168,14 @@ async fn contract_call_verifying_an_inner_proof() {
 
     // Deploy it.
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
-    let mut strictness = WellFormedStrictness::default();
-    strictness.enforce_balancing = false;
+    let strictness = unbalanced();
     let op = ContractOperation::new(Some(outer_vk), None);
     let contract = ContractState::new(
         StateValue::Null,
         HashMap::new().insert(b"verify"[..].into(), op.clone()),
         Default::default(),
     );
-    let (tx, addr) = {
+    let (deploy_tx, addr) = {
         let deploy = ContractDeploy::new(&mut rng, contract);
         let addr = deploy.address();
         let tx = tx_prove(
@@ -190,12 +196,12 @@ async fn contract_call_verifying_an_inner_proof() {
         .expect("deploy proving");
         (tx, addr)
     };
-    state.assert_apply(&tx, strictness);
+    state.assert_apply(&deploy_tx, strictness);
     assert!(state.ledger.index(addr).is_some());
 
     // Call it. The inner proof is the witness; its statement is the private
     // transcript the circuit binds as the instance to verify against.
-    let tx = {
+    let call_tx = {
         // A call must carry a transcript. One `Noop` is the least a contract
         // can say, and field-reprs to the single zero the circuit declares.
         let transcripts = partition_transcripts(
@@ -234,6 +240,19 @@ async fn contract_call_verifying_an_inner_proof() {
             .await
             .expect("call proving")
     };
+    (state, deploy_tx, call_tx)
+}
+
+fn unbalanced() -> WellFormedStrictness {
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    strictness
+}
+
+#[tokio::test]
+async fn contract_call_verifying_an_inner_proof() {
+    let (mut state, _, tx) = deploy_and_call().await;
+    let strictness = unbalanced();
     // Nothing here is vacuous only if the proof really carries what
     // `verify_proof` deferred, and well-formedness really discharges it.
     let (_, call) = tx.calls().next().expect("the transaction has one call");
@@ -249,4 +268,24 @@ async fn contract_call_verifying_an_inner_proof() {
     tx.well_formed(&state.ledger, strictness, Timestamp::from_secs(0))
         .expect("a call carrying a verified inner proof is well-formed");
     state.assert_apply(&tx, strictness);
+}
+
+/// Regenerates the TypeScript integration tests' fixtures in
+/// `integration-tests/resources/verify-proof`. Ignored, as it overwrites them:
+///
+/// ```text
+/// cargo test -p midnight-ledger-v10 --features proving --test verify-proof \
+///     -- --ignored write_integration_test_fixtures
+/// ```
+#[tokio::test]
+#[ignore = "writes integration-tests/resources/verify-proof; run on purpose"]
+async fn write_integration_test_fixtures() {
+    let (_, deploy_tx, call_tx) = deploy_and_call().await;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../integration-tests/resources/verify-proof");
+    for (name, tx) in [("deploy", &deploy_tx), ("call", &call_tx)] {
+        let mut bytes = Vec::new();
+        serialize::tagged_serialize(tx, &mut bytes).expect("in-memory serialization");
+        std::fs::write(dir.join(format!("{name}.tx")), bytes).expect("write fixture");
+    }
 }
