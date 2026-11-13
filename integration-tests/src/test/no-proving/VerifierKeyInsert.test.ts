@@ -39,7 +39,7 @@ describe('Ledger API - VerifierKeyInsert', () => {
    * @then Should store the v4 key
    */
   test('should construct with a v4 verifier key', () => {
-    const verifierKey = new ContractOperationVersionedVerifierKey('v4', TestResource.circuit('noop')!.verifierKey);
+    const verifierKey = new ContractOperationVersionedVerifierKey('v4', TestResource.circuit('noop').verifierKey);
 
     const verifierKeyInsert = new VerifierKeyInsert('operation', verifierKey);
 

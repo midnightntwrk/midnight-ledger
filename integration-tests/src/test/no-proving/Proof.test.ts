@@ -27,7 +27,25 @@ const G1_GENERATOR = Buffer.from(
   'hex'
 );
 
-const length = (n: number): Buffer => Buffer.from([n * 4]);
+/** A compressed G1 point (compression flag set, sign flag clear) with the given x and the smaller y. */
+const compressedPoint = (x: number): Buffer => {
+  const point = Buffer.alloc(POINT_BYTES);
+  point[0] = 0x80;
+  point.writeUInt32BE(x, POINT_BYTES - 4);
+  return point;
+};
+// y^2 = x^3 + 4 has no solution at x = 1, so this is no point on the curve at all.
+const OFF_CURVE = compressedPoint(1);
+// (0, 2) is on the curve, but has order 3, so it lies outside the prime-order subgroup.
+const OUTSIDE_SUBGROUP = compressedPoint(0);
+
+/** SCALE compact length; the single-byte mode only covers lengths below 64. */
+const length = (n: number): Buffer => {
+  if (n >= 64) {
+    throw new Error(`single-byte SCALE compact length out of range: ${n}`);
+  }
+  return Buffer.from([n * 4]);
+};
 const versioned = (...parts: Uint8Array[]): Buffer => Buffer.concat([TAG, ...parts]);
 const v4 = (bytes: Uint8Array, ...accumulators: Uint8Array[]): Buffer =>
   versioned(Buffer.from([V4]), length(bytes.length), bytes, length(accumulators.length), ...accumulators);
@@ -75,14 +93,15 @@ describe('Ledger API - Proof', () => {
   });
 
   /**
-   * @given A V4 proof[v6] whose accumulator has an all-0xff point
+   * @given A V4 proof[v6] whose accumulator has a point off the curve, or on it but outside the subgroup
    * @when Deserializing it
    * @then Should throw naming the curve and subgroup check
    */
-  test('should reject an accumulator point that is not on the curve', () => {
-    const offCurve = Buffer.alloc(POINT_BYTES, 0xff);
-
-    expect(() => Proof.deserialize(v4(Buffer.from([1]), accumulator(G1_GENERATOR, offCurve)))).toThrow(
+  test.each([
+    ['not on the curve', OFF_CURVE],
+    ['outside the prime-order subgroup', OUTSIDE_SUBGROUP]
+  ])('should reject an accumulator point %s', (_, point) => {
+    expect(() => Proof.deserialize(v4(Buffer.from([1]), accumulator(G1_GENERATOR, point)))).toThrow(
       /not on the curve, or outside the prime-order subgroup/
     );
   });
@@ -90,10 +109,10 @@ describe('Ledger API - Proof', () => {
   /**
    * @given A V4 proof[v6] whose accumulator holds a single point
    * @when Deserializing it
-   * @then Should throw
+   * @then Should throw running out of input, not on a point check
    */
   test('should reject an accumulator shorter than two points', () => {
-    expect(() => Proof.deserialize(v4(Buffer.from([1]), G1_GENERATOR))).toThrow();
+    expect(() => Proof.deserialize(v4(Buffer.from([1]), G1_GENERATOR))).toThrow(/failed to fill whole buffer/);
   });
 
   /**

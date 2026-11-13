@@ -163,10 +163,14 @@ const proofServerRequest = async (endpoint: string, payload: Uint8Array): Promis
     if (e instanceof Error) {
       logger.warn(`Axios all retries failed: ${e.message}`);
     }
+    // The server explains a rejected request in the body; keep it so callers can tell failures apart.
+    response = axios.isAxiosError(e) ? e.response : undefined;
   }
   if (response?.status !== 200) {
-    logger.warn(`Request failed: status=${response?.status}, text=${response?.statusText}, data=${response?.data}`);
-    throw new Error(response?.statusText);
+    const body = response?.data ? Buffer.from(response.data).toString('utf8') : '';
+    const message = `proof server /${endpoint} failed: status=${response?.status} ${response?.statusText ?? ''}: ${body}`;
+    logger.warn(message);
+    throw new Error(message);
   }
   return response.data;
 };
@@ -350,7 +354,7 @@ const PROVE_TX_PATH = '/prove-tx';
 // Built-in keys are resolved by the server itself; only test circuits travel with the request.
 const serverProver: ProvingProvider = {
   check: async (serializedPreimage: Uint8Array, keyLocation: string): Promise<(bigint | undefined)[]> => {
-    const payload = createCheckPayload(serializedPreimage, TestResource.circuit(keyLocation)?.ir);
+    const payload = createCheckPayload(serializedPreimage, TestResource.circuitAt(keyLocation)?.ir);
     const result = await proofServerRequest('check', payload);
     return parseCheckResult(result);
   },
@@ -359,10 +363,14 @@ const serverProver: ProvingProvider = {
     keyLocation: string,
     overwriteBindingInput?: bigint
   ): Promise<Uint8Array> => {
-    const payload = createProvingPayload(serializedPreimage, overwriteBindingInput, TestResource.circuit(keyLocation));
+    const payload = createProvingPayload(
+      serializedPreimage,
+      overwriteBindingInput,
+      TestResource.circuitAt(keyLocation)
+    );
     return proofServerRequest('prove', payload);
   },
-  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => TestResource.circuit(keyLocation)
+  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => TestResource.circuitAt(keyLocation)
 };
 
 const callProverWorker = (op: 'check' | 'prove', args: any[]): Promise<any> => {

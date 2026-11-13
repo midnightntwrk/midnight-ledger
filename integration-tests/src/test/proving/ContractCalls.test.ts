@@ -31,7 +31,7 @@ describe('Ledger API - ContractCalls [@slow][@proving]', () => {
   beforeEach(() => {
     state = TestState.new();
     op = new ContractOperation();
-    op.verifierKey = TestResource.circuit(CIRCUIT)!.verifierKey;
+    op.verifierKey = TestResource.circuit(CIRCUIT).verifierKey;
     addr = deployOperation(state, CIRCUIT, op);
   });
 
@@ -64,11 +64,11 @@ describe('Ledger API - ContractCalls [@slow][@proving]', () => {
   /**
    * @given An unproven call carrying an inner proof for a circuit without verify_proof
    * @when Proving it
-   * @then Should be rejected by the prover
+   * @then Should be rejected by the prover for the unconsumed witness
    */
   test('should refuse to prove a call whose inner proofs the circuit does not consume', async () => {
     const withInnerProof = noopCallTx(state, addr, CIRCUIT, op, CIRCUIT, [new Uint8Array([1, 2, 3])]);
 
-    await expect(prove(withInnerProof)).rejects.toThrow();
+    await expect(prove(withInnerProof)).rejects.toThrow(/Expected 0 proof witnesses .*received 1/);
   });
 });
