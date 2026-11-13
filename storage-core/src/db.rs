@@ -313,8 +313,15 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     }
 
     #[cfg(feature = "gc-v1")]
-    /// Children-only [`batch_get_nodes`](DB::batch_get_nodes); `None` for a missing key. The
-    /// default loads whole objects; override where children are stored apart from the payload.
+    /// Children-only [`batch_get_nodes`](DB::batch_get_nodes); `None` for a missing key, which may
+    /// also be left out. The default loads whole objects; override where children are stored apart
+    /// from the payload.
+    ///
+    /// Reachability is determined from these lists, so each must have the same
+    /// [`refs`](ArenaKey::refs) as the stored children, which an override may return as
+    /// [`ArenaKey::Ref`]s. The exception: a node never returned by [`DB::scan_keys`], with all its
+    /// descendants, may report none, and must stay excluded until any garbage collection relying
+    /// on that completes.
     #[allow(clippy::type_complexity)]
     fn batch_get_children<I>(
         &self,
@@ -1023,7 +1030,7 @@ mod tests {
 
     /// `scan_keys` yields exactly the keys `scan` yields, across resumes, and
     /// `batch_get_children` yields exactly the children `batch_get_nodes` yields,
-    /// `None` included. Backends overriding either must keep this.
+    /// `None` included. Overrides of `batch_get_children` need only match the children's refs.
     #[cfg(feature = "gc-v1")]
     fn test_keys_and_children_match_objects<D: DB<Hasher = DefaultHasher>>(db: &mut D) {
         let leaf = RawNode::new(&[0], 0, vec![]);

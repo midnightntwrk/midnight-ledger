@@ -351,6 +351,16 @@ impl<H: WellBehavedHasher> ArenaKey<H> {
         res
     }
 
+    /// As [`Self::refs`], but as an iterator, which allocates nothing for a by-reference key.
+    #[cfg(feature = "gc-v1")]
+    pub(crate) fn refs_iter(&self) -> impl Iterator<Item = &ArenaHash<H>> {
+        let (by_ref, direct) = match self {
+            ArenaKey::Ref(n) => (Some(n), None),
+            ArenaKey::Direct(_) => (None, Some(self.refs())),
+        };
+        by_ref.into_iter().chain(direct.into_iter().flatten())
+    }
+
     /// Returns Some(key) if Ref, None otherwise
     #[cfg(test)]
     pub fn into_ref(&self) -> Option<&ArenaHash<H>> {

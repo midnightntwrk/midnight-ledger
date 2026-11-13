@@ -89,6 +89,53 @@ impl RunningBenchmark {
     }
 }
 
+/// Debug builds only: panics if a reported child list differs from the stored object's, or a
+/// requested key with children is left out. Empty lists pass, as pinned nodes report none.
+#[cfg(debug_assertions)]
+fn check_reported_children<D: DB>(
+    db: &D,
+    batch: &[ArenaHash<D::Hasher>],
+    reported: &[(
+        ArenaHash<D::Hasher>,
+        Option<Vec<crate::arena::ArenaKey<D::Hasher>>>,
+    )],
+) {
+    use std::collections::HashMap;
+    let objects = db.batch_get_nodes(batch.iter().cloned());
+    let stored = objects
+        .iter()
+        .map(|(key, object)| {
+            let children = object
+                .iter()
+                .flat_map(|object| object.children.iter())
+                .flat_map(|child| child.refs_iter())
+                .collect::<HashSet<_>>();
+            (key, children)
+        })
+        .collect::<HashMap<_, _>>();
+    for (key, children) in reported {
+        let Some(stored) = stored.get(key) else {
+            continue;
+        };
+        let children = children
+            .iter()
+            .flatten()
+            .flat_map(|child| child.refs_iter())
+            .collect::<HashSet<_>>();
+        assert!(
+            children.is_empty() || children == *stored,
+            "batch_get_children reported children for {key:?} that differ from its stored object's"
+        );
+    }
+    let reported = reported.iter().map(|(key, _)| key).collect::<HashSet<_>>();
+    for (key, children) in &stored {
+        assert!(
+            reported.contains(key) || children.is_empty(),
+            "batch_get_children left out {key:?}, whose stored object has children"
+        );
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct GcState<D: DB> {
     rescan: bool,
@@ -167,7 +214,7 @@ impl<D: DB> GcState<D> {
                 if let Some(obj) = cache_read(hash.clone()) {
                     self.mark_set.insert(hash.clone());
                     self.grey_set.remove(&hash);
-                    for child in obj.children.iter().flat_map(|c| c.refs().into_iter()) {
+                    for child in obj.children.iter().flat_map(|c| c.refs_iter()) {
                         if !self.mark_set.contains(child) && !self.grey_set.contains(child) {
                             self.grey_set.insert(child.clone());
                             next.insert(child.clone());
@@ -186,11 +233,16 @@ impl<D: DB> GcState<D> {
             let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
             let batch_size = batch.len();
             let batch_read = db.batch_get_children(batch.iter().cloned());
+            #[cfg(debug_assertions)]
+            check_reported_children(db, &batch, &batch_read);
+            // Mark every requested key, returned or not, so none stays grey forever.
+            for key in &batch {
+                self.grey_set.remove(key);
+            }
             self.mark_set.extend(batch);
             for (parent, children) in batch_read {
-                self.grey_set.remove(&parent);
                 self.mark_set.insert(parent);
-                for child in children.iter().flatten().flat_map(|c| c.refs().into_iter()) {
+                for child in children.iter().flatten().flat_map(|c| c.refs_iter()) {
                     if !self.mark_set.contains(child) && !self.grey_set.contains(child) {
                         self.grey_set.insert(child.clone());
                     }
@@ -259,6 +311,7 @@ mod tests {
     #[cfg(feature = "proptest")]
     use proptest::{arbitrary::Arbitrary, strategy::Just};
     use serialize::Deserializable;
+    use std::sync::Mutex;
     use std::{
         collections::{HashMap, HashSet},
         sync::{
@@ -310,13 +363,29 @@ mod tests {
             .collect()
     }
 
-    /// Overrides `scan_keys` to enumerate keys without objects, and counts the calls that read
-    /// objects.
+    /// Reads keys and children without objects, counting object reads. `pinned` nodes are
+    /// unscanned and childless; `stale`, `omit` and `noisy` simulate faulty backends.
     #[derive(Clone, Debug, Default)]
     struct TestDb {
         inner: InMemoryDB,
+        pinned: Arc<Mutex<Vec<u8>>>,
+        stale: Option<u8>,
+        omit: Option<u8>,
+        noisy: bool,
         object_scans: Arc<AtomicUsize>,
         node_reads: Arc<AtomicUsize>,
+        children_asked: Arc<Mutex<Vec<ArenaHash<DefaultHasher>>>>,
+    }
+
+    impl TestDb {
+        fn pinned(&self) -> Vec<ArenaHash<DefaultHasher>> {
+            self.pinned
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|n| hash(*n))
+                .collect()
+        }
     }
 
     impl DummyArbitrary for TestDb {}
@@ -408,8 +477,59 @@ mod tests {
             Vec<ArenaHash<DefaultHasher>>,
             Option<Self::ScanResumeHandle>,
         ) {
+            let pinned = self.pinned();
             let (batch, handle) = self.inner.scan(resume_from, batch_size);
-            (batch.into_iter().map(|(key, _)| key).collect(), handle)
+            let keys = batch
+                .into_iter()
+                .map(|(key, _)| key)
+                .filter(|key| !pinned.contains(key))
+                .collect();
+            (keys, handle)
+        }
+
+        fn batch_get_children<I>(
+            &self,
+            keys: I,
+        ) -> Vec<(
+            ArenaHash<DefaultHasher>,
+            Option<Vec<ArenaKey<DefaultHasher>>>,
+        )>
+        where
+            I: Iterator<Item = ArenaHash<DefaultHasher>>,
+        {
+            let pinned = self.pinned();
+            keys.filter(|key| self.omit.map(hash).as_ref() != Some(key))
+                .map(|key| {
+                    self.children_asked.lock().unwrap().push(key.clone());
+                    // As refs only, like a backend storing them apart from the objects.
+                    let mut children = self.inner.get_node(&key).map(|object| {
+                        if pinned.contains(&key) {
+                            return vec![];
+                        }
+                        object
+                            .children
+                            .iter()
+                            .flat_map(|child| child.refs_iter().cloned().map(ArenaKey::Ref))
+                            .collect::<Vec<_>>()
+                    });
+                    if self.stale.map(hash).as_ref() == Some(&key) {
+                        children.iter_mut().for_each(|children| {
+                            children.pop();
+                        });
+                    }
+                    (key, children)
+                })
+                .flat_map(|entry| {
+                    let copies = if self.noisy { 2 } else { 1 };
+                    std::iter::repeat_n(entry, copies)
+                })
+                .chain(self.noisy.then(|| {
+                    (
+                        hash(2),
+                        Some(vec![ArenaKey::Ref(hash(3)), ArenaKey::Ref(hash(4))]),
+                    )
+                }))
+                .collect()
         }
     }
 
@@ -428,6 +548,35 @@ mod tests {
         assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
         assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
         assert_eq!(object_scans.load(Relaxed), 0);
+    }
+
+    #[test]
+    fn gc_marks_with_batch_get_children() {
+        let db = TestDb::default();
+        let node_reads = db.node_reads.clone();
+        let mut backend = backend(db);
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+        // Debug builds read objects to check the reported children against them.
+        if !cfg!(debug_assertions) {
+            assert_eq!(node_reads.load(Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn gc_neither_sweeps_nor_marks_below_childless_unscanned_nodes() {
+        let db = TestDb {
+            pinned: Arc::new(Mutex::new(vec![4, 5])),
+            ..Default::default()
+        };
+        let children_asked = db.children_asked.clone();
+        let mut backend = backend(db);
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+        // 4 is reached and reports no children, so the mark phase never asks for 5's.
+        let asked = children_asked.lock().unwrap();
+        assert!(asked.contains(&hash(4)));
+        assert!(!asked.contains(&hash(5)));
     }
 
     #[test]
@@ -495,5 +644,131 @@ mod tests {
         }
         assert_eq!(culled, 3 * CHUNK);
         assert_eq!(size(), 6 * CHUNK);
+    }
+
+    /// Runs gc passes of `batches` on-disk batches each until a cycle completes, calling `between`
+    /// after each. With this small graph a batch always covers a whole level of the mark.
+    fn gc_in_passes<D: DB<Hasher = DefaultHasher>>(
+        backend: &mut StorageBackend<D>,
+        batches: usize,
+        mut between: impl FnMut(usize),
+    ) -> usize {
+        let calls = std::cell::Cell::new(0);
+        let budget = || {
+            calls.set(calls.get() + 1);
+            if calls.get() <= batches {
+                Duration::MAX
+            } else {
+                Duration::ZERO
+            }
+        };
+        let mut culled = 0;
+        for pass in 0..20 {
+            calls.set(0);
+            culled += backend.gc_budgeted(budget);
+            between(pass);
+            if backend.database.size() == NODES.len() - 2 {
+                break;
+            }
+        }
+        culled
+    }
+
+    #[test]
+    fn gc_keeps_a_subtree_pinned_during_a_bounded_cycle() {
+        let db = TestDb::default();
+        let (pinned, children_asked) = (db.pinned.clone(), db.children_asked.clone());
+        let mut backend = backend(db);
+        // Pinning 4 and 5 mid-mark makes the mark skip 5, which must survive the sweep.
+        let culled = gc_in_passes(&mut backend, 2, |pass| {
+            if pass == 0 {
+                let asked = children_asked.lock().unwrap().clone();
+                assert_eq!(
+                    asked,
+                    vec![hash(1), hash(2)],
+                    "the first pass stops mid-mark"
+                );
+                pinned.lock().unwrap().extend([4, 5]);
+            }
+        });
+        assert_eq!(culled, 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+        assert!(!children_asked.lock().unwrap().contains(&hash(5)));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "reported children for")]
+    fn gc_catches_a_stale_child_list() {
+        // 2 is reported without 4, which would leave 4 and 5 unmarked and deleted.
+        let db = TestDb {
+            stale: Some(2),
+            ..Default::default()
+        };
+        backend(db).gc(Duration::from_secs(3600));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "whose stored object has children")]
+    fn gc_catches_a_stored_node_left_out() {
+        // Leaving out 2 would leave 3, 4 and 5 unmarked and deleted.
+        let db = TestDb {
+            omit: Some(2),
+            ..Default::default()
+        };
+        backend(db).gc(Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn gc_completes_when_a_leaf_is_left_out() {
+        // A left-out key is marked like a missing node, so the cycle still completes.
+        let db = TestDb {
+            omit: Some(3),
+            ..Default::default()
+        };
+        let mut backend = backend(db);
+        assert_eq!(gc_in_passes(&mut backend, 10, |_| {}), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn gc_follows_references_through_direct_children() {
+        use crate::arena::DirectChildNode;
+        // 20's only child is embedded, and references 21; 22 is garbage.
+        let mut db = InMemoryDB::<DefaultHasher>::default();
+        let embedded = DirectChildNode::new(vec![0], vec![ArenaKey::Ref(hash(21))]);
+        db.batch_update(
+            [
+                (
+                    hash(20),
+                    OnDiskObject {
+                        data: vec![20],
+                        children: vec![ArenaKey::Direct(embedded)],
+                    },
+                ),
+                node(21, &[]),
+                node(22, &[]),
+            ]
+            .into_iter()
+            .map(|(key, object)| (key, Update::InsertNode(object))),
+        );
+        db.set_root_count(hash(20), 1);
+        let mut backend = StorageBackend::new(1, db);
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 1);
+        assert!(backend.database.get_node(&hash(21)).is_some());
+        assert!(backend.database.get_node(&hash(22)).is_none());
+    }
+
+    #[test]
+    fn gc_accepts_repeated_and_unrequested_keys() {
+        // Correct lists, but every key twice, and 2 also before it was requested.
+        let db = TestDb {
+            noisy: true,
+            ..Default::default()
+        };
+        let mut backend = backend(db);
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
     }
 }
