@@ -212,7 +212,7 @@ impl<D: DB> GcState<D> {
         let mut cull_set = vec![];
         while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
-            let (keys, handle) = db.scan_keys(self.sweep_resume.clone(), batch_size);
+            let (keys, handle) = db.scan_keys(self.sweep_resume.take(), batch_size);
             self.sweep_resume = handle;
             let batch_size = keys.len();
             // Cull all nodes in the batch that are *not* marked.
@@ -250,6 +250,186 @@ impl<D: DB> GcState<D> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        DefaultHasher,
+        arena::{ArenaHash, ArenaKey},
+        backend::{OnDiskObject, StorageBackend},
+        db::{DB, DummyArbitrary, InMemoryDB, Update},
+    };
+    #[cfg(feature = "proptest")]
+    use proptest::{arbitrary::Arbitrary, strategy::Just};
+    use serialize::Deserializable;
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering::Relaxed},
+        },
+        time::Duration,
+    };
+
+    fn hash(n: u8) -> ArenaHash<DefaultHasher> {
+        ArenaHash::deserialize(&mut [n; 32].as_slice(), 0).unwrap()
+    }
+
+    fn node(n: u8, children: &[u8]) -> (ArenaHash<DefaultHasher>, OnDiskObject<DefaultHasher>) {
+        let object = OnDiskObject {
+            data: vec![n],
+            children: children.iter().map(|c| ArenaKey::Ref(hash(*c))).collect(),
+        };
+        (hash(n), object)
+    }
+
+    // 1 is the gc root: 1 -> 2 -> 3 and 2 -> 4 -> 5. 6 -> 7 is garbage.
+    const NODES: [(u8, &[u8]); 7] = [
+        (1, &[2]),
+        (2, &[3, 4]),
+        (3, &[]),
+        (4, &[5]),
+        (5, &[]),
+        (6, &[7]),
+        (7, &[]),
+    ];
+
+    /// A backend over [`NODES`] with only 1 a root, and a cache of one node, which keeps the mark
+    /// phase on disk.
+    fn backend<D: DB<Hasher = DefaultHasher>>(mut db: D) -> StorageBackend<D> {
+        db.batch_update(NODES.iter().map(|(n, children)| {
+            let (key, object) = node(*n, children);
+            (key, Update::InsertNode(object))
+        }));
+        db.set_root_count(hash(1), 1);
+        StorageBackend::new(1, db)
+    }
+
+    fn survivors<D: DB<Hasher = DefaultHasher>>(backend: &StorageBackend<D>) -> HashSet<u8> {
+        NODES
+            .iter()
+            .map(|(n, _)| *n)
+            .filter(|n| backend.database.get_node(&hash(*n)).is_some())
+            .collect()
+    }
+
+    /// Overrides `scan_keys` to enumerate keys without objects, and counts the calls that read
+    /// objects.
+    #[derive(Clone, Debug, Default)]
+    struct TestDb {
+        inner: InMemoryDB,
+        object_scans: Arc<AtomicUsize>,
+        node_reads: Arc<AtomicUsize>,
+    }
+
+    impl DummyArbitrary for TestDb {}
+
+    #[cfg(feature = "proptest")]
+    impl Arbitrary for TestDb {
+        type Parameters = ();
+        type Strategy = Just<Self>;
+
+        fn arbitrary_with(_: ()) -> Self::Strategy {
+            unimplemented!()
+        }
+    }
+
+    impl DB for TestDb {
+        type Hasher = DefaultHasher;
+        type ScanResumeHandle = <InMemoryDB as DB>::ScanResumeHandle;
+
+        fn get_node(&self, key: &ArenaHash<DefaultHasher>) -> Option<OnDiskObject<DefaultHasher>> {
+            self.inner.get_node(key)
+        }
+
+        fn insert_node(
+            &mut self,
+            key: ArenaHash<DefaultHasher>,
+            object: OnDiskObject<DefaultHasher>,
+        ) {
+            self.inner.insert_node(key, object)
+        }
+
+        fn delete_node(&mut self, key: &ArenaHash<DefaultHasher>) {
+            self.inner.delete_node(key)
+        }
+
+        fn batch_update<I>(&mut self, iter: I)
+        where
+            I: Iterator<Item = (ArenaHash<DefaultHasher>, Update<DefaultHasher>)>,
+        {
+            self.inner.batch_update(iter)
+        }
+
+        fn batch_get_nodes<I>(
+            &self,
+            keys: I,
+        ) -> Vec<(
+            ArenaHash<DefaultHasher>,
+            Option<OnDiskObject<DefaultHasher>>,
+        )>
+        where
+            I: Iterator<Item = ArenaHash<DefaultHasher>>,
+        {
+            self.node_reads.fetch_add(1, Relaxed);
+            self.inner.batch_get_nodes(keys)
+        }
+
+        fn get_root_count(&self, key: &ArenaHash<DefaultHasher>) -> u32 {
+            self.inner.get_root_count(key)
+        }
+
+        fn set_root_count(&mut self, key: ArenaHash<DefaultHasher>, count: u32) {
+            self.inner.set_root_count(key, count)
+        }
+
+        fn get_roots(&self) -> HashMap<ArenaHash<DefaultHasher>, u32> {
+            self.inner.get_roots()
+        }
+
+        fn size(&self) -> usize {
+            self.inner.size()
+        }
+
+        fn scan(
+            &self,
+            resume_from: Option<Self::ScanResumeHandle>,
+            batch_size: usize,
+        ) -> (
+            Vec<(ArenaHash<DefaultHasher>, OnDiskObject<DefaultHasher>)>,
+            Option<Self::ScanResumeHandle>,
+        ) {
+            self.object_scans.fetch_add(1, Relaxed);
+            self.inner.scan(resume_from, batch_size)
+        }
+
+        fn scan_keys(
+            &self,
+            resume_from: Option<Self::ScanResumeHandle>,
+            batch_size: usize,
+        ) -> (
+            Vec<ArenaHash<DefaultHasher>>,
+            Option<Self::ScanResumeHandle>,
+        ) {
+            let (batch, handle) = self.inner.scan(resume_from, batch_size);
+            (batch.into_iter().map(|(key, _)| key).collect(), handle)
+        }
+    }
+
+    #[test]
+    fn gc_with_default_scan_keys() {
+        let mut backend = backend(InMemoryDB::<DefaultHasher>::default());
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn gc_sweeps_with_scan_keys() {
+        let db = TestDb::default();
+        let object_scans = db.object_scans.clone();
+        let mut backend = backend(db);
+        assert_eq!(backend.gc(Duration::from_secs(3600)), 2);
+        assert_eq!(survivors(&backend), HashSet::from([1, 2, 3, 4, 5]));
+        assert_eq!(object_scans.load(Relaxed), 0);
+    }
+
     #[test]
     fn test_gc() {
         use crate::db::DB;
