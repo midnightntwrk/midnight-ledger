@@ -254,4 +254,71 @@ mod tests {
         let out_proven = out.prove(provider).await.unwrap();
         assert_eq!(out_proven.proof.serialized_size(), OUTPUT_PROOF_SIZE);
     }
+
+    /// The zswap circuits have no inner proofs, so a proof arriving with
+    /// accumulators was extended by someone other than its prover.
+    #[tokio::test]
+    async fn test_appended_accumulator_rejected() {
+        use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
+        use serialize::Deserializable;
+        use transient_crypto::proofs::{DeferredAccumulator, Proof};
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let resolver = ZswapResolver(
+            MidnightDataProvider::new(
+                data_provider::FetchMode::Synchronous,
+                data_provider::OutputMode::Log,
+                ZSWAP_EXPECTED_FILES.to_owned(),
+            )
+            .unwrap(),
+        );
+        let mut provider = LocalProvingProvider {
+            rng: rng.split(),
+            params: &resolver,
+            resolver: &resolver,
+        };
+
+        // Both points at infinity, compressed.
+        let mut identities = [0u8; 96];
+        identities[0] = 0xc0;
+        identities[48] = 0xc0;
+        let acc = DeferredAccumulator::deserialize(&mut &identities[..], 0)
+            .expect("the identity is a valid point");
+        let extend = |proof: &Proof| {
+            let mut proof = proof.clone();
+            proof.accumulators.push(acc);
+            Arc::new(proof)
+        };
+
+        let qcoin = QualifiedCoinInfo {
+            value: Default::default(),
+            type_: Default::default(),
+            nonce: rng.r#gen(),
+            mt_index: 0,
+        };
+        let coin = CoinInfo::from(&qcoin);
+        let recipient = Recipient::Contract(Default::default());
+        let tree = MerkleTree::<(), InMemoryDB>::blank(32)
+            .try_update_hash(0, coin.commitment(&recipient).0, ())
+            .expect("updating hash on non-collapsed tree should always succeed")
+            .rehash();
+
+        let mut inp = Input::new_contract_owned(&mut rng, &qcoin, None, Default::default(), &tree)
+            .unwrap()
+            .prove(provider.split())
+            .await
+            .unwrap();
+        inp.well_formed(0).expect("honest input proof verifies");
+        inp.proof = extend(&inp.proof);
+        assert!(inp.well_formed(0).is_err());
+
+        let mut out =
+            Output::<_, InMemoryDB>::new_contract_owned(&mut rng, &coin, None, Default::default())
+                .unwrap()
+                .prove(provider)
+                .await
+                .unwrap();
+        out.well_formed(0).expect("honest output proof verifies");
+        out.proof = extend(&out.proof);
+        assert!(out.well_formed(0).is_err());
+    }
 }
