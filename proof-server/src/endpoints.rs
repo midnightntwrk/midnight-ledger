@@ -13,7 +13,7 @@
 
 #![deny(unreachable_pub)]
 #![deny(warnings)]
-use actix_web::error::ErrorBadRequest;
+use actix_web::error::{ErrorBadRequest, ErrorPayloadTooLarge};
 use actix_web::http::StatusCode;
 use actix_web::web::{self, Bytes, BytesMut, Data, Payload};
 use actix_web::{Error, HttpResponse, HttpResponseBuilder, Responder, get, post};
@@ -32,12 +32,16 @@ use ledger::structure::{
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::collections::HashMap;
+use std::io;
 use std::sync::Arc;
 use storage::db::InMemoryDB;
 use tracing::{debug, info};
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
+use transient_crypto::proofs::{
+    KeyLocation, ParamsProver, ParamsProverProvider, ProvingKeyMaterial, Resolver as ResolverT,
+    WrappedIr,
+};
 
 use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
@@ -56,10 +60,34 @@ lazy_static! {
     );
 }
 
-async fn payload_to_bytes(mut payload: Payload) -> Result<Bytes, Error> {
+/// The default for [`BodyLimit`]: 256 MiB.
+///
+/// The largest built-in prover key (zswap spend) is about 25 MB, and prover keys roughly double
+/// with each increment of `k`, so this leaves room for a transaction carrying several contract
+/// keys.
+pub const DEFAULT_MAX_BODY_SIZE: usize = 256 * 1024 * 1024;
+
+/// The largest request body, in bytes, this server reads before rejecting the request with
+/// HTTP 413.
+#[derive(Clone, Copy, Debug)]
+pub struct BodyLimit(pub usize);
+
+impl Default for BodyLimit {
+    fn default() -> Self {
+        BodyLimit(DEFAULT_MAX_BODY_SIZE)
+    }
+}
+
+async fn payload_to_bytes(mut payload: Payload, limit: &BodyLimit) -> Result<Bytes, Error> {
     let mut body = BytesMut::new();
     while let Some(chunk) = payload.next().await {
         let chunk = chunk?;
+        if body.len().saturating_add(chunk.len()) > limit.0 {
+            return Err(ErrorPayloadTooLarge(format!(
+                "request body exceeds this server's limit of {} bytes",
+                limit.0
+            )));
+        }
         body.extend_from_slice(&chunk);
     }
     Ok(body.freeze())
@@ -69,30 +97,45 @@ async fn payload_to_bytes(mut payload: Payload) -> Result<Bytes, Error> {
 ///
 /// Proving memory grows with `2^k`, so the limit lets operators reject circuits that would exceed
 /// the host's memory instead of having the process killed mid-proof.
+///
+/// The limit is enforced where public parameters are loaded (see [`LimitedParams`]), on the `k`
+/// the prover actually asks for. That is the prover key's `k`, which a request can choose
+/// independently of its IR, so checking the IR alone would not bound it. It also avoids
+/// synthesizing the circuit on the request path just to learn its `k`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MaxK(pub Option<u8>);
 
 impl MaxK {
-    fn check(&self, k: u8) -> Result<(), Error> {
+    fn exceeded(&self, k: u8) -> Option<String> {
         match self.0 {
-            Some(max_k) if k > max_k => Err(ErrorBadRequest(format!(
+            Some(max_k) if k > max_k => Some(format!(
                 "k={k} exceeds this server's limit of max_k={max_k}"
-            ))),
-            _ => Ok(()),
+            )),
+            _ => None,
         }
     }
 
-    async fn check_key(&self, name: &str, data: &ProvingKeyMaterial) -> Result<(), Error> {
-        if self.0.is_none() {
-            return Ok(());
+    fn check(&self, k: u8) -> Result<(), Error> {
+        match self.exceeded(k) {
+            Some(msg) => Err(ErrorBadRequest(msg)),
+            None => Ok(()),
         }
-        // Computing `k` builds the circuit model, which takes seconds for large circuits.
-        let ir = data.ir_source.clone();
-        let k = web::block(move || versioned_ir::k(&ir))
-            .await?
-            .map_err(ErrorBadRequest)?;
-        self.check(k)
-            .map_err(|e| ErrorBadRequest(format!("circuit '{name}': {e}")))
+    }
+}
+
+/// The server's public parameters, refusing any `k` above [`MaxK`].
+///
+/// Every proving path loads parameters through this, so the limit holds whichever key or IR
+/// the request supplied.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LimitedParams(pub(crate) MaxK);
+
+impl ParamsProverProvider for LimitedParams {
+    async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
+        if let Some(msg) = self.0.exceeded(k) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, msg));
+        }
+        PUBLIC_PARAMS.get_params(k).await
     }
 }
 
@@ -187,26 +230,40 @@ pub(crate) async fn proof_versions() -> impl Responder {
 }
 
 #[post("/k")]
-pub(crate) async fn get_k(payload: Payload) -> Result<HttpResponse, Error> {
+pub(crate) async fn get_k(
+    pool: Data<Arc<WorkerPool>>,
+    limit: Data<BodyLimit>,
+    payload: Payload,
+) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /k...");
-    let request = payload_to_bytes(payload).await?;
+    let request = payload_to_bytes(payload, &limit).await?;
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
     );
 
-    let k = versioned_ir::k(&request).map_err(ErrorBadRequest)?;
+    // Computing `k` synthesizes the circuit, which costs time and memory that grow with the
+    // request's IR. Run it in the worker pool, like proving, so concurrent requests are bounded
+    // by the pool's workers and job capacity instead of each taking a thread of its own.
+    let (_id, updates) = pool
+        .submit_and_subscribe(move || {
+            let k = versioned_ir::k(&request).map_err(WorkError::BadInput)?;
+            Ok(format!("{k}").into_bytes())
+        })
+        .await?;
+    let response = JobStatus::wait_for_success(&updates).await?;
 
-    Ok(HttpResponse::Ok().body(format!("{k}")))
+    Ok(HttpResponse::Ok().body(response))
 }
 
 #[post("/check")]
 pub(crate) async fn check(
     pool: Data<Arc<WorkerPool>>,
+    limit: Data<BodyLimit>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /check...");
-    let request = payload_to_bytes(payload).await?;
+    let request = payload_to_bytes(payload, &limit).await?;
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
@@ -278,10 +335,11 @@ pub(crate) async fn check(
 pub(crate) async fn prove(
     pool: Data<Arc<WorkerPool>>,
     max_k: Data<MaxK>,
+    limit: Data<BodyLimit>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove...");
-    let request = payload_to_bytes(payload).await?;
+    let request = payload_to_bytes(payload, &limit).await?;
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
@@ -291,10 +349,8 @@ pub(crate) async fn prove(
         Option<ProvingKeyMaterial>,
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    if let Some(data) = &data {
-        max_k.check_key(&ppi.key_location().0, data).await?;
-    }
 
+    let params = LimitedParams(**max_k);
     let data_resolver = data.clone();
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
@@ -338,10 +394,11 @@ pub(crate) async fn prove(
                                 })?,
                         };
 
-                        let proof = versioned_ir::prove(ppi, &proving_data.ir_source, &resolver)
-                            .await
-                            .map_err(WorkError::BadInput)?
-                            .0;
+                        let proof =
+                            versioned_ir::prove(ppi, &proving_data.ir_source, &resolver, &params)
+                                .await
+                                .map_err(WorkError::BadInput)?
+                                .0;
 
                         ProofVersioned::V2(proof)
                     }
@@ -365,19 +422,18 @@ pub(crate) async fn prove(
 pub(crate) async fn prove_transaction(
     pool: Data<Arc<WorkerPool>>,
     max_k: Data<MaxK>,
+    limit: Data<BodyLimit>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove-tx...");
-    let request = payload_to_bytes(payload).await?;
+    let request = payload_to_bytes(payload, &limit).await?;
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
     );
     let (tx, keys): TransactionProvePayload<Signature> =
         tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    for (name, data) in &keys {
-        max_k.check_key(name, data).await?;
-    }
+    let params = LimitedParams(**max_k);
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -402,7 +458,7 @@ pub(crate) async fn prove_transaction(
                 );
                 let provider = zkir_v2::LocalProvingProvider {
                     rng: OsRng,
-                    params: &resolver,
+                    params: &params,
                     resolver: &resolver,
                 };
                 // NOTE: The initial cost model here is part of why this is deprecated!

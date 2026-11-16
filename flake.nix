@@ -280,6 +280,10 @@
                   # (`-v proof-params:/var/cache/midnight/zk-params`); without it every fresh
                   # container re-downloads them before binding the port.
                   "MIDNIGHT_PP=/var/cache/midnight/zk-params"
+                  # The server binds loopback by default, which a published container port
+                  # cannot reach. Publish to the host's loopback to keep it local:
+                  # `docker run -p 127.0.0.1:6300:6300 ...`.
+                  "MIDNIGHT_PROOF_SERVER_BIND=0.0.0.0"
                 ];
                 ExposedPorts = {
                   "6300/tcp" = {};

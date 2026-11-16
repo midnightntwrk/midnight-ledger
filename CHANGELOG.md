@@ -8,7 +8,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
-- feat: the proof server accepts `--max-k` (`MIDNIGHT_PROOF_SERVER_MAX_K`). `/prove` and `/prove-tx` reject circuits supplied in the request whose `k` exceeds it with HTTP 400, before queuing the job, and `/fetch-params/{k}` refuses larger `k`. Unset by default, which keeps the current unlimited behaviour.
+- feat: the proof server accepts `--max-k` (`MIDNIGHT_PROOF_SERVER_MAX_K`). A proof whose prover key needs parameters above this `k`, built in or supplied with the request, fails with HTTP 400 before they are downloaded or loaded, and `/fetch-params/{k}` refuses larger `k`. Unset by default, which keeps the current unlimited behaviour.
+- **breaking**: the proof server listens on `127.0.0.1` by default instead of all interfaces. `--bind` (`MIDNIGHT_PROOF_SERVER_BIND`) sets the address; the Docker image sets it to `0.0.0.0`, so publish its port as `127.0.0.1:6300:6300` to keep it local.
+- feat: the proof server rejects request bodies above `--max-body-size` (`MIDNIGHT_PROOF_SERVER_MAX_BODY_SIZE`, default 256 MiB) with HTTP 413, instead of buffering bodies of any size.
+- fix: the proof server's `/k` runs in the worker pool, so its circuit synthesis is bounded by `--num-workers` and `--job-capacity` instead of tying up a server thread per request.
+- feat: the proof server accepts `--cors-origins` (`MIDNIGHT_PROOF_SERVER_CORS_ORIGINS`), a comma-separated list of origins allowed to call it from a browser. Unset keeps allowing every origin, and the server logs a warning.
 - fix: the proof server's `/prove-tx` and `/check` fetch public parameters that are not yet cached, instead of failing with `task join error` because their runtime had I/O disabled.
 
 ## Ledger 9.1.0.2-rc.0

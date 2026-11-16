@@ -18,9 +18,9 @@ mod common {
     use std::time::Duration;
 
     use actix_web::{dev::ServerHandle, rt};
-    use midnight_proof_server::endpoints::MaxK;
-    use midnight_proof_server::server;
+    use midnight_proof_server::endpoints::{BodyLimit, MaxK};
     use midnight_proof_server::worker_pool::WorkerPool;
+    use midnight_proof_server::{ServerConfig, server};
     use reqwest::Client;
 
     pub const DEFAULT_NUM_WORKERS: usize = 2;
@@ -61,16 +61,48 @@ mod common {
             .expect("Failed to create HTTP client")
     }
 
+    fn test_config(fetch_params: bool) -> ServerConfig {
+        ServerConfig {
+            port: 0,
+            fetch_params,
+            ..ServerConfig::default()
+        }
+    }
+
     pub fn start_server(num_workers: usize, job_limit: usize) -> TestServer {
-        start_server_impl(num_workers, job_limit, false, None)
+        start_server_impl(num_workers, job_limit, test_config(false))
     }
 
     pub fn start_server_with_max_k(fetch_params: bool, max_k: u8) -> TestServer {
         start_server_impl(
             DEFAULT_NUM_WORKERS,
             DEFAULT_JOB_LIMIT,
-            fetch_params,
-            Some(max_k),
+            ServerConfig {
+                max_k: MaxK(Some(max_k)),
+                ..test_config(fetch_params)
+            },
+        )
+    }
+
+    pub fn start_server_with_body_limit(max_body_size: usize) -> TestServer {
+        start_server_impl(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            ServerConfig {
+                max_body_size: BodyLimit(max_body_size),
+                ..test_config(false)
+            },
+        )
+    }
+
+    pub fn start_server_with_cors_origins(origins: &[&str]) -> TestServer {
+        start_server_impl(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            ServerConfig {
+                cors_origins: Some(origins.iter().map(|o| o.to_string()).collect()),
+                ..test_config(false)
+            },
         )
     }
 
@@ -79,15 +111,10 @@ mod common {
         job_limit: usize,
         fetch_params: bool,
     ) -> TestServer {
-        start_server_impl(num_workers, job_limit, fetch_params, None)
+        start_server_impl(num_workers, job_limit, test_config(fetch_params))
     }
 
-    fn start_server_impl(
-        num_workers: usize,
-        job_limit: usize,
-        fetch_params: bool,
-        max_k: Option<u8>,
-    ) -> TestServer {
+    fn start_server_impl(num_workers: usize, job_limit: usize, config: ServerConfig) -> TestServer {
         init_logger();
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -95,8 +122,7 @@ mod common {
         std::thread::spawn(move || {
             rt::System::new().block_on(async move {
                 let pool = WorkerPool::new(num_workers, job_limit, 600.0);
-                let (srv, bound_port) =
-                    server(0, fetch_params, pool, MaxK(max_k)).expect("Failed to start server");
+                let (srv, bound_port) = server(config, pool).expect("Failed to start server");
                 tx.send((srv.handle(), bound_port))
                     .expect("Failed to send server handle");
                 srv.await.expect("Server error");
@@ -967,13 +993,12 @@ mod fetch_params_endpoint {
 mod max_k {
     use super::common::*;
     use super::test_data::*;
-    use ledger::structure::Signature;
     use serialize::tagged_serialize;
     use std::collections::HashMap;
-    use storage::db::InMemoryDB;
     use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as _};
 
     const ZSWAP_OUTPUT: &str = "midnight/zswap/output";
+    const ZSWAP_SIGN: &str = "midnight/zswap/sign";
 
     async fn zswap_output_key() -> ProvingKeyMaterial {
         RESOLVER
@@ -1033,12 +1058,12 @@ mod max_k {
 
         assert_eq!(response.status(), 400);
         let error_text = response.text().await.expect("Failed to get response text");
-        assert_eq!(
-            error_text,
-            format!(
-                "circuit '{ZSWAP_OUTPUT}': k={k} exceeds this server's limit of max_k={}",
+        assert!(
+            error_text.contains(&format!(
+                "k={k} exceeds this server's limit of max_k={}",
                 k - 1
-            )
+            )),
+            "Unexpected error: {error_text}"
         );
 
         stop_server(server).await;
@@ -1066,13 +1091,15 @@ mod max_k {
         let k = output_k().await;
         let server = start_server_with_max_k(false, k - 1);
 
-        let tx = create_contract_deploy_tx::<Signature, InMemoryDB>().await;
+        // The limit applies to the circuits the transaction actually proves, so this needs a
+        // transaction with a zswap output; a key that is sent but never used loads no params.
+        let tx = create_unbalanced_zswap_tx(1);
         let keys: HashMap<String, ProvingKeyMaterial> =
             [(ZSWAP_OUTPUT.to_owned(), zswap_output_key().await)].into();
         let mut body = Vec::new();
         tagged_serialize(&(tx, keys), &mut body).expect("Failed to serialize transaction");
 
-        let response = HTTP_CLIENT
+        let response = build_client(LONG_REQUEST_TIMEOUT_SECS)
             .post(format!("{}/prove-tx", server.base_url()))
             .body(body)
             .send()
@@ -1082,7 +1109,48 @@ mod max_k {
         assert_eq!(response.status(), 400);
         let error_text = response.text().await.expect("Failed to get response text");
         assert!(
-            error_text.contains(&format!("circuit '{ZSWAP_OUTPUT}': k={k} exceeds")),
+            error_text.contains(&format!("k={k} exceeds")),
+            "Unexpected error: {error_text}"
+        );
+
+        stop_server(server).await;
+    }
+
+    /// The limit applies to the `k` the prover key asks parameters for, not the `k` of the IR
+    /// sent alongside it: a small IR must not let a larger prover key through.
+    #[tokio::test]
+    async fn prove_rejects_prover_key_above_max_k_with_smaller_ir() {
+        let output = zswap_output_key().await;
+        let sign = RESOLVER
+            .resolve_key(KeyLocation(ZSWAP_SIGN.into()))
+            .await
+            .expect("Failed to resolve key")
+            .expect("Missing zswap sign key");
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let output_k = k_of(&server, &output).await;
+        let sign_k = k_of(&server, &sign).await;
+        stop_server(server).await;
+        assert!(
+            sign_k < output_k,
+            "test needs the sign circuit (k={sign_k}) to be smaller than output (k={output_k})"
+        );
+
+        let server = start_server_with_max_k(false, sign_k);
+        let mismatched = ProvingKeyMaterial {
+            ir_source: sign.ir_source,
+            ..output
+        };
+        let response = build_client(LONG_REQUEST_TIMEOUT_SECS)
+            .post(format!("{}/prove", server.base_url()))
+            .body(prove_body(mismatched))
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 400);
+        let error_text = response.text().await.expect("Failed to get response text");
+        assert!(
+            error_text.contains(&format!("exceeds this server's limit of max_k={sign_k}")),
             "Unexpected error: {error_text}"
         );
 
@@ -1102,6 +1170,102 @@ mod max_k {
         assert_eq!(response.status(), 400);
         let error_text = response.text().await.expect("Failed to get response text");
         assert_eq!(error_text, "k=12 exceeds this server's limit of max_k=10");
+
+        stop_server(server).await;
+    }
+}
+
+mod body_limit {
+    use super::common::*;
+
+    #[tokio::test]
+    async fn rejects_body_above_limit() {
+        let server = start_server_with_body_limit(1024);
+
+        for endpoint in ["k", "check", "prove", "prove-tx"] {
+            let response = HTTP_CLIENT
+                .post(format!("{}/{endpoint}", server.base_url()))
+                .body(vec![0u8; 4096])
+                .send()
+                .await
+                .expect("Request failed");
+            assert_eq!(response.status(), 413, "/{endpoint}");
+        }
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_body_within_limit() {
+        let server = start_server_with_body_limit(1024);
+
+        // Not a valid request, but small enough to be read and then rejected as malformed.
+        let response = HTTP_CLIENT
+            .post(format!("{}/k", server.base_url()))
+            .body(vec![0u8; 512])
+            .send()
+            .await
+            .expect("Request failed");
+        assert_eq!(response.status(), 400);
+
+        stop_server(server).await;
+    }
+}
+
+mod cors {
+    use super::common::*;
+
+    const ALLOWED: &str = "https://allowed.example";
+
+    async fn preflight(server: &TestServer, origin: &str) -> reqwest::Response {
+        HTTP_CLIENT
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("{}/prove", server.base_url()),
+            )
+            .header("Origin", origin)
+            .header("Access-Control-Request-Method", "POST")
+            .send()
+            .await
+            .expect("Request failed")
+    }
+
+    #[tokio::test]
+    async fn allowlist_admits_listed_origin_only() {
+        let server = start_server_with_cors_origins(&[ALLOWED]);
+
+        let allowed = preflight(&server, ALLOWED).await;
+        assert_eq!(
+            allowed
+                .headers()
+                .get("access-control-allow-origin")
+                .map(|v| v.to_str().unwrap().to_owned()),
+            Some(ALLOWED.to_owned())
+        );
+
+        let denied = preflight(&server, "https://evil.example").await;
+        assert!(
+            denied
+                .headers()
+                .get("access-control-allow-origin")
+                .is_none(),
+            "unlisted origin must not be allowed"
+        );
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn default_stays_permissive() {
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+
+        let response = preflight(&server, "https://any.example").await;
+        assert!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .is_some()
+        );
 
         stop_server(server).await;
     }

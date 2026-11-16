@@ -18,10 +18,8 @@ use rand::rngs::OsRng;
 #[allow(unused_imports)]
 use serialize::{peek_tag, tagged_deserialize};
 use std::io::Cursor;
-use transient_crypto::proofs::{Proof, ProofPreimage, Zkir};
+use transient_crypto::proofs::{ParamsProverProvider, Proof, ProofPreimage, Zkir};
 use zkir as zkir_v2;
-
-use crate::endpoints::PUBLIC_PARAMS;
 
 pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
     let tag = peek_tag(&mut std::io::Cursor::new(request)).map_err(|e| e.to_string())?;
@@ -60,6 +58,7 @@ pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
     ir_source: &[u8],
     resolver: &Resolver,
+    params: &impl ParamsProverProvider,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
     let tag = peek_tag(&mut std::io::Cursor::new(ir_source)).map_err(|e| e.to_string())?;
     match tag.as_str() {
@@ -73,7 +72,7 @@ pub(crate) async fn prove(
             let mut provider = zkir_v2::LocalProvingProvider {
                 rng: OsRng.split(),
                 resolver,
-                params: &*PUBLIC_PARAMS,
+                params,
             };
             let proof = provider
                 .split()
@@ -85,7 +84,7 @@ pub(crate) async fn prove(
         }
         "ir-source[v3-generic]" => {
             //let ir_source = tagged_deserialize::<zkir_v3::IrSource>(ir_source).map_err(|e| e.to_string())?;
-            ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+            ppi.prove::<zkir_v3::IrSource>(OsRng, params, resolver)
                 .await
                 .map_err(|e| e.to_string())
         }

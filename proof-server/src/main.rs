@@ -19,8 +19,9 @@ use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use futures::future::join;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
-use midnight_proof_server::endpoints::{MaxK, PUBLIC_PARAMS};
-use midnight_proof_server::{server, worker_pool::WorkerPool};
+use midnight_proof_server::endpoints::{BodyLimit, DEFAULT_MAX_BODY_SIZE, MaxK, PUBLIC_PARAMS};
+use midnight_proof_server::{ServerConfig, server, worker_pool::WorkerPool};
+use std::net::{IpAddr, Ipv4Addr};
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
@@ -58,6 +59,21 @@ struct Args {
     /// Reject proving requests for circuits larger than this `k`. Unlimited when unset.
     #[arg(long, env = "MIDNIGHT_PROOF_SERVER_MAX_K", value_parser = clap::value_parser!(u8).range(1..=25))]
     max_k: Option<u8>,
+    /// The address to listen on. Use `0.0.0.0` to accept connections from other hosts, e.g.
+    /// inside a container.
+    #[arg(long, default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST), env = "MIDNIGHT_PROOF_SERVER_BIND")]
+    bind: IpAddr,
+    /// Reject request bodies larger than this many bytes with HTTP 413.
+    #[arg(long, default_value_t = DEFAULT_MAX_BODY_SIZE, env = "MIDNIGHT_PROOF_SERVER_MAX_BODY_SIZE")]
+    max_body_size: usize,
+    /// Comma-separated origins allowed to call the server from a browser, e.g.
+    /// `https://app.example.com,chrome-extension://<id>`. Any origin when unset.
+    #[arg(
+        long,
+        env = "MIDNIGHT_PROOF_SERVER_CORS_ORIGINS",
+        value_delimiter = ','
+    )]
+    cors_origins: Option<Vec<String>>,
 }
 
 #[actix_web::main]
@@ -97,10 +113,16 @@ async fn main() -> std::io::Result<()> {
         info!("Rejecting proving requests for circuits above k={max_k}");
     }
     let pool = WorkerPool::new(args.num_workers, args.job_capacity, args.job_timeout);
-    server(args.port, !args.no_fetch_params, pool, MaxK(args.max_k))
-        .unwrap()
-        .0
-        .await
+    let config = ServerConfig {
+        bind: args.bind,
+        port: args.port,
+        fetch_params: !args.no_fetch_params,
+        max_k: MaxK(args.max_k),
+        max_body_size: BodyLimit(args.max_body_size),
+        cors_origins: args.cors_origins,
+    };
+    info!("Listening on {}:{}", config.bind, config.port);
+    server(config, pool).unwrap().0.await
 }
 
 fn init_logging(verbose: bool) {
