@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- breaking: upgrade to `midnight-zk-stdlib` 3.0.0-rc.1 / `midnight-circuits`
+  8.0.0-rc.1, resolved from the `midnight-zk-stdlib-v3.0.0-rc.1` git tag. Keys
+  and proofs of the earlier proof system do not carry over; the prover key tag
+  moves to `prover-key[v8]`.
+- breaking: `DeferredAccumulator` exposes its two points as public fields;
+  `new`, `to_accumulator` and `reconstruct_accumulator` become crate-private
+  and `InnerSelfEmulation` is dropped, so midnight-circuits types leave the
+  public API. `DeferredAccumulator::check` runs its pairing check.
+
 ## Version `3.1.0`
 
 - feat: add `PureGeneratorPedersen::smallest_representable`, for bounding
