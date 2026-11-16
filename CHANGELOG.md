@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+## Ledger 9.1.0.2
+
 - fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 - chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.1`, now resolved from crates.io.
