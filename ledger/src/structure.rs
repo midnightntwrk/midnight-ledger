@@ -376,14 +376,40 @@ impl Tagged for ProofVersioned {
 tag_enforcement_test!(ProofVersioned);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable)]
-#[tag = "proof"]
+#[tag = "proof-marker[v1]"]
 #[storable(base)]
 pub struct ProofMarker;
+tag_enforcement_test!(ProofMarker);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable)]
-#[tag = "proof-preimage"]
+#[tag = "proof-preimage-marker[v1]"]
 #[storable(base)]
 pub struct ProofPreimageMarker;
+tag_enforcement_test!(ProofPreimageMarker);
+
+/// Tag tests of the proven kind, for the types that hold one of its proof
+/// types directly. They fail when the tag of a proof type moves and the
+/// marker's does not.
+#[cfg(test)]
+mod proven_tags {
+    use super::*;
+    use crate::dust::DustSpend;
+
+    tag_enforcement_test!(DustSpend<ProofMarker, InMemoryDB>);
+    tag_enforcement_test!(ContractCall<ProofMarker, InMemoryDB>);
+    tag_enforcement_test!(StandardTransaction<Signature, ProofMarker, PureGeneratorPedersen, InMemoryDB>);
+}
+
+/// As `proven_tags`, for the unproven kind.
+#[cfg(test)]
+mod unproven_tags {
+    use super::*;
+    use crate::dust::DustSpend;
+
+    tag_enforcement_test!(DustSpend<ProofPreimageMarker, InMemoryDB>);
+    tag_enforcement_test!(ContractCall<ProofPreimageMarker, InMemoryDB>);
+    tag_enforcement_test!(StandardTransaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>);
+}
 
 pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + Tagged {
     type Pedersen: PedersenDowngradeable<D> + Serializable + Deserializable + Tagged;
