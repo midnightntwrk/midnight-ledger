@@ -1,28 +1,128 @@
 # Ledger 9.1.0.2 Release Notes
 
 **Version:** 9.1.0.2
-**Date:** <YYYY-MM-DD>
+**Date:** 2026-11-16
 
 ## High-level summary
 
-<One or two paragraphs: what kind of release this is and the headline changes.>
+Ledger 9.1.0.2 is a client-side patch release on the `ledger-9` line. It
+promotes `9.1.0.2-rc.0` after QA approval. It does not change transaction
+validation, state hashes or anything a node computes.
+
+It fixes two ways in which wallets and DApps built transactions that the node
+then rejected. Transcript partitioning now sizes the guaranteed section against
+the time to dismiss the final transaction will be allowed, and callers can pass
+the expected shape of that transaction through the new `TransactionShape`.
+Partitioning also rehearses each call with the widest commitment tree indices
+the chain could assign, so contracts that store a coin's `mt_index` declare
+enough written bytes.
+
+It also lets the wasm API load contract state that an ordinary map write can
+leave in a non-canonical trie shape, which earlier releases rejected, leaving
+the contract unreadable to clients.
+
+Since the release candidate, the proof server moves to zkir v3 `3.2.1`, which
+fixes proving for Compact circuits whose chip requirements
+earlier versions missed, and its image passes `docker run` arguments
+through to the server.
 
 ## Audience
 
 This release note is important for:
 
-- <e.g. Node developers>
-- <e.g. Developers using the ledger WASM bindings>
+- Developers using the ledger WASM bindings, in particular wallets and DApps
+  that partition transcripts or call `Transaction.addCalls`
+- Integrators who build transactions with the `ledger-9` Rust crates
+- Proof server operators
+- Node developers, only to note that the node needs no change and must not
+  enable the new `storage` leniency
+
+## Released packages
+
+| **Package** | **Version** |
+|-------------|-------------|
+| npm `@midnightntwrk/ledger-v9` | `1.0.2` |
+| npm `@midnightntwrk/onchain-runtime-v4` | `4.0.2` |
+| proof server | `9.0.2` |
+| crates.io `midnight-ledger-v9` | `1.0.2` |
+| crates.io `midnight-storage` | `3.1.0` |
+| crates.io `midnight-transient-crypto` | `3.1.0` |
+
+The npm packages are also published under the legacy `@midnight-ntwrk` scope.
+Every other package, including `@midnightntwrk/zkir-v2`, `midnight-zswap` and
+the `onchain-*` crates, is unchanged from 9.1.0.1.
+
+Build pins, read from the lockfile: `midnight-circuits` `7.3.0`,
+`midnight-zk-stdlib` `2.4.0`, and zkir v3 (`midnight-zkir`, from crates.io)
+`3.2.1`.
 
 ## Summary of updates
 
-### <Component or area> Updates
+### Transcript partitioning
 
-- <feat/fix/breaking bullet>
+- fix: transcript partitioning sizes the guaranteed section against the
+  predicted transaction's time-to-dismiss allowance,
+  `max(min_time_to_dismiss, time_to_dismiss_per_byte * size)`, minus a reserve,
+  instead of a fixed floor.
+- fix: the predicted size and the reserve come from a mock transaction of the
+  calls' `TransactionShape`. The reserve covers every call's proof
+  verification, including calls that end up fully fallible, priced by each
+  call's own public inputs. Partitioning therefore reserves more than before,
+  and may keep fewer calls guaranteed for the same input.
+- fix: partitioning rehearses each call with the widest commitment tree indices
+  the chain could assign.
+- feat: `TransactionShape` counts a transaction's non-call parts: intents,
+  Night and non-Night unshielded spends and outputs, Dust spends, Zswap inputs,
+  outputs and transients, and Dust registrations and deregistrations.
+  `TransactionShape::for_calls` derives the counts of the balanced transaction
+  from the calls.
+- feat: `partition_transcripts_with_tx_shape` and
+  `Transaction::add_calls_with_tx_shape` partition against a caller-supplied
+  shape. Use them when the final transaction has more parts than the calls
+  imply, such as a payment from several Night UTXOs. `add_calls` folds the
+  Zswap parts it is given into the shape.
+- feat: the wasm API exposes `TransactionShape` as a class obtained from
+  `TransactionShape.forCalls`, with one accessor per count, and adds an
+  optional `expectedTxShape` argument to `partitionTranscripts` and
+  `Transaction.addCalls`.
+
+### Contract state loading
+
+- fix: the wasm API deserializes contract state, transactions and ledger state
+  that contain a trie with a short `Extension` chain.
+- feat: `storage::merkle_patricia_trie::ALLOW_SHORT_EXTENSION_CHAINS` is a
+  scoped thread-local, unset by default. While it is set, decoding accepts a
+  trie in which an `Extension` node shorter than 255 nibbles has an `Extension`
+  child; every other invariant still applies. `onchain-runtime-wasm` sets it
+  while deserializing, so both npm packages get the leniency. Nodes and
+  consensus code must never set it.
+
+### Proof server
+
+- fix: zkir v3 moves to `3.2.1`, which derives a circuit's chip architecture
+  from every instruction rather than only its inputs and entry points. Proving
+  failed for Compact circuits that needed a chip only through another
+  instruction, such as a foreign-field constant. Existing proving and
+  verifying keys remain valid.
+- fix: the image passes trailing `docker run` arguments to the server
+  (`docker run <image> -v` now works; previously the `bash -c` entrypoint
+  silently dropped them). The old `midnight-proof-server ...` command forms
+  still work.
+- feat: the image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a
+  volume there to skip the parameter download on restart.
+
+### Dependencies
+
+- feat: `midnight-transient-crypto` 3.1.0 adds
+  `PureGeneratorPedersen::smallest_representable`, which `midnight-ledger-v9`
+  1.0.2 requires.
+- `midnight-storage` 3.1.0 adds `ALLOW_SHORT_EXTENSION_CHAINS` and depends on
+  `scoped-tls`.
 
 ## New features requiring configuration updates
 
-*None in this release.*
+*None in this release.* Mounting a volume at `MIDNIGHT_PP` for the proof
+server is optional.
 
 ## Deprecations
 
@@ -30,77 +130,21 @@ This release note is important for:
 
 ## Breaking changes or required actions for developers
 
-*None in this release.*
+*None in this release.* The new wasm arguments are optional, and the new Rust
+functions sit beside the existing ones.
 
 ## Fixed defect list
 
 | **Component** | **Description** |
 |---------------|-----------------|
-| <component>   | <description>   |
+| ledger | [#838](https://github.com/midnightntwrk/midnight-ledger/issues/838): a contract call with exactly one Dust spend could fail the node's time-to-dismiss check, because partitioning sized the guaranteed section against a floor rather than the transaction's allowance. |
+| ledger | [#839](https://github.com/midnightntwrk/midnight-ledger/issues/839): a contract that stores a coin's `mt_index` under-declared its written bytes once the commitment tree had grown past 255 entries, and the node rejected the transaction for running out of gas budget. |
+| ledger-wasm, onchain-runtime-wasm | [#856](https://github.com/midnightntwrk/midnight-ledger/pull/856): after a map write, a contract's state could fail to deserialize in the wasm API, so clients could neither read the contract nor build calls to it. |
+| proof server | Proving failed for zkir v3 circuits that need a chip only through an instruction other than their inputs and entry points (fixed in `midnight-zkir` 3.2.1). |
+| proof server | The image dropped trailing `docker run` arguments. |
 
-<!-- Draft bullets from commits since the last tag: -->
-- fix: build after merging ledger-9's transcript partitioning
-- fix: let clients load tries with short extension chains
-- fix: release storage 2.0.5 on sha2 0.10
-- fix: compilation after merge
-- fix: rehearse calls with the widest commitment tree indices
-- feat: take an expected TransactionShape when partitioning transcripts
-- fix: partition transcripts against a mock transaction's size and time-to-dismiss
-- feat: add TransactionShape, the counts of a transaction's non-call parts
-- fix: require base-crypto-derive 1.1.0
-- fix: require base-crypto-derive 1.1.0 for the Envelope derive
-- fix: let isolate.py tag path-dependency workspace members
-- fix: guarantee each translation run persists progress
-- fix: revert storage and storage-core to sha2 0.10
-- fix: key repeated dust registrations without their signatures
-- fix: don't mark slots read on ins and rem
-- fix: saturate FixedPoint::from_u128_div instead of wrapping
-- fix: cap contracts at 256 operations
-- fix: count shared call effects in the time to dismiss
-- fix: bound a call's program length by its public-input count
-- fix: serialize registration signing data once per dust actions
-- fix: reject committee signatures repeated in a transaction
-- feat: count distinct values across several weighted arrays
-- fix: charge each deploy for its state, within a bounded walk
-- fix: saturate entry counts summed for pricing
-- fix: check keys stored with their values once per shared node
-- fix: price nested shared structure in time linear in the encoding
-- feat: charge copies of values that share nodes once per shared node
-- fix: reject repeated entries before computing fees
-- fix: check fees before stateless transaction checks
-- fix: price transactions in time linear in their encoding
-- fix: compute StateValue field sizes in linear time
-- feat: fold Merkle trees in time linear in distinct nodes
-- fix: check TimeFilterMap consistency in linear time
-- fix: check Map keys in time linear in distinct nodes
-- fix: check Array indices in time linear in distinct nodes
-- fix: check MPT canonicity per node instead of per trie
-- feat: fold MPT-backed collections in time linear in distinct nodes
-- feat: add DagMemo for linear-time walks over shared DAGs
-- fix: make isolate.py push to a selectable remote
-- fix: report the real threshold in BridgeClaimTooSmall
-- fix: track cache state through ins and cached bmt idx
-- fix: bump rustls to 0.23.46 to resolve the RUSTSEC-2026-0346/0347/0348/0349 cargo audit failures.
-- fix: failed Sp::downcast no longer leaks a metadata refcount
-- fix: reject zero-value ClaimRewards transactions
-- feat: remove unnessisary specified lifetime bounds
-- fix: reject contract calls that receive or send Dust
-- fix: replace deprecated atomic fetch_update calls with try_update to satisfy clippy on newer Rust toolchains
-- fix: restore original runner labels and required check names
-- fix: update vulnerable transport dependencies
-- fix: replace deprecated atomic update calls
-- fix: use the nondeprecated atomic update API
-- feat: allow args to be passed through
-- fix: use the inline runner cleanup convention
-- fix: reclaim unused SDK space before Nix builds
-- fix: isolate metadata checks from proving artifacts
-- fix: verify output evidence opens commitment on event replay
-- fix: price oversized transcript gas instead of wrapping to zero
-- fix: count in-lined children towards the deserialization recursion limit
-- fix: remove quadratic when deserialising
-- fix: let the release resume after the npm publish approval
-- fix: release the proof server on its own tag, idempotently
-- fix: flatten proof-server public key into manifest artifact
-- fix: stop expanding untrusted input into workflow shell (GHSA-w369-9rqw-8hq8)
-- fix: drop the unused http2 feature (RUSTSEC-2026-0258) (#722)
-- fix: stop purging the Nix store cache on every run (#724)
+## Known defects
+
+| **Issue** | **Description** |
+|-----------|-----------------|
+| `insert` can produce a non-canonical trie | `MerklePatriciaTrie` insertion can still build the short `Extension` chain that strict decoding rejects. Nodes agree on the shape, and changing it changes state hashes, so the fix needs a hard fork. This release only lets clients load such state. Workaround: load affected state through the wasm API, or with `ALLOW_SHORT_EXTENSION_CHAINS` set, in client code only. |
