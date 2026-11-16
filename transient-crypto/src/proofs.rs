@@ -627,7 +627,13 @@ impl Arbitrary for DeferredAccumulator {
 /// A verifier key, used for checking proofs.
 #[derive(Debug, Storable)]
 #[storable(base)]
-pub struct VerifierKey(Arc<Mutex<InnerVerifierKey>>);
+pub struct VerifierKey {
+    /// How many [`DeferredAccumulator`]s a proof against this key carries.
+    /// Parsed from the first four bytes of the key's raw bytes, which are
+    /// this count in little-endian, followed by the zk-stdlib key.
+    accumulators: u32,
+    key: Arc<Mutex<InnerVerifierKey>>,
+}
 
 #[cfg(feature = "proptest")]
 simple_arbitrary!(VerifierKey);
@@ -644,19 +650,16 @@ tag_enforcement_test!(VerifierKey);
 
 impl Distribution<VerifierKey> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> VerifierKey {
+        let accumulators: u32 = rng.gen_range(0..4);
         let size: u8 = rng.r#gen();
         let mut bytes = Vec::with_bounded_capacity(size as usize);
         rng.fill_bytes(&mut bytes);
-        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Uninitialized(bytes))))
-    }
-}
-
-impl From<MidnightVK<KZG>> for VerifierKey {
-    fn from(vk: MidnightVK<KZG>) -> Self {
-        let mut raw = Vec::new();
-        vk.write(&mut raw, SerdeFormat::Processed)
-            .expect("in-memory serialize");
-        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))))
+        let mut raw = accumulators.to_le_bytes().to_vec();
+        raw.extend(bytes);
+        VerifierKey {
+            accumulators,
+            key: Arc::new(Mutex::new(InnerVerifierKey::Uninitialized(raw))),
+        }
     }
 }
 
@@ -675,7 +678,10 @@ pub(crate) enum InnerVerifierKey {
 
 impl Clone for VerifierKey {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        VerifierKey {
+            accumulators: self.accumulators,
+            key: self.key.clone(),
+        }
     }
 }
 
@@ -695,9 +701,19 @@ impl Deserializable for VerifierKey {
                 ),
             ));
         }
-        Ok(Self(Arc::new(Mutex::new(InnerVerifierKey::Uninitialized(
-            buf,
-        )))))
+        let accumulators = buf
+            .first_chunk::<4>()
+            .map(|count| u32::from_le_bytes(*count))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "verifier key too short for its accumulator count",
+                )
+            })?;
+        Ok(VerifierKey {
+            accumulators,
+            key: Arc::new(Mutex::new(InnerVerifierKey::Uninitialized(buf))),
+        })
     }
 }
 
@@ -775,6 +791,34 @@ impl Serializable for VerifierKey {
 }
 
 impl VerifierKey {
+    /// Wraps a key for a circuit whose proofs carry `accumulators` deferred
+    /// accumulators.
+    pub fn new(vk: MidnightVK<KZG>, accumulators: u32) -> Self {
+        let mut raw = accumulators.to_le_bytes().to_vec();
+        vk.write(&mut raw, SerdeFormat::Processed)
+            .expect("in-memory serialize");
+        VerifierKey {
+            accumulators,
+            key: Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))),
+        }
+    }
+
+    /// How many deferred accumulators a proof against this key carries.
+    pub fn accumulators(&self) -> u32 {
+        self.accumulators
+    }
+
+    fn check_accumulator_count(&self, proof: &Proof) -> Result<(), VerifyingError> {
+        if proof.accumulators.len() != self.accumulators as usize {
+            return Err(anyhow::anyhow!(
+                "proof carries {} accumulators, but its key expects {}",
+                proof.accumulators.len(),
+                self.accumulators
+            ));
+        }
+        Ok(())
+    }
+
     /// Initializes the lazy verifier key
     pub fn init(&self) -> Result<(), VerifyingError> {
         self.force_init()?;
@@ -784,7 +828,7 @@ impl VerifierKey {
     // warning! This grabs the lock! Make sure to drop the result before re-running!
     #[allow(dead_code)] // Some features don't try to initialize
     pub(crate) fn force_init(&self) -> Result<MidnightVK<KZG>, VerifyingError> {
-        let mut mutex = self.0.lock().expect("mutex is not poisoned");
+        let mut mutex = self.key.lock().expect("mutex is not poisoned");
         let data = match &*mutex {
             InnerVerifierKey::Initialized(key, _) => {
                 return Ok(key.clone());
@@ -794,7 +838,9 @@ impl VerifierKey {
             }
             InnerVerifierKey::Uninitialized(data) => data.clone(),
         };
-        let mut slice: &[u8] = &data;
+        let mut slice: &[u8] = data
+            .get(4..)
+            .ok_or_else(|| anyhow::anyhow!("verifier key too short for its accumulator count"))?;
         let vk = MidnightVK::read(&mut slice, SerdeFormat::Processed)
             .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
         // Reject keys with unconsumed trailing bytes: two encodings must not map
@@ -808,7 +854,7 @@ impl VerifierKey {
     }
 
     fn inner_serialize<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
-        match &*self.0.lock().expect("mutex is not poisoned") {
+        match &*self.key.lock().expect("mutex is not poisoned") {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
                 writer.write_all(data)
             }
@@ -818,7 +864,7 @@ impl VerifierKey {
 
     /// Returns the original raw bytes, preserved even after initialization.
     pub fn original_bytes(&self) -> Vec<u8> {
-        match &*self.0.lock().expect("mutex is not poisoned") {
+        match &*self.key.lock().expect("mutex is not poisoned") {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => data.clone(),
             InnerVerifierKey::Initialized(_, original) => original.clone(),
         }
@@ -831,6 +877,7 @@ impl VerifierKey {
         proof: &Proof,
         statement: F,
     ) -> Result<(), VerifyingError> {
+        self.check_accumulator_count(proof)?;
         let vk = self.force_init()?;
 
         // The caller-facing `statement` covers only the outer circuit's own public
@@ -875,6 +922,7 @@ impl VerifierKey {
         proof: &Proof,
         statement: F,
     ) -> Result<(), VerifyingError> {
+        self.check_accumulator_count(proof)?;
         let acc_len = accumulator_pi_len();
         let pi_len = statement.count() + proof.accumulators.len() * acc_len;
         crate::mock_verify::mock_verify_for(pi_len, proof.accumulators.len())
@@ -897,6 +945,7 @@ impl VerifierKey {
         let mut acc_blocks_per_proof: Vec<Vec<DeferredAccumulator>> = vec![];
 
         for (vk, proof, stmt) in parts.into_iter() {
+            vk.check_accumulator_count(proof)?;
             let mut pi: Vec<outer::Scalar> = proof
                 .accumulators
                 .iter()
@@ -1346,6 +1395,29 @@ mod accumulator_discharge_tests {
             ),
         );
         assert!(DeferredAccumulator::new(&unresolved).is_none());
+    }
+
+    #[test]
+    fn the_accumulator_count_is_checked_before_the_key_is_read() {
+        let mut body = 1u32.to_le_bytes().to_vec();
+        body.extend([0u8; 8]);
+        let vk = VerifierKey {
+            accumulators: 1,
+            key: Arc::new(Mutex::new(InnerVerifierKey::Uninitialized(body))),
+        };
+        let none = Proof::from_bytes(vec![]);
+        let err = vk
+            .verify(&PARAMS_VERIFIER, &none, std::iter::empty())
+            .unwrap_err();
+        assert!(err.to_string().contains("expects 1"), "{err}");
+
+        let mut one = none.clone();
+        one.accumulators
+            .push(DeferredAccumulator::new(&Accumulator::<Bls12>::trivial(&[])).unwrap());
+        let err = vk
+            .verify(&PARAMS_VERIFIER, &one, std::iter::empty())
+            .unwrap_err();
+        assert!(err.to_string().contains("verifier key"), "{err}");
     }
 
     /// Checks the point decoder against midnight-circuits' own, which it only

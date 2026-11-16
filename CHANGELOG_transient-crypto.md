@@ -6,6 +6,10 @@
   8.0.0-rc.1, resolved from the `midnight-zk-stdlib-v3.0.0-rc.1` git tag. Keys
   and proofs of the earlier proof system do not carry over; the prover key tag
   moves to `prover-key[v8]`.
+- breaking: `VerifierKey` records how many deferred accumulators its proofs
+  carry, as a little-endian `u32` ahead of the zk-stdlib key in its bytes, and
+  rejects a proof carrying any other number. `VerifierKey::new` replaces
+  `From<MidnightVK>`.
 - breaking: `DeferredAccumulator` exposes its two points as public fields;
   `new`, `to_accumulator` and `reconstruct_accumulator` become crate-private
   and `InnerSelfEmulation` is dropped, so midnight-circuits types leave the

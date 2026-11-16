@@ -170,10 +170,10 @@ pub fn proof_verification(c: &mut Criterion) {
             params: &impl ParamsProverProvider,
         ) -> Result<VerifierKey, anyhow::Error> {
             use midnight_zk_stdlib::setup_vk;
-            Ok(VerifierKey::from(setup_vk::<_, KZG>(
-                params.get_params(self.k()).await?.as_ref(),
-                self,
-            )))
+            Ok(VerifierKey::new(
+                setup_vk::<_, KZG>(params.get_params(self.k()).await?.as_ref(), self),
+                0,
+            ))
         }
         async fn keygen(
             &self,
@@ -182,7 +182,7 @@ pub fn proof_verification(c: &mut Criterion) {
             use midnight_zk_stdlib::{setup_pk, setup_vk};
             let vk = setup_vk::<_, KZG>(params.get_params(self.k()).await?.as_ref(), self);
             let pk = setup_pk(self, &vk);
-            Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+            Ok((ProverKey::from_raw(pk), VerifierKey::new(vk, 0)))
         }
         fn load_ir_from_tagged(
             reader: impl std::io::Read + std::io::Seek,
