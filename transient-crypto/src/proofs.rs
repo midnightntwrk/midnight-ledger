@@ -137,9 +137,9 @@ lazy_static! {
 
 /// A zero-knowledge proof.
 ///
-/// `bytes` is the raw PLONK proof produced by midnight-zk. `accumulators`
-/// carries one deferred KZG accumulator per `verify_proof` instruction in the
-/// outer circuit, in instruction order.
+/// `bytes` is the raw PLONK proof produced by midnight-zk. `accumulators` are
+/// the pairing checks its circuit deferred to the verifier, in the order the
+/// circuit exposes them as public inputs.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
@@ -147,15 +147,15 @@ lazy_static! {
 pub struct Proof {
     /// The raw PLONK proof bytes.
     pub bytes: Vec<u8>,
-    /// Deferred KZG accumulators exposed by `verify_proof` instructions.
+    /// Deferred KZG accumulators, as many as the verifier key expects.
     pub accumulators: Vec<DeferredAccumulator>,
 }
 tag_enforcement_test!(Proof);
 
 impl Proof {
     /// Builds a proof from just the PLONK bytes, with no accumulators. Use for
-    /// circuits that contain no `verify_proof` instructions, and for mock or
-    /// erased proofs that are never verified.
+    /// circuits that defer no pairing checks, and for mock or erased proofs
+    /// that are never verified.
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
         Self {
             bytes,
@@ -467,7 +467,8 @@ fn decode_point(fields: &[outer::Scalar]) -> Option<outer::Affine> {
         .filter(|p: &outer::Affine| bool::from(p.is_on_curve()))
 }
 
-/// A deferred KZG accumulator, as a `verify_proof` instruction exposes it.
+/// A deferred KZG accumulator: a pairing check a proof's circuit left to its
+/// verifier.
 ///
 /// Only two points, because that is all one carries: an exposed accumulator has
 /// been through `resolve_fixed_bases` and `collapse`, leaving each side a single
@@ -527,8 +528,8 @@ impl DeferredAccumulator {
         self.to_accumulator().check(&params.0, &BTreeMap::new())
     }
 
-    /// The public-input encoding the outer circuit constrained, which the
-    /// verifier prepends to its own statement.
+    /// The public-input encoding a circuit exposing the accumulator constrains,
+    /// which the verifier prepends to its own statement.
     pub fn as_public_input(self) -> Vec<outer::Scalar> {
         <AssignedAccumulator<Bls12> as Instantiable<outer::Scalar>>::as_public_input(
             &self.to_accumulator(),
@@ -880,11 +881,8 @@ impl VerifierKey {
         self.check_accumulator_count(proof)?;
         let vk = self.force_init()?;
 
-        // The caller-facing `statement` covers only the outer circuit's own public
-        // inputs (binding input, communications commitment, impact fields). The
-        // deferred KZG accumulators exposed by `verify_proof` instructions travel
-        // on the proof itself; they are prepended here to reconstruct the full
-        // public-input vector the outer circuit committed to.
+        // The accumulators travel on the proof rather than in the statement;
+        // the circuit's public inputs are both, accumulators first.
         let mut pi: Vec<outer::Scalar> = proof
             .accumulators
             .iter()
@@ -913,9 +911,8 @@ impl VerifierKey {
     /// Mocks the checking of a proof against a statement
     ///
     /// We do this by running a number of CPU burn cycles calculated to be approximately
-    /// equivalent in time-taken to real proof verification, including the deferred
-    /// pairing check that [`verify`](Self::verify) performs on each inner-proof
-    /// accumulator exposed by a `verify_proof` instruction.
+    /// equivalent in time-taken to real proof verification, including the
+    /// pairing check that [`verify`](Self::verify) performs on each accumulator.
     #[cfg(feature = "mock-verify")]
     pub fn mock_verify<F: Iterator<Item = Fr>>(
         &self,
@@ -1065,7 +1062,7 @@ pub trait ProvingProvider {
     fn resolver(&self) -> &impl Resolver;
 }
 
-/// An inner proof handed to an `InnerProof` instruction as a witness.
+/// A proof the circuit being proven verifies, supplied as a witness.
 #[derive(
     Clone,
     Debug,
@@ -1114,8 +1111,8 @@ pub struct ProofPreimage {
     pub public_transcript_inputs: Vec<Fr>,
     /// A public statement vector encoding statement call results in the IR.
     pub public_transcript_outputs: Vec<Fr>,
-    /// Prover-supplied inner proofs consumed positionally by `VerifyProof`
-    /// instructions — one per `VerifyProof`, in instruction order.
+    /// Proofs the circuit verifies, supplied as witnesses. How the circuit
+    /// consumes them is up to the IR.
     pub inner_proofs: Vec<InnerProofWitness>,
     /// An arbitrary input to be bound to in the proof.
     pub binding_input: Fr,

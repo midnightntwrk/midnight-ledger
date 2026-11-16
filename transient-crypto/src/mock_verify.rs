@@ -63,9 +63,9 @@ pub struct CalibrationRecord {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct CalibrationFile {
     points: Vec<CalibrationRecord>,
-    /// Burn iterations equivalent to one inner-proof accumulator pairing check,
-    /// as performed by [`VerifierKey::verify`] outside `midnight_zk_stdlib::verify`
-    /// for each `verify_proof` instruction the circuit carries.
+    /// Burn iterations equivalent to one accumulator pairing check, as performed
+    /// by [`VerifierKey::verify`] outside `midnight_zk_stdlib::verify` for each
+    /// accumulator a proof carries.
     pairing_iters: u64,
 }
 
@@ -74,7 +74,7 @@ struct CalibrationFile {
 pub struct Calibration {
     /// The number of public inputs of each proof and its performance impact during verification
     pub points: Vec<CalibrationRecord>,
-    /// Burn iterations equivalent to one inner-proof accumulator pairing check.
+    /// Burn iterations equivalent to one accumulator pairing check.
     pub pairing_iters: u64,
 }
 
@@ -165,7 +165,7 @@ fn dummy_verify(calibrated_iterations: u64) -> Result<(), VerifyingError> {
 }
 
 /// Simulates proof verification for a proof with the given public-input length
-/// and the given number of inner-proof accumulators, using the global calibration.
+/// and the given number of accumulators, using the global calibration.
 pub fn mock_verify_for(
     public_input_len: usize,
     accumulator_count: usize,
@@ -178,8 +178,8 @@ pub fn iters_for_len(public_input_len: usize) -> u64 {
     calibration().median_iters(public_input_len)
 }
 
-/// Computes the simulated iteration count for `count` inner-proof accumulator
-/// pairing checks.
+/// Computes the simulated iteration count for `count` accumulator pairing
+/// checks.
 pub fn iters_for_pairings(count: usize) -> u64 {
     calibration().pairing_iters.saturating_mul(count as u64)
 }
@@ -318,7 +318,7 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
     }
 
     // Measure one deferred pairing check. `mock_verify_for` multiplies this by
-    // the accumulator count so the mock also charges the per-`verify_proof`
+    // the accumulator count so the mock also charges the per-accumulator
     // pairing cost that `VerifierKey::verify` performs outside
     // `midnight_zk_stdlib::verify`.
     let _ = dummy_verify(100);

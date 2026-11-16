@@ -306,6 +306,29 @@ pub fn proof_verification(c: &mut Criterion) {
     });
 }
 
+/// The work [`VerifierKey::verify`] does per accumulator a proof carries, on
+/// top of verifying the proof itself: regenerating the accumulator's public
+/// inputs, and its pairing check.
+pub fn accumulator_verification(c: &mut Criterion) {
+    use group::{Group, ff::Field};
+    use midnight_transient_crypto::proofs::{DeferredAccumulator, PARAMS_VERIFIER};
+    with_json_iter("proof_verify_accumulator", c, |g, json| {
+        let point =
+            || (midnight_curves::G1Projective::generator() * outer::Scalar::random(OsRng)).into();
+        let acc = DeferredAccumulator {
+            lhs: point(),
+            rhs: point(),
+        };
+        g.bench_function(json.to_string(), |b| {
+            b.iter(|| {
+                let acc = black_box(acc);
+                black_box(acc.as_public_input());
+                black_box(acc.check(&PARAMS_VERIFIER))
+            });
+        });
+    });
+}
+
 pub fn fr_arith(c: &mut Criterion) {
     with_json_iter("fr_add", c, |g, json| {
         g.bench_function(json.to_string(), |bench| {
@@ -363,6 +386,7 @@ criterion_group!(
     embedded_point_arith,
     fr_arith,
     proof_verification,
+    accumulator_verification,
     pedersen,
     signature_verification
 );
