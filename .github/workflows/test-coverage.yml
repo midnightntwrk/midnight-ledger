@@ -68,9 +68,9 @@ jobs:
 
       - name: Check test coverage
         run: |
-          nix develop -c cargo test --workspace --exclude midnight-proof-server --all-features --verbose -- --nocapture --test-threads=4
-          # Proof-server HTTP deadlines need uncontended proving resources.
-          nix develop -c cargo test -p midnight-proof-server --all-features --verbose -- --nocapture --test-threads=1
+          nix develop -c cargo test --workspace --all-features --verbose -- --nocapture --test-threads=4 --skip prove_endpoint::processes_valid_request
+          # Keep workspace features identical while isolating the HTTP proving deadline.
+          nix develop -c cargo test --workspace --all-features --verbose prove_endpoint::processes_valid_request -- --nocapture --test-threads=1 --exact
 
       - name: Generate HTML report
         run: |
