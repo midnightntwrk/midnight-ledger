@@ -219,7 +219,7 @@ jobs:
           - os: ubuntu-24.04-arm
             runner: ubuntu-24.04-arm
           - os: macos-latest
-            runner: macos-15
+            runner: macos-26
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
