@@ -301,9 +301,9 @@ pub enum ProofVersioned {
     V2(transient_crypto_2::proofs::Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait, in the
     /// pre-accumulator `proof[v5]` format.
-    V3(transient_crypto_2::proofs::Proof),
+    V3(transient_crypto_3::proofs::Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
-    V4(Proof),
+    V4(transient_crypto_4::proofs::Proof),
 }
 
 impl Serializable for ProofVersioned {
@@ -325,7 +325,8 @@ impl Serializable for ProofVersioned {
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V2(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V3(proof) => proof.serialized_size() + 1,
             ProofVersioned::V4(proof) => proof.serialized_size() + 1,
         }
     }
@@ -367,8 +368,8 @@ impl Tagged for ProofVersioned {
         format!(
             "[[],{},{},{}]",
             transient_crypto_2::proofs::Proof::tag(),
-            transient_crypto_2::proofs::Proof::tag(),
-            Proof::tag()
+            transient_crypto_3::proofs::Proof::tag(),
+            transient_crypto_4::proofs::Proof::tag()
         )
     }
 }
@@ -477,7 +478,10 @@ impl ProofVersioned {
             ContractOperationVersion::V3 => {
                 Some(Self::V2(transient_crypto_2::proofs::Proof(proof.bytes)))
             }
-            ContractOperationVersion::V4 => Some(Self::V4(proof)),
+            ContractOperationVersion::V4 => {
+                Some(Self::V3(transient_crypto_3::proofs::Proof(proof.bytes)))
+            }
+            ContractOperationVersion::V5 => Some(Self::V4(proof)),
         }
     }
 }
@@ -521,8 +525,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
         match proof {
             ProofVersioned::V2(old_proof) => {
                 let vk = op.v2_vk().ok_or_else(|| {
@@ -552,28 +554,37 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                 }
             }
-            ProofVersioned::V3(old_proof) => {
+            ProofVersioned::V3(v3_proof) => {
                 let vk = op.v3_vk().ok_or_else(|| {
-                    warn!("missing v2 verifier key");
+                    warn!("missing ledger 9 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
                         address: call.address,
                         operation: call.entry_point.clone(),
                     }
                 })?;
-                let inner_proof = &Proof::from_bytes(old_proof.0.clone());
+                let v3_pis = pis.into_iter().map(|f| {
+                    transient_crypto_3::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                });
                 match mode {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk
-                        .mock_verify(inner_proof, pis.into_iter())
+                        .mock_verify(v3_pis)
+                        .map_err(|e| anyhow::anyhow!("ledger 9 key mock verification: {e}"))
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                     _ => vk
-                        .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                        .verify(
+                            &transient_crypto_3::proofs::PARAMS_VERIFIER,
+                            v3_proof,
+                            v3_pis,
+                        )
+                        .map_err(|e| anyhow::anyhow!("ledger 9 key verification: {e}"))
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                 }
             }
             ProofVersioned::V4(inner_proof) => {
-                let vk = op.v3_vk().ok_or_else(|| {
-                    warn!("missing v2 verifier key");
+                let vk = op.v4_vk().ok_or_else(|| {
+                    warn!("missing latest verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
                         address: call.address,
                         operation: call.entry_point.clone(),
@@ -585,7 +596,11 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         .mock_verify(inner_proof, pis.into_iter())
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                     _ => vk
-                        .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                        .verify(
+                            &transient_crypto_4::proofs::PARAMS_VERIFIER,
+                            inner_proof,
+                            pis.into_iter(),
+                        )
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                 }
             }
@@ -618,7 +633,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     fn proof_version_to_operation_version(proof: &Self::Proof) -> Option<ContractOperationVersion> {
         Some(match proof {
             ProofVersioned::V2(_) => ContractOperationVersion::V3,
-            ProofVersioned::V3(_) | ProofVersioned::V4(_) => ContractOperationVersion::V4,
+            ProofVersioned::V3(_) => ContractOperationVersion::V4,
+            ProofVersioned::V4(_) => ContractOperationVersion::V5,
         })
     }
 }
@@ -995,7 +1011,7 @@ pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 #[derive(Storable, Envelope)]
 #[envelope(InnerIntentSigningEnvelope<S, P, B, D>)]
 #[envelope(InnerIntentPedersenEnvelope<S, P, B, D>)]
-#[tag = "intent[v9]"]
+#[tag = "intent[v10]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
@@ -1009,7 +1025,7 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, 
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-signing-envelope[v9]"]
+#[tag = "inner-intent-signing-envelope[v10]"]
 #[phantom(D)]
 // Note: This signing envelope is *not* just the erased intent in order to not count the number of
 // signatures in unshielded offers. For this same reason, no wrapper is required for contract
@@ -1025,7 +1041,7 @@ pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: S
 tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-signing-envelope[v9]"]
+#[tag = "intent-signing-envelope[v10]"]
 #[phantom(D)]
 pub struct IntentSigningEnvelope<D: DB> {
     pub segment: u16,
@@ -1034,7 +1050,7 @@ pub struct IntentSigningEnvelope<D: DB> {
 tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-pedersen-challenge-envelope[v9]"]
+#[tag = "inner-intent-pedersen-challenge-envelope[v10]"]
 #[phantom(D)]
 // Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
 // binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
@@ -1057,7 +1073,7 @@ struct InnerIntentPedersenEnvelope<
 tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-pedersen-challenge-envelope[v9]"]
+#[tag = "intent-pedersen-challenge-envelope[v10]"]
 #[phantom(D)]
 struct IntentPedersenEnvelope<D: DB> {
     segment: u16,
@@ -1506,7 +1522,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v12]"]
+#[tag = "transaction[v13]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1790,7 +1806,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v12]"]
+#[tag = "standard-transaction[v13]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -2564,20 +2580,7 @@ where
                     // ceil(log2(n)): number of bits needed to distinguish n entries
                     let ops_log_size = (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize;
                     cstate.operations.get(entry_point).map(|op| {
-                        let vk_size = match ver {
-                            Some(ContractOperationVersion::V3) => {
-                                op.v2.as_ref().map(|vk| vk.serialized_size())
-                            }
-                            Some(ContractOperationVersion::V4) => {
-                                op.v3.as_ref().map(|vk| vk.serialized_size())
-                            }
-                            None => op
-                                .v3
-                                .as_ref()
-                                .map(|vk| vk.serialized_size())
-                                .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
-                        }
-                        .unwrap_or(VERIFIER_KEY_SIZE);
+                        let vk_size = verifier_key_size(&op, ver).unwrap_or(VERIFIER_KEY_SIZE);
                         (vk_size, ops_log_size)
                     })
                 })
@@ -2788,19 +2791,7 @@ where
         let model = &params.cost_model;
         let validation_cost = self.validation_cost_impl(model, |address, entry_point, ver| {
             let vk_size = get_op(*address, entry_point)
-                .and_then(|op| match ver {
-                    Some(ContractOperationVersion::V3) => {
-                        op.v2.as_ref().map(|vk| vk.serialized_size())
-                    }
-                    Some(ContractOperationVersion::V4) => {
-                        op.v3.as_ref().map(|vk| vk.serialized_size())
-                    }
-                    None => op
-                        .v3
-                        .as_ref()
-                        .map(|vk| vk.serialized_size())
-                        .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
-                })
+                .and_then(|op| verifier_key_size(&op, ver))
                 .unwrap_or(VERIFIER_KEY_SIZE);
             model.cell_read(vk_size as u64)
                 + model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -3120,7 +3111,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v6]"]
+#[tag = "contract-deploy[v7]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -3147,19 +3138,24 @@ impl<D: DB> ContractDeploy<D> {
 pub enum ContractOperationVersion {
     /// The v2 field in ContractOperation (v1 zk-stdlib verifier keys).
     V3,
-    /// The v3 field in ContractOperation (v2 zk-stdlib verifier keys).
+    /// The v3 field in ContractOperation (v2 zk-stdlib verifier keys, as
+    /// ledger 9 stores them).
     V4,
+    /// The v4 field in ContractOperation (latest verifier keys).
+    V5,
 }
 
 impl ContractOperationVersion {
     /// The operation version that verifies proofs made against a verifier key
     /// with this tag. Taken from the key types themselves, so a tag bump in
-    /// either proof system carries over rather than going stale here.
+    /// any proof system carries over rather than going stale here.
     pub fn of_verifier_key_tag(tag: &str) -> Option<Self> {
         if tag == transient_crypto_2::proofs::VerifierKey::tag() {
             Some(Self::V3)
-        } else if tag == transient_crypto::proofs::VerifierKey::tag() {
+        } else if tag == transient_crypto_3::proofs::VerifierKey::tag() {
             Some(Self::V4)
+        } else if tag == transient_crypto_4::proofs::VerifierKey::tag() {
+            Some(Self::V5)
         } else {
             None
         }
@@ -3172,13 +3168,14 @@ impl Serializable for ContractOperationVersion {
         match self {
             V::V3 => Serializable::serialize(&2u8, writer),
             V::V4 => Serializable::serialize(&3u8, writer),
+            V::V5 => Serializable::serialize(&4u8, writer),
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersion as V;
         match self {
-            V::V3 | V::V4 => 1,
+            V::V3 | V::V4 | V::V5 => 1,
         }
     }
 }
@@ -3205,6 +3202,7 @@ impl Deserializable for ContractOperationVersion {
             )),
             2u8 => Ok(V::V3),
             3u8 => Ok(V::V4),
+            4u8 => Ok(V::V5),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -3219,6 +3217,7 @@ impl ContractOperationVersion {
         match self {
             V::V3 => co.v2.is_some(),
             V::V4 => co.v3.is_some(),
+            V::V5 => co.v4.is_some(),
         }
     }
     pub(crate) fn rm_from(&self, co: &mut ContractOperation) {
@@ -3226,7 +3225,26 @@ impl ContractOperationVersion {
         match self {
             V::V3 => co.v2 = None,
             V::V4 => co.v3 = None,
+            V::V5 => co.v4 = None,
         }
+    }
+}
+
+/// The serialized size of the verifier key that proofs of `version` are
+/// checked against, or of the newest key present when no version is given.
+fn verifier_key_size(
+    op: &ContractOperation,
+    version: Option<ContractOperationVersion>,
+) -> Option<usize> {
+    use ContractOperationVersion as V;
+    let v2 = || op.v2.as_ref().map(|vk| vk.serialized_size());
+    let v3 = || op.v3.as_ref().map(|vk| vk.serialized_size());
+    let v4 = || op.v4.as_ref().map(|vk| vk.serialized_size());
+    match version {
+        Some(V::V3) => v2(),
+        Some(V::V4) => v3(),
+        Some(V::V5) => v4(),
+        None => v4().or_else(v3).or_else(v2),
     }
 }
 
@@ -3235,8 +3253,11 @@ impl ContractOperationVersion {
 pub enum ContractOperationVersionedVerifierKey {
     /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
     V3(transient_crypto_2::proofs::VerifierKey),
-    /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
-    V4(transient_crypto::proofs::VerifierKey),
+    /// A v2 (zk-stdlib v2) verifier key as ledger 9 stores it, stored in
+    /// ContractOperation.v3.
+    V4(transient_crypto_3::proofs::VerifierKey),
+    /// A latest verifier key, stored in ContractOperation.v4.
+    V5(transient_crypto_4::proofs::VerifierKey),
 }
 
 impl ContractOperationVersionedVerifierKey {
@@ -3246,6 +3267,7 @@ impl ContractOperationVersionedVerifierKey {
         match self {
             VK::V3(_) => V::V3,
             VK::V4(_) => V::V4,
+            VK::V5(_) => V::V5,
         }
     }
 
@@ -3257,6 +3279,7 @@ impl ContractOperationVersionedVerifierKey {
         match ContractOperationVersion::of_verifier_key_tag(&tag) {
             Some(ContractOperationVersion::V3) => Ok(Self::V3(tagged_deserialize(&mut raw)?)),
             Some(ContractOperationVersion::V4) => Ok(Self::V4(tagged_deserialize(&mut raw)?)),
+            Some(ContractOperationVersion::V5) => Ok(Self::V5(tagged_deserialize(&mut raw)?)),
             None => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("unknown verifier key version {tag}"),
@@ -3269,6 +3292,7 @@ impl ContractOperationVersionedVerifierKey {
         match self {
             VK::V3(vk) => co.v2 = Some(vk.clone()),
             VK::V4(vk) => co.v3 = Some(vk.clone()),
+            VK::V5(vk) => co.v4 = Some(vk.clone()),
         }
     }
 }
@@ -3285,6 +3309,10 @@ impl Serializable for ContractOperationVersionedVerifierKey {
                 Serializable::serialize(&3u8, writer)?;
                 Serializable::serialize(vk, writer)
             }
+            VK::V5(vk) => {
+                Serializable::serialize(&4u8, writer)?;
+                Serializable::serialize(vk, writer)
+            }
         }
     }
 
@@ -3293,6 +3321,7 @@ impl Serializable for ContractOperationVersionedVerifierKey {
         match self {
             VK::V3(vk) => 1 + Serializable::serialized_size(vk),
             VK::V4(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V5(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }
@@ -3303,9 +3332,10 @@ impl Tagged for ContractOperationVersionedVerifierKey {
     }
     fn tag_unique_factor() -> String {
         format!(
-            "[[],[],{},{}]",
+            "[[],[],{},{},{}]",
             transient_crypto_2::proofs::VerifierKey::tag(),
-            transient_crypto::proofs::VerifierKey::tag()
+            transient_crypto_3::proofs::VerifierKey::tag(),
+            transient_crypto_4::proofs::VerifierKey::tag()
         )
     }
 }
@@ -3326,6 +3356,10 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
                 recursion_depth,
             )?)),
             3u8 => Ok(VK::V4(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            4u8 => Ok(VK::V5(Deserializable::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -3413,7 +3447,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v9]"]
+#[tag = "contract-action[v10]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -3723,7 +3757,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v18]"]
+#[tag = "ledger-state[v19]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
@@ -3858,6 +3892,7 @@ pub(crate) mod tests {
     mod count_saturation;
     mod pre_budget_work;
     pub(crate) mod transactions;
+    mod verifier_keys;
 
     use storage::db::InMemoryDB;
 

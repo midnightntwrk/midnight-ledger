@@ -991,7 +991,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v8]"]
+#[tag = "contract-state[v9]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -1131,13 +1131,15 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v6]"]
+#[tag = "contract-operation[v7]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     /// v1 (zk-stdlib v1) verifier key.
     pub v2: Option<transient_crypto_2::proofs::VerifierKey>,
-    /// v2 (zk-stdlib v2) verifier key.
-    pub v3: Option<VerifierKey>,
+    /// v2 (zk-stdlib v2) verifier key, as ledger 9 stores it.
+    pub v3: Option<transient_crypto_3::proofs::VerifierKey>,
+    /// Latest verifier key.
+    pub v4: Option<transient_crypto_4::proofs::VerifierKey>,
     /// The IR associated with this contract operation.
     pub ir: Option<Sp<IrBuf>>,
 }
@@ -1147,18 +1149,19 @@ impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
         ContractOperation {
             v2: None,
+            v3: None,
+            v4: vk,
             ir,
-            v3: vk,
         }
     }
 
-    /// Returns the latest (v3) verifier key.
+    /// Returns the latest (v4) verifier key.
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v3.as_ref()
+        self.v4.as_ref()
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        &mut self.v3
+        &mut self.v4
     }
 
     /// Returns the v2 verifier key.
@@ -1167,8 +1170,13 @@ impl ContractOperation {
     }
 
     /// Returns the v3 verifier key.
-    pub fn v3_vk(&self) -> Option<&VerifierKey> {
+    pub fn v3_vk(&self) -> Option<&transient_crypto_3::proofs::VerifierKey> {
         self.v3.as_ref()
+    }
+
+    /// Returns the v4 verifier key.
+    pub fn v4_vk(&self) -> Option<&transient_crypto_4::proofs::VerifierKey> {
+        self.v4.as_ref()
     }
 }
 
@@ -1183,14 +1191,16 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
-                ir: None,
                 v3: None,
+                v4: None,
+                ir: None,
             }
         } else {
             ContractOperation {
                 v2: None,
-                ir: None,
                 v3: None,
+                v4: None,
+                ir: None,
             }
         }
     }
@@ -1237,8 +1247,9 @@ impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
         ContractOperation {
             v2: None,
-            ir: None,
             v3: None,
+            v4: None,
+            ir: None,
         }
     }
 }

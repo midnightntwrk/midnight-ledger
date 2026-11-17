@@ -14,6 +14,7 @@ public-internal-structure = []
 coin-structure = { version = "3.0.1", path = "../coin-structure", package = "midnight-coin-structure" }
 transient-crypto = { version = "4.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 transient-crypto-2 = { package = "midnight-transient-crypto", version = "^2.0.0" }
+transient-crypto-3 = { package = "midnight-transient-crypto", version = "^3.1.0" }
 base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
 storage = { version = "3.1.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }

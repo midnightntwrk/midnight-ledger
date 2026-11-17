@@ -23,9 +23,10 @@ use midnight_ledger::test_utilities::{
 };
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v10 as midnight_ledger;
-use onchain_runtime::state::{ContractState, StateValue, stval};
+use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+use serialize::Deserializable;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use storage::storage::HashMap;
@@ -135,4 +136,33 @@ async fn non_zero_contract_deploy_balance() {
             expected_balance
         ),
     }
+}
+
+/// A deployed operation may hold a ledger 9 verifier key alone.
+#[test]
+fn deploy_with_only_a_ledger_9_verifier_key() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+
+    // Keys are parsed on first use, so an empty one does here.
+    let mut op = ContractOperation::new(None, None);
+    op.v3 = Some(Deserializable::deserialize(&mut &b"\x00"[..], 0).unwrap());
+    let contract = ContractState::new(
+        StateValue::Null,
+        HashMap::new().insert(b"op"[..].into(), op),
+        Default::default(),
+    );
+    let deploy = ContractDeploy::new(&mut rng, contract);
+    let intents = test_intents(
+        &mut rng,
+        Vec::new(),
+        Vec::new(),
+        vec![deploy],
+        Timestamp::from_secs(0),
+    );
+    Transaction::from_intents("local-test", intents)
+        .well_formed(&ledger_state, strictness, Timestamp::from_secs(0))
+        .unwrap();
 }

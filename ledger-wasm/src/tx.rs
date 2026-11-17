@@ -516,10 +516,11 @@ impl Transaction {
                     .or_else(|_| {
                         let ppiv = tagged_deserialize::<ProofVersioned>(&mut &result[..])?;
                         match ppiv {
-                            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
-                                Ok::<_, std::io::Error>(
-                                    transient_crypto::proofs::Proof::from_bytes(proof.0),
-                                )
+                            ProofVersioned::V2(proof) => Ok::<_, std::io::Error>(
+                                transient_crypto::proofs::Proof::from_bytes(proof.0),
+                            ),
+                            ProofVersioned::V3(proof) => {
+                                Ok(transient_crypto::proofs::Proof::from_bytes(proof.0))
                             }
                             ProofVersioned::V4(proof) => Ok(proof),
                             _ => Err(std::io::Error::new(

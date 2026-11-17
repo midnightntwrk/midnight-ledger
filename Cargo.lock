@@ -3295,6 +3295,7 @@ dependencies = [
  "midnight-storage",
  "midnight-storage-core 1.2.3",
  "midnight-transient-crypto 2.2.0",
+ "midnight-transient-crypto 3.1.0",
  "midnight-transient-crypto 4.0.0",
  "midnight-zkir",
  "midnight-zkir-v3",
@@ -3412,6 +3413,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto 2.2.0",
+ "midnight-transient-crypto 3.1.0",
  "midnight-transient-crypto 4.0.0",
  "pastey",
  "proptest",
@@ -3707,6 +3709,41 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage-core 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "midnight-zk-stdlib 1.3.0",
+ "pastey",
+ "rand 0.8.6",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2 0.11.0",
+ "subtle",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
+name = "midnight-transient-crypto"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df59b81236d176d6afd73361229eb615f3f8a23ae9f2cfee0c1f8184236229fb"
+dependencies = [
+ "anyhow",
+ "blake2b_simd",
+ "const-hex",
+ "derive-where",
+ "fake",
+ "ff 0.13.1",
+ "futures",
+ "group 0.13.0",
+ "lazy_static",
+ "lru",
+ "midnight-base-crypto",
+ "midnight-base-crypto-derive 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-circuits 7.3.0",
+ "midnight-curves 0.3.1",
+ "midnight-proofs 0.8.2",
+ "midnight-serialize",
+ "midnight-storage-core 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-zk-stdlib 2.4.0",
  "pastey",
  "rand 0.8.6",
  "serde",

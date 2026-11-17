@@ -563,3 +563,69 @@ fn maintenance() {
         ));
     }
 }
+
+/// An operation holds one verifier key per version, each inserted and removed
+/// on its own.
+#[test]
+fn verifier_key_per_version() {
+    use ContractOperationVersion as Version;
+    use ContractOperationVersionedVerifierKey as Key;
+
+    /// Keys are parsed on first use, so an empty one does here.
+    fn key<K: Deserializable>() -> K {
+        K::deserialize(&mut &b"\x00"[..], 0).unwrap()
+    }
+
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+
+    let authority = ContractMaintenanceAuthority {
+        committee: vec![],
+        threshold: 0,
+        counter: 0,
+    };
+    let cstate = ContractState::new(StateValue::Null, HashMap::new(), authority);
+    let deploy = ContractDeploy::new(&mut rng, cstate);
+    let addr = deploy.address();
+    let deploy_tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        Transaction::new(
+            "local-test",
+            test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
+            None,
+            HashMap::new(),
+        );
+    state.assert_apply(&deploy_tx, strictness);
+
+    let foo = || EntryPointBuf(b"foo"[..].to_owned());
+    let insert = |key| SingleUpdate::VerifierKeyInsert(foo(), key);
+    let remove = |version| SingleUpdate::VerifierKeyRemove(foo(), version);
+    let mut counter = 0;
+    // Applies the updates and says which of `v2`, `v3` and `v4` then hold a key.
+    let mut keys_after = |updates| {
+        let update = MaintenanceUpdate::new(addr, updates, counter);
+        counter += 1;
+        let tx = update_tx(&mut rng, update, &state);
+        state.assert_apply(&tx, strictness);
+        let cstate = state.ledger.index(addr).unwrap();
+        let op = cstate.operations.get(&foo());
+        op.map(|op| [op.v2.is_some(), op.v3.is_some(), op.v4.is_some()])
+    };
+
+    let v3_and_v5 = vec![insert(Key::V3(key())), insert(Key::V5(key()))];
+    assert_eq!(keys_after(v3_and_v5), Some([true, false, true]));
+    assert_eq!(
+        keys_after(vec![insert(Key::V4(key()))]),
+        Some([true, true, true])
+    );
+    assert_eq!(
+        keys_after(vec![remove(Version::V4)]),
+        Some([true, false, true])
+    );
+    // An operation without keys is dropped.
+    assert_eq!(
+        keys_after(vec![remove(Version::V3), remove(Version::V5)]),
+        None
+    );
+}

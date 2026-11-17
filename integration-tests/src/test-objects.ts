@@ -424,4 +424,12 @@ export class TestResource {
   static operationVerifierKey = (): Uint8Array => {
     return loadBinaryFile('../resources/sample_vk.verifier');
   };
+
+  /**
+   * A verifier key carrying the tag `verifier-key[v<keyVersion>]`. A key is
+   * parsed on first use, so the four bytes after the tag (a length, then three
+   * bytes) need not be a real key.
+   */
+  static taggedVerifierKey = (keyVersion: 6 | 7 | 8): Uint8Array =>
+    new Uint8Array([...new TextEncoder().encode(`midnight:verifier-key[v${keyVersion}]:`), 12, 1, 2, 3]);
 }

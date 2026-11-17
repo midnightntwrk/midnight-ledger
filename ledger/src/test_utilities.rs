@@ -641,8 +641,8 @@ impl<D: DB> TestState<D> {
 }
 
 /// Resolves the key material for `name` and builds the corresponding
-/// [`ContractOperation`], deserializing the verifier key into the v1 (`v2`) or
-/// v2 (`v3`) field depending on its tag.
+/// [`ContractOperation`], deserializing the verifier key into the field its
+/// tag names.
 pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> ContractOperation {
     use transient_crypto::proofs::Resolver;
     let proof_data = resolver
@@ -651,16 +651,11 @@ pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> Cont
         .expect("resolving verifier key should not error")
         .expect("verifier key should be present");
     let mut op = ContractOperation::new(None, None);
-    if let Ok(vk) = serialize::tagged_deserialize::<transient_crypto::proofs::VerifierKey>(
-        &mut &proof_data.verifier_key[..],
-    ) {
-        op.v3 = Some(vk);
-    } else {
-        op.v2 = Some(
-            serialize::tagged_deserialize(&mut &proof_data.verifier_key[..])
-                .expect("verifier key should deserialize as a v1 or v2 verifier key"),
-        );
-    }
+    crate::structure::ContractOperationVersionedVerifierKey::from_tagged_key(
+        &proof_data.verifier_key,
+    )
+    .expect("verifier key should carry the tag of a known verifier key version")
+    .insert_into(&mut op);
     op
 }
 
@@ -988,7 +983,10 @@ impl ProvingProvider for ProofServerProvider<'_> {
             println!("    Proving response: {} bytes", bytes.len());
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
-                ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
+                ProofVersioned::V2(proof) => {
+                    Ok(transient_crypto::proofs::Proof::from_bytes(proof.0))
+                }
+                ProofVersioned::V3(proof) => {
                     Ok(transient_crypto::proofs::Proof::from_bytes(proof.0))
                 }
                 ProofVersioned::V4(proof) => Ok(proof),

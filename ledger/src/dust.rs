@@ -175,9 +175,9 @@ lazy_static! {
 ///
 /// The key's version picks the proof system, the way
 /// [`ContractCall`](crate::structure::ContractCall) verification picks one from
-/// the operation's key. A v1 key takes the proof's bytes and nothing else: that
-/// proof system has no `verify_proof`, so it cannot have earned the
-/// accumulators a latest-format [`Proof`] has room for, and accumulators
+/// the operation's key. A v1 or ledger 9 key takes the proof's bytes and nothing
+/// else: those proof systems have no `verify_proof`, so they cannot have earned
+/// the accumulators a latest-format [`Proof`] has room for, and accumulators
 /// arriving with one are junk no pairing check downstream would look at.
 #[cfg(feature = "proof-verifying")]
 pub(crate) fn verify_spend_proof(
@@ -204,11 +204,29 @@ pub(crate) fn verify_spend_proof(
                 ),
             }
         }
-        ContractOperationVersionedVerifierKey::V4(vk) => match mode {
+        ContractOperationVersionedVerifierKey::V4(vk) => {
+            if !proof.accumulators.is_empty() {
+                anyhow::bail!("ledger 9 dust spend proof carries deferred accumulators");
+            }
+            let pis = pis.into_iter().map(|f| {
+                transient_crypto_3::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    .expect("Fr round-trip")
+            });
+            match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => vk.mock_verify(pis),
+                _ => vk.verify(
+                    &transient_crypto_3::proofs::PARAMS_VERIFIER,
+                    &transient_crypto_3::proofs::Proof(proof.bytes.clone()),
+                    pis,
+                ),
+            }
+        }
+        ContractOperationVersionedVerifierKey::V5(vk) => match mode {
             #[cfg(feature = "mock-verify")]
             ProofVerificationMode::CalibratedMock => vk.mock_verify(proof, pis.into_iter()),
             _ => vk.verify(
-                &transient_crypto::proofs::PARAMS_VERIFIER,
+                &transient_crypto_4::proofs::PARAMS_VERIFIER,
                 proof,
                 pis.into_iter(),
             ),

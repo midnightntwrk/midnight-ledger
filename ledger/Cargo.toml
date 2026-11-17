@@ -15,7 +15,7 @@ proof-verifying = ["zswap/proof-verifying"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
 test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3", "zkir_v3/test-utilities"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
-mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
+mock-verify = ["transient-crypto/mock-verify", "transient-crypto-3/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
 
 [dependencies]
@@ -25,6 +25,7 @@ zswap = { version = "9.0.1", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "4.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 transient-crypto-2 = { package = "midnight-transient-crypto", version = "^2.0.0" }
+transient-crypto-3 = { package = "midnight-transient-crypto", version = "^3.1.0" }
 storage = { version = "3.1.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
