@@ -104,7 +104,7 @@ describe('Ledger API - PrePartitionContractCall', () => {
       testIntents([], [], [deploy], state.time)
     );
     const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
-    const encodedAddr = encodeContractAddress(addr);
+    const encodedAddr = Static.trimTrailingZeros(encodeContractAddress(addr));
 
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());

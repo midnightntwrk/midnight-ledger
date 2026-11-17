@@ -540,6 +540,31 @@ mod tests {
     }
 
     #[test]
+    fn small_budget_terminates() {
+        setup_db();
+        let mut before = mk_nesty(5, 0);
+        before.persist();
+        before.unload();
+        let mut tl_state = TypedTranslationState::<
+            lr::Nesty<TestDb>,
+            rl::Nesty<TestDb>,
+            TestTable,
+            TestDb,
+        >::start(before)
+        .unwrap();
+        // One node's worth of budget, below the work of the root's inline
+        // subtree, whose results do not survive a run.
+        let cost = CostDuration::from_picoseconds(20_000_000);
+        for _ in 0..1000 {
+            if tl_state.result().unwrap().is_some() {
+                break;
+            }
+            tl_state = tl_state.run(cost).unwrap();
+        }
+        assert!(tl_state.result().unwrap().is_some());
+    }
+
+    #[test]
     fn test_test_table_closed() {
         setup_db();
         <TestTable as TranslationTable<TestDb>>::assert_closure();

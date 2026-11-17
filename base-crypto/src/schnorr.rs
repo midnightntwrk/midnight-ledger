@@ -13,6 +13,8 @@
 
 //! Schnorr signature scheme over secp256k1, conforming to BIP340.
 use crate::BinaryHashRepr;
+use crate::rng::RngCompat;
+use k256::elliptic_curve::Generate;
 use k256::schnorr;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
@@ -65,7 +67,7 @@ impl Default for VerifyingKey {
     fn default() -> Self {
         // Manually sampled, we want a stand-in without an rng sometimes.
         VerifyingKey(
-            schnorr::VerifyingKey::from_bytes(&[
+            schnorr::VerifyingKey::from_slice(&[
                 43, 59, 242, 191, 89, 80, 243, 46, 116, 47, 12, 103, 140, 35, 90, 207, 180, 68,
                 188, 10, 108, 126, 200, 195, 239, 14, 120, 114, 89, 188, 199, 38,
             ])
@@ -129,7 +131,7 @@ impl Deserializable for VerifyingKey {
         let mut bytes = [0u8; 32];
         reader.read_exact(&mut bytes)?;
         Ok(VerifyingKey(
-            schnorr::VerifyingKey::from_bytes(&bytes).map_err(|_| {
+            schnorr::VerifyingKey::from_slice(&bytes).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "Malformed Schnorr verifying key",
@@ -163,7 +165,9 @@ tag_enforcement_test!(SigningKey);
 impl SigningKey {
     /// Samples a new secret key from secure randomness
     pub fn sample<R: Rng + CryptoRng>(mut rng: R) -> Self {
-        SigningKey(schnorr::SigningKey::random(&mut rng))
+        SigningKey(schnorr::SigningKey::generate_from_rng(&mut RngCompat(
+            &mut rng,
+        )))
     }
 
     /// Returns the corresponding verifying public key
@@ -173,12 +177,12 @@ impl SigningKey {
 
     /// Signs a message
     pub fn sign<R: Rng + CryptoRng>(&self, rng: &mut R, msg: &[u8]) -> Signature {
-        Signature(self.0.sign_with_rng(rng, msg))
+        Signature(self.0.sign_with_rng(&mut RngCompat(rng), msg))
     }
 
     /// Parse signing key from big endian-encoded bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        let signing_key = schnorr::SigningKey::from_bytes(bytes)?;
+        let signing_key = schnorr::SigningKey::from_slice(bytes)?;
         Ok(SigningKey(signing_key))
     }
 }
@@ -206,7 +210,7 @@ impl Deserializable for SigningKey {
         let mut bytes = [0u8; 32];
         reader.read_exact(&mut bytes)?;
         Ok(SigningKey(
-            schnorr::SigningKey::from_bytes(&bytes).map_err(|_| {
+            schnorr::SigningKey::from_slice(&bytes).map_err(|_| {
                 io::Error::new(io::ErrorKind::InvalidData, "Malformed Schnorr signing key")
             })?,
         ))

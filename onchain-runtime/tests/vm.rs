@@ -842,4 +842,306 @@ mod tests {
             ))
         );
     }
+
+    mod cached_idx {
+        use super::*;
+        use proptest::prelude::*;
+        use std::collections::BTreeMap;
+        use storage::storage::default_storage;
+
+        type D = InMemoryDB;
+
+        #[derive(Debug, Clone, Copy)]
+        enum Container {
+            Map,
+            Bmt,
+        }
+
+        #[derive(Debug, Clone, Copy)]
+        enum Relocation {
+            None,
+            FreshArray,
+            FreshMap,
+            UsedSlot,
+            Aliased,
+        }
+
+        fn container(kind: Container, height: u8, leaves: &BTreeMap<u64, u64>) -> StateValue<D> {
+            match kind {
+                Container::Map => {
+                    StateValue::Map(leaves.iter().fold(HashMap::new(), |m, (k, v)| {
+                        m.insert(AlignedValue::from(*k), StateValue::from(*v))
+                    }))
+                }
+                Container::Bmt => StateValue::BoundedMerkleTree(
+                    leaves
+                        .iter()
+                        .fold(MerkleTree::blank(height), |t, (i, v)| {
+                            t.try_update_hash(*i, leaf_hash(v), ()).unwrap()
+                        })
+                        .rehash(),
+                ),
+            }
+        }
+
+        fn expected_leaf(kind: Container, leaf: Option<&u64>) -> StateValue<D> {
+            match (kind, leaf) {
+                (_, None) => StateValue::Null,
+                (Container::Map, Some(v)) => StateValue::from(*v),
+                (Container::Bmt, Some(v)) => StateValue::Cell(Sp::new(leaf_hash(v).into())),
+            }
+        }
+
+        // Round-trips through the arena so the container's nodes are only
+        // loaded on demand, as they are for contract state read from disk.
+        fn lazily_loaded(value: StateValue<D>) -> StateValue<D> {
+            let mut sp = Sp::<_, D>::new(value);
+            sp.persist();
+            let key = sp.as_typed_key();
+            drop(sp);
+            let lazy = default_storage::<D>().arena.get_lazy(&key).unwrap();
+            assert!(lazy.is_lazy());
+            (*lazy).clone()
+        }
+
+        // Moves the value on top of the stack into another container and
+        // takes it back out. `UsedSlot` moves it into slot 0 of the persistent
+        // container `dest` stack entries down, after reading `key` from that
+        // slot's previous occupant. `Aliased` moves it into that slot, keeps
+        // the copy taken back out, then puts the previous occupant back after
+        // reading `key` from it.
+        fn relocate(
+            relocation: Relocation,
+            key: &AlignedValue,
+            dest: u8,
+        ) -> Vec<Op<ResultModeGather, D>> {
+            let new_tag: u8 = match relocation {
+                Relocation::None => return vec![],
+                // Array of length 1.
+                Relocation::FreshArray => 3 | (1 << 3),
+                Relocation::FreshMap => 2,
+                Relocation::UsedSlot => {
+                    return ops![
+                        dup dest;
+                        idx [(AlignedValue::from(0u8)), (key.clone())];
+                        pop;
+                        dup dest;
+                        push ((0u8));
+                        dup 2;
+                        ins 1;
+                        idx [(AlignedValue::from(0u8))]
+                    ];
+                }
+                Relocation::Aliased => {
+                    return ops![
+                        dup dest;
+                        push ((0u8));
+                        dup 2;
+                        ins 1;
+                        dup 0;
+                        idx [(AlignedValue::from(0u8))];
+                        dup (dest + 2);
+                        idx [(AlignedValue::from(0u8))];
+                        dup 0;
+                        idx [(key.clone())];
+                        pop;
+                        dup 2;
+                        push ((0u8));
+                        dup 2;
+                        ins 1;
+                        pop;
+                        pop
+                    ];
+                }
+            };
+            ops![
+                push ((new_tag));
+                new;
+                push ((0u8));
+                dup 2;
+                ins 1;
+                idx [(AlignedValue::from(0u8))]
+            ]
+        }
+
+        fn read_case() -> impl Strategy<Value = (u8, BTreeMap<u64, u64>, u64)> {
+            (1u8..=32)
+                .prop_flat_map(|height| {
+                    let index = 0..1u64 << height;
+                    (
+                        Just(height),
+                        prop::collection::btree_map(index.clone(), any::<u64>(), 0..8),
+                        index,
+                    )
+                })
+                .prop_flat_map(|(height, leaves, fresh)| {
+                    let keys: Vec<u64> = leaves.keys().copied().chain([fresh]).collect();
+                    (Just(height), Just(leaves), prop::sample::select(keys))
+                })
+        }
+
+        fn container_kind() -> impl Strategy<Value = Container> {
+            prop_oneof![Just(Container::Map), Just(Container::Bmt)]
+        }
+
+        fn relocation() -> impl Strategy<Value = Relocation> {
+            prop_oneof![
+                Just(Relocation::None),
+                Just(Relocation::FreshArray),
+                Just(Relocation::FreshMap),
+                Just(Relocation::UsedSlot),
+                Just(Relocation::Aliased),
+            ]
+        }
+
+        proptest! {
+            // A cached read is priced as already paid for, so it must only
+            // succeed on a leaf this run has already read, however the
+            // container holding it was moved around beforehand.
+            #[test]
+            fn cached_leaf_read_requires_prior_read(
+                kind in container_kind(),
+                (height, leaves, key) in read_case(),
+                wrappers in 0usize..=2,
+                relocation in relocation(),
+                relocate_at in 0usize..=2,
+                warm: bool,
+                lazy: bool,
+            ) {
+                let relocate_at = relocate_at.min(wrappers);
+                let mut state = container(kind, height, &leaves);
+                for _ in 0..wrappers {
+                    state = StateValue::Array(vec![state].into());
+                }
+                let decoy = container(kind, height, &BTreeMap::from([(key, 0)]));
+                let mut dest = StateValue::Array(vec![decoy].into());
+                if lazy {
+                    state = lazily_loaded(state);
+                    dest = lazily_loaded(dest);
+                }
+                let key_av = AlignedValue::from(key);
+                let mut program: Vec<Op<ResultModeGather, D>> = Vec::new();
+                for level in 0..wrappers {
+                    if level == relocate_at {
+                        program.extend(relocate(relocation, &key_av, 1));
+                    }
+                    program.extend(ops![idx [(AlignedValue::from(0u8))]]);
+                }
+                if relocate_at == wrappers {
+                    program.extend(relocate(relocation, &key_av, 1));
+                }
+                if warm {
+                    program.extend(ops![dup 0; idx [(key_av.clone())]; pop]);
+                }
+                program.extend(ops![idxc [(key_av)]]);
+
+                let result = run_program::<D, ResultModeGather>(
+                    &[
+                        VmValue::new(ValueStrength::Strong, dest),
+                        VmValue::new(ValueStrength::Strong, state),
+                    ],
+                    &program,
+                );
+                let expected = expected_leaf(kind, leaves.get(&key));
+                match (warm, relocation) {
+                    (false, _) => prop_assert_eq!(result, Err(OnchainProgramError::CacheMiss)),
+                    (true, Relocation::None) => {
+                        let (stack, _) = result?;
+                        prop_assert_eq!(&stack.last().unwrap().value, &expected);
+                    }
+                    // Whether a warmed read stays warm across a move is open;
+                    // only a wrong value is a violation.
+                    (true, _) => match result {
+                        Ok((stack, _)) => prop_assert_eq!(&stack.last().unwrap().value, &expected),
+                        Err(e) => prop_assert_eq!(e, OnchainProgramError::CacheMiss),
+                    },
+                }
+            }
+        }
+    }
+
+    // `ins` and `rem` replace a slot without reading it, so they must not mark
+    // it as read: a copy of the container left on the stack still holds the
+    // old value, and a cached `idx` on it would read that value for free.
+    mod overwrite_does_not_mark_read {
+        use super::*;
+
+        type D = InMemoryDB;
+
+        fn array(v: StateValue<D>) -> StateValue<D> {
+            StateValue::Array(vec![v].into())
+        }
+
+        fn map(k: u64, v: u64) -> StateValue<D> {
+            StateValue::Map(HashMap::new().insert(AlignedValue::from(k), StateValue::from(v)))
+        }
+
+        fn run(state: StateValue<D>, ops: &[Op<ResultModeGather, D>]) -> OnchainProgramError<D> {
+            run_program::<D, ResultModeGather>(
+                &[VmValue::new(ValueStrength::Strong, state)],
+                ops,
+            )
+            .unwrap_err()
+        }
+
+        fn insc_then_read_copy() -> Vec<Op<ResultModeGather, D>> {
+            ops![
+                dup 0;
+                push ((0u8));
+                push ((7u64));
+                insc 1;
+                pop;
+                idxc [(AlignedValue::from(0u8))]
+            ]
+        }
+
+        #[test]
+        fn cold_read_misses() {
+            let ops = ops![idxc [(AlignedValue::from(0u8))]];
+            assert_eq!(
+                run(array(StateValue::from(42u64)), &ops),
+                OnchainProgramError::CacheMiss
+            );
+        }
+
+        #[test]
+        fn cached_ins_into_array() {
+            assert_eq!(
+                run(array(StateValue::from(42u64)), &insc_then_read_copy()),
+                OnchainProgramError::CacheMiss
+            );
+        }
+
+        #[test]
+        fn cached_ins_walk_through_nested_arrays() {
+            let state = array(array(array(StateValue::from(42u64))));
+            let ops: Vec<_> = (0..3).flat_map(|_| insc_then_read_copy()).collect();
+            assert_eq!(run(state, &ops), OnchainProgramError::CacheMiss);
+        }
+
+        #[test]
+        fn ins_into_map() {
+            let ops = ops![
+                dup 0;
+                push ((1u64));
+                push ((7u64));
+                ins 1;
+                pop;
+                idxc [(AlignedValue::from(1u64))]
+            ];
+            assert_eq!(run(map(1, 42), &ops), OnchainProgramError::CacheMiss);
+        }
+
+        #[test]
+        fn rem_from_map() {
+            let ops = ops![
+                dup 0;
+                push ((1u64));
+                rem;
+                pop;
+                idxc [(AlignedValue::from(1u64))]
+            ];
+            assert_eq!(run(map(1, 42), &ops), OnchainProgramError::CacheMiss);
+        }
+    }
 }

@@ -35,6 +35,7 @@ pub(crate) fn ciphertext_to_field(c: &CoinCiphertext) -> transient_crypto::curve
     )
 }
 
+pub(crate) mod compact_slots;
 mod construct;
 pub mod error;
 pub mod keys;

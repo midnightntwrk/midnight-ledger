@@ -30,6 +30,10 @@ use std::time::Instant;
 
 pub type RawNode<D> = ArenaKey<<D as DB>::Hasher>;
 
+/// Heuristic for the overhead of processing a node, which dominates in most
+/// cases.
+const NODE_OVERHEAD: CostDuration = CostDuration::from_picoseconds(20_000_000);
+
 pub enum StepResult<D: DB> {
     Finished(Sp<dyn Any + Send + Sync, D>),
     NotEnoughTime,
@@ -272,9 +276,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         } else {
             let t0 = Instant::now();
             let res = T::finalize(&self.value, limit, cache)?;
-            // Heuristic for overhead of processing a node. Dominates in most cases.
-            // Set at 20us.
-            *limit -= CostDuration::from_picoseconds(20_000_000);
+            *limit -= NODE_OVERHEAD;
             let res = match res {
                 // TODO: Here and elsewhere, we destroy the Sp for the hash,
                 // which will actually deallocate it. Use something that keeps
@@ -599,6 +601,8 @@ struct InflightTranslationState<TABLE: TranslationTable<D>, D: DB> {
     work_queue: Queue<TaggedTranslationState<TABLE, D>, D>,
     cache: TranslationCache<D>,
     result: Option<Sp<dyn Any + Send + Sync, D>>,
+    // Whether this run cached a new result that outlives it.
+    persisted_progress: bool,
 }
 
 impl<TABLE: TranslationTable<D>, D: DB> From<TranslationState<TABLE, D>>
@@ -609,6 +613,7 @@ impl<TABLE: TranslationTable<D>, D: DB> From<TranslationState<TABLE, D>>
             work_queue: value.work_queue.into(),
             cache: value.cache.into(),
             result: value.result,
+            persisted_progress: false,
         }
     }
 }
@@ -658,9 +663,14 @@ impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
 
     pub fn run(&self, mut limit: CostDuration) -> io::Result<Self> {
         let mut cur = InflightTranslationState::from(self.clone());
+        let run_limit = limit;
         cur.result = loop {
             match cur.step(&mut limit)? {
-                Either::Left(true) => break None,
+                Either::Left(true) if cur.persisted_progress => break None,
+                // Results for in-lined nodes are dropped at the end of a run,
+                // so stopping before persisting one would redo the same work
+                // forever.
+                Either::Left(true) => limit = run_limit.max(NODE_OVERHEAD),
                 Either::Left(false) => {}
                 Either::Right(res) => break Some(res),
             }
@@ -701,6 +711,12 @@ impl<TABLE: TranslationTable<D>, D: DB> InflightTranslationState<TABLE, D> {
                 if self.work_queue.is_empty() {
                     return Ok(Either::Right(res));
                 } else {
+                    if !self.persisted_progress
+                        && matches!(cur.from, ArenaKey::Ref(_))
+                        && self.cache.lookup(&cur.id, cur.from.clone()).is_none()
+                    {
+                        self.persisted_progress = true;
+                    }
                     self.cache.insert(cur.id, cur.from, res);
                 }
             }

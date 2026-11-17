@@ -53,7 +53,7 @@ mod tests {
     #[cfg(feature = "proptest")]
     randomised_serialization_test!(SimpleArray);
     #[cfg(feature = "proptest")]
-    type SimpleMap = midnight_storage::storage::Map<TestVec, u8>;
+    type SimpleMap = midnight_storage::storage::Map<u64, u8>;
     #[cfg(feature = "proptest")]
     randomised_serialization_test!(SimpleMap);
     #[cfg(feature = "proptest")]

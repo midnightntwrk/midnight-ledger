@@ -250,19 +250,31 @@ impl CostModel {
         self.read_cell((FR_BYTES * 3 + 2) as u64, sync) * log_size as u64
     }
     pub fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
-        let topo_nodes = value.serialize_to_node_list();
-        let bytes_written = topo_nodes
-            .nodes
-            .iter()
-            .map(|n| {
-                n.data.len() as u64 + n.child_indices.len() as u64 * PERSISTENT_HASH_BYTES as u64
-            })
-            .sum::<u64>();
-        RunningCost {
+        // Bytes saturate, so nothing exceeds u64::MAX and the walk always completes.
+        self.tree_copy_bounded(&value, u64::MAX).unwrap_or(RunningCost {
+            bytes_written: u64::MAX,
+            ..RunningCost::ZERO
+        })
+    }
+    /// As [`Self::tree_copy`], or `None` once the bytes written exceed
+    /// `limit`, having walked only the nodes counted so far.
+    pub fn tree_copy_bounded<T: Storable<D>, D: DB>(
+        &self,
+        value: &Sp<T, D>,
+        limit: u64,
+    ) -> Option<RunningCost> {
+        let mut bytes_written = 0u64;
+        let complete = value.try_visit_nodes(|data, children| {
+            bytes_written = bytes_written
+                .saturating_add(data.len() as u64)
+                .saturating_add(children as u64 * PERSISTENT_HASH_BYTES as u64);
+            bytes_written <= limit
+        });
+        complete.then_some(RunningCost {
             read_time: CostDuration::ZERO,
             compute_time: CostDuration::ZERO,
             bytes_written,
             bytes_deleted: 0,
-        }
+        })
     }
 }

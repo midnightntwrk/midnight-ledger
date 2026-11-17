@@ -371,17 +371,23 @@ impl Alignment {
         self.consume(value).map(|(_, res)| res.0.is_empty()) == Some(true)
     }
 
-    pub(crate) fn consume_internal<T, F: Fn(&mut T, AlignmentAtom), G: Fn(&T) -> usize>(
+    /// Tests if a value fits within the alignment, with an explicit found on `Field` aligned atoms.
+    pub fn fits_field_check(&self, value: &ValueSlice, field_check: impl Fn(&ValueAtom) -> bool) -> bool {
+        self.consume_field_check(value, field_check).map(|(_, res)| res.0.is_empty()) == Some(true)
+    }
+
+    pub(crate) fn consume_internal<T, F: Fn(&mut T, AlignmentAtom), G: Fn(&T) -> usize, FC: Fn(&ValueAtom) -> bool>(
         &self,
         mut value: &ValueSlice,
         f: &F,
         len: &G,
+        field_check: &FC,
         mut acc: T,
     ) -> Option<T> {
         for ts in self.0.iter() {
             match ts {
                 AlignmentSegment::Atom(pty) => {
-                    if value.0.is_empty() || !pty.fits(&value.0[0]) {
+                    if value.0.is_empty() || !pty.fits_field_check(&value.0[0], field_check) {
                         return None;
                     }
                     value = ValueSlice::from_prim_slice(&value.0[1..]);
@@ -398,7 +404,7 @@ impl Alignment {
                     value = ValueSlice::from_prim_slice(&value.0[1..]);
                     let prev_consumed = len(&acc);
                     let branch = tys.get(branch)?;
-                    acc = branch.consume_internal(value, f, len, acc)?;
+                    acc = branch.consume_internal(value, f, len, field_check, acc)?;
                     let consumed = len(&acc) - prev_consumed;
                     value = ValueSlice::from_prim_slice(&value.0[consumed..]);
                 }
@@ -413,7 +419,19 @@ impl Alignment {
         &'a self,
         value: &'a ValueSlice,
     ) -> Option<(AlignedValueSlice<'a>, &'a ValueSlice)> {
-        let split_point = self.consume_internal(value, &|ctr, _| *ctr += 1, &|ctr| *ctr, 0)?;
+        self.consume_field_check(value, |_| true)
+    }
+
+    /// Consumes part of a value with this alignment, returning its aligned
+    /// form, and the remaining value, if the prefix fits this alignment.
+    ///
+    /// Enforces an additional explicit check on `Field` alignments.
+    pub fn consume_field_check<'a>(
+        &'a self,
+        value: &'a ValueSlice,
+        field_check: impl Fn(&ValueAtom) -> bool,
+    ) -> Option<(AlignedValueSlice<'a>, &'a ValueSlice)> {
+        let split_point = self.consume_internal(value, &|ctr, _| *ctr += 1, &|ctr| *ctr, &field_check, 0)?;
         Some((
             AlignedValueSlice(ValueSlice::from_prim_slice(&value.0[..split_point]), self),
             ValueSlice::from_prim_slice(&value.0[split_point..]),
@@ -708,13 +726,19 @@ pub const FIELD_BYTE_LIMIT: usize = 64;
 impl AlignmentAtom {
     /// Tests if a [`ValueAtom`] fits within the alignment.
     pub fn fits(&self, value: &ValueAtom) -> bool {
+        self.fits_field_check(value, |_| true)
+    }
+
+    /// Tests if a [`ValueAtom`] fits within the alignment, with an explicit additional constraint
+    /// on field values.
+    pub fn fits_field_check(&self, value: &ValueAtom, field_check: impl Fn(&ValueAtom) -> bool) -> bool {
         match self {
             AlignmentAtom::Compress => true,
             AlignmentAtom::Bytes { length } => {
                 *length >= value.0.len() as u32 && value.is_in_normal_form()
             }
 
-            AlignmentAtom::Field => FIELD_BYTE_LIMIT >= value.0.len() && value.is_in_normal_form(),
+            AlignmentAtom::Field => FIELD_BYTE_LIMIT >= value.0.len() && value.is_in_normal_form() && field_check(value),
         }
     }
 }

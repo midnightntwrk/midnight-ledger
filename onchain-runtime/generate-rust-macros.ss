@@ -46,7 +46,7 @@
 (define-syntax path-arg
   (syntax-rules (quote stack)
     [(_ 'stack) "Key::Stack"]
-    [(_ val) (format "Key::Value(~a.into())" (rt-arg val))]))
+    [(_ val) (format "Key::Value($crate::ops::expect_checked(~a))" (rt-arg val))]))
 
 (define-syntax rt-arg
   (syntax-rules (void list length align state-value rt-entry-point-hash rt-aligned-concat rt-value->int rt-coin-commit rt-max-sizeof rt-leaf-hash quote f-cached f reverse cdr car + - * sub1 add1 expt null cell map array merkle-tree rt-null)
@@ -58,10 +58,10 @@
     [(_ (align n bytes))
       (format "AlignedValue::from(~a as u~a)" (rt-arg n) (* 8 bytes))]
     [(_ (state-value 'null)) "StateValue::Null"]
-    [(_ (state-value 'cell cont)) (format "StateValue::Cell(Sp::new(~a.try_into().unwrap()))" (rt-arg cont))]
+    [(_ (state-value 'cell cont)) (format "StateValue::Cell(Sp::new($crate::ops::expect_checked(~a)))" (rt-arg cont))]
     [(_ (state-value 'map ([key value] ...)))
       (format "StateValue::Map([~{~a~^, ~}].iter().cloned().collect())"
-              (list (format "(AlignedValue::from(~a), ~a)" (rt-arg key) (rt-arg value)) ...))]
+              (list (format "($crate::ops::expect_checked(~a), ~a)" (rt-arg key) (rt-arg value)) ...))]
     [(_ (state-value 'array (entries ...)))
       (format "StateValue::Array(vec![~{~a~^, ~}].into())" (list (rt-arg entries) ...))]
     [(_ (state-value 'merkle-tree nat ([key value] ...)))
@@ -69,7 +69,7 @@
               (rt-arg nat)
               (list (format "~a, ~a.into()" (rt-arg key) (rt-arg value)) ...))]
     [(_ (state-value 'ADT value value_type))
-      (format "StateValue::from(~a)" (rt-arg value))]
+      (format "$crate::ops::expect_checked_state_value(StateValue::from(~a))" (rt-arg value))]
     [(_ (rt-entry-point-hash ep))
       (format "AlignedValue::from(persistent_commit(&~a.0[..], HashOutput(*b\"midnight:entry-point\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\\0\")))" (rt-arg ep))]
     [(_ (rt-aligned-concat args ...))

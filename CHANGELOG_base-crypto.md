@@ -1,10 +1,40 @@
 # `base-crypto` Changelog
 
+## Version `1.1.1`
+
+- security: `FixedPoint::from_u64_div` saturates to `FixedPoint::MAX` instead of
+  wrapping negative for quotients of `2^63` or more, which made
+  `CostDuration * FixedPoint` return zero for such durations.
+- security: `FixedPoint::from_u128_div`, and with it `FixedPoint` division,
+  saturates to `FixedPoint::MAX` instead of wrapping negative for quotients
+  between `i128::MAX` and `u128::MAX` (e.g. `FixedPoint::MAX / 0.75`).
+
 ## Version `1.1.0`
 
 - feat: add `within_bounds` on `RunningCost`
 - feat: add `Envelope` trait derive macro, for building signing envelopes
 - feat: add `Mul` implementation of `CostDuration` and `FixedPoint`
+- security: reject non-canonical `Value` and `ValueAtom` encodings: a singleton
+  value encoded in the multi-entry form, and an atom that fits the single-byte
+  form encoded as multiple bytes.
+- security: `AlignedValue` deserialization now rejects a value that does not fit
+  its declared alignment.
+- fix: `Duration::from_hours` saturates instead of overflowing.
+
+## Version `1.0.2`
+
+- feat: `Alignment::fits_field_check`, `Alignment::consume_field_check` and
+  `AlignmentAtom::fits_field_check`, which apply an additional caller-supplied
+  check to atoms with `Field` alignment.
+
+## Version `1.0.1`
+
+- security: reject non-canonical `Value` and `ValueAtom` encodings: a singleton
+  value encoded in the multi-entry form, and an atom that fits the single-byte
+  form encoded as multiple bytes.
+- security: `AlignedValue` deserialization now rejects a value that does not fit
+  its declared alignment.
+- fix: `Duration::from_hours` saturates instead of overflowing.
 
 ## Version `1.0.0`
 

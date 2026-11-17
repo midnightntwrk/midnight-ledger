@@ -73,6 +73,10 @@ fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generic
 ///
 /// When an attribute `#[storable(invariant = some_function)]` is set, `some_function` is used as the
 /// `Storable::check_invariant` implementation.
+///
+/// When `#[storable(invariant_memoized = some_function)]` is set instead, `some_function` also
+/// takes a `&mut InvariantMemos<D>` shared by every check in one decode; `InvariantMemos` must
+/// be imported where the type derives `Storable`.
 #[proc_macro_derive(Storable, attributes(storable, tag, phantom))]
 pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -115,13 +119,23 @@ pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
     let to_binary_repr_impl = derive_to_binary_repr(&input.data, &db);
     let from_binary_repr_impl = derive_from_binary_repr(&input.data, &db);
 
-    let invariant_impl = invariant.map(|expr| {
-        quote! {
+    let invariant_impl = match invariant {
+        Some(Invariant::Plain(expr)) => Some(quote! {
             fn check_invariant(&self) -> Result<(), std::io::Error> {
                 #expr(self)
             }
-        }
-    });
+        }),
+        Some(Invariant::Memoized(expr)) => Some(quote! {
+            fn check_invariant(&self) -> Result<(), std::io::Error> {
+                #expr(self, &mut InvariantMemos::new())
+            }
+
+            fn check_invariant_memoized(&self, memos: &mut InvariantMemos<#db>) -> Result<(), std::io::Error> {
+                #expr(self, memos)
+            }
+        }),
+        None => None,
+    };
 
     let mut expanded = quote! {
         #[allow(unused)]
@@ -297,7 +311,12 @@ fn is_base(input: &DeriveInput) -> Option<TokenStream> {
     })
 }
 
-fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>) {
+enum Invariant {
+    Plain(Expr),
+    Memoized(Expr),
+}
+
+fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Invariant>) {
     use std::collections::HashMap;
     // Find #[storable(...)] attrs
     let attrs: Vec<Punctuated<MetaNameValue, Token![,]>> = input
@@ -324,7 +343,13 @@ fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>) {
         Expr::Path(p) => p.path.get_ident().cloned(),
         _ => None,
     });
-    (db, kvs.get("invariant").cloned().cloned())
+    let invariant = match (kvs.get("invariant"), kvs.get("invariant_memoized")) {
+        (Some(_), Some(_)) => panic!("set at most one of `invariant` and `invariant_memoized`"),
+        (Some(expr), None) => Some(Invariant::Plain((*expr).clone())),
+        (None, Some(expr)) => Some(Invariant::Memoized((*expr).clone())),
+        (None, None) => None,
+    };
+    (db, invariant)
 }
 
 #[derive(PartialEq)]

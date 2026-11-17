@@ -459,7 +459,7 @@ impl<D: DB> TestState<D> {
         if self.debug_print {
             dbg!(tx.cost_with_state(&self.ledger.parameters, &self.ledger, false)).ok();
             dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
-            dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
+            dbg!(tx.application_cost(&self.ledger.parameters)).ok();
             dbg!(
                 tx.cost_with_state(&self.ledger.parameters, &self.ledger, false)
                     .ok()

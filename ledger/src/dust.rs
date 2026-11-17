@@ -81,6 +81,83 @@ use transient_crypto::{
 use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
+/// State slot indices of the `ledger` fields declared in `ledger/dust.compact`.
+///
+/// The on-chain runtime addresses contract state positionally, so each `ledger`
+/// declaration in the Compact source is reachable under `Key::Value(n)` where `n` is
+/// its zero-based declaration index. These constants are the single definition of
+/// that mapping; they are mirrored by hand, because the build consumes the
+/// pre-compiled ZKIR in `zkir-precompiles/` rather than invoking `compactc` (see
+/// `flake.nix`).
+///
+/// Reordering, inserting or removing a `ledger` declaration in `dust.compact`
+/// therefore requires updating these values in lockstep. Getting them wrong produces
+/// a public transcript that does not match the circuit's verifier key, so every
+/// affected dust proof fails to verify.
+mod compact_slots {
+    /// `ledger commitment_merkle_tree: HistoricMerkleTree<32, Field>`
+    pub(super) const DUST_IDX_COMMITMENT_TREE: u8 = 0;
+    /// `ledger generation_merkle_tree: HistoricMerkleTree<32, Field>`
+    pub(super) const DUST_IDX_GENERATION_TREE: u8 = 1;
+    /// `ledger nullifiers: Set<Field>`
+    pub(super) const DUST_IDX_NULLIFIERS: u8 = 2;
+    /// `ledger parameters: DustParameters`
+    pub(super) const DUST_IDX_PARAMETERS: u8 = 3;
+    /// `ledger ctime: Uint<64>`
+    pub(super) const DUST_IDX_CTIME: u8 = 4;
+    /// `ledger dust_spend: DustSpend`
+    pub(super) const DUST_IDX_SPEND: u8 = 5;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The `ledger` field names declared in a Compact source, in declaration order.
+        fn ledger_fields(src: &str) -> Vec<&str> {
+            src.lines()
+                .map(str::trim)
+                .map(|line| line.strip_prefix("export ").unwrap_or(line))
+                .filter_map(|line| line.strip_prefix("ledger "))
+                .map(|rest| rest.split(':').next().unwrap_or("").trim())
+                .collect()
+        }
+
+        /// Pins the constants above to the declaration order in `dust.compact`, so that
+        /// reordering, inserting, removing or renaming a `ledger` field there fails here
+        /// rather than silently invalidating every dust proof.
+        #[test]
+        fn slot_indices_match_compact_source() {
+            let fields = ledger_fields(include_str!("../dust.compact"));
+            let expected = [
+                (DUST_IDX_COMMITMENT_TREE, "commitment_merkle_tree"),
+                (DUST_IDX_GENERATION_TREE, "generation_merkle_tree"),
+                (DUST_IDX_NULLIFIERS, "nullifiers"),
+                (DUST_IDX_PARAMETERS, "parameters"),
+                (DUST_IDX_CTIME, "ctime"),
+                (DUST_IDX_SPEND, "dust_spend"),
+            ];
+            assert_eq!(
+                fields.len(),
+                expected.len(),
+                "dust.compact declares {} ledger fields, but {} slot indices are \
+                 defined in dust.rs; found {fields:?}",
+                fields.len(),
+                expected.len(),
+            );
+            for (idx, name) in expected {
+                assert_eq!(
+                    fields[usize::from(idx)],
+                    name,
+                    "slot {idx} is documented as `{name}`, but dust.compact declares \
+                     `{}` at that position",
+                    fields[usize::from(idx)],
+                );
+            }
+        }
+    }
+}
+use compact_slots::*;
+
 #[cfg(feature = "proof-verifying")]
 const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
@@ -488,6 +565,14 @@ impl DustGenerationInfo {
     }
 }
 
+/// Deprecated. Retained only to preserve the serialized shape of
+/// [`DustGenerationState`] (`dust-generation-state[v1]`) so that pre-patch wasm
+/// libraries can still deserialize ledger state produced by patched binaries.
+///
+/// It is no longer consulted for soundness: generation uniqueness is now enforced
+/// via [`DustGenerationState::night_indices`], which keys on the initial nonce
+/// alone (the spend circuit binds `gen.nonce` to that nonce). Do not reintroduce
+/// this into any validity check.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable)]
 #[storable(base)]
 #[tag = "dust-generation-uniqueness-info"]
@@ -627,7 +712,7 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 let mut prog = Vec::new();
                 // Check commitment merkle tree root
                 prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
-                    [Key::Value(0u8.into())],
+                    [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
                     false,
                     32,
                     Fr,
@@ -635,30 +720,38 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 ));
                 // Check generation merkle tree root
                 prog.extend(HistoricMerkleTree_check_root!(
-                    [Key::Value(1u8.into())],
+                    [Key::Value(DUST_IDX_GENERATION_TREE.into())],
                     false,
                     32,
                     Fr,
                     generation_root.0
                 ));
                 // Read spend
-                prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+                prog.extend(Cell_read!(
+                    [Key::Value(DUST_IDX_SPEND.into())],
+                    false,
+                    DustSpend
+                ));
                 // Read ctime
-                prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+                prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
                 // Read dust parameters
-                prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+                prog.extend(Cell_read!(
+                    [Key::Value(DUST_IDX_PARAMETERS.into())],
+                    false,
+                    DustParameters
+                ));
                 // Insert old nullifier
                 prog.extend(Set_insert!(
-                    [Key::Value(2u8.into())],
+                    [Key::Value(DUST_IDX_NULLIFIERS.into())],
                     false,
                     Fr,
                     self.old_nullifier.0
                 ));
                 // Read ctime
-                prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+                prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
                 // Insert new commitment
                 prog.extend(HistoricMerkleTree_insert_hash!(
-                    [Key::Value(0u8.into())],
+                    [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
                     false,
                     32,
                     Fr,
@@ -738,20 +831,17 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
         }
     }
 
-    pub(crate) fn well_formed(
+    pub(crate) fn well_formed<'d>(
         &self,
-        segment_id: u16,
-        parent: &ErasedIntent<D>,
+        data_to_sign: impl FnOnce() -> &'d [u8],
         strictness: WellFormedStrictness,
     ) -> Result<(), MalformedTransaction<D>> {
         if !strictness.verify_signatures
-            || self.signature.as_ref().map(|sig| {
-                S::signature_verify(
-                    &parent.data_to_sign(segment_id),
-                    self.night_key.clone(),
-                    sig,
-                )
-            }) == Some(true)
+            || self
+                .signature
+                .as_ref()
+                .map(|sig| S::signature_verify(data_to_sign(), self.night_key.clone(), sig))
+                == Some(true)
         {
             Ok(())
         } else {
@@ -848,8 +938,15 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
         for spend in self.spends.iter() {
             spend.well_formed(ref_state, segment_id, binding, strictness, self.ctime)?;
         }
+        // Every registration signs the whole intent, so it is serialized once.
+        let data_to_sign = std::cell::OnceCell::new();
         for reg in self.registrations.iter() {
-            ref_state.stateless_check(|| reg.well_formed(segment_id, parent, strictness))?;
+            ref_state.stateless_check(|| {
+                reg.well_formed(
+                    || data_to_sign.get_or_init(|| parent.data_to_sign(segment_id)),
+                    strictness,
+                )
+            })?;
         }
         ref_state.param_check(true, |params| if self.ctime > tblock || self.ctime + params.dust.dust_grace_period < tblock {
             warn!(ctime = ?self.ctime, ?tblock, grace_period = ?params.dust.dust_grace_period, "dust actions out of TTL range");
@@ -918,10 +1015,15 @@ tag_enforcement_test!(DustParameters);
 
 impl DustParameters {
     pub const fn time_to_cap(&self) -> Duration {
-        Duration::from_secs(
-            self.night_dust_ratio
-                .div_ceil(self.generation_decay_rate as u64) as i128,
-        )
+        // Should not happen, but panic-guards
+        if self.generation_decay_rate == 0 {
+            Duration::from_secs(i128::MAX)
+        } else {
+            Duration::from_secs(
+                self.night_dust_ratio
+                    .div_ceil(self.generation_decay_rate as u64) as i128,
+            )
+        }
     }
 }
 
@@ -993,7 +1095,20 @@ pub struct DustGenerationState<D: DB> {
     pub address_delegation: Map<UserAddress, DustPublicKey, D>,
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
     pub generating_tree_first_free: u64,
+    /// Deprecated. No longer populated or consulted; retained solely to preserve
+    /// the serialized shape of this struct (`dust-generation-state[v1]`) for
+    /// pre-patch wasm libraries. Soundness now relies on `night_indices` below.
+    /// See [`DustGenerationUniquenessInfo`].
     pub generating_set: HashSet<DustGenerationUniquenessInfo, D>,
+    /// Maps each generation's initial nonce to its index in `generating_tree`.
+    ///
+    /// This map MUST be append-only: a nonce, once inserted, is never removed.
+    /// Dust-spend soundness depends on it — `fresh_dust_output` uses it to reject
+    /// a second generation reusing an existing initial nonce, and the spend circuit
+    /// binds `gen.nonce` to the spent UTXO's initial nonce. If an entry could be
+    /// dropped, a nonce could recur with a different value and the binding would no
+    /// longer uniquely determine the generation. (Contrast `DustLocalState`'s own
+    /// `night_indices`, which is wallet-local and safe to prune in `process_ttls`.)
     pub night_indices: HashMap<InitialNonce, u64, D>,
     pub root_history: TimeFilterMap<Identity<MerkleTreeDigest>, D>,
 }
@@ -1072,7 +1187,6 @@ impl<D: DB> DustState<D> {
         parent_intent: &ErasedIntent<D>,
         registration: &DustRegistration<S, D>,
         dust_params: &DustParameters,
-        tnow: Timestamp,
         context: &TransactionContext<D>,
         mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<(Self, u128), TransactionInvalid<D>> {
@@ -1146,7 +1260,7 @@ impl<D: DB> DustState<D> {
                     initial_value,
                     output.value,
                     **dust_addr,
-                    tnow,
+                    context.block_context.tblock,
                     context.block_context.tblock,
                     &mut event_push,
                 )?;
@@ -1190,11 +1304,10 @@ impl<D: DB> DustState<D> {
             nonce: initial_nonce,
             dtime: Timestamp::MAX,
         };
-        if self.generation.generating_set.member(&gen_info.into()) {
-            warn!(?gen_info, "already present generation info");
-            return Err(DustStateError::GenerationInfoAlreadyPresent(gen_info));
+        if self.generation.night_indices.contains_key(&initial_nonce) {
+            warn!(?initial_nonce, "already present initial_nonce info");
+            return Err(DustStateError::InitialNonceAlreadyPresent(initial_nonce));
         }
-        state.generation.generating_set = state.generation.generating_set.insert(gen_info.into());
         state.generation.generating_tree = state
             .generation
             .generating_tree
@@ -1802,7 +1915,7 @@ impl<D: DB> DustLocalState<D> {
         let mut prog = Vec::new();
         // Check commitment merkle tree root
         prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
-            [Key::Value(0u8.into())],
+            [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
             false,
             32,
             Fr,
@@ -1812,7 +1925,7 @@ impl<D: DB> DustLocalState<D> {
         ));
         // Check generation merkle tree root
         prog.extend(HistoricMerkleTree_check_root!(
-            [Key::Value(1u8.into())],
+            [Key::Value(DUST_IDX_GENERATION_TREE.into())],
             false,
             32,
             Fr,
@@ -1823,18 +1936,31 @@ impl<D: DB> DustLocalState<D> {
                 ))?
         ));
         // Read spend
-        prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+        prog.extend(Cell_read!(
+            [Key::Value(DUST_IDX_SPEND.into())],
+            false,
+            DustSpend
+        ));
         // Read ctime
-        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
         // Read dust parameters
-        prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+        prog.extend(Cell_read!(
+            [Key::Value(DUST_IDX_PARAMETERS.into())],
+            false,
+            DustParameters
+        ));
         // Insert old nullifier
-        prog.extend(Set_insert!([Key::Value(2u8.into())], false, Fr, old_nul.0));
+        prog.extend(Set_insert!(
+            [Key::Value(DUST_IDX_NULLIFIERS.into())],
+            false,
+            Fr,
+            old_nul.0
+        ));
         // Read ctime
-        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        prog.extend(Cell_read!([Key::Value(DUST_IDX_CTIME.into())], false, u64));
         // Insert new commitment
         prog.extend(HistoricMerkleTree_insert_hash!(
-            [Key::Value(0u8.into())],
+            [Key::Value(DUST_IDX_COMMITMENT_TREE.into())],
             false,
             32,
             Fr,
@@ -2140,8 +2266,8 @@ pub fn successor_utxo(
         backing_night: utxo.backing_night,
         ctime: *now,
         initial_value: v_now,
-        seq: utxo.seq + 1,
-        nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
+        seq: utxo.seq.saturating_add(1),
+        nonce: dust_nonce(&utxo.backing_night, utxo.seq.saturating_add(1), sk),
         owner: utxo.owner,
         mt_index: new_commitment_index,
     }

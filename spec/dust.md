@@ -75,10 +75,12 @@ In practice, this is not continuously processed, but is calculated at the time
 a Dust UTXO is spent, by computing the "updated" value of this UTXO. For this
 purpose, the creation time of Dust UTXOs is used, as well as metadata
 "generation info" associated with the backing Night UTXO. This metadata
-includes the Dust public key, the creation time of the backing Night UTXO, and
+includes the Dust public key and
 the *deletion* time of the backing Night UTXO (if applicable -- this may also
 be a future time, and is set to the maximum timestamp if backing Night UTXO is
-still present). These allow computing any generation and decay between the
+still present). The creation time of the backing Night UTXO is not stored
+separately; for the first Dust UTXO in a chain it *is* that UTXO's `ctime`.
+Together these allow computing any generation and decay between the
 the time the Dust UTXO being spent was created and the current time.
 
 This Night metadata is stored separately to the main UTXO set, and not all
@@ -97,7 +99,7 @@ given Night public key with the corresponding secret key's signature.
 Finally, because registrations run a challenge of paying for their own fees, if
 the same Night address is used in a registration, and at least one input that
 is *not* backing any Dust, then fees may be taken from the Dust these inputs
-*would have* generated, had they has an associated Dust UTXO (effectively
+*would have* generated, had they had an associated Dust UTXO (effectively
 backdating the registration). Any freshly created Dust UTXOs associated with
 the same Night address get the remaining Dust from this split between them at
 creation time, rather than the typical initial balance of 0.
@@ -260,7 +262,7 @@ subsystem:
   mapping and may affect the Dust generation state and create fresh Dust UTXOs
   if the relevant Night address has Night UTXOs owed Dust in this transaction.
 
-The latter two are captured in an explicit `DustActions` structure, which also includes a timestamp that these actions are made against.
+The latter two are captured in an explicit `DustActions` structure, which also includes a timestamp. `DustSpend`s are evaluated as if they had occurred at this time stamp, while `DustRegistration`s occur at the time of the block that includes them.
 
 The `DustRegistration`s case is the complex one, because these registrations
 *may* pay for fees. This has several preconditions and, differently from the
@@ -323,25 +325,22 @@ struct DustGenerationInfo {
 }
 ```
 
-In order to ensure that Dust generation is unique, a variant of this without
-the timestamp is also kept in the state, preventing duplicate Dust generations.
-
-```rust
-struct DustGenerationUniquenessInfo {
-    value: u128,
-    owner: DustPublicKey,
-    nonce: InitialNonce,
-}
-```
+Dust generation is kept unique by the initial nonce: each `DustGenerationInfo`
+is created with a distinct `nonce`, and the state records every nonce it has
+seen (via `night_indices`, below), rejecting any attempt to insert a second
+generation with an already-present nonce. This uniqueness is load-bearing for
+spend soundness — the spend circuit binds the generation info used to compute a
+Dust UTXO's value to the UTXO's initial nonce, so a nonce must determine at most
+one generation.
 
 The ledger's state related to the Dust generation information has a number of
 components:
 - A mapping from Night addresses to Dust addresses, to provide the Dust owner value for new Night outputs.
 - A sequential Merkle tree of `DustGenerationInfo`, which can be directly used
   to assert the presence of a specific Dust generation info in ZK proofs.
-- A corresponding set of the `DustGenerationUniquenessInfo`s, to prevent
-  collisions in these.
-- A mapping from Night UTXOs to their position in the Merkle tree.
+- A mapping from each generation's initial nonce to its position in the Merkle
+  tree. This is append-only, and doubles as the uniqueness check preventing two
+  generations from sharing an initial nonce.
 - A history of valid Merkle tree roots (valid for the Dust grace period).
 
 ```rust
@@ -349,7 +348,7 @@ struct DustGenerationState {
     address_delegation: Map<NightAddress, DustPublicKey>,
     generating_tree: MerkleTree<DustGenerationInfo>,
     generating_tree_first_free: usize,
-    generating_set: Set<DustGenerationUniquenessInfo>,
+    /// Append-only; also enforces initial-nonce uniqueness (see above).
     night_indices: Map<InitialNonce, u64>,
     root_history: TimeFilterMap<MerkleTreeRoot>,
 }
@@ -431,6 +430,7 @@ fn updated_value(
     let tstart_phase_1 = inp.ctime;
     let tend_phase_12 = min(gen.dtime, now);
     let value_phase_1_unchecked = (tend_phase_12 - tstart_phase_1).as_seconds() * rate + inp.initial_value;
+    assert!(inp.initial_value <= vfull);
     let value_phase_12 = clamp(value_phase_1_unchecked, inp.initial_value, vfull);
     // Again, we aren't constraining the end to be after the start, instead
     // we're clamping the output to the reasonable region of outputs.
@@ -476,7 +476,8 @@ Locally, users need to supply:
 - The Dust secret key demonstrating ownership
 - The backing generation info
 - The paths to both the Dust commitment being spent and the generation info.
-- The nonce and sequence number of the new output.
+- The initial nonce of the backing Night UTXO, and the sequence number of the
+  Dust UTXO being spent.
 
 ```rust
 fn dust_spend_valid(
@@ -490,9 +491,9 @@ fn dust_spend_valid(
     gen: Private<DustGenerationInfo>,
     commitment_merkle_tree: Private<MerkleTree<DustCommitment>>,
     generation_merkle_tree: Private<MerkleTree<DustGenerationInfo>>,
-    // Note these are for the new coin, and there is no need to validate these,
-    // as the secret key ensures these are provided by the same user as consumes
-    // them.
+    // The initial nonce of the backing Night UTXO, and the sequence number of
+    // the spent UTXO. Both are bound below, tying the generation info and the
+    // spent UTXO's nonce to a shared origin.
     initial_nonce: Private<InitialNonce>,
     seq_no: Private<u32>,
 ) -> bool {
@@ -507,6 +508,15 @@ fn dust_spend_valid(
     assert!(commitment_root = commitment_merkle_tree.root());
     assert!(generation_merkle_tree.contains(gen));
     assert!(genration_root = generation_merkle_tree.root());
+    // Bind both the spent UTXO's nonce and the generation info to a shared
+    // initial nonce. Without this the generation info is unconstrained: any
+    // entry in the generation tree could be paired with the spent UTXO, letting
+    // a spender substitute a higher-value backing Night to inflate the computed
+    // updated value. The first UTXO in a chain (seq 0) is bound to the public
+    // key, all subsequent ones to the secret key (see the nonce discussion above).
+    let old_key = if seq_no == 0 { dust.owner } else { sk };
+    assert!(dust.nonce == field::hash((initial_nonce, seq_no, old_key)));
+    assert!(gen.nonce == initial_nonce);
     let nullifier = field::hash(DustPreProjection {
         initial_value: dust.initial_value,
         owner: sk,
@@ -517,7 +527,7 @@ fn dust_spend_valid(
     let v_pre = updated_value(inp, gen, tnow, params);
     assert!(v_pre >= dust_spend.v_fee);
     let v = v_pre - dust_spend.v_fee;
-    let nonce = field::hash((initial_nonce, seq_no, sk));
+    let nonce = field::hash((initial_nonce, seq_no + 1, sk));
     let post_commitment = field::hash(DustPreProjection {
         initial_value: v,
         owner: dust.owner,
@@ -695,7 +705,7 @@ impl DustState {
                 .any(|reg| hash(reg.night_key) == output.owner);
             if !handled_by_registration {
                 let initial_nonce = hash(hash(segment, parent), output_no as u32);
-                self = self.fresh_dust_output(initial_nonce, 0,  output.value, dust_addr, tblock, tblock)?;
+                self = self.fresh_dust_output(initial_nonce, 0,  output.value, dust_addr, tblock)?;
             }
         }
         self
@@ -707,15 +717,14 @@ impl DustState {
         initial_value: u128,
         night_value: u128,
         dust_addr: DustPublicKey,
-        tnow: Timestamp,
-        tblock: Timestamp,
+        night_ctime: Timestamp,
     ) -> Result<Self> {
         let seq = 0;
         let dust_pre_projection = DustPreProjection {
             initial_value: initial_value,
             owner: dust_addr,
             nonce: field::hash((initial_nonce, seq, dust_addr)),
-            ctime: tnow,
+            ctime: night_ctime,
         };
         let dust_commitment = field::hash(dust_pre_projection);
         self.utxo.commitments = self.utxo.commitments.insert(
@@ -729,10 +738,9 @@ impl DustState {
             nonce: initial_nonce,
             dtime: Timestamp::MAX,
         };
-        assert!(!self.generation.generating_set.contains(gen_info.into()));
-        self.generation.generating_set = self.generation.generating_set.insert(
-            gen_info.into(),
-        );
+        // `night_indices` doubles as the uniqueness check: an initial nonce may
+        // only ever be inserted once.
+        assert!(!self.generation.night_indices.contains(initial_nonce));
         self.generation.generating_tree = self.generation.generating_tree.insert(
             self.generation.generating_tree_first_free,
             gen_info,
@@ -761,7 +769,6 @@ impl DustState {
         parent_intent: ErasedIntent,
         reg: DustRegistration<S>,
         params: DustParameters,
-        tnow: Timestamp,
         context: BlockContext,
     ) -> Result<(Self, u128)> {
         let night_address = hash(reg.night_key);
@@ -790,7 +797,7 @@ impl DustState {
                 let ratio = ((output.value * DISTRIBUTION_RESOLUTION) / output_sum);
                 let initial_value = (ratio * dust_out) / DISTRIBUTION_RESOLUTION;
                 let initial_nonce = hash(hash(segment, parent), output_no as u32);
-                self = self.fresh_dust_output(initial_nonce, initial_value, output.value, dust_addr, tnow, context.tblock)?;
+                self = self.fresh_dust_output(initial_nonce, initial_value, output.value, dust_addr, context.tblock)?;
             }
         }
         Ok((self, remaining_fees))

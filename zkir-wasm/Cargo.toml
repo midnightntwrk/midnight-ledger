@@ -1,6 +1,6 @@
 [package]
 name = "midnight-zkir-wasm"
-version = "2.2.0-rc.3"
+version = "2.2.0"
 edition = "2024"
 license.workspace = true
 publish = false
@@ -24,6 +24,9 @@ wasm-bindgen = "=0.2.108"
 wasm-bindgen-futures = "^0.4.50"
 js-sys = "^0.3.81"
 hex = "^0.4.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "^0.3.58"
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = ['-O', '--enable-reference-types', '-g']

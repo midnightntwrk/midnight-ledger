@@ -81,10 +81,15 @@ from the consensus layer that produces it.
   `unclaimed_block_rewards` / `bridge_receiving` by a `DistributeNight`
   system transaction (§3).
 * **Validity constraints:** the signature must verify; `network_id` must
-  match; the amount must be claimable (the ledger enforces a minimum,
-  `LedgerParameters::min_claimable_rewards`, derived so the claim can cover
-  its own theoretical DUST fee at the Dust cap — otherwise `RewardTooSmall`);
-  and the claimed value must not exceed the address's claimable balance.
+  match; the claimed value must not exceed the address's claimable balance
+  (otherwise `InsufficientClaimable`); and the amount must meet a minimum:
+  * `Reward` claims must be at least `LedgerParameters::min_claimable_rewards`,
+    derived so the claim can cover its own theoretical DUST fee at the Dust
+    cap (otherwise `RewardTooSmall`).
+  * `CardanoBridge` claims must be at least
+    `LedgerParameters::c_to_m_bridge_min_amount`, or claim the full non-zero
+    claimable balance so a remainder below the minimum can still be withdrawn
+    (otherwise `BridgeClaimTooSmall`).
 
 > `VerifiedTransaction` (`structure.rs`) is not a separate variant — it is a
 > wrapper produced after verification, holding the proof-erased

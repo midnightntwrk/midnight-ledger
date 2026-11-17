@@ -479,7 +479,7 @@ impl RunningCost {
         self.read_time <= bounds.read_time
             && self.compute_time <= bounds.compute_time
             && self.bytes_written <= bounds.bytes_written
-            && self.bytes_deleted <= bounds.bytes_deleted
+            && self.bytes_deleted >= bounds.bytes_deleted
     }
 }
 
@@ -736,8 +736,15 @@ impl FixedPoint {
             return FixedPoint(i128::MAX);
         }
         let ashift = (a as u128) << 64;
-        let c = ashift.div_ceil(b as u128) as i128;
-        FixedPoint(c)
+        let c = ashift.div_ceil(b as u128);
+        // `a / b` may be up to `2^64 - 1`, which does not fit into the signed
+        // representation. Saturate rather than wrapping into negatives, which
+        // would otherwise be clamped to zero cost downstream.
+        if c > i128::MAX as u128 {
+            FixedPoint(i128::MAX)
+        } else {
+            FixedPoint(c as i128)
+        }
     }
 
     /// Instantiates a fixed point from a/b (rounded up to the nearest 2^-64)
@@ -755,7 +762,8 @@ impl FixedPoint {
         } else {
             i256::from(1u64)
         } + c;
-        if c > i256::from(u128::MAX) {
+        // Saturate at the signed maximum; anything above it would wrap negative.
+        if c > i256::from(i128::MAX) {
             FixedPoint(i128::MAX)
         } else {
             FixedPoint(c.as_i128())
@@ -998,6 +1006,94 @@ mod tests {
     }
 
     #[test]
+    fn from_u64_div_never_negative() {
+        for a in [
+            0,
+            1,
+            (1u64 << 63) - 1,
+            1u64 << 63,
+            (1u64 << 63) + 1,
+            u64::MAX,
+        ] {
+            for b in [1, 2, 3, u64::MAX] {
+                assert!(
+                    FixedPoint::from_u64_div(a, b).0 >= 0,
+                    "{a} / {b} went negative"
+                );
+            }
+        }
+        assert_eq!(FixedPoint::from_u64_div(1u64 << 63, 1), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u64_div(u64::MAX, 1), FixedPoint::MAX);
+        assert_eq!(
+            FixedPoint::from_u64_div(u64::MAX, 2).0,
+            ((u64::MAX as u128) << 63) as i128
+        );
+    }
+
+    #[test]
+    fn cost_duration_scaling_does_not_wrap_to_zero() {
+        let below = CostDuration::from_picoseconds((1u64 << 63) - 1);
+        assert_eq!(below * FixedPoint::ONE, below);
+        assert_eq!(FixedPoint::ONE * below, below);
+        for ps in [1u64 << 63, (1u64 << 63) + 1, u64::MAX] {
+            let d = CostDuration::from_picoseconds(ps);
+            for scaled in [d * FixedPoint::ONE, FixedPoint::ONE * d] {
+                assert!(
+                    scaled >= CostDuration::from_picoseconds(1u64 << 63),
+                    "{ps} ps scaled down to {scaled:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn from_u128_div_never_negative() {
+        let max = i128::MAX as u128;
+        for a in [
+            0,
+            1,
+            (1 << 63) - 1,
+            1 << 63,
+            1 << 64,
+            max,
+            max + 1,
+            u128::MAX,
+        ] {
+            for b in [1, 3, 1 << 64, u128::MAX] {
+                assert!(
+                    FixedPoint::from_u128_div(a, b).0 >= 0,
+                    "{a} / {b} went negative"
+                );
+            }
+        }
+        // Largest exactly representable integer quotient.
+        assert_eq!(
+            FixedPoint::from_u128_div((1 << 63) - 1, 1).0,
+            (((1u128 << 63) - 1) << 64) as i128
+        );
+        assert_eq!(FixedPoint::from_u128_div(1 << 63, 1), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u128_div(max + 1, 1 << 64), FixedPoint::MAX);
+        assert_eq!(FixedPoint::from_u128_div(u128::MAX, 1), FixedPoint::MAX);
+    }
+
+    #[test]
+    fn fixed_point_div_saturates_with_sign() {
+        let three_quarters = FixedPoint::from_u64_div(3, 4);
+        let neg_max = FixedPoint(-i128::MAX);
+        assert_eq!(FixedPoint::MAX / three_quarters, FixedPoint::MAX);
+        assert_eq!(FixedPoint::MAX / -three_quarters, neg_max);
+        assert_eq!(neg_max / three_quarters, neg_max);
+        assert_eq!(neg_max / -three_quarters, FixedPoint::MAX);
+        assert_eq!(FixedPoint(i128::MIN) / three_quarters, neg_max);
+        assert_eq!(FixedPoint::MAX / FixedPoint::MIN_POSITIVE, FixedPoint::MAX);
+        // Quotients in range are unaffected.
+        assert_eq!(
+            FixedPoint::MAX / FixedPoint::from_u64_div(2, 1),
+            FixedPoint(i128::MAX / 2 + 1)
+        );
+    }
+
+    #[test]
     fn test_pricing_cant_get_stuck() {
         let mut cur = FeePrices {
             overall_price: FixedPoint::ONE,
@@ -1094,6 +1190,29 @@ mod tests {
         fn u128_div(a: u128, b in 1u128..u128::MAX) {
             within_permissible_error(a as f64 / b as f64, f64::from(FixedPoint::from_u128_div(a, b)), 1e-9f64);
         }
+        // Declared deletions lower the priced net writes, so they must not exceed
+        // the actual deletions; every other component is an upper bound.
+        #[test]
+        fn within_bounds_bounds_deletions_from_below(
+            actual in running_cost(),
+            declared in running_cost(),
+        ) {
+            let expected = actual.read_time <= declared.read_time
+                && actual.compute_time <= declared.compute_time
+                && actual.bytes_written <= declared.bytes_written
+                && declared.bytes_deleted <= actual.bytes_deleted;
+            prop_assert_eq!(actual.within_bounds(&declared), expected);
+        }
+    }
+
+    // Small ranges, so that independently drawn costs often compare both ways.
+    fn running_cost() -> impl Strategy<Value = RunningCost> {
+        (0u64..4, 0u64..4, 0u64..4, 0u64..4).prop_map(|(r, c, w, d)| RunningCost {
+            read_time: CostDuration::from_picoseconds(r),
+            compute_time: CostDuration::from_picoseconds(c),
+            bytes_written: w,
+            bytes_deleted: d,
+        })
     }
 
     #[test]

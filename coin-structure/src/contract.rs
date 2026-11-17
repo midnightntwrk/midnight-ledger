@@ -47,6 +47,7 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 #[tag = "contract-address[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct ContractAddress(pub HashOutput);
+serialize::encoding_shape_as!(ContractAddress, [u8; 32]);
 tag_enforcement_test!(ContractAddress);
 
 impl rand::distributions::Distribution<ContractAddress> for rand::distributions::Standard {

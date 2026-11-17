@@ -298,6 +298,11 @@ impl ContractCall {
         segment_id: u16,
         parent: ErasedIntent,
     ) -> Result<()> {
+        // Dust is not transferable: contracts may neither receive nor send it.
+        for transcript in [self.guaranteed_transcript, self.fallible_transcript].flatten() {
+            assert!(!transcript.effects.unshielded_inputs.contains_key(TokenType::Dust));
+            assert!(!transcript.effects.unshielded_outputs.contains_key(TokenType::Dust));
+        }
         let circuit = ref_state.contract.get(self.address)?.operations.get(self.entry_point)?;
         zk_verify(
             circuit,

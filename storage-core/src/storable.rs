@@ -14,6 +14,7 @@
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::arena::{ArenaKey, DirectChildNode, Opaque, Sp, hash};
+use crate::dag_memo::InvariantMemos;
 use crate::db::DB;
 use base_crypto::schnorr::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -22,7 +23,7 @@ use base_crypto::{
     fab::{AlignedValue, Alignment, Value},
     hash::HashOutput,
 };
-use digest::Digest;
+use crypto::digest::Digest;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
@@ -118,6 +119,16 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     /// An invariant to check on deserialization. Should be invoked from within `from_binary_repr`.
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         Ok(())
+    }
+
+    /// As [`Self::check_invariant`], sharing `memos` with every other check in
+    /// the same decode.
+    fn check_invariant_memoized(
+        &self,
+        memos: &mut InvariantMemos<D>,
+    ) -> Result<(), std::io::Error> {
+        let _ = memos;
+        self.check_invariant()
     }
 
     /// Represents self as a `ArenaKey`

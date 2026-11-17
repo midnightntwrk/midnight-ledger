@@ -803,9 +803,9 @@ impl LedgerState {
             }
             // Then apply registrations
             for intent in tx.intents.sorted_values() {
-                for (time, reg) in intent.dust_actions
+                for reg in intent.dust_actions
                     .iter()
-                    .flat_map(|a| a.registrations.iter().map(|reg| (a.ctime, reg)))
+                    .flat_map(|a| a.registrations.iter())
                 {
                     (self.dust, fees_remaining) = self.dust.apply_registration(
                         context.ref_state.utxo,
@@ -813,7 +813,6 @@ impl LedgerState {
                         intent.erase_proofs(),
                         reg,
                         self.params.dust,
-                        ctime,
                         context.block_context,
                     )?;
                 }

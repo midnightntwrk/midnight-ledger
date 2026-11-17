@@ -3,8 +3,8 @@ macro_rules! kernel_claim_zswap_nullifier {
   ($f:expr_2021, $fcached:expr_2021, $nul:expr_2021) => {
     [
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($nul.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($nul.clone()))).try_into().unwrap() },
       Op::Push { storage: false.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
@@ -17,8 +17,8 @@ macro_rules! kernel_claim_zswap_coin_spend {
   ($f:expr_2021, $fcached:expr_2021, $note:expr_2021) => {
     [
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($note.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($note.clone()))).try_into().unwrap() },
       Op::Push { storage: false.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
@@ -31,8 +31,8 @@ macro_rules! kernel_claim_zswap_coin_receive {
   ($f:expr_2021, $fcached:expr_2021, $note:expr_2021) => {
     [
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($note.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($note.clone()))).try_into().unwrap() },
       Op::Push { storage: false.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
@@ -45,10 +45,10 @@ macro_rules! kernel_claim_contract_call {
   ($f:expr_2021, $fcached:expr_2021, $addr:expr_2021, $entry_point:expr_2021, $comm:expr_2021) => {
     [
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(3 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(3 as u8)))].try_into().unwrap() },
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Size,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::concat([AlignedValue::from($addr.clone()), AlignedValue::from($entry_point.clone()), AlignedValue::from($comm.clone())].iter()).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::concat([AlignedValue::from($addr.clone()), AlignedValue::from($entry_point.clone()), AlignedValue::from($comm.clone())].iter())))).try_into().unwrap() },
       Op::Concat { cached: true.try_into().unwrap(), n: 160.try_into().unwrap() },
       Op::Push { storage: false.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
@@ -71,12 +71,12 @@ macro_rules! kernel_mint {
   ($f:expr_2021, $fcached:expr_2021, $domain_sep:expr_2021, $amount:expr_2021) => {
     [
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(4 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($domain_sep.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(4 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($domain_sep.clone()))).try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Member,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($amount.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($amount.clone()))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Neg,
       Op::Branch { skip: 4.try_into().unwrap() },
@@ -95,7 +95,7 @@ macro_rules! kernel_self {
   ($f:expr_2021, $fcached:expr_2021) => {
     [
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
   };
@@ -117,8 +117,8 @@ macro_rules! Cell_write {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty, $value:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($value.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($value.clone()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
     ]
@@ -130,8 +130,8 @@ macro_rules! Cell_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(<$value_type>::default()).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(<$value_type>::default())))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
     ]
@@ -143,11 +143,11 @@ macro_rules! Cell_write_coin {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty, $coin:expr_2021, $recipient:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
       Op::Dup { n: (3 + ((($f.clone().len() as u8) - 1) * 2)).try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().commitment(&$recipient.clone()).try_into().unwrap())).try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into()), Key::Stack].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone().commitment(&$recipient.clone())))).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8))), Key::Stack].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone()))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Concat { cached: true.try_into().unwrap(), n: 91.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -173,7 +173,7 @@ macro_rules! Counter_less_than {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($threshold.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($threshold.clone()))).try_into().unwrap() },
       Op::Lt,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -207,8 +207,8 @@ macro_rules! Counter_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64)))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
     ]
@@ -220,7 +220,7 @@ macro_rules! Set_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Map([].iter().cloned().collect()).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
@@ -235,7 +235,7 @@ macro_rules! Set_is_empty {
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
       Op::Size,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64)))).try_into().unwrap() },
       Op::Eq,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -260,7 +260,7 @@ macro_rules! Set_member {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($elem.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($elem.clone()))).try_into().unwrap() },
       Op::Member,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -272,7 +272,7 @@ macro_rules! Set_insert {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty, $elem:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($elem.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($elem.clone()))).try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
@@ -285,7 +285,7 @@ macro_rules! Set_remove {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty, $elem:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($elem.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($elem.clone()))).try_into().unwrap() },
       Op::Rem { cached: false.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
     ]
@@ -298,10 +298,10 @@ macro_rules! Set_insert_coin {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
       Op::Dup { n: (2 + (($f.clone().len() as u8) * 2)).try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().commitment(&$recipient.clone()).try_into().unwrap())).try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into()), Key::Stack].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone().commitment(&$recipient.clone())))).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8))), Key::Stack].try_into().unwrap() },
       Op::Concat { cached: true.try_into().unwrap(), n: 91.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone()))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -315,7 +315,7 @@ macro_rules! Map_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $key_type:ty, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Map([].iter().cloned().collect()).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
@@ -330,7 +330,7 @@ macro_rules! Map_is_empty {
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
       Op::Size,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64)))).try_into().unwrap() },
       Op::Eq,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -355,7 +355,7 @@ macro_rules! Map_member {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($key.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($key.clone()))).try_into().unwrap() },
       Op::Member,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -368,7 +368,7 @@ macro_rules! Map_lookup {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($key.clone().into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked($key.clone()))].try_into().unwrap() },
       Op::Popeq { cached: false.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
   };
@@ -379,8 +379,8 @@ macro_rules! Map_insert {
   ($f:expr_2021, $fcached:expr_2021, $key_type:ty, $value_type:ty, $key:expr_2021, $value:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($key.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::from($value.clone()).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($key.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: $crate::ops::expect_checked_state_value(StateValue::from($value.clone())).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
     ]
@@ -392,8 +392,8 @@ macro_rules! Map_insert_default {
   ($f:expr_2021, $fcached:expr_2021, $key_type:ty, $value_type:ty, $key:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($key.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::from(AlignedValue::from(<$value_type>::default())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($key.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: $crate::ops::expect_checked_state_value(StateValue::from(AlignedValue::from(<$value_type>::default()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
     ]
@@ -405,7 +405,7 @@ macro_rules! Map_remove {
   ($f:expr_2021, $fcached:expr_2021, $key_type:ty, $value_type:ty, $key:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($key.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($key.clone()))).try_into().unwrap() },
       Op::Rem { cached: false.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
     ]
@@ -417,11 +417,11 @@ macro_rules! Map_insert_coin {
   ($f:expr_2021, $fcached:expr_2021, $key_type:ty, $value_type:ty, $key:expr_2021, $coin:expr_2021, $recipient:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($key.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($key.clone()))).try_into().unwrap() },
       Op::Dup { n: (2 + (($f.clone().len() as u8) * 2)).try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().commitment(&$recipient.clone()).try_into().unwrap())).try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into()), Key::Stack].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone().commitment(&$recipient.clone())))).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8))), Key::Stack].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone()))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Concat { cached: true.try_into().unwrap(), n: 91.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -435,8 +435,8 @@ macro_rules! List_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::Null, StateValue::Null, StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap()))].into()).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::Null, StateValue::Null, StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64))))].into()).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
     ]
@@ -449,9 +449,9 @@ macro_rules! List_is_empty {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Type,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(1 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(1 as u8)))).try_into().unwrap() },
       Op::Eq,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -464,7 +464,7 @@ macro_rules! List_length {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
   };
@@ -476,18 +476,18 @@ macro_rules! List_head {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Type,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(1 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(1 as u8)))).try_into().unwrap() },
       Op::Eq,
       Op::Branch { skip: 4.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(1 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(1 as u8)))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Concat { cached: false.try_into().unwrap(), n: (2 + (<$value_type>::alignment().max_aligned_size() as u32)).try_into().unwrap() },
       Op::Jmp { skip: 2.try_into().unwrap() },
       Op::Pop,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::concat([AlignedValue::from(AlignedValue::from(0 as u8)), AlignedValue::from(AlignedValue::from(<$value_type>::default()))].iter()).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::concat([AlignedValue::from(AlignedValue::from(0 as u8)), AlignedValue::from(AlignedValue::from(<$value_type>::default()))].iter())))).try_into().unwrap() },
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
   };
@@ -498,7 +498,7 @@ macro_rules! List_pop_front {
   ($f:expr_2021, $fcached:expr_2021, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: ($f.clone().len() as u8).try_into().unwrap() },
     ]
   };
@@ -510,15 +510,15 @@ macro_rules! List_push_front {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
       Op::Dup { n: 0.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::Cell(Sp::new($value.clone().try_into().unwrap())), StateValue::Null, StateValue::Null].into()).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::Cell(Sp::new($crate::ops::expect_checked($value.clone()))), StateValue::Null, StateValue::Null].into()).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(2 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(2 as u8)))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(1 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(1 as u8)))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) + 1).try_into().unwrap() },
     ]
@@ -531,23 +531,23 @@ macro_rules! List_push_front_coin {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
       Op::Dup { n: 0.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(0 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u8)))).try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::Null, StateValue::Null, StateValue::Null].into()).try_into().unwrap() },
       Op::Dup { n: (4 + (($f.clone().len() as u8) * 2)).try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().commitment(&$recipient.clone()).try_into().unwrap())).try_into().unwrap() },
-      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into()), Key::Stack].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($coin.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone().commitment(&$recipient.clone())))).try_into().unwrap() },
+      Op::Idx { cached: true.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8))), Key::Stack].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($coin.clone()))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Concat { cached: true.try_into().unwrap(), n: 91.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(2 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(2 as u8)))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(1 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(1 as u8)))).try_into().unwrap() },
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) + 1).try_into().unwrap() },
     ]
@@ -559,8 +559,8 @@ macro_rules! MerkleTree_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::BoundedMerkleTree(MerkleTree::blank($nat)), StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap()))].into()).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::BoundedMerkleTree(MerkleTree::blank($nat)), StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64))))].into()).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) - 1).try_into().unwrap() },
     ]
@@ -573,8 +573,8 @@ macro_rules! MerkleTree_is_full {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from((2 as u64).pow($nat) as u64).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from((2 as u64).pow($nat) as u64)))).try_into().unwrap() },
       Op::Lt,
       Op::Neg,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
@@ -588,9 +588,9 @@ macro_rules! MerkleTree_check_root {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($rt.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($rt.clone()))).try_into().unwrap() },
       Op::Eq,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -602,13 +602,13 @@ macro_rules! MerkleTree_insert {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $item:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone()))).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone())))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) + 1).try_into().unwrap() },
     ]
@@ -620,12 +620,12 @@ macro_rules! MerkleTree_insert_index {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $item:expr_2021, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone()))).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone())))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -646,13 +646,13 @@ macro_rules! MerkleTree_insert_hash {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $hash:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($hash.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($hash.clone()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) + 1).try_into().unwrap() },
     ]
@@ -664,12 +664,12 @@ macro_rules! MerkleTree_insert_hash_index {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $hash:expr_2021, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($hash.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($hash.clone()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -690,11 +690,11 @@ macro_rules! MerkleTree_insert_index_default {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from(AlignedValue::from(<$value_type>::default())))).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from(AlignedValue::from(<$value_type>::default()))))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -715,11 +715,11 @@ macro_rules! HistoricMerkleTree_reset_to_default {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().iter().cloned().rev().collect::<Vec<_>>().iter().cloned().skip(1).collect::<Vec<_>>().iter().cloned().rev().collect::<Vec<_>>().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::BoundedMerkleTree(MerkleTree::blank($nat)), StateValue::Cell(Sp::new(AlignedValue::from(0 as u64).try_into().unwrap())), StateValue::Map([].iter().cloned().collect())].into()).try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($f.clone().iter().cloned().rev().collect::<Vec<_>>()[0].clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Array(vec![StateValue::BoundedMerkleTree(MerkleTree::blank($nat)), StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(0 as u64)))), StateValue::Map([].iter().cloned().collect())].into()).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
@@ -735,8 +735,8 @@ macro_rules! HistoricMerkleTree_is_full {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from((2 as u64).pow($nat) as u64).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from((2 as u64).pow($nat) as u64)))).try_into().unwrap() },
       Op::Lt,
       Op::Neg,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
@@ -750,8 +750,8 @@ macro_rules! HistoricMerkleTree_check_root {
     [
       Op::Dup { n: 0.try_into().unwrap() },
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: false.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($rt.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($rt.clone()))).try_into().unwrap() },
       Op::Member,
       Op::Popeq { cached: true.try_into().unwrap(), result: ().try_into().unwrap() },
     ]
@@ -763,18 +763,18 @@ macro_rules! HistoricMerkleTree_insert {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $item:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone()))).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone())))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -788,12 +788,12 @@ macro_rules! HistoricMerkleTree_insert_index {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $item:expr_2021, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone()))).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from($item.clone())))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -804,9 +804,9 @@ macro_rules! HistoricMerkleTree_insert_index {
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Pop,
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -820,18 +820,18 @@ macro_rules! HistoricMerkleTree_insert_hash {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $hash:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($hash.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($hash.clone()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -845,12 +845,12 @@ macro_rules! HistoricMerkleTree_insert_hash_index {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $hash:expr_2021, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($hash.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($hash.clone()))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -861,9 +861,9 @@ macro_rules! HistoricMerkleTree_insert_hash_index {
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Pop,
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -877,12 +877,12 @@ macro_rules! HistoricMerkleTree_insert_index_default {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty, $index:expr_2021) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
-      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new(leaf_hash(&ValueReprAlignedValue(AlignedValue::from(AlignedValue::from(<$value_type>::default())))).try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
+      Op::Push { storage: true.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(leaf_hash(&ValueReprAlignedValue(AlignedValue::from(AlignedValue::from(<$value_type>::default()))))))).try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(1 as u8).into())].try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($index.clone().try_into().unwrap())).try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(1 as u8)))].try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked($index.clone()))).try_into().unwrap() },
       Op::Addi { immediate: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
       Op::Dup { n: 1.try_into().unwrap() },
@@ -893,9 +893,9 @@ macro_rules! HistoricMerkleTree_insert_index_default {
       Op::Swap { n: 0.try_into().unwrap() },
       Op::Pop,
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(2 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: true.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(2 as u8)))].try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: false.try_into().unwrap(), n: 1.try_into().unwrap() },
@@ -909,10 +909,10 @@ macro_rules! HistoricMerkleTree_reset_history {
   ($f:expr_2021, $fcached:expr_2021, $nat:literal, $value_type:ty) => {
     [
       Op::Idx { cached: $fcached.try_into().unwrap(), push_path: true.try_into().unwrap(), path: $f.clone().try_into().unwrap() },
-      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new(AlignedValue::from(2 as u8).try_into().unwrap())).try_into().unwrap() },
+      Op::Push { storage: false.try_into().unwrap(), value: StateValue::Cell(Sp::new($crate::ops::expect_checked(AlignedValue::from(2 as u8)))).try_into().unwrap() },
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Map([].iter().cloned().collect()).try_into().unwrap() },
       Op::Dup { n: 2.try_into().unwrap() },
-      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value(AlignedValue::from(0 as u8).into())].try_into().unwrap() },
+      Op::Idx { cached: false.try_into().unwrap(), push_path: false.try_into().unwrap(), path: vec![Key::Value($crate::ops::expect_checked(AlignedValue::from(0 as u8)))].try_into().unwrap() },
       Op::Root,
       Op::Push { storage: true.try_into().unwrap(), value: StateValue::Null.try_into().unwrap() },
       Op::Ins { cached: true.try_into().unwrap(), n: (($f.clone().len() as u8) + 2).try_into().unwrap() },

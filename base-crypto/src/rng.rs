@@ -44,3 +44,28 @@ impl<R: SeedableRng + RngCore + SplittableMarker> SplittableRng for R {
         Self::from_rng(self).expect("Rng must survive splitting!")
     }
 }
+
+/// Adapts a `rand` 0.8 RNG to the `rand_core` 0.10 traits expected by `k256`.
+pub(crate) struct RngCompat<'a, R: ?Sized>(pub(crate) &'a mut R);
+
+impl<R: RngCore + ?Sized> k256::elliptic_curve::rand_core::TryRng for RngCompat<'_, R> {
+    type Error = std::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        Ok(self.0.next_u32())
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        Ok(self.0.next_u64())
+    }
+
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+        self.0.fill_bytes(dst);
+        Ok(())
+    }
+}
+
+impl<R: RngCore + rand::CryptoRng + ?Sized> k256::elliptic_curve::rand_core::TryCryptoRng
+    for RngCompat<'_, R>
+{
+}

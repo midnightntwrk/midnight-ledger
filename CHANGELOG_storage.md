@@ -1,5 +1,64 @@
 # `storage` Changelog
 
+## Unreleased
+
+## Version `3.1.0`
+
+- fix: add the scoped thread-local
+  `merkle_patricia_trie::ALLOW_SHORT_EXTENSION_CHAINS`, which, while set, lets
+  clients deserialize tries in which an `Extension` node shorter than 255
+  nibbles has an `Extension` child. `insert` produces such tries in some cases,
+  and they exist in chain state. Nodes and consensus code must never set it.
+
+## Version `3.0.0`
+
+- fix: a state-translation run that exhausts its budget continues until it
+  has persisted at least one result. Results for in-lined nodes do not survive
+  a run, so a budget below an in-lined subtree's work never finished.
+- fix: revert to `sha2` 0.10 / `digest` 0.10, matching `storage-core`, so
+  `ledger-8`'s published `storage` can share `storage-core` with this one.
+- breaking: `Map` requires its keys to implement `serialize::EncodingShape`
+  (through `MapKey`), so that decoding checks keys once per trie node. This is
+  a major version so that `ledger-8`, whose keys lack the trait, keeps
+  `storage` 2.x.
+- security: decoding checks `Array` indices, `Map` and `HashMap` keys,
+  `TimeFilterMap` consistency and `MerklePatriciaTrie` canonicity in time
+  linear in the distinct nodes, rather than once per path through shared
+  nodes. They accept the same encodings as before.
+- feat: `fold` on `MerklePatriciaTrie`, `Array` and `HashMap`, combining
+  entries in time linear in the distinct nodes, and `distinct_values` and
+  `distinct_values_across` on `MerklePatriciaTrie` and `Array`, counting the
+  paths to each distinct value.
+- security: `MerklePatriciaTrie` node deserialization threads the loader's
+  recursion depth through, rather than restarting it at every node boundary.
+
+## Version `2.0.5`
+
+Skips `2.0.4`, published from the `ledger-9` line on `sha2` 0.11.
+
+- fix: revert to `sha2` 0.10 / `digest` 0.10, so this crate builds against
+  `storage-core` 1.2.3 and shares it with `ledger-9`'s `storage` 3.
+- fix: `MerklePatriciaTrie` removal no longer panics when the removed path is
+  shorter than an `Extension` node's compressed path. Shipped unlisted in
+  `2.0.4`.
+
+## Version `2.0.4`
+
+Skips `2.0.3`, published from the `ledger-8` line.
+
+- security: `MerklePatriciaTrie` deserialization now enforces full structural
+  canonicity rather than annotation consistency alone, so a trie whose structure
+  is not uniquely determined by its contents no longer decodes.
+- security: an `Extension` node whose declared nibble length disagrees with the
+  length of its encoded path is rejected.
+- security: `MultiSet` rejects zero-count entries.
+- security: `TimeFilterMap` rejects an encoding whose set and time-map
+  representations disagree.
+- security: nibble-encoded keys reject trailing bytes left over after decoding.
+- feat: add `MerklePatriciaTrie::canonicity` and
+  `MerklePatriciaTrie::is_canonical`, which state the canonicity rules
+  explicitly.
+
 ## Version `2.0.2`
 
 - fix: clear clippy::useless_borrows_in_formatting across workspace

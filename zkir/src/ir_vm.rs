@@ -191,6 +191,9 @@ fn assemble_bytes(
     Ok(acc)
 }
 
+// `x`/`y` replace the deprecated coordinate getters, but may not keep the
+// verifier keys of deployed circuits.
+#[allow(deprecated)]
 fn ecc_from_parts(
     std: &ZkStdLib,
     layouter: &mut impl Layouter<outer::Scalar>,
@@ -526,6 +529,9 @@ impl Relation for IrSource {
         Ok(instance.clone())
     }
 
+    // `x`/`y` replace the deprecated coordinate getters, but may not keep the
+    // verifier keys of deployed circuits.
+    #[allow(deprecated)]
     fn circuit(
         &self,
         std: &ZkStdLib,
