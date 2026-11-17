@@ -72,10 +72,16 @@ jobs:
 
       - name: Generate HTML report
         run: |
-          nix develop .#ci -c rustup component add llvm-tools-preview
-          RUSTFLAGS='' nix develop .#ci -c cargo install cargo-binutils
-          grcov . --binary-path ./target/debug/deps/ -s . -t html --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/html
-          grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
+          # Profile readers must match the Fenix compiler used for the tests.
+          llvm_root=$(nix build .#rust-coverage-tools --no-link --print-out-paths)
+          llvm_tools="$llvm_root/lib/rustlib/x86_64-unknown-linux-gnu/bin"
+          test -x "$llvm_tools/llvm-profdata"
+          test -x "$llvm_tools/llvm-cov"
+          "$llvm_tools/llvm-profdata" --version
+          grcov . --llvm-path "$llvm_tools" --binary-path ./target/debug/deps/ -s . -t html --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/html
+          grcov . --llvm-path "$llvm_tools" --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
+          grep -q '^SF:' target/coverage/tests.lcov
+          grep -Eq '^DA:[0-9]+,[1-9][0-9]*' target/coverage/tests.lcov
 
       - name: Upload test report artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

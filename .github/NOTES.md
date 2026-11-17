@@ -61,6 +61,10 @@ their existing serial behavior. Custom larger-runner labels are managed
 by the organization; ordinary PR runner images are pinned while the legacy
 check names are preserved for branch protection.
 
+Coverage reports use LLVM tools from the same pinned Fenix stable toolchain as
+the test compiler. The report step requires source and executed-line records,
+so an LLVM profile-format mismatch cannot silently produce empty artifacts.
+
 Validate workflow edits with `actionlint -shellcheck=""`, run the Python helper
 checks with `python3 -m unittest discover -s .github/scripts/tests`, and compare
 cold/warm CI runs. Check the exported cache sizes, actual cache hits, coverage
