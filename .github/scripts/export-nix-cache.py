@@ -27,7 +27,7 @@ def reusable(path):
 
 def main():
     paths = subprocess.check_output(
-        ["nix-store", "--query", "--all"], text=True
+        ["nix", "path-info", "--all"], text=True
     ).splitlines()
     roots = [path for path in paths if reusable(Path(path))]
     if not roots:
@@ -44,6 +44,9 @@ def main():
     shutil.rmtree(cache, ignore_errors=True)
     staging.rename(cache)
     size = sum(path.stat().st_size for path in cache.rglob("*") if path.is_file())
+    if "GITHUB_OUTPUT" in os.environ:
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write("has-outputs=true\n")
     print(f"Cached {len(roots)} output roots; compressed binary cache: {size / 2**20:.1f} MiB")
 
 
