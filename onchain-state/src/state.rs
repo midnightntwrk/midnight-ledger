@@ -1135,7 +1135,7 @@ impl<D: DB> Default for ContractState<D> {
 #[non_exhaustive]
 pub struct ContractOperation {
     /// v1 (zk-stdlib v1) verifier key.
-    pub v2: Option<transient_crypto_old::proofs::VerifierKey>,
+    pub v2: Option<transient_crypto_2::proofs::VerifierKey>,
     /// v2 (zk-stdlib v2) verifier key.
     pub v3: Option<VerifierKey>,
     /// The IR associated with this contract operation.
@@ -1162,7 +1162,7 @@ impl ContractOperation {
     }
 
     /// Returns the v2 verifier key.
-    pub fn v2_vk(&self) -> Option<&transient_crypto_old::proofs::VerifierKey> {
+    pub fn v2_vk(&self) -> Option<&transient_crypto_2::proofs::VerifierKey> {
         self.v2.as_ref()
     }
 
@@ -1202,7 +1202,7 @@ impl FieldRepr for ContractOperation {
             Some(ref vk) => {
                 writer.write(&[0x01.into()]);
                 let mut bytes: Vec<u8> = Vec::new();
-                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(
+                <transient_crypto_2::proofs::VerifierKey as Serializable>::serialize(
                     vk, &mut bytes,
                 )
                 .expect("VerifierKey is serializable");
@@ -1216,7 +1216,7 @@ impl FieldRepr for ContractOperation {
         match self.v2 {
             Some(ref vk) => {
                 let mut bytes: Vec<u8> = Vec::new();
-                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(
+                <transient_crypto_2::proofs::VerifierKey as Serializable>::serialize(
                     vk, &mut bytes,
                 )
                 .expect("VerifierKey is serializable");

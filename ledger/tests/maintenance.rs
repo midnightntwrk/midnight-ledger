@@ -128,7 +128,7 @@ fn maintenance() {
     let mut strictness = WellFormedStrictness::default();
     strictness.enforce_balancing = false;
     let fake_vk =
-        transient_crypto_old::proofs::VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0)
+        transient_crypto_2::proofs::VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0)
             .unwrap();
 
     let committee_sks: Vec<_> = (0..4)

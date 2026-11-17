@@ -298,10 +298,10 @@ impl ProofPreimageVersioned {
 #[non_exhaustive]
 pub enum ProofVersioned {
     /// A proof generated against the v1 (zk-stdlib v1) Zkir trait.
-    V2(transient_crypto_old::proofs::Proof),
+    V2(transient_crypto_2::proofs::Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait, in the
     /// pre-accumulator `proof[v5]` format.
-    V3(transient_crypto_old::proofs::Proof),
+    V3(transient_crypto_2::proofs::Proof),
     /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
     V4(Proof),
 }
@@ -366,8 +366,8 @@ impl Tagged for ProofVersioned {
     fn tag_unique_factor() -> String {
         format!(
             "[[],{},{},{}]",
-            transient_crypto_old::proofs::Proof::tag(),
-            transient_crypto_old::proofs::Proof::tag(),
+            transient_crypto_2::proofs::Proof::tag(),
+            transient_crypto_2::proofs::Proof::tag(),
             Proof::tag()
         )
     }
@@ -475,7 +475,7 @@ impl ProofVersioned {
     pub fn of_verifier_key_tag(tag: &str, proof: Proof) -> Option<Self> {
         match ContractOperationVersion::of_verifier_key_tag(tag)? {
             ContractOperationVersion::V3 => {
-                Some(Self::V2(transient_crypto_old::proofs::Proof(proof.bytes)))
+                Some(Self::V2(transient_crypto_2::proofs::Proof(proof.bytes)))
             }
             ContractOperationVersion::V4 => Some(Self::V4(proof)),
         }
@@ -533,7 +533,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     }
                 })?;
                 let old_pis = pis.into_iter().map(|f| {
-                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
                 });
                 match mode {
@@ -544,7 +544,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                         .map_err(MalformedTransaction::<D>::InvalidProof),
                     _ => vk
                         .verify(
-                            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                            &transient_crypto_2::proofs::PARAMS_VERIFIER,
                             old_proof,
                             old_pis,
                         )
@@ -3156,7 +3156,7 @@ impl ContractOperationVersion {
     /// with this tag. Taken from the key types themselves, so a tag bump in
     /// either proof system carries over rather than going stale here.
     pub fn of_verifier_key_tag(tag: &str) -> Option<Self> {
-        if tag == transient_crypto_old::proofs::VerifierKey::tag() {
+        if tag == transient_crypto_2::proofs::VerifierKey::tag() {
             Some(Self::V3)
         } else if tag == transient_crypto::proofs::VerifierKey::tag() {
             Some(Self::V4)
@@ -3234,7 +3234,7 @@ impl ContractOperationVersion {
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
     /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
-    V3(transient_crypto_old::proofs::VerifierKey),
+    V3(transient_crypto_2::proofs::VerifierKey),
     /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
     V4(transient_crypto::proofs::VerifierKey),
 }
@@ -3304,7 +3304,7 @@ impl Tagged for ContractOperationVersionedVerifierKey {
     fn tag_unique_factor() -> String {
         format!(
             "[[],[],{},{}]",
-            transient_crypto_old::proofs::VerifierKey::tag(),
+            transient_crypto_2::proofs::VerifierKey::tag(),
             transient_crypto::proofs::VerifierKey::tag()
         )
     }

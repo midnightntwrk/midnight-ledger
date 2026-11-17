@@ -191,15 +191,15 @@ pub(crate) fn verify_spend_proof(
                 anyhow::bail!("v1 dust spend proof carries deferred accumulators");
             }
             let pis = pis.into_iter().map(|f| {
-                transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes())
                     .expect("Fr round-trip")
             });
             match mode {
                 #[cfg(feature = "mock-verify")]
                 ProofVerificationMode::CalibratedMock => vk.mock_verify(pis),
                 _ => vk.verify(
-                    &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                    &transient_crypto_old::proofs::Proof(proof.bytes.clone()),
+                    &transient_crypto_2::proofs::PARAMS_VERIFIER,
+                    &transient_crypto_2::proofs::Proof(proof.bytes.clone()),
                     pis,
                 ),
             }
