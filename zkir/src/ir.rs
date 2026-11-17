@@ -17,7 +17,7 @@ use anyhow::Result;
 use base_crypto::fab::Alignment;
 use midnight_proofs::dev::cost_model::CircuitModel;
 use midnight_proofs::utils::SerdeFormat;
-use midnight_zk_stdlib::MidnightPK;
+use midnight_zk_stdlib::{KZG, MidnightPK};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -114,7 +114,7 @@ pub enum IrMinorVersion {
 struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
-    type ProverKey = MidnightPK<IrSource>;
+    type ProverKey = MidnightPK<IrSource, KZG>;
 
     fn check(
         &self,
@@ -145,7 +145,7 @@ impl Zkir for IrSource {
                 let preproc = self.preprocess(preimage)?;
                 let pis = preproc.pis.clone();
                 let pi_skips = preproc.pi_skips.clone();
-                let proof = prove::<_, TranscriptHash>(
+                let proof = prove::<_, TranscriptHash, KZG>(
                     params_k.as_ref(),
                     &inner_pk,
                     self,
@@ -566,7 +566,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_zk_stdlib::cost_model(self, None),
+            model: midnight_zk_stdlib::cost_model::<_, KZG>(self, None, false),
         }
     }
 
@@ -691,8 +691,14 @@ impl IrSource {
         let params_k = params.get_params(inner_pk.k()).await?;
         let pis = preproc.pis.clone();
 
-        let proof =
-            prove::<_, TranscriptHash>(params_k.as_ref(), &inner_pk, self, &pis, preproc, rng)?;
+        let proof = prove::<_, TranscriptHash, KZG>(
+            params_k.as_ref(),
+            &inner_pk,
+            self,
+            &pis,
+            preproc,
+            rng,
+        )?;
 
         Ok(Proof::from_bytes(proof))
     }

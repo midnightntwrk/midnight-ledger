@@ -22,19 +22,20 @@
 //! otherwise the conditions under which the measurements are taken won't be representative
 use crate::curve::{Fr, outer};
 use crate::proofs::{
-    InnerSelfEmulation, KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof,
-    ProofPreimage, ProverKey, ProvingError, ProvingKeyMaterial, Resolver, TranscriptHash,
-    VerifierKey, VerifyingError, Zkir,
+    KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, Proof, ProofPreimage,
+    ProverKey, ProvingError, ProvingKeyMaterial, Resolver, TranscriptHash, VerifierKey,
+    VerifyingError, Zkir,
 };
 use futures::executor::block_on;
 use group::Group;
 use midnight_circuits::{
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
-    verifier::{Accumulator, Msm},
+    verifier::{Accumulator, Msm, Point},
 };
-use midnight_curves::G1Projective;
-use midnight_zk_stdlib::{MidnightPK, Relation};
+use midnight_curves::{Bls12, G1Projective};
+use midnight_proofs::poly::PolynomialLabel;
+use midnight_zk_stdlib::{KZG, MidnightPK, Relation};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -353,9 +354,8 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
 fn measure_pairing_iters(dummy_ns_per_iter: f64) -> u64 {
     let g = G1Projective::generator();
     let one = outer::Scalar::from(1u64);
-    let lhs = Msm::<InnerSelfEmulation>::new(&[g], &[one], &BTreeMap::new());
-    let rhs = Msm::<InnerSelfEmulation>::new(&[g], &[one], &BTreeMap::new());
-    let acc = Accumulator::<InnerSelfEmulation>::new(lhs, rhs);
+    let side = || Msm::<Bls12>::new(&[Point::Variable(g)], &[one], &[PolynomialLabel::NoLabel]);
+    let acc = Accumulator::<Bls12>::new(side(), side());
 
     let _ = black_box(acc.check(&PARAMS_VERIFIER.0, &BTreeMap::new()));
 
@@ -419,7 +419,7 @@ impl Relation for TestIr {
 }
 
 impl Zkir for TestIr {
-    type ProverKey = MidnightPK<TestIr>;
+    type ProverKey = MidnightPK<TestIr, KZG>;
 
     fn check(&self, _preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, ProvingError> {
         Ok(vec![])
@@ -436,7 +436,7 @@ impl Zkir for TestIr {
         let pis = preimage.public_transcript_inputs.clone();
         let pk = pk.init().unwrap();
         let proof =
-            prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, self.clone(), rng)?;
+            prove::<_, TranscriptHash, KZG>(params_k.as_ref(), &pk, self, &pis, self.clone(), rng)?;
         Ok((
             Proof::from_bytes(proof),
             preimage.public_transcript_inputs.clone(),
@@ -451,7 +451,7 @@ impl Zkir for TestIr {
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
         use midnight_zk_stdlib::setup_vk;
-        Ok(VerifierKey::from(setup_vk(
+        Ok(VerifierKey::from(setup_vk::<_, KZG>(
             params.get_params(self.k()).await?.as_ref(),
             self,
         )))
@@ -461,7 +461,7 @@ impl Zkir for TestIr {
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
         use midnight_zk_stdlib::{setup_pk, setup_vk};
-        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let vk = setup_vk::<_, KZG>(params.get_params(self.k()).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
         Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
     }
@@ -474,7 +474,7 @@ impl Zkir for TestIr {
         tagged_deserialize(reader)
     }
     fn read_raw_pk(reader: impl std::io::Read) -> std::io::Result<Self::ProverKey> {
-        MidnightPK::<Self>::read(
+        MidnightPK::<Self, KZG>::read(
             &mut { reader },
             midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
         )
