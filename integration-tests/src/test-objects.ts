@@ -28,6 +28,7 @@ import {
   type Nonce,
   type Op,
   type PreBinding,
+  type Proof,
   type PreProof,
   type PublicAddress,
   type QualifiedShieldedCoinInfo,
@@ -54,6 +55,7 @@ import {
 } from '@midnightntwrk/ledger';
 import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import type { ProvingKeyMaterial } from '@midnightntwrk/zkir-v2';
 import { generateHex, loadBinaryFile } from './test-utils';
@@ -331,6 +333,65 @@ export class Static {
   });
 }
 
+/** Test circuits from `zkir-precompiles`, by key location, as `<precompile dir>/<circuit>`. */
+const TEST_CIRCUITS = {
+  noop: 'noop/noop'
+} as const;
+
+export type TestCircuit = keyof typeof TEST_CIRCUITS;
+
+const isTestCircuit = (keyLocation: string): keyLocation is TestCircuit =>
+  Object.prototype.hasOwnProperty.call(TEST_CIRCUITS, keyLocation);
+
+const testCircuitCache = new Map<TestCircuit, ProvingKeyMaterial>();
+
+export class TestResource {
+  static operationVerifierKey = (): Uint8Array => loadBinaryFile('../resources/sample_vk.verifier');
+
+  /**
+   * Key material of a hand-rolled zkir-v3 circuit from `zkir-precompiles`, keyed with a `verifier-key[v8]`
+   * by the `test-artifacts` Nix package that `MIDNIGHT_LEDGER_TEST_STATIC_DIR` points at.
+   */
+  static circuit = (name: TestCircuit): ProvingKeyMaterial => {
+    const cached = testCircuitCache.get(name);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const staticDir = process.env.MIDNIGHT_LEDGER_TEST_STATIC_DIR;
+    if (!staticDir) {
+      throw new Error(
+        `MIDNIGHT_LEDGER_TEST_STATIC_DIR must point at the test-artifacts Nix package to load test circuit '${name}'`
+      );
+    }
+    const [dir, circuit] = TEST_CIRCUITS[name].split('/');
+    const read = (subdir: string, ext: string): Uint8Array =>
+      new Uint8Array(readFileSync(path.join(staticDir, dir, subdir, `${circuit}.${ext}`)));
+    const material = {
+      proverKey: read('keys', 'prover'),
+      verifierKey: read('keys', 'verifier'),
+      ir: read('zkir', 'bzkir')
+    };
+    testCircuitCache.set(name, material);
+    return material;
+  };
+
+  /** Key material for `keyLocation` if it names a test circuit; `undefined` for a built-in key. */
+  static circuitAt = (keyLocation: string): ProvingKeyMaterial | undefined =>
+    isTestCircuit(keyLocation) ? TestResource.circuit(keyLocation) : undefined;
+
+  /**
+   * Transactions proven in Rust as `ledger/tests/verify-proof.rs` does, against a contract whose circuit
+   * runs `verify_proof`, so the call's proof carries one deferred accumulator.
+   */
+  static verifyProofTx = (name: 'deploy' | 'call'): Transaction<SignatureEnabled, Proof, PreBinding> =>
+    Transaction.deserialize(
+      'signature',
+      'proof',
+      'pre-binding',
+      loadBinaryFile(`../resources/verify-proof/${name}.tx`)
+    );
+}
+
 export const keyMaterialProvider = new (class {
   // eslint-disable-next-line class-methods-use-this
   async lookupWellKnownKey(type: string, keyLocation: string): Promise<Buffer | undefined> {
@@ -352,6 +413,10 @@ export const keyMaterialProvider = new (class {
   }
 
   async lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined> {
+    const circuit = TestResource.circuitAt(keyLocation);
+    if (circuit !== undefined) {
+      return circuit;
+    }
     const [proverKey, verifierKey, ir] = await Promise.all([
       this.lookupWellKnownKey('prover', keyLocation),
       this.lookupWellKnownKey('verifier', keyLocation),
@@ -419,9 +484,3 @@ export const getNewUnshieldedOffer = (
     ],
     [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
   );
-
-export class TestResource {
-  static operationVerifierKey = (): Uint8Array => {
-    return loadBinaryFile('../resources/sample_vk.verifier');
-  };
-}
