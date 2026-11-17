@@ -14,7 +14,7 @@ import subprocess
 
 def reusable(path):
     name = path.name[33:]
-    if name.endswith(("-vendor", "-source")):
+    if name.endswith(("-vendor", "-vendor-staging", "-source", ".tar.gz", ".tar.xz", ".tar.zst", ".zip")):
         return False
     return path.is_dir() and re.fullmatch(
         r"(?:zkir(?:-static-[a-z0-9_-]+)?|midnight-zkir|midnight-local-params|"
@@ -47,7 +47,11 @@ def main():
     if "GITHUB_OUTPUT" in os.environ:
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write("has-outputs=true\n")
-    print(f"Cached {len(roots)} output roots; compressed binary cache: {size / 2**20:.1f} MiB")
+    summary = f"Cached {len(roots)} output roots; compressed binary cache: {size / 2**20:.1f} MiB"
+    print(summary)
+    if "GITHUB_STEP_SUMMARY" in os.environ:
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+            output.write(summary + "\n")
 
 
 if __name__ == "__main__":

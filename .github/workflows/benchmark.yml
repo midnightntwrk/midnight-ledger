@@ -47,18 +47,21 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore reusable Nix outputs
-        uses: ./.github/actions/cache-nix
+      - name: Restore and save Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
-          workload: ${{ github.workflow }}-${{ github.job }}
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-primary-key: never
+          purge-created: P7D
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-        with:
-          key: nix-${{ hashFiles('flake.lock') }}
 
       - name: Benchmark compare
         run: |
@@ -89,7 +92,3 @@ jobs:
         with:
           name: benchmark-report
           path: target/criterion/reports/
-
-      - name: Save reusable Nix outputs
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/save-nix

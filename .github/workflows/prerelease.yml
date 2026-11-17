@@ -513,8 +513,8 @@ jobs:
 
           for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
           for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-latest/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-latest/*; do cp "$f" "$STAGING/integration-junit.xml"; done
           for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
 
           if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then

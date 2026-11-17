@@ -168,11 +168,6 @@ jobs:
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
-        with:
-          key: nix-${{ hashFiles('flake.lock') }}
-
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
           sudo mkdir -m 0755 -p /nix/var/nix/{profiles,gcroots}/per-user/$USER

@@ -28,6 +28,7 @@ class ExportTests(unittest.TestCase):
                 ("rust-stable-with-std-2026-04-16", False),
                 ("source", False),
                 ("cargo-audit-0.22.0-vendor", False),
+                ("cargo-audit-0.22.0.tar.gz", False),
             ]:
                 path = Path(directory) / ("a" * 32 + "-" + name)
                 path.mkdir()
@@ -69,3 +70,13 @@ class ExportTests(unittest.TestCase):
                 cache.main()
             self.assertFalse((old / "stale.narinfo").exists())
             self.assertTrue((old / "current.narinfo").exists())
+
+    def test_no_outputs_does_not_save_an_empty_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "github-output"
+            with patch.dict(os.environ, {"RUNNER_TEMP": directory, "GITHUB_OUTPUT": str(output)}), patch.object(
+                cache.subprocess, "check_output", return_value=""
+            ), patch.object(cache.subprocess, "run") as copy:
+                cache.main()
+            copy.assert_not_called()
+            self.assertFalse(output.exists())
