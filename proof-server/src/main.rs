@@ -20,7 +20,8 @@ use futures::future::join;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
 use midnight_proof_server::endpoints::PUBLIC_PARAMS;
-use midnight_proof_server::{server, worker_pool::WorkerPool};
+use midnight_proof_server::key_derivation::KeyDerivationConfig;
+use midnight_proof_server::{server_with_key_derivation, worker_pool::WorkerPool};
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
@@ -55,6 +56,37 @@ struct Args {
         env = "MIDNIGHT_PROOF_SERVER_NO_FETCH_PARAMS"
     )]
     no_fetch_params: bool,
+    /// Refuse requests whose key material has an empty prover key, instead of
+    /// deriving the prover key from the IR.
+    #[arg(
+        long,
+        default_value_t = false,
+        env = "MIDNIGHT_PROOF_SERVER_NO_KEY_DERIVATION"
+    )]
+    no_key_derivation: bool,
+    /// Largest circuit `k` whose prover key is derived on demand.
+    #[arg(
+        long,
+        default_value_t = KeyDerivationConfig::default().max_k,
+        env = "MIDNIGHT_PROOF_SERVER_KEY_DERIVATION_MAX_K",
+        value_parser = clap::value_parser!(u8).range(1..=25)
+    )]
+    key_derivation_max_k: u8,
+    /// Number of prover keys that may be derived at the same time.
+    #[arg(
+        long,
+        default_value_t = KeyDerivationConfig::default().max_concurrent,
+        env = "MIDNIGHT_PROOF_SERVER_KEY_DERIVATION_CONCURRENCY",
+        value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..)
+    )]
+    key_derivation_concurrency: usize,
+    /// Memory bound, in MiB, for derived prover keys kept for reuse.
+    #[arg(
+        long,
+        default_value_t = KeyDerivationConfig::default().cache_bytes >> 20,
+        env = "MIDNIGHT_PROOF_SERVER_KEY_CACHE_MIB"
+    )]
+    key_cache_mib: usize,
 }
 
 #[actix_web::main]
@@ -90,8 +122,20 @@ async fn main() -> std::io::Result<()> {
         ks.into_iter().collect::<Result<Vec<_>, _>>()?;
         keys.into_iter().collect::<Result<Vec<_>, _>>()?;
     }
+    let key_derivation = KeyDerivationConfig {
+        enabled: !args.no_key_derivation,
+        max_k: args.key_derivation_max_k,
+        max_concurrent: args.key_derivation_concurrency,
+        cache_bytes: args.key_cache_mib << 20,
+    };
+    if key_derivation.enabled {
+        info!(
+            "Deriving prover keys on demand up to k={}",
+            key_derivation.max_k
+        );
+    }
     let pool = WorkerPool::new(args.num_workers, args.job_capacity, args.job_timeout);
-    server(args.port, !args.no_fetch_params, pool)
+    server_with_key_derivation(args.port, !args.no_fetch_params, pool, key_derivation)
         .unwrap()
         .0
         .await

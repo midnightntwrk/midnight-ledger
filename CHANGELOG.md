@@ -6,6 +6,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: proof-server `/prove` derives a circuit's prover key from the supplied IR when the request's key material has an empty prover key, and proves with it only if the verifier key derived with it equals the supplied verifier key byte for byte. Derived keys are cached in memory by IR and verifier-key hash. A request carrying a prover key is unchanged. Bounded by `--key-derivation-max-k` (default 17), `--key-derivation-concurrency` (default 1) and `--key-cache-mib` (default 1024); `--no-key-derivation` turns it off. A refused derivation answers HTTP 422 with an `x-key-derivation-refused` header (`disabled`, `k-too-large`, `vk-mismatch`, `unsupported-ir`), and `GET /key-derivation` reports the limits and counters.
 - fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 - chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.1`, now resolved from crates.io.
