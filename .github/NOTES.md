@@ -54,7 +54,8 @@ then asks Nix to realize the expected output before executing the tests. Release
 coverage and native unit tests run alongside package builds; integration waits
 for its dependency artifact. Existing publication dependencies remain intact.
 
-Coverage uses a separate Cargo cache and four test threads. It still executes
+Coverage uses a separate Cargo cache and four test threads, except proof-server
+tests stay serial to avoid contention against HTTP deadlines. It still executes
 all workspace features and produces both HTML and LCOV reports. Native PR tests
 retain their existing serial behavior. Custom larger-runner labels are managed
 by the organization; ordinary PR runner images are pinned while the legacy

@@ -68,7 +68,9 @@ jobs:
 
       - name: Check test coverage
         run: |
-          nix develop -c cargo test --all --all-features --verbose -- --nocapture --test-threads=4
+          nix develop -c cargo test --workspace --exclude midnight-proof-server --all-features --verbose -- --nocapture --test-threads=4
+          # Proof-server HTTP deadlines need uncontended proving resources.
+          nix develop -c cargo test -p midnight-proof-server --all-features --verbose -- --nocapture --test-threads=1
 
       - name: Generate HTML report
         run: |
