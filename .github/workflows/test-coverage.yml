@@ -6,7 +6,7 @@ on:
   pull_request:
   push:
     branches:
-      - master
+      - 'ledger-*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -18,6 +18,10 @@ env:
 
 jobs:
   coverage:
+    env:
+      CARGO_INCREMENTAL: '0'
+      RUSTFLAGS: '-Cinstrument-coverage'
+      LLVM_PROFILE_FILE: 'cargo-test-%p-%m.profraw'
     runs-on: ubuntu-latest-8-core-x64
     steps:
 
@@ -43,18 +47,18 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
+
+      - name: Cache instrumented Cargo dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          key: coverage-${{ hashFiles('flake.lock') }}
 
       - name: Download grcov
         run: |
@@ -64,15 +68,12 @@ jobs:
 
       - name: Check test coverage
         run: |
-          export CARGO_INCREMENTAL=0
-          export RUSTFLAGS='-Cinstrument-coverage'
-          export LLVM_PROFILE_FILE='cargo-test-%p-%m.profraw'
-          nix develop -c cargo test --all --all-features --verbose -- --nocapture --test-threads=1
+          nix develop -c cargo test --all --all-features --verbose -- --nocapture --test-threads=4
 
       - name: Generate HTML report
         run: |
           nix develop .#ci -c rustup component add llvm-tools-preview
-          nix develop .#ci -c cargo install cargo-binutils
+          RUSTFLAGS='' nix develop .#ci -c cargo install cargo-binutils
           grcov . --binary-path ./target/debug/deps/ -s . -t html --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/html
           grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
 
@@ -89,3 +90,7 @@ jobs:
         with:
           name: Lcov Coverage Report
           path: target/coverage/tests.lcov
+
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix

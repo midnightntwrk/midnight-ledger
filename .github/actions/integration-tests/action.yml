@@ -5,6 +5,11 @@ description: >-
   level) by ci.yml and by the release flow (prerelease.yml); the caller must
   check out the repository first.
 
+inputs:
+  dependencies-artifact:
+    description: Nix closure produced by the build job in this workflow run.
+    default: ''
+
 runs:
   using: composite
   steps:
@@ -36,14 +41,24 @@ runs:
           extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
           accept-flake-config = true
 
-    - name: Restore and save Nix store
-      uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+    - name: Restore reusable Nix outputs
+      uses: ./.github/actions/cache-nix
       with:
-        primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-        restore-prefixes-first-match: nix-${{ runner.os }}-
-        purge: true
-        purge-prefixes: nix-${{ runner.os }}-
-        purge-created: 0
+        workload: integration-tests
+
+    - name: Download integration dependencies
+      if: inputs.dependencies-artifact != ''
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      with:
+        name: ${{ inputs.dependencies-artifact }}
+        path: ${{ runner.temp }}/integration-deps
+
+    - name: Import integration dependencies
+      if: inputs.dependencies-artifact != ''
+      shell: bash
+      run: |
+        # Only import the artifact from this workflow run, never another PR.
+        nix-store --import < "$RUNNER_TEMP/integration-deps/closure.nar"
 
     - name: Configure cargo
       shell: bash
@@ -67,6 +82,13 @@ runs:
       uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       with:
         node-version: 22
+
+    - name: Cache Yarn downloads
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: integration-tests/.yarn/cache
+        key: yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('integration-tests/yarn.lock') }}
+        restore-keys: yarn-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Run integration tests
       shell: bash
@@ -107,3 +129,7 @@ runs:
       with:
         name: integration-coverage-txt
         path: integration-tests/coverage.txt
+
+    - name: Save reusable Nix outputs
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/save-nix
