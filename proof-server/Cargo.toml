@@ -48,6 +48,7 @@ ledger = { path = "../ledger", package = "midnight-ledger-v10", features = ["tes
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-3 = { package = "midnight-transient-crypto", version = "^3.1.0" }
 env_logger = "^0.11"
 log = "^0.4.28"
 function_name = "^0.3.0"

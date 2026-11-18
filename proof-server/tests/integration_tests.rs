@@ -888,6 +888,131 @@ mod prove_endpoint {
     }
 }
 
+/// `/prove` against the `verifier-key[v7]` keys of contracts deployed on
+/// ledger 9, keyed by the IR crates ledger 9 was released with.
+mod prove_endpoint_ledger_9 {
+    use super::common::*;
+    use ledger::structure::{ProofPreimageVersioned, ProofVersioned};
+    use ledger::test_utilities::PUBLIC_PARAMS;
+    use serialize::{Serializable, Tagged, tagged_deserialize, tagged_serialize};
+    use std::borrow::Cow;
+    use std::sync::Arc;
+    use transient_crypto::curve::Fr;
+    use transient_crypto::hash::transient_commit;
+    use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingKeyMaterial, WrappedIr};
+    use transient_crypto_3::proofs::{PARAMS_VERIFIER, VerifierKey, Zkir};
+
+    /// A circuit whose public inputs are the binding input, the communications
+    /// commitment over no inputs or outputs, and one zero.
+    const IR_V2: &str = r#"{
+       "version": { "major": 2, "minor": 2 },
+       "num_inputs": 0,
+       "do_communications_commitment": true,
+       "instructions": [
+           { "op": "load_imm", "imm": "00" },
+           { "op": "declare_pub_input", "var": 0 },
+           { "op": "pi_skip", "guard": null, "count": 1 }
+       ]
+    }"#;
+
+    /// The circuit of [`IR_V2`] in IR 3.1, which only ledger 9's crate reads.
+    const IR_V3: &str = r#"{
+       "version": { "major": 3, "minor": 1 },
+       "inputs": [],
+       "outputs": [],
+       "do_communications_commitment": true,
+       "instructions": [
+           { "op": "impact", "guard": "0x01", "inputs": ["0x00"] }
+       ]
+    }"#;
+
+    const BINDING_INPUT: u64 = 42;
+
+    fn tagged<T: Serializable + Tagged>(x: &T) -> Vec<u8> {
+        let mut buf = Vec::new();
+        tagged_serialize(x, &mut buf).expect("in-memory serialization");
+        buf
+    }
+
+    async fn ledger_9_keys<Z: Zkir + Serializable + Tagged>(
+        ir: &Z,
+    ) -> (ProvingKeyMaterial, VerifierKey) {
+        let (pk, vk) = ir.keygen(&PUBLIC_PARAMS.0).await.expect("keygen");
+        let material = ProvingKeyMaterial {
+            prover_key: tagged(&pk),
+            verifier_key: tagged(&vk),
+            ir_source: tagged(ir),
+        };
+        (material, vk)
+    }
+
+    /// `/k` and `/check` accept an IR 3.1 circuit sent alone, as wallets send
+    /// it before `/prove`. `/prove` overrides the binding input and answers
+    /// with a ledger 9 proof that verifies against the key.
+    #[tokio::test]
+    async fn checks_and_proves_ledger_9_circuits() {
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
+        let post = |endpoint: &'static str, body: Vec<u8>| {
+            client
+                .post(format!("{}/{endpoint}", server.base_url()))
+                .body(body)
+                .send()
+        };
+
+        let ir_v2 = zkir_v2::IrSource::load(IR_V2.as_bytes()).expect("IR must parse");
+        let ir_v3 = zkir_v3::IrSource::load(IR_V3.as_bytes()).expect("IR must parse");
+        let circuits = [
+            ("IR v2", ledger_9_keys(&ir_v2).await),
+            ("IR v3", ledger_9_keys(&ir_v3).await),
+        ];
+
+        let rand = Fr::from(7);
+        let comm = transient_commit(&Vec::<Fr>::new(), rand);
+        let ppi = ProofPreimageVersioned::V2(Arc::new(ProofPreimage {
+            inputs: vec![],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![0.into()],
+            public_transcript_outputs: vec![],
+            inner_proofs: vec![],
+            binding_input: 0.into(),
+            communications_commitment: Some((comm, rand)),
+            key_location: KeyLocation(Cow::Borrowed("ledger-9")),
+        }));
+        let statement = [Fr::from(BINDING_INPUT), comm, 0.into()].map(|f| {
+            transient_crypto_3::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("same field")
+        });
+
+        let ir = WrappedIr(tagged(&ir_v3));
+        for (endpoint, body) in [
+            ("k", ir.0.clone()),
+            ("check", tagged(&(ppi.clone(), Some(ir)))),
+        ] {
+            let response = post(endpoint, body).await.expect("Request failed");
+            assert_eq!(response.status(), 200, "/{endpoint}");
+        }
+
+        for (name, (material, vk)) in circuits {
+            let body = tagged(&(ppi.clone(), Some(material), Some(Fr::from(BINDING_INPUT))));
+            let response = post("prove", body).await.expect("Request failed");
+            assert_eq!(response.status(), 200, "{name}");
+            let bytes = response
+                .bytes()
+                .await
+                .expect("Failed to get response bytes");
+            let proof: ProofVersioned =
+                tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
+            let ProofVersioned::V3(proof) = proof else {
+                panic!("{name}: expected a ledger 9 proof, got {proof:?}");
+            };
+            vk.verify(&PARAMS_VERIFIER, &proof, statement.into_iter())
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+
+        stop_server(server).await;
+    }
+}
+
 mod fetch_params_endpoint {
     use super::common::*;
 
