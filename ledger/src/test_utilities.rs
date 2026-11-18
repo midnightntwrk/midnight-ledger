@@ -758,6 +758,9 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
                     preimage.key_location.0
                 )
             })?;
+        if crate::ledger_9_proving::is_ledger_9_key(&key_material.verifier_key) {
+            return crate::ledger_9_proving::check(preimage, &key_material.ir_source);
+        }
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
         match tag.as_str() {
             "ir-source[v2]" | "ir-source[v2-generic]" => self.zkir_v2.check(preimage).await,
@@ -787,6 +790,16 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
                     preimage.key_location.0
                 )
             })?;
+        if crate::ledger_9_proving::is_ledger_9_key(&key_material.verifier_key) {
+            let mut preimage = preimage.clone();
+            if let Some(binding_input) = overwrite_binding_input {
+                preimage.binding_input = binding_input;
+            }
+            let (proof, _) =
+                crate::ledger_9_proving::prove(&preimage, &key_material, self.rng, self.resolver)
+                    .await?;
+            return Ok(proof);
+        }
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
         match tag.as_str() {
             "ir-source[v2]" | "ir-source[v2-generic]" => {

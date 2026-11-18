@@ -18,7 +18,7 @@ use rand::rngs::OsRng;
 #[allow(unused_imports)]
 use serialize::{peek_tag, tagged_deserialize};
 use std::io::Cursor;
-use transient_crypto::proofs::{Proof, ProofPreimage, Zkir};
+use transient_crypto::proofs::{Proof, ProofPreimage, ProvingKeyMaterial, Zkir};
 use zswap::prove::legacy;
 
 use crate::endpoints::PUBLIC_PARAMS;
@@ -31,9 +31,7 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
                 .map_err(|e| e.to_string())?;
             Ok(legacy::k(&ir_v2))
         }
-        // TODO: zkir v3 implements transient-crypto 3's `Zkir`; serve it once
-        // v3 verifier keys return to `ContractOperation`.
-        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        "ir-source[v3-generic]" => ledger::ledger_9_proving::k(request).map_err(|e| e.to_string()),
         "ir-source[v4-generic]" => {
             let ir_v4 =
                 tagged_deserialize::<zkir_v4::IrSource>(request).map_err(|e| e.to_string())?;
@@ -51,8 +49,9 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
                 zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)).map_err(|e| e.to_string())?;
             legacy::check(&ir_v2, &ppi).map_err(|e| e.to_string())
         }
-        // TODO: see `k`.
-        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        "ir-source[v3-generic]" => {
+            ledger::ledger_9_proving::check(&ppi, ir).map_err(|e| e.to_string())
+        }
         "ir-source[v4-generic]" => {
             let ir_v4 = tagged_deserialize::<zkir_v4::IrSource>(ir).map_err(|e| e.to_string())?;
             ppi.check(&ir_v4).map_err(|e| e.to_string())
@@ -63,9 +62,15 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
 
 pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
-    ir_source: &[u8],
+    keys: &ProvingKeyMaterial,
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
+    if ledger::ledger_9_proving::is_ledger_9_key(&keys.verifier_key) {
+        return ledger::ledger_9_proving::prove(&ppi, keys, OsRng, &*PUBLIC_PARAMS)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    let ir_source = &keys.ir_source[..];
     let tag = peek_tag(&mut std::io::Cursor::new(ir_source)).map_err(|e| e.to_string())?;
     match tag.as_str() {
         "ir-source[v2]" | "ir-source[v2-generic]" => {
@@ -87,8 +92,10 @@ pub(crate) async fn prove(
             let skips = legacy::check(&ir, &ppi).map_err(|e| e.to_string())?;
             Ok((proof, skips))
         }
-        // TODO: see `k`.
-        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        // The key check above takes every `ir-source[v3-generic]` circuit.
+        "ir-source[v3-generic]" => {
+            Err("ZKIR v3 is only proven against verifier-key[v7] keys".into())
+        }
         "ir-source[v4-generic]" => ppi
             .prove::<zkir_v4::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await

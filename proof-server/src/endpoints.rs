@@ -301,7 +301,7 @@ pub(crate) async fn prove(
                                 })?,
                         };
 
-                        let proof = versioned_ir::prove(ppi, &proving_data.ir_source, &resolver)
+                        let proof = versioned_ir::prove(ppi, &proving_data, &resolver)
                             .await
                             .map_err(WorkError::BadInput)?
                             .0;
