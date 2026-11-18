@@ -54,7 +54,7 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::proofs::KeyLocation;
-use zkir_v2::LocalProvingProvider;
+use zswap::prove::legacy::LegacyProvingProvider;
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("fallible");
@@ -2161,7 +2161,7 @@ fn gen_unshielded_offer(rng: &mut StdRng) -> (SigningKey, UnshieldedOffer<Signat
 
 async fn setup() -> (
     StdRng,
-    LocalProvingProvider<'static, StdRng, Resolver, Resolver>,
+    LegacyProvingProvider<'static, StdRng, Resolver, Resolver>,
     ContractCallPrototype<InMemoryDB>,
     LedgerState<InMemoryDB>,
 ) {
@@ -2169,7 +2169,7 @@ async fn setup() -> (
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
 
-    let prover = LocalProvingProvider {
+    let prover = LegacyProvingProvider {
         rng: rng.split(),
         resolver: &*RESOLVER,
         params: &*RESOLVER,

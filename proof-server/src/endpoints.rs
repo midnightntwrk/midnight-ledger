@@ -39,8 +39,8 @@ use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
 
-use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
+use zswap::prove::legacy::LegacyProvingProvider;
 
 use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
@@ -364,7 +364,7 @@ pub(crate) async fn prove_transaction(
                         Box::pin(std::future::ready(Ok(keys.get(loc.0.as_ref()).cloned())))
                     }),
                 );
-                let provider = zkir_v2::LocalProvingProvider {
+                let provider = LegacyProvingProvider {
                     rng: OsRng,
                     params: &resolver,
                     resolver: &resolver,

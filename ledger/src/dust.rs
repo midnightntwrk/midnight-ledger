@@ -2316,7 +2316,7 @@ mod tests {
         use serialize::Serializable;
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-        use zkir_v2::LocalProvingProvider;
+        use zswap::prove::legacy::LegacyProvingProvider;
 
         use crate::{
             dust::DUST_SPEND_PROOF_SIZE,
@@ -2333,7 +2333,7 @@ mod tests {
             .unwrap()
             .1;
         let resolver = test_resolver("");
-        let prover = LocalProvingProvider {
+        let prover = LegacyProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,

@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-zkir = { path = "../../zkir-wasm", package = "midnight-zkir-wasm" }
+zkir = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "ledger-9", package = "midnight-zkir-wasm" }
 wasm-bindgen-rayon = "1.2"
 web-sys = "0.3.77"
 

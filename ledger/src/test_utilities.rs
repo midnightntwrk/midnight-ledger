@@ -67,10 +67,12 @@ use transient_crypto::proofs::KeyLocation;
 #[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProverKey, ProvingProvider, Resolver as ResolverT, WrappedIr};
 #[cfg(feature = "proving")]
-use zkir_v2::{IrSource, LocalProvingProvider};
+use zkir_v2::IrSource;
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
 use zswap::prove::ZswapResolver;
+#[cfg(feature = "proving")]
+use zswap::prove::legacy::LegacyProvingProvider;
 use zswap::{Delta, Offer as ZswapOffer, Output as ZswapOutput};
 
 #[cfg(feature = "proving")]
@@ -741,7 +743,7 @@ pub async fn tx_prove_bind<
 #[cfg(feature = "proving")]
 struct CombinedProofProvider<'a, R: Rng + CryptoRng + SplittableRng> {
     rng: R,
-    zkir_v2: LocalProvingProvider<'a, R, Resolver, Resolver>,
+    zkir_v2: LegacyProvingProvider<'a, R, Resolver, Resolver>,
     resolver: &'a Resolver,
 }
 
@@ -764,10 +766,13 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
         let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
         match tag.as_str() {
             "ir-source[v2]" | "ir-source[v2-generic]" => self.zkir_v2.check(preimage).await,
-            "ir-source[v3-generic]" => {
-                let ir_v3: zkir_v3::IrSource =
+            // TODO: zkir v3 implements transient-crypto 3's `Zkir`; prove it
+            // once v3 verifier keys return to `ContractOperation`.
+            "ir-source[v3-generic]" => Err(anyhow::anyhow!("ZKIR v3 proving is not yet supported")),
+            "ir-source[v4-generic]" => {
+                let ir_v4: zkir_v4::IrSource =
                     tagged_deserialize(&mut &key_material.ir_source[..])?;
-                preimage.check(&ir_v3)
+                preimage.check(&ir_v4)
             }
             _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
         }
@@ -792,13 +797,15 @@ impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofPr
             "ir-source[v2]" | "ir-source[v2-generic]" => {
                 self.zkir_v2.prove(preimage, overwrite_binding_input).await
             }
-            "ir-source[v3-generic]" => {
+            // TODO: see `check`.
+            "ir-source[v3-generic]" => Err(anyhow::anyhow!("ZKIR v3 proving is not yet supported")),
+            "ir-source[v4-generic]" => {
                 let mut preimage = preimage.clone();
                 if let Some(binding_input) = overwrite_binding_input {
                     preimage.binding_input = binding_input;
                 }
                 preimage
-                    .prove::<zkir_v3::IrSource>(self.rng, self.resolver, self.resolver)
+                    .prove::<zkir_v4::IrSource>(self.rng, self.resolver, self.resolver)
                     .await
                     .map(|(proof, _)| proof)
             }
@@ -835,7 +842,7 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
         } else {
             let provider = CombinedProofProvider {
                 rng: _rng.split(),
-                zkir_v2: LocalProvingProvider {
+                zkir_v2: LegacyProvingProvider {
                     rng: _rng.split(),
                     params: resolver,
                     resolver,

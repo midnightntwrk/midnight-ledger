@@ -19,7 +19,7 @@ use rand::rngs::OsRng;
 use serialize::{peek_tag, tagged_deserialize};
 use std::io::Cursor;
 use transient_crypto::proofs::{Proof, ProofPreimage, Zkir};
-use zkir as zkir_v2;
+use zswap::prove::legacy;
 
 use crate::endpoints::PUBLIC_PARAMS;
 
@@ -29,12 +29,15 @@ pub(crate) fn k(request: &[u8]) -> Result<u8, String> {
         "ir-source[v2]" | "ir-source[v2-generic]" => {
             let ir_v2 = zkir_v2::IrSource::load_from_tagged(Cursor::new(request))
                 .map_err(|e| e.to_string())?;
-            Ok(ir_v2.k())
+            Ok(legacy::k(&ir_v2))
         }
-        "ir-source[v3-generic]" => {
-            let ir_v3 =
-                tagged_deserialize::<zkir_v3::IrSource>(request).map_err(|e| e.to_string())?;
-            Ok(ir_v3.k())
+        // TODO: zkir v3 implements transient-crypto 3's `Zkir`; serve it once
+        // v3 verifier keys return to `ContractOperation`.
+        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        "ir-source[v4-generic]" => {
+            let ir_v4 =
+                tagged_deserialize::<zkir_v4::IrSource>(request).map_err(|e| e.to_string())?;
+            Ok(ir_v4.k())
         }
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
@@ -46,11 +49,13 @@ pub(crate) fn check(ppi: Arc<ProofPreimage>, ir: &[u8]) -> Result<Vec<Option<usi
         "ir-source[v2]" | "ir-source[v2-generic]" => {
             let ir_v2 =
                 zkir_v2::IrSource::load_from_tagged(Cursor::new(ir)).map_err(|e| e.to_string())?;
-            ppi.check(&ir_v2).map_err(|e| e.to_string())
+            legacy::check(&ir_v2, &ppi).map_err(|e| e.to_string())
         }
-        "ir-source[v3-generic]" => {
-            let ir_v3 = tagged_deserialize::<zkir_v3::IrSource>(ir).map_err(|e| e.to_string())?;
-            ppi.check(&ir_v3).map_err(|e| e.to_string())
+        // TODO: see `k`.
+        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        "ir-source[v4-generic]" => {
+            let ir_v4 = tagged_deserialize::<zkir_v4::IrSource>(ir).map_err(|e| e.to_string())?;
+            ppi.check(&ir_v4).map_err(|e| e.to_string())
         }
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
@@ -66,11 +71,10 @@ pub(crate) async fn prove(
         "ir-source[v2]" | "ir-source[v2-generic]" => {
             let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
                 .map_err(|e| e.to_string())?;
-            // Use LocalProvingProvider for v2 IRs to handle V0/V1 backward compat routing.
             use base_crypto::rng::SplittableRng;
             use transient_crypto::proofs::ProvingProvider;
 
-            let mut provider = zkir_v2::LocalProvingProvider {
+            let mut provider = legacy::LegacyProvingProvider {
                 rng: OsRng.split(),
                 resolver,
                 params: &*PUBLIC_PARAMS,
@@ -80,15 +84,15 @@ pub(crate) async fn prove(
                 .prove(&ppi, None)
                 .await
                 .map_err(|e| e.to_string())?;
-            let skips = ppi.check(&ir).map_err(|e| e.to_string())?;
+            let skips = legacy::check(&ir, &ppi).map_err(|e| e.to_string())?;
             Ok((proof, skips))
         }
-        "ir-source[v3-generic]" => {
-            //let ir_source = tagged_deserialize::<zkir_v3::IrSource>(ir_source).map_err(|e| e.to_string())?;
-            ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
-                .await
-                .map_err(|e| e.to_string())
-        }
+        // TODO: see `k`.
+        "ir-source[v3-generic]" => Err("ZKIR v3 is not yet supported".into()),
+        "ir-source[v4-generic]" => ppi
+            .prove::<zkir_v4::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+            .await
+            .map_err(|e| e.to_string()),
         _ => Err(format!("Unsupported ZKIR tag: '{tag}'")),
     }
 }

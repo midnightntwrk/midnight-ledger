@@ -19,6 +19,12 @@
     utils.url = "github:numtide/flake-utils";
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
+    zkir-v2.url = "github:midnightntwrk/midnight-ledger/ledger-9";
+    zkir-v2.inputs.nixpkgs.follows = "nixpkgs";
+    zkir-v2.inputs.fenix.follows = "fenix";
+    zkir-v3.url = "github:midnightntwrk/midnight-zkir/zkir-v3";
+    zkir-v3.inputs.nixpkgs.follows = "nixpkgs";
+    zkir-v3.inputs.fenix.follows = "fenix";
     #compactc = {
     #  url = "github:midnightntwrk/compactc";
     #  inputs.zkir.follows = "zkir";
@@ -32,6 +38,8 @@
     utils,
     fenix,
     inclusive,
+    zkir-v2,
+    zkir-v3,
     #compactc,
     ...
   }:
@@ -68,8 +76,6 @@
           ./ledger-wasm
           ./proof-server
           ./storage
-          ./zkir
-          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -128,7 +134,7 @@
             extraBuildInputs = (if require-artifacts then
               [
                 self.packages.${system}.local-params
-                self.packages.${system}.zkir
+                zkir-v2.packages.${system}.zkir
               ] else []);
           };
         mkLedger = {
@@ -171,7 +177,7 @@
               nativeBuildInputs =
                 [
                   self.packages.${system}.local-params
-                  self.packages.${system}.zkir
+                  zkir-v2.packages.${system}.zkir
                   rust-build
                   pkgs.chez
                 ];
@@ -326,7 +332,7 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
+              zkir-v2.packages.${system}.zkir-wasm
             ];
           };
 
@@ -337,8 +343,6 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              packages.zkir-wasm
-              packages.zkir-v3-wasm
             ];
           };
 
@@ -358,8 +362,8 @@
             nativeBuildInputs = [
               pkgs.jq
               packages.public-params
-              self.packages.${system}.zkir
-              self.packages.${system}.zkir-v3
+              zkir-v2.packages.${system}.zkir
+              zkir-v3.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
             ];
             buildPhase = ''
@@ -373,9 +377,9 @@
                 mv $contract-tmp "$contract/zkir"
                 VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
                 if [[ "$VERSION" == "2" ]]; then
-                  ${self.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${zkir-v2.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 elif [[ "$VERSION" == "3" ]]; then
-                  ${self.packages.${system}.zkir-v3}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
+                  ${zkir-v3.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
                 fi
               done
             '';
@@ -399,7 +403,7 @@
             #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              self.packages.${system}.zkir
+              zkir-v2.packages.${system}.zkir
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.coreutils
             ];
@@ -437,8 +441,6 @@
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v5"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v10"; package-name = "ledger-v10"; require-artifacts = true; };
-          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
-          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -452,58 +454,6 @@
 
           packages.proof-server-oci-arm64-experimental = mkDocker { isCrossArm = true; experimental = true; };
 
-          packages.zkir = ({
-              "x86_64-linux" = pkgsStatic;
-              "x86_64-darwin" = pkgs;
-              "aarch64-linux" = pkgsStatic;
-              "aarch64-darwin" = pkgs;
-          }.${system}.makeRustPlatform {
-            rustc = packages.rust-build-toolchain;
-            cargo = packages.rust-build-toolchain;
-          }).buildRustPackage rec {
-              pname = "zkir";
-              version = (builtins.fromTOML (builtins.readFile ./zkir/Cargo.toml)).package.version;
-              src = rustWorkspaceSrc;
-              cargoLock.lockFile = ./Cargo.lock;
-              cargoLock.allowBuiltinFetchGit = true;
-
-              MIDNIGHT_PP = "${packages.public-params}";
-
-              buildInputs = [
-                packages.public-params
-              ];
-              cargoBuildFlags = "--package midnight-zkir --features binary";
-              nativeBuildInputs = [
-                packages.rust-build-toolchain
-              ];
-              doCheck = false;
-            };
-          packages.zkir-v3 = ({
-              "x86_64-linux" = pkgsStatic;
-              "x86_64-darwin" = pkgs;
-              "aarch64-linux" = pkgsStatic;
-              "aarch64-darwin" = pkgs;
-          }.${system}.makeRustPlatform {
-            rustc = packages.rust-build-toolchain;
-            cargo = packages.rust-build-toolchain;
-          }).buildRustPackage rec {
-              pname = "zkir-v3";
-              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
-              src = rustWorkspaceSrc;
-              cargoLock.lockFile = ./Cargo.lock;
-              cargoLock.allowBuiltinFetchGit = true;
-
-              MIDNIGHT_PP = "${packages.public-params}";
-
-              buildInputs = [
-                packages.public-params
-              ];
-              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
-              nativeBuildInputs = [
-                packages.rust-build-toolchain
-              ];
-              doCheck = false;
-            };
           packages.public-params = let
               param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {

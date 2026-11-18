@@ -620,8 +620,7 @@ mod ready_endpoint {
 mod k_endpoint {
     use super::common::*;
     use serialize::tagged_serialize;
-    use transient_crypto::proofs::Zkir;
-    use zkir as zkir_v2;
+    use zswap::prove::legacy;
 
     fn create_minimal_ir_source() -> zkir_v2::IrSource {
         zkir_v2::IrSource {
@@ -637,7 +636,7 @@ mod k_endpoint {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
 
         let ir = create_minimal_ir_source();
-        let expected_k = ir.k();
+        let expected_k = legacy::k(&ir);
 
         let mut body = Vec::new();
         tagged_serialize(&ir, &mut body).expect("Failed to serialize IR");

@@ -28,6 +28,9 @@ use transient_crypto::proofs::{
 };
 use transient_crypto::proofs::{ParamsProver, ProvingKeyMaterial, ProvingProvider};
 
+#[cfg(feature = "proving")]
+pub mod legacy;
+
 #[derive(Clone)]
 pub struct ZswapResolver(pub MidnightDataProvider);
 
@@ -180,12 +183,13 @@ impl<D: DB> Transient<ProofPreimage, D> {
 
 #[cfg(test)]
 mod tests {
+    use super::legacy::LegacyProvingProvider;
     use base_crypto::data_provider;
     use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use transient_crypto::merkle_tree::MerkleTree;
-    use zkir_v2::{Instruction, IrSource, LocalProvingProvider};
+    use zkir_v2::{Instruction, IrSource};
 
     use super::*;
 
@@ -224,7 +228,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = LocalProvingProvider {
+        let mut provider = LegacyProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,
@@ -271,7 +275,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = LocalProvingProvider {
+        let mut provider = LegacyProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,
