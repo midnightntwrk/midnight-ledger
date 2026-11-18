@@ -1,0 +1,26 @@
+name: Export integration dependencies
+description: Build once and transfer the Nix runtime closure to the integration job.
+runs:
+  using: composite
+  steps:
+    - name: Build WASM packages and integration dependencies
+      shell: bash
+      run: nix build .#integration-test-deps
+
+    - name: Export integration dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/integration-deps"
+        nix-store --query --requisites ./result > "$RUNNER_TEMP/integration-deps/paths"
+        mapfile -t paths < "$RUNNER_TEMP/integration-deps/paths"
+        nix-store --export "${paths[@]}" > "$RUNNER_TEMP/integration-deps/closure.nar"
+
+    - name: Upload integration dependencies
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: integration-deps
+        path: ${{ runner.temp }}/integration-deps/closure.nar
+        compression-level: 1
+        retention-days: 1
+        if-no-files-found: error

@@ -17,13 +17,19 @@ env:
 
 jobs:
   check:
+    name: check (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
+
+      - name: Test CI cache helper
+        run: python3 -m unittest discover -s .github/scripts/tests
 
       - name: Free up runner disk space
         if: runner.os == 'Linux' && runner.environment == 'github-hosted'
@@ -60,21 +66,18 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          key: nix-${{ hashFiles('flake.lock') }}
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -115,11 +118,18 @@ jobs:
         if: always()
         run: df -h / /nix
 
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
+
   build-wasm:
+    name: build-wasm (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
@@ -150,21 +160,13 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -172,23 +174,26 @@ jobs:
           sudo chown -R $USER:nixbld /nix/var/nix/{profiles,gcroots}/per-user/$USER
         shell: bash # Ensure bash is used for these commands
 
-      - name: Build ledger-wasm
-        run: nix build .#ledger-wasm
+      - name: Build and export integration dependencies
+        uses: ./.github/actions/export-integration-deps
 
-      - name: Build onchain-runtime-wasm
-        run: nix build .#onchain-runtime-wasm
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
 
-      - name: Build zkir-wasm
-        run: nix build .#zkir-wasm
 
   # Inline matrix job (not a reusable-workflow call) so the check name stays
   # `integration-tests (ubuntu-latest)`. The steps live in a composite action
   # shared with the release flow (prerelease.yml), so there is no duplication.
   integration-tests:
+    needs: build-wasm
+    name: integration-tests (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
@@ -201,12 +206,21 @@ jobs:
           df -h /
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
+        with:
+          dependencies-artifact: integration-deps
 
   build-ledger:
+    name: build-ledger (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm
+          - os: macos-latest
+            runner: macos-26
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
@@ -237,21 +251,18 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          key: nix-${{ hashFiles('flake.lock') }}
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -280,11 +291,20 @@ jobs:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
         run: nix develop -c cargo test --release --target wasm32-unknown-unknown -p midnight-zkir-wasm
 
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
+
   build-proof-server:
+    name: build-proof-server (${{ matrix.os }})
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: ubuntu-latest
+            runner: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
@@ -315,21 +335,18 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          key: nix-${{ hashFiles('flake.lock') }}
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -359,3 +376,7 @@ jobs:
         with:
           name: "proof-server-test-results-${{ matrix.os }}"
           path: target/test-*
+
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix

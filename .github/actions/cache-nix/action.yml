@@ -1,0 +1,38 @@
+name: Cache reusable Nix outputs
+description: Restore a compact binary cache instead of the entire Nix store.
+inputs:
+  workload:
+    description: Workload whose Nix outputs populate the cache.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore Nix binary cache
+      id: cache
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: ${{ runner.temp }}/nix-ci-cache
+        key: nix-outputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.workload }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-${{ github.sha }}
+        restore-keys: |
+          nix-outputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.workload }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
+          nix-outputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.workload }}-
+
+    - name: Configure local binary cache
+      shell: bash
+      env:
+        CACHE_KEY: ${{ steps.cache.outputs.cache-primary-key }}
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/nix-ci-cache"
+        if [ ! -f "$RUNNER_TEMP/nix-ci-cache/nix-cache-info" ]; then
+          printf 'StoreDir: /nix/store\n' > "$RUNNER_TEMP/nix-ci-cache/nix-cache-info"
+        fi
+        # Trust only this branch-scoped local cache, not other substituters.
+        {
+          echo 'NIX_CONFIG<<NIX_CI_CONFIG_END'
+          printf '%s\n' "${NIX_CONFIG:-}"
+          echo "extra-substituters = file://$RUNNER_TEMP/nix-ci-cache?trusted=true"
+          echo 'NIX_CI_CONFIG_END'
+          echo "NIX_CI_CACHE_KEY=$CACHE_KEY"
+          echo "NIX_CI_CACHE_HIT=$CACHE_HIT"
+        } >> "$GITHUB_ENV"
