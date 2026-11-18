@@ -95,13 +95,13 @@ impl Display for OfferCreationFailed {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
         use OfferCreationFailed::*;
         match self {
-            InvalidIndex(err) => write!(formatter, "{} -- write creating spend proof", err),
+            InvalidIndex(err) => write!(formatter, "{} -- while creating spend proof", err),
             CommitmentNotInTree(com) => write!(
                 formatter,
                 "commitment {:?} is not in the coin commitment tree -- while creating spend proof",
                 com
             ),
-            Proving(err) => write!(formatter, "{} -- write creating Zswap proof", err),
+            Proving(err) => write!(formatter, "{} -- while creating Zswap proof", err),
             NotContractOwned => write!(
                 formatter,
                 "attempted to spend a user-owned output as contract owned"

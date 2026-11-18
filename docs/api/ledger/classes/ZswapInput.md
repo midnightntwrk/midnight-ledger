@@ -111,8 +111,16 @@ static newContractOwned(
    coin, 
    segment, 
    contract, 
-   state): UnprovenInput;
+   state, 
+   mtIndex?): UnprovenInput;
 ```
+
+Creates a new input, spending a coin owned by a smart contract
+
+The coin's leaf in `state`'s commitment tree is located by the coin's
+commitment. `mtIndex` is an optional hint at where that leaf is, e.g. as
+reported by [ZswapChainState.tryApply](ZswapChainState.md#tryapply). It is checked against the
+leaf, so a wrong hint costs a search of the tree, not an invalid input
 
 #### Parameters
 
@@ -131,6 +139,10 @@ static newContractOwned(
 ##### state
 
 [`ZswapChainState`](ZswapChainState.md)
+
+##### mtIndex?
+
+`bigint`
 
 #### Returns
 

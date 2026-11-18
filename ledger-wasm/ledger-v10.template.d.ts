@@ -2042,7 +2042,15 @@ export class ZswapLocalState {
 export class ZswapInput<P extends Proofish> {
   private constructor();
 
-  static newContractOwned(coin: ShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
+  /**
+   * Creates a new input, spending a coin owned by a smart contract
+   *
+   * The coin's leaf in `state`'s commitment tree is located by the coin's
+   * commitment. `mtIndex` is an optional hint at where that leaf is, e.g. as
+   * reported by {@link ZswapChainState.tryApply}. It is checked against the
+   * leaf, so a wrong hint costs a search of the tree, not an invalid input
+   */
+  static newContractOwned(coin: ShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState, mtIndex?: bigint): UnprovenInput;
 
   serialize(): Uint8Array;
 

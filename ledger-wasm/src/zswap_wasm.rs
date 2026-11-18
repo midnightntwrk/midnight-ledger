@@ -410,11 +410,19 @@ impl ZswapInput {
         segment: Option<u16>,
         contract: &str,
         state: &ZswapChainState,
+        mt_index: Option<u64>,
     ) -> Result<ZswapInput, JsError> {
         let coin = value_to_shielded_coininfo(coin)?;
         let addr = from_hex_ser(contract)?;
         Ok(ZswapInput(ZswapInputTypes::UnprovenInput(
-            zswap::Input::new_contract_owned(&mut OsRng, &coin, segment, addr, &state.0.coin_coms)?,
+            zswap::Input::new_contract_owned(
+                &mut OsRng,
+                &coin,
+                mt_index,
+                segment,
+                addr,
+                &state.0.coin_coms,
+            )?,
         )))
     }
 

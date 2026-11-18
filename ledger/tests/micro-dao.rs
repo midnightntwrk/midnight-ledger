@@ -346,6 +346,7 @@ async fn micro_dao_inner(mode: TestMode) {
                         &mut rng,
                         &CoinInfo::from(&pot),
                         None,
+                        None,
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
@@ -922,6 +923,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     ZswapInput::new_contract_owned(
                         &mut rng,
                         &CoinInfo::from(&pot),
+                        None,
                         None,
                         addr,
                         &state.ledger.zswap.coin_coms,

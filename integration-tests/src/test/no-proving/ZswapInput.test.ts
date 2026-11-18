@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapInput, ZswapChainState } from '@midnightntwrk/ledger';
+import { ZswapInput, ZswapChainState, ZswapOffer, ZswapOutput } from '@midnightntwrk/ledger';
 import { Random, Static } from '@/test-objects';
 import { createValidZSwapInput } from '@/test-utils';
 
@@ -27,6 +27,32 @@ describe('Ledger API - ZSwapInput', () => {
     expect(() =>
       ZswapInput.newContractOwned(Static.shieldedCoinInfo(10_000n), 0, Random.contractAddress(), new ZswapChainState())
     ).toThrow('is not in the coin commitment tree');
+  });
+
+  /**
+   * Test the optional Merkle tree index hint.
+   *
+   * @given A chain state holding a contract-owned output, and the index tryApply reported for it
+   * @when Creating a contract-owned ZswapInput with no hint, the right hint and a wrong hint
+   * @then Should create the spend each time, and still refuse a coin the tree does not hold
+   */
+  test('should locate the coin with or without an index hint', () => {
+    const coin = Static.shieldedCoinInfo(10_000n);
+    const contract = Random.contractAddress();
+    const output = ZswapOutput.newContractOwned(coin, 0, contract);
+    const [applied, indices] = new ZswapChainState().tryApply(ZswapOffer.fromOutput(output, coin.type, coin.value));
+    const state = applied.postBlockUpdate(new Date(0), 1000n);
+    const index = indices.get(output.commitment);
+    expect(index).toEqual(0n);
+
+    const nullifiers = [undefined, index, index! + 1n].map(
+      (hint) => ZswapInput.newContractOwned(coin, 0, contract, state, hint).nullifier
+    );
+    expect(new Set(nullifiers).size).toEqual(1);
+
+    expect(() => ZswapInput.newContractOwned(Static.shieldedCoinInfo(1n), 0, contract, state, index)).toThrow(
+      'is not in the coin commitment tree'
+    );
   });
 
   /**

@@ -278,15 +278,15 @@ async fn test_shielded_full_lifecycle() {
     let coin_nul = new_coin.nullifier(&SenderEvidence::Contract(addr));
 
     // Create ZSwap input for existing pot
-    let pot_in =
-        ZswapInput::new_contract_owned(
-            &mut rng,
-            &CoinInfo::from(&pot),
-            None,
-            addr,
-            &state.ledger.zswap.coin_coms,
-        )
-        .unwrap();
+    let pot_in = ZswapInput::new_contract_owned(
+        &mut rng,
+        &CoinInfo::from(&pot),
+        None,
+        None,
+        addr,
+        &state.ledger.zswap.coin_coms,
+    )
+    .unwrap();
 
     // Create transient for new deposit (created and nullified in same tx)
     let transient =
@@ -433,15 +433,15 @@ async fn test_shielded_full_lifecycle() {
         withdraw_coin.commitment(&Recipient::User(state.zswap_keys.coin_public_key()));
     let change_com = change_coin.commitment(&Recipient::Contract(addr));
 
-    let pot_in =
-        ZswapInput::new_contract_owned(
-            &mut rng,
-            &CoinInfo::from(&pot),
-            None,
-            addr,
-            &state.ledger.zswap.coin_coms,
-        )
-        .unwrap();
+    let pot_in = ZswapInput::new_contract_owned(
+        &mut rng,
+        &CoinInfo::from(&pot),
+        None,
+        None,
+        addr,
+        &state.ledger.zswap.coin_coms,
+    )
+    .unwrap();
 
     // User output (not contract-owned)
     let withdraw_out = ZswapOutput::new(

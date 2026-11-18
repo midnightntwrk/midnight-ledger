@@ -241,8 +241,8 @@ mod tests {
             .expect("updating hash on non-collapsed tree should always succeed")
             .rehash();
 
-        let inp =
-            Input::new_contract_owned(&mut rng, &coin, None, Default::default(), &tree).unwrap();
+        let inp = Input::new_contract_owned(&mut rng, &coin, None, None, Default::default(), &tree)
+            .unwrap();
         let inp_proven = inp.prove(provider.split()).await.unwrap();
         assert_eq!(inp_proven.proof.serialized_size(), INPUT_PROOF_SIZE);
 

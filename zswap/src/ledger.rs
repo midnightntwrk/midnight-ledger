@@ -257,6 +257,7 @@ impl<D: DB> State<D> {
 #[cfg(test)]
 mod tests {
     use super::State;
+    use crate::error::OfferCreationFailed;
     use crate::{DB, Delta};
     use crate::{Input, Offer, Output};
     use base_crypto::time::{Duration, Timestamp};
@@ -267,9 +268,11 @@ mod tests {
     use rand::rngs::ThreadRng;
     use rand::{CryptoRng, Rng};
     use std::collections::HashMap;
+    use storage::arena::Sp;
     use storage::db::InMemoryDB;
-    use transient_crypto::merkle_tree::MerkleTreeDigest;
+    use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
     use transient_crypto::proofs::ProofPreimage;
+    use transient_crypto::repr::FieldRepr;
 
     #[test]
     fn test_filtered_spend() {
@@ -315,7 +318,102 @@ mod tests {
             .unwrap();
         state = new_state.post_block_update(Default::default(), Duration::from_secs(3600));
         state = insert_dummy_outputs(&mut rng, state, 25);
-        Input::new_contract_owned(&mut rng, &coin, None, addr, &state.filter(&[addr])).unwrap();
+        Input::new_contract_owned(&mut rng, &coin, None, None, addr, &state.filter(&[addr]))
+            .unwrap();
+    }
+    
+    #[test]
+    fn test_contract_owned_spend_locates_commitment() {
+        fn insert_dummy_outputs(
+            rng: &mut ThreadRng,
+            state: State<InMemoryDB>,
+        ) -> State<InMemoryDB> {
+            (0..5).fold(state, |state, _| {
+                state
+                    .try_apply(&make_dummy_output_offer(rng), None)
+                    .unwrap()
+                    .0
+            })
+        }
+        let mut rng = rand::thread_rng();
+        let addr = ContractAddress::default();
+        let coin = CoinInfo {
+            nonce: rng.r#gen(),
+            type_: rng.r#gen(),
+            value: 500,
+        };
+        let output = Output::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
+        let commitment = output.coin_com;
+        let state = insert_dummy_outputs(&mut rng, State::<InMemoryDB>::new());
+        let (state, indices) = state
+            .try_apply(
+                &Offer {
+                    inputs: vec![].into(),
+                    outputs: vec![output].into(),
+                    transient: vec![].into(),
+                    deltas: vec![Delta {
+                        token_type: rng.r#gen(),
+                        value: 500,
+                    }]
+                    .into(),
+                },
+                None,
+            )
+            .unwrap();
+        let index = *indices
+            .get(&commitment)
+            .expect("try_apply reports the index of every commitment it inserts");
+        let state = insert_dummy_outputs(&mut rng, state)
+            .post_block_update(Default::default(), Duration::from_secs(3600));
+        let tree = &state.coin_coms;
+        let root = tree.root().unwrap();
+
+        let mut path_repr = Vec::new();
+        tree.path_for_leaf(index, ((), commitment.0))
+            .unwrap()
+            .field_repr(&mut path_repr);
+        
+        for hint in [None, Some(index), Some(index + 1), Some(0), Some(u64::MAX)] {
+            let input = Input::new_contract_owned(&mut rng, &coin, hint, None, addr, tree)
+                .unwrap_or_else(|err| panic!("hint {hint:?}: {err}"));
+            assert_eq!(input.merkle_tree_root, root, "hint {hint:?}");
+            assert!(
+                input
+                    .proof
+                    .inputs
+                    .windows(path_repr.len())
+                    .any(|window| window == path_repr),
+                "hint {hint:?}: the spend must open the coin's own leaf"
+            );
+        }
+
+        let not_in_tree = |coin: &CoinInfo,
+                           hint: Option<u64>,
+                           addr: ContractAddress,
+                           tree: &MerkleTree<
+            Option<Sp<ContractAddress, InMemoryDB>>,
+            InMemoryDB,
+        >| {
+            match Input::new_contract_owned(&mut rand::thread_rng(), coin, hint, None, addr, tree) {
+                Err(OfferCreationFailed::CommitmentNotInTree(reported)) => {
+                    assert_eq!(reported, coin.commitment(&Recipient::Contract(addr)));
+                }
+                Err(err) => panic!("expected CommitmentNotInTree, got: {err}"),
+                Ok(_) => panic!("expected CommitmentNotInTree, got an input"),
+            }
+        };
+
+        let absent = CoinInfo {
+            nonce: rng.r#gen(),
+            ..coin
+        };
+        not_in_tree(&absent, None, addr, tree);
+        not_in_tree(&absent, Some(index), addr, tree);
+
+        let other_addr = ContractAddress(rng.r#gen());
+        not_in_tree(&coin, Some(index), other_addr, tree);
+
+        not_in_tree(&coin, Some(index), addr, &state.filter(&[other_addr]));
     }
 
     #[test]

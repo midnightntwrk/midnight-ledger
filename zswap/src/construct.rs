@@ -153,15 +153,24 @@ impl<D: DB> Input<ProofPreimage, D> {
     pub fn new_contract_owned<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &CoinInfo,
+        mt_index_hint: Option<u64>,
         segment: Option<u16>,
         contract: ContractAddress,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
         let merkle_tree_root = tree.root().ok_or(OfferCreationFailed::TreeNotRehashed)?;
         let commitment = coin.commitment(&Recipient::Contract(contract));
-        let path = tree
-            .find_path_for_hashed_leaf_within_range(commitment.0, ..)
+        let holds_commitment = |index: u64| {
+            (tree.height() >= 64 || index >> tree.height() == 0)
+                && matches!(tree.index(index), Some((hash, _)) if hash == commitment.0)
+        };
+        let index = mt_index_hint
+            .filter(|&index| holds_commitment(index))
+            .or_else(|| tree.rposition_of_hashed_leaf(commitment.0))
             .ok_or(OfferCreationFailed::CommitmentNotInTree(commitment))?;
+        let path = tree
+            .path_for_leaf(index, ((), commitment.0))
+            .map_err(OfferCreationFailed::InvalidIndex)?;
         debug!("spending contract-owned coin");
         Self::new_from_path::<R>(
             rng,
@@ -169,10 +178,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             segment,
             SenderEvidence::Contract(contract),
             merkle_tree_root,
-            MerklePath {
-                leaf: ((), path.leaf),
-                path: path.path,
-            },
+            path,
         )
     }
 
@@ -434,7 +440,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
             .contract_address
             .clone()
             .ok_or(OfferCreationFailed::NotContractOwned)?;
-        let input = Input::new_contract_owned(rng, coin, segment, *addr.deref(), &tree)?;
+        let input = Input::new_contract_owned(rng, coin, Some(0), segment, *addr.deref(), &tree)?;
         Ok(Transient::from_parts(input, output))
     }
 
