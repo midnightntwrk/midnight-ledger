@@ -3892,6 +3892,7 @@ pub(crate) mod tests {
     mod count_saturation;
     mod pre_budget_work;
     pub(crate) mod transactions;
+    mod verifier_key_versions;
     mod verifier_keys;
 
     use storage::db::InMemoryDB;
