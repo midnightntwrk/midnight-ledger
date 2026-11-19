@@ -117,13 +117,13 @@ impl<D: DB> GcState<D> {
         self.rescan = true;
     }
 
-    pub(crate) fn run<'a, 'b: 'a>(
-        &'b mut self,
+    pub(crate) fn run<'a>(
+        &mut self,
         roots: impl Iterator<Item = ArenaHash<D::Hasher>>,
         remaining_budget: impl Fn() -> Duration,
-        db: &'b mut D,
+        db: &mut D,
         cache_read: impl Fn(ArenaHash<D::Hasher>) -> Option<&'a OnDiskObject<D::Hasher>>,
-        db_roots: impl for<'c> FnOnce(&'c mut D) -> Vec<ArenaHash<D::Hasher>>,
+        db_roots: impl FnOnce(&mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> Vec<ArenaHash<D::Hasher>> {
         // First, we need to update our root set. We take the new root set `roots`, and note any
         // additions to add to the grey set. Deletions are not handled, as they may still be on
