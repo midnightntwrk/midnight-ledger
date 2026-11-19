@@ -17,7 +17,7 @@ name: Publish npm packages
 # skipped, so re-runs after partial failures are safe.
 #
 # npm TRUSTED PUBLISHING: npmjs auth is OIDC - no npmjs token. THIS file
-# (publish.yml) with environment `release` must be registered as the trusted
+# (publish.yml) with environment `npm-publish-stable` must be registered as the trusted
 # publisher (with "Allow npm publish") for every @midnightntwrk package:
 #   @midnightntwrk/ledger-vN
 #   @midnightntwrk/onchain-runtime-vN
@@ -70,11 +70,11 @@ jobs:
     # Standard hosted runner (free on public repos): the nix build is mostly
     # restored from the cache shared with prerelease.yml, so no large runner.
     runs-on: ubuntu-24.04
-    # Same approval gate as the release workflow: real publishes require the
-    # protected `release` environment; dry runs need no approval.
+    # Real publishes require the protected `npm-publish-stable` environment, the
+    # org-wide name for npm Trusted Publishing; dry runs need no approval.
     # NB: the truthy value must be the && arm - '' is falsy in GitHub
     # expressions, so `cond && '' || x` yields x on BOTH branches.
-    environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
+    environment: ${{ github.event.inputs.dry_run != 'true' && 'npm-publish-stable' || '' }}
     permissions:
       contents: read
       id-token: write # npm Trusted Publishing (OIDC) + provenance
