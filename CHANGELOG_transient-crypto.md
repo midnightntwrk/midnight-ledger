@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- feat: `MerkleTree::position_of_hashed_leaf` and `rposition_of_hashed_leaf`
+  find a leaf's index by its hash, lowest or highest index first. They skip
+  stubs and collapsed subtrees and stop at the first match.
+- perf: the `MerkleTree::find_path_for_*` searches no longer list every leaf
+  before comparing. They still return the lowest-indexed match.
+
 ## Version `3.1.0`
 
 - feat: add `PureGeneratorPedersen::smallest_representable`, for bounding

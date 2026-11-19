@@ -37,7 +37,6 @@ import {
   ZswapTransient
 } from '@midnightntwrk/ledger';
 import {
-  getQualifiedShieldedCoinInfo,
   INITIAL_NIGHT_AMOUNT,
   LOCAL_TEST_NETWORK_ID,
   Random,
@@ -145,11 +144,7 @@ describe('Ledger API - Transaction.addCalls Zswap partitioning', () => {
     // A contract-owned output, kept out of the offer itself and used only to build a transient.
     const transientCoin: ShieldedCoinInfo = createShieldedCoinInfo(token.raw, 50_000n);
     const transientSource = ZswapOutput.newContractOwned(transientCoin, undefined, addr);
-    const zswapTransient = ZswapTransient.newFromContractOwnedOutput(
-      getQualifiedShieldedCoinInfo(transientCoin),
-      0,
-      transientSource
-    );
+    const zswapTransient = ZswapTransient.newFromContractOwnedOutput(transientCoin, 0, transientSource);
 
     // A separate contract-owned output that goes into the offer on its own.
     const outputCoin: ShieldedCoinInfo = createShieldedCoinInfo(token.raw, 70_000n);
