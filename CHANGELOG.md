@@ -17,6 +17,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: ZKIR's `Instruction` tag moves to `ir-instruction[v4]` for the two new variants.
 - feat: `IrMinorVersion::V1` marks an `IrSource` carrying `verify_proof_vks`, and is now the default. `IrSource`'s `Serializable` is hand-written and branches on it, so `V0` blobs keep their exact byte layout and still load; serializing a `V0` that carries key material is an error rather than a silent drop.
 - fix: `zkir-wasm`'s `prove` and `check` converted a preimage for the v1 pipeline by re-deserializing the raw request bytes as `transient_crypto_old::proofs::ProofPreimage`.
+- breaking: the proof kind markers get versioned tags: `ProofMarker` moves from `proof` to `proof-marker[v1]`, and `ProofPreimageMarker` from `proof-preimage` to `proof-preimage-marker[v1]`. A type generic over the proof kind names the marker in its tag, so its proven and unproven tags move, for example `transaction[v12](signature[v2],proof,pedersen-schnorr[v1])` to `transaction[v12](signature[v2],proof-marker[v1],pedersen-schnorr[v1])`. A marker's version must be bumped whenever the bytes of its `Proof` or `LatestProof` change.
+- chore: `tag_enforcement_test!` also runs for the proven and unproven kinds of `DustSpend`, `ContractCall` and `StandardTransaction`, the types that hold a proof directly, so a proof change that leaves the marker tags alone fails a test.
 
 ## Unreleased (Ledger 9)
 
