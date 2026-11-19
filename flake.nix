@@ -87,7 +87,6 @@
           ./onchain-runtime-wasm
           ./generate-cost-model
           ./rustfmt.toml
-          ./wasm-proving-demos/zkir-mt
         ];
         rust = fenix.packages.${system};
         # Temporary until 0.22.0 is in nixpkgs, as this is required to parse
