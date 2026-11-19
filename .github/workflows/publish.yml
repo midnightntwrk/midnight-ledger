@@ -1,28 +1,30 @@
 name: Publish npm packages
 
 # Single npm-publish path for the ledger package family. Publishes each
-# package to GH Packages and public npmjs under BOTH scopes while the org
-# migrates:
-#   @midnight-ntwrk/<pkg>  (legacy scope)
-#   @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
-#                           to the midnightntwrk org instead of the
-#                           deprecated midnight-ntwrk org)
+# package to:
+#   - GH Packages under BOTH scopes while the org migrates:
+#       @midnight-ntwrk/<pkg>  (legacy scope)
+#       @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
+#                               to the midnightntwrk org instead of the
+#                               deprecated midnight-ntwrk org)
+#   - public npmjs under @midnightntwrk ONLY. The dashed @midnight-ntwrk scope
+#     is retired on npmjs (shieldedtech/shielded-sre#761); existing dashed
+#     versions stay installable and are deprecated with a pointer.
 # The built tarball's own scope is never trusted: bagel.nix's default scope
 # flipped on ledger-8 (f232211) and differs across release branches, so every
 # tarball is normalized to each target scope before publishing.
 # Publishes are idempotent per target: already-published versions are
 # skipped, so re-runs after partial failures are safe.
 #
-# npm TRUSTED PUBLISHING (planned): register THIS file (publish.yml) with
-# environment `release` as the trusted publisher for every package:
-#   @midnight-ntwrk/ledger-vN            @midnightntwrk/ledger-vN
-#   @midnight-ntwrk/onchain-runtime-vN   @midnightntwrk/onchain-runtime-vN
-#   @midnight-ntwrk/zkir-vN              @midnightntwrk/zkir-vN
-# Then flip auth here:
-#   1. permissions: add `id-token: write`
-#   2. delete the NPM_TOKEN env + the registry.npmjs.org auth line below
-#      (npm >= 11.5 performs the OIDC exchange automatically)
-#   3. keep MIDNIGHTCI_PACKAGES_WRITE - GH Packages has no trusted publishing
+# npm TRUSTED PUBLISHING: npmjs auth is OIDC - no npmjs token. THIS file
+# (publish.yml) with environment `release` must be registered as the trusted
+# publisher (with "Allow npm publish") for every @midnightntwrk package:
+#   @midnightntwrk/ledger-vN
+#   @midnightntwrk/onchain-runtime-vN
+#   @midnightntwrk/zkir-vN
+# npm >= 11.5.1 performs the OIDC exchange automatically (guarded below) and
+# attaches provenance. MIDNIGHTCI_PACKAGES_WRITE stays for GH Packages, which
+# has no trusted publishing.
 # Trusted publishing validates the TOP-LEVEL workflow file, so this workflow
 # must stay directly dispatched - do not convert it to workflow_call.
 
@@ -75,6 +77,7 @@ jobs:
     environment: ${{ github.event.inputs.dry_run != 'true' && 'release' || '' }}
     permissions:
       contents: read
+      id-token: write # npm Trusted Publishing (OIDC) + provenance
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
@@ -92,6 +95,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38  # v6.5.0
         with:
+          # Pinned so npm is >= 11.5.1 (OIDC trusted publishing); the runner's
+          # default Node is not guaranteed to ship it.
+          node-version: '24'
           registry-url: https://npm.pkg.github.com/
         env:
           # Dry runs never publish; give them no credentials at all.
@@ -129,7 +135,6 @@ jobs:
         env:
           # Dry runs never publish; give them no credentials at all.
           NODE_AUTH_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_PACKAGES_WRITE || '' }}
-          NPM_TOKEN: ${{ github.event.inputs.dry_run != 'true' && secrets.MIDNIGHTCI_NPMJS_TOKEN || '' }}
           PACKAGES: ${{ github.event.inputs.packages }}
         run: |
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
@@ -137,15 +142,12 @@ jobs:
           SCOPES="@midnight-ntwrk @midnightntwrk"
           SCRIPTS="${GITHUB_WORKSPACE}/.publish-scripts/.github/scripts"
 
-          # npmjs auth (GH Packages auth is configured by setup-node). The
-          # token is written literally: npm's ${VAR} expansion yields empty
-          # -> ENEEDAUTH. Under trusted publishing this block is deleted.
-          # Dry runs never publish, so they get no token at all.
-          if [ "${DRY_RUN}" != "true" ]; then
-            if [ -z "${NPM_TOKEN:-}" ]; then
-              echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set - cannot authenticate to npmjs"; exit 1
-            fi
-            printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # npmjs auth is npm Trusted Publishing (OIDC): no token is written for
+          # registry.npmjs.org, so npm exchanges the job's id-token. GH Packages
+          # auth is configured by setup-node. Fail fast if npm can't do OIDC.
+          NPM_VER=$(npm --version)
+          if [ "$(printf '%s\n' 11.5.1 "$NPM_VER" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "::error::npm ${NPM_VER} < 11.5.1 - OIDC trusted publishing unsupported"; exit 1
           fi
 
           case "$PACKAGES" in
@@ -182,7 +184,10 @@ jobs:
             # scope is a harmless identity repack).
             for SCOPE in $SCOPES; do
               T=$("${SCRIPTS}/rescope-npm-tarball.sh" "$TGZ" "$SCOPE" "$ATTR_DIR")
-              for REG in "$GH_REG" "$NPMJS_REG"; do
+              # npmjs gets the canonical @midnightntwrk scope only.
+              REGS="$GH_REG"
+              if [ "$SCOPE" = "@midnightntwrk" ]; then REGS="$GH_REG $NPMJS_REG"; fi
+              for REG in $REGS; do
                 "${SCRIPTS}/run-unless-dry.sh" \
                   "${SCRIPTS}/npm-publish-idempotent.sh" \
                   "$T" "$REG" "${SCOPE}/${BASE}" "$VER"
