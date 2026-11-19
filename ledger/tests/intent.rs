@@ -21,6 +21,7 @@ use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::error::TransactionApplicationError;
+use midnight_ledger::legacy_proving::LegacyProvingProvider;
 use midnight_ledger::prove::Resolver;
 use midnight_ledger::structure::ReplayProtectionState;
 use midnight_ledger::structure::{
@@ -54,7 +55,6 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::proofs::KeyLocation;
-use zswap::prove::legacy::LegacyProvingProvider;
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("fallible");

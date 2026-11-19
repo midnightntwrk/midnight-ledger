@@ -39,8 +39,8 @@ use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
 
+use ledger::legacy_proving::LegacyProvingProvider;
 use zswap::prove::ZswapResolver;
-use zswap::prove::legacy::LegacyProvingProvider;
 
 use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
@@ -303,8 +303,7 @@ pub(crate) async fn prove(
 
                         let proof = versioned_ir::prove(ppi, &proving_data, &resolver)
                             .await
-                            .map_err(WorkError::BadInput)?
-                            .0;
+                            .map_err(WorkError::BadInput)?;
 
                         // The key the proof will be verified against decides which
                         // variant it is, as it does in `ledger::prove`.

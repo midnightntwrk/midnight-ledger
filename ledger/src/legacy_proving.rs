@@ -11,19 +11,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Proving against the `verifier-key[v7]` keys that contracts deployed on
-//! ledger 9 hold.
+//! Proves circuits of the ZKIR versions before 4, behind the current
+//! `transient-crypto` types.
 //!
-//! The proof is made by `midnight-transient-crypto` 3.1 and the
-//! `midnight-zkir` release ledger 9 proves the circuit's IR version with.
+//! | circuit              | proven by                       | verifier key       |
+//! |----------------------|---------------------------------|--------------------|
+//! | IR v2, minor 0 and 1 | `midnight-transient-crypto` 2   | `verifier-key[v6]` |
+//! | IR v2, minor 2       | `midnight-transient-crypto` 3.1 | `verifier-key[v7]` |
+//! | IR v3                | `midnight-transient-crypto` 3.1 | `verifier-key[v7]` |
+//!
+//! The circuit is read and proven by the `midnight-zkir` release of its IR
+//! version. Both releases speak `midnight-transient-crypto` 3.1, and the IR v2
+//! one picks `midnight-transient-crypto` 2 for minor 0 and 1 itself.
 
+use base_crypto::rng::SplittableRng;
 use midnight_proofs::utils::SerdeFormat;
 use rand::{CryptoRng, Rng};
-use serialize::{Tagged, peek_tag, tagged_deserialize};
+use serialize::{peek_tag, tagged_deserialize};
 use std::io;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
-    ParamsProverProvider, Proof, ProofPreimage, ProvingError, ProvingKeyMaterial,
+    ParamsProverProvider, Proof, ProofPreimage, ProvingError, ProvingKeyMaterial, ProvingProvider,
+    Resolver,
 };
 use transient_crypto_3::proofs as v3;
 
@@ -47,7 +56,7 @@ fn v3_preimage(p: &ProofPreimage) -> io::Result<v3::ProofPreimage> {
     if !inner_proofs.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "a preimage with inner proofs cannot be proven against a verifier-key[v7] key",
+            "a preimage with inner proofs cannot be proven for a ZKIR version before 4",
         ));
     }
     let frs = |fs: &[Fr]| fs.iter().copied().map(fr).collect();
@@ -89,7 +98,6 @@ impl v3::Resolver for Keys<'_> {
     }
 }
 
-/// A circuit, loaded by the release ledger 9 reads its IR version with.
 enum Ir {
     V2(zkir_v2::IrSource),
     V3(zkir_v3::IrSource),
@@ -107,11 +115,6 @@ fn load(ir_source: &[u8]) -> io::Result<Ir> {
             format!("Unknown ZKIR tag: '{tag}'"),
         )),
     }
-}
-
-/// Whether the serialized `verifier_key` is a `verifier-key[v7]` key.
-pub fn is_ledger_9_key(verifier_key: &[u8]) -> bool {
-    matches!(peek_tag(&mut io::Cursor::new(verifier_key)), Ok(tag) if tag == v3::VerifierKey::tag())
 }
 
 /// The `k` the circuit of `ir_source` is proven at.
@@ -134,30 +137,83 @@ pub fn check(
     }
 }
 
-/// Proves `preimage` against `keys`, whose verifier key is a
-/// `verifier-key[v7]` key.
-///
-/// The result is what [`ProofPreimage::prove`] returns. The proof carries no
-/// accumulators.
+/// Proves `preimage` against `keys`. The proof carries no accumulators.
 pub async fn prove(
     preimage: &ProofPreimage,
     keys: &ProvingKeyMaterial,
-    rng: impl Rng + CryptoRng,
+    rng: impl CryptoRng + SplittableRng,
     params: &impl ParamsProverProvider,
-) -> Result<(Proof, Vec<Option<usize>>), ProvingError> {
+) -> Result<Proof, ProvingError> {
     let preimage = v3_preimage(preimage)?;
     let (params, resolver) = (Params(params), Keys(keys));
-    let (proof, pi_skips) = match load(&keys.ir_source)? {
+    let proof = match load(&keys.ir_source)? {
         Ir::V2(_) => {
-            preimage
-                .prove::<zkir_v2::IrSource>(rng, &params, &resolver)
-                .await?
+            let provider = zkir_v2::LocalProvingProvider {
+                rng,
+                resolver: &resolver,
+                params: &params,
+            };
+            v3::ProvingProvider::prove(provider, &preimage, None).await?
         }
         Ir::V3(_) => {
             preimage
                 .prove::<zkir_v3::IrSource>(rng, &params, &resolver)
                 .await?
+                .0
         }
     };
-    Ok((Proof::from_bytes(proof.0), pi_skips))
+    Ok(Proof::from_bytes(proof.0))
+}
+
+pub struct LegacyProvingProvider<'a, R: Rng + CryptoRng + SplittableRng, S, P> {
+    pub rng: R,
+    pub resolver: &'a S,
+    pub params: &'a P,
+}
+
+impl<R: Rng + CryptoRng + SplittableRng, S: Resolver, P> LegacyProvingProvider<'_, R, S, P> {
+    async fn keys(&self, preimage: &ProofPreimage) -> Result<ProvingKeyMaterial, anyhow::Error> {
+        self.resolver
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "could not resolve key location: {}",
+                    preimage.key_location.0
+                )
+            })
+    }
+}
+
+impl<R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvider> ProvingProvider
+    for LegacyProvingProvider<'_, R, S, P>
+{
+    async fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, anyhow::Error> {
+        check(preimage, &self.keys(preimage).await?.ir_source)
+    }
+
+    async fn prove(
+        self,
+        preimage: &ProofPreimage,
+        overwrite_binding_input: Option<Fr>,
+    ) -> Result<Proof, anyhow::Error> {
+        let keys = self.keys(preimage).await?;
+        let mut preimage = preimage.clone();
+        if let Some(binding_input) = overwrite_binding_input {
+            preimage.binding_input = binding_input;
+        }
+        prove(&preimage, &keys, self.rng, self.params).await
+    }
+
+    fn split(&mut self) -> Self {
+        Self {
+            rng: self.rng.split(),
+            resolver: self.resolver,
+            params: self.params,
+        }
+    }
+
+    fn resolver(&self) -> &impl Resolver {
+        self.resolver
+    }
 }

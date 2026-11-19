@@ -22,8 +22,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - chore: `tag_enforcement_test!` also runs for the proven and unproven kinds of `DustSpend`, `ContractCall` and `StandardTransaction`, the types that hold a proof directly, so a proof change that leaves the marker tags alone fails a test.
 - breaking: `ContractOperation` gets a third verifier key field. `v3` holds the `verifier-key[v7]` key of a contract deployed on ledger 9, verified with `midnight-transient-crypto` 3.1, and the new `v4` holds the `verifier-key[v8]` key. `ContractOperationVersion` and `ContractOperationVersionedVerifierKey` gain `V5` (`'v5'` in the JavaScript API) for `v4`.
 - breaking: the tag moves to `contract-operation[v7]`, and with it every tag that contains a contract operation, among them `transaction[v13]`, `ledger-state[v19]` and the intent signing envelopes.
-- feat: the proof server and the ledger's test prover prove against a `verifier-key[v7]` key, as contracts deployed on ledger 9 hold. The new `ledger_9_proving` module of the ledger makes the proof with `midnight-transient-crypto` 3.1 and the `midnight-zkir` releases ledger 9 proves with (2.2.0 and 3.2.1).
-- chore: the nix `zkir` package builds with `--manifest-path zkir/Cargo.toml`, since `midnight-zkir` now names two packages in the dependency graph.
+- feat: the proof server and the ledger's test prover prove circuits of every ZKIR version before 4.
 
 ## Unreleased (Ledger 9)
 

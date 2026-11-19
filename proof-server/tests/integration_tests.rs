@@ -619,8 +619,8 @@ mod ready_endpoint {
 
 mod k_endpoint {
     use super::common::*;
+    use ledger::legacy_proving;
     use serialize::tagged_serialize;
-    use zswap::prove::legacy;
 
     fn create_minimal_ir_source() -> zkir_v2::IrSource {
         zkir_v2::IrSource {
@@ -636,10 +636,10 @@ mod k_endpoint {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
 
         let ir = create_minimal_ir_source();
-        let expected_k = legacy::k(&ir);
 
         let mut body = Vec::new();
         tagged_serialize(&ir, &mut body).expect("Failed to serialize IR");
+        let expected_k = legacy_proving::k(&body).expect("Failed to compute k");
 
         let response = HTTP_CLIENT
             .post(format!("{}/k", server.base_url()))
@@ -888,43 +888,18 @@ mod prove_endpoint {
     }
 }
 
-/// `/prove` against the `verifier-key[v7]` keys of contracts deployed on
-/// ledger 9, keyed by the IR crates ledger 9 was released with.
-mod prove_endpoint_ledger_9 {
+/// A ratchet over `/k`, `/check` and `/prove`: they still take a circuit for
+/// every way a Midnight ledger has proven one.
+mod ir_versions {
     use super::common::*;
     use ledger::structure::{ProofPreimageVersioned, ProofVersioned};
-    use ledger::test_utilities::PUBLIC_PARAMS;
+    use ledger::test_utilities::circuits_of_every_ir_version;
     use serialize::{Serializable, Tagged, tagged_deserialize, tagged_serialize};
     use std::borrow::Cow;
     use std::sync::Arc;
     use transient_crypto::curve::Fr;
     use transient_crypto::hash::transient_commit;
-    use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingKeyMaterial, WrappedIr};
-    use transient_crypto_3::proofs::{PARAMS_VERIFIER, VerifierKey, Zkir};
-
-    /// A circuit whose public inputs are the binding input, the communications
-    /// commitment over no inputs or outputs, and one zero.
-    const IR_V2: &str = r#"{
-       "version": { "major": 2, "minor": 2 },
-       "num_inputs": 0,
-       "do_communications_commitment": true,
-       "instructions": [
-           { "op": "load_imm", "imm": "00" },
-           { "op": "declare_pub_input", "var": 0 },
-           { "op": "pi_skip", "guard": null, "count": 1 }
-       ]
-    }"#;
-
-    /// The circuit of [`IR_V2`] in IR 3.1, which only ledger 9's crate reads.
-    const IR_V3: &str = r#"{
-       "version": { "major": 3, "minor": 1 },
-       "inputs": [],
-       "outputs": [],
-       "do_communications_commitment": true,
-       "instructions": [
-           { "op": "impact", "guard": "0x01", "inputs": ["0x00"] }
-       ]
-    }"#;
+    use transient_crypto::proofs::{KeyLocation, ProofPreimage, WrappedIr};
 
     const BINDING_INPUT: u64 = 42;
 
@@ -934,23 +909,23 @@ mod prove_endpoint_ledger_9 {
         buf
     }
 
-    async fn ledger_9_keys<Z: Zkir + Serializable + Tagged>(
-        ir: &Z,
-    ) -> (ProvingKeyMaterial, VerifierKey) {
-        let (pk, vk) = ir.keygen(&PUBLIC_PARAMS.0).await.expect("keygen");
-        let material = ProvingKeyMaterial {
-            prover_key: tagged(&pk),
-            verifier_key: tagged(&vk),
-            ir_source: tagged(ir),
-        };
-        (material, vk)
+    /// Verifies `$proof` against `$key` with the `midnight-transient-crypto`
+    /// release `$crypto`.
+    macro_rules! verify {
+        ($crypto:ident, $key:expr, $proof:expr, $statement:expr) => {{
+            use $crypto::{curve, proofs};
+            let key: proofs::VerifierKey = tagged_deserialize(&$key[..]).expect("a verifier key");
+            let statement =
+                $statement.map(|f| curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("same field"));
+            key.verify(&proofs::PARAMS_VERIFIER, &$proof, statement.into_iter())
+        }};
     }
 
-    /// `/k` and `/check` accept an IR 3.1 circuit sent alone, as wallets send
-    /// it before `/prove`. `/prove` overrides the binding input and answers
-    /// with a ledger 9 proof that verifies against the key.
+    /// `/k` and `/check` accept the circuit sent alone, as wallets send it
+    /// before `/prove`. `/prove` overrides the binding input and answers with
+    /// a proof that verifies against the circuit's key.
     #[tokio::test]
-    async fn checks_and_proves_ledger_9_circuits() {
+    async fn checks_and_proves_circuits_of_every_ir_version() {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
         let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
         let post = |endpoint: &'static str, body: Vec<u8>| {
@@ -959,13 +934,6 @@ mod prove_endpoint_ledger_9 {
                 .body(body)
                 .send()
         };
-
-        let ir_v2 = zkir_v2::IrSource::load(IR_V2.as_bytes()).expect("IR must parse");
-        let ir_v3 = zkir_v3::IrSource::load(IR_V3.as_bytes()).expect("IR must parse");
-        let circuits = [
-            ("IR v2", ledger_9_keys(&ir_v2).await),
-            ("IR v3", ledger_9_keys(&ir_v3).await),
-        ];
 
         let rand = Fr::from(7);
         let comm = transient_commit(&Vec::<Fr>::new(), rand);
@@ -977,36 +945,37 @@ mod prove_endpoint_ledger_9 {
             inner_proofs: vec![],
             binding_input: 0.into(),
             communications_commitment: Some((comm, rand)),
-            key_location: KeyLocation(Cow::Borrowed("ledger-9")),
+            key_location: KeyLocation(Cow::Borrowed("circuit")),
         }));
-        let statement = [Fr::from(BINDING_INPUT), comm, 0.into()].map(|f| {
-            transient_crypto_3::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("same field")
-        });
+        let statement = [Fr::from(BINDING_INPUT), comm, 0.into()];
 
-        let ir = WrappedIr(tagged(&ir_v3));
-        for (endpoint, body) in [
-            ("k", ir.0.clone()),
-            ("check", tagged(&(ppi.clone(), Some(ir)))),
-        ] {
-            let response = post(endpoint, body).await.expect("Request failed");
-            assert_eq!(response.status(), 200, "/{endpoint}");
-        }
+        for (name, material) in circuits_of_every_ir_version().await {
+            let ir = WrappedIr(material.ir_source.clone());
+            let key = material.verifier_key.clone();
+            for (endpoint, body) in [
+                ("k", ir.0.clone()),
+                ("check", tagged(&(ppi.clone(), Some(ir)))),
+            ] {
+                let response = post(endpoint, body).await.expect("Request failed");
+                assert_eq!(response.status(), 200, "{name}: /{endpoint}");
+            }
 
-        for (name, (material, vk)) in circuits {
             let body = tagged(&(ppi.clone(), Some(material), Some(Fr::from(BINDING_INPUT))));
             let response = post("prove", body).await.expect("Request failed");
-            assert_eq!(response.status(), 200, "{name}");
+            assert_eq!(response.status(), 200, "{name}: /prove");
             let bytes = response
                 .bytes()
                 .await
                 .expect("Failed to get response bytes");
             let proof: ProofVersioned =
                 tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
-            let ProofVersioned::V3(proof) = proof else {
-                panic!("{name}: expected a ledger 9 proof, got {proof:?}");
-            };
-            vk.verify(&PARAMS_VERIFIER, &proof, statement.into_iter())
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            match proof {
+                ProofVersioned::V2(proof) => verify!(transient_crypto_2, key, proof, statement),
+                ProofVersioned::V3(proof) => verify!(transient_crypto_3, key, proof, statement),
+                ProofVersioned::V4(proof) => verify!(transient_crypto, key, proof, statement),
+                proof => panic!("{name}: a proof version this test does not verify: {proof:?}"),
+            }
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         }
 
         stop_server(server).await;
