@@ -20,7 +20,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 
 zkir_v2 = { version = "2.2.0", package = "midnight-zkir" }
 zkir_v3 = { version = "3.2.1", package = "midnight-zkir" }
-zkir_v4 = { version = "4.0.0-rc.1", git = "https://github.com/midnightntwrk/midnight-zkir", branch = "tkerber/ledger-10-prep", package = "midnight-zkir" }
+zkir_v4 = { version = "4.0.0-rc.1", git = "https://github.com/midnightntwrk/midnight-zkir", branch = "zkir-v4", package = "midnight-zkir" }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

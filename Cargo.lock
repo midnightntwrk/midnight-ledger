@@ -4175,7 +4175,7 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "4.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?branch=tkerber%2Fledger-10-prep#3bfd968ebe8615cdd788e7e08023d9879d9ed53a"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?branch=zkir-v4#ba6e3fe8430904a723c6475f07f317c5a1c9cd87"
 dependencies = [
  "anyhow",
  "const-hex",
