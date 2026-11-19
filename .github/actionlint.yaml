@@ -1,0 +1,5 @@
+# Organization-managed larger GitHub-hosted runner names.
+self-hosted-runner:
+  labels:
+    - ubuntu-latest-8-core-x64
+    - ubuntu-latest-4-core-arm64

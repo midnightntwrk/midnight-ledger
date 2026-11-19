@@ -482,7 +482,7 @@ describe('Ledger API - MicroDao', () => {
         const mtIndexAsBigInt = valueToBigInt([value[3]]);
 
         const pot: QualifiedShieldedCoinInfo = decodeQualifiedShieldedCoinInfo({
-          nonce: Static.trimTrailingZeros(value[0]),
+          nonce: Static.padWithZeros(value[0], 32),
           color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
           value: valueAsBigInt,
           mt_index: mtIndexAsBigInt
@@ -1081,13 +1081,9 @@ describe('Ledger API - MicroDao', () => {
     const { value } = potVal.asCell();
     const valueAsBigInt = valueToBigInt([value[2]]);
     const mtIndexAsBigInt = valueToBigInt([value[3]]);
-    const nonceWithoutZeroAtTheEnd = value[0];
-    const nonce = new Uint8Array(nonceWithoutZeroAtTheEnd.length + 1);
-    nonce.set(nonceWithoutZeroAtTheEnd, 0);
-    nonce[nonceWithoutZeroAtTheEnd.length] = 0;
 
     const pot: QualifiedShieldedCoinInfo = decodeQualifiedShieldedCoinInfo({
-      nonce,
+      nonce: Static.padWithZeros(value[0], 32),
       color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
       value: valueAsBigInt,
       mt_index: mtIndexAsBigInt
