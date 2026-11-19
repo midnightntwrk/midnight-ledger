@@ -500,7 +500,9 @@ impl ContractOperation {
 
     #[wasm_bindgen(getter = verifierKey)]
     pub fn verifier_key(&self) -> Result<JsValue, JsError> {
-        if let Some(vk) = &self.0.v3 {
+        if let Some(vk) = &self.0.v4 {
+            to_value_ser(vk)
+        } else if let Some(vk) = &self.0.v3 {
             to_value_ser(vk)
         } else if let Some(vk) = &self.0.v2 {
             to_value_ser(vk)
@@ -515,8 +517,11 @@ impl ContractOperation {
         let tag = peek_tag(&mut std::io::Cursor::new(&data))?;
         match tag.as_str() {
             "verifier-key[v6]" => self.0.v2 = Some(tagged_deserialize(&mut &data[..])?),
-            "verifier-key[v8]" => self.0.v3 = Some(tagged_deserialize(&mut &data[..])?),
-            _ => return Err(JsError::new("unknown verifier key tag: '{tag}'")),
+            "verifier-key[v7]" => self.0.v3 = Some(tagged_deserialize(&mut &data[..])?),
+            "verifier-key[v8]" => self.0.v4 = Some(tagged_deserialize(&mut &data[..])?),
+            _ => {
+                return Err(JsError::new(&format!("unknown verifier key tag: '{tag}'")));
+            }
         }
         Ok(())
     }

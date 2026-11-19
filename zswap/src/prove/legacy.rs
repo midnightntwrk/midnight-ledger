@@ -26,7 +26,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProvingProvider, Resolver,
 };
-use transient_crypto_old::proofs as old;
+use transient_crypto_2::proofs as old;
 use zkir_v2::IrSource;
 
 /// A [`ProvingProvider`] for v2 ZKIR circuits with legacy (v1) keys.
@@ -73,8 +73,8 @@ impl<P: ParamsProverProvider> old::ParamsProverProvider for OldParams<'_, P> {
     }
 }
 
-fn old_fr(f: Fr) -> transient_crypto_old::curve::Fr {
-    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
+fn old_fr(f: Fr) -> transient_crypto_2::curve::Fr {
+    transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("Fr round-trip")
 }
 
 fn old_preimage(p: &ProofPreimage) -> io::Result<old::ProofPreimage> {

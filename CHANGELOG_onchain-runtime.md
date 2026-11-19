@@ -2,13 +2,12 @@
 
 ## Version `5.0.0`
 
-- breaking: pull in breaking transient-crypto changes. A verifier key in
-  `ContractOperation`'s `v3` slot is now one whose proofs carry the deferred
-  accumulators a `verify_proof` instruction exposes: `verifier-key[v8]` against
-  `proof[v6]`, where it was `[v7]` against `proof[v5]`. The key's own bytes are
-  unchanged, so a stored contract operation still decodes.
-- breaking: `ContractOperation.verifierKey` takes a `verifier-key[v8]` key, and
-  refuses the `[v7]` it took before.
+- breaking: pull in breaking transient-crypto changes. `ContractOperation`
+  gains a `v4` slot for a `verifier-key[v8]` key. The `v3` slot keeps the
+  `verifier-key[v7]` key it holds on ledger 9. The tags move to
+  `contract-operation[v7]` and `contract-state[v9]`.
+- breaking: `ContractOperation.verifierKey` puts a key in the slot its tag
+  names, and returns the newest key the operation holds.
 - feat: `proofDataIntoSerializedPreimage` takes the inner proofs a circuit's
   `verify_proof` instructions consume, and emits a `proof-preimage[v2]`.
 
