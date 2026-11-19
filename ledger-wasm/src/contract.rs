@@ -306,6 +306,7 @@ impl ContractOperationVersion {
             }
             "v3" => V::V3,
             "v4" => V::V4,
+            "v5" => V::V5,
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -320,6 +321,7 @@ impl ContractOperationVersion {
         match &self.0 {
             V::V3 => "v3",
             V::V4 => "v4",
+            V::V5 => "v5",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -358,6 +360,7 @@ impl ContractOperationVersionedVerifierKey {
             }
             "v3" => V::V3(serialize::tagged_deserialize(&mut &raw_vk[..])?),
             "v4" => V::V4(serialize::tagged_deserialize(&mut &raw_vk[..])?),
+            "v5" => V::V5(serialize::tagged_deserialize(&mut &raw_vk[..])?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -372,6 +375,7 @@ impl ContractOperationVersionedVerifierKey {
         match &self.0 {
             V::V3(..) => "v3",
             V::V4(..) => "v4",
+            V::V5(..) => "v5",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -384,6 +388,7 @@ impl ContractOperationVersionedVerifierKey {
         match &self.0 {
             V::V3(vk) => Serializable::serialize(vk, &mut buf)?,
             V::V4(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V5(vk) => Serializable::serialize(vk, &mut buf)?,
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         Ok(Uint8Array::from(&buf[..]))

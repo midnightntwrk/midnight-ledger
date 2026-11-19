@@ -16,4 +16,7 @@
 // Proptest derive triggers this.
 #![allow(non_local_definitions)]
 
+// `transient_crypto` by its major version, for code that names several versions.
+extern crate transient_crypto as transient_crypto_4;
+
 pub mod state;

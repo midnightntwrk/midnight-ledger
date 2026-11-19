@@ -428,7 +428,7 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
         address: ContractAddress,
         operation: EntryPoint,
     ) -> Result<(), MalformedTransaction<D>> {
-        if self.v2.is_none() && self.v3.is_none() {
+        if self.v2.is_none() && self.v3.is_none() && self.v4.is_none() {
             warn!("no verifier key set");
             return Err(MalformedTransaction::VerifierKeyNotSet {
                 address,
