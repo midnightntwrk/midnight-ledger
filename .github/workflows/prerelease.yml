@@ -73,15 +73,10 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Get project versions
         run: |
@@ -256,6 +251,9 @@ jobs:
             "${GITHUB_WORKSPACE}/.github/scripts/run-unless-dry.sh" git push origin "${TAG_NAME}"
           fi
 
+      - name: Build and export integration dependencies
+        uses: ./.github/actions/export-integration-deps
+
       - name: Upload npm package tarballs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -264,6 +262,9 @@ jobs:
           path: release-artifacts/*.tgz
           if-no-files-found: warn
 
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
 
   docker-push:
     needs: build
@@ -287,7 +288,6 @@ jobs:
   # No `secrets:` - neither reusable workflow consumes any (GITHUB_TOKEN is
   # always provided), so passing them would violate least privilege.
   coverage:
-    needs: build
     uses: ./.github/workflows/test-coverage.yml
 
   integration:
@@ -298,9 +298,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 #v7.0.1
       - name: Run integration tests
         uses: ./.github/actions/integration-tests
+        with:
+          dependencies-artifact: integration-deps
 
   unit-tests:
-    needs: build
     runs-on: ubuntu-latest-8-core-x64
     steps:
       - name: Checkout repository
@@ -325,21 +326,18 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          key: nix-${{ hashFiles('flake.lock') }}
 
       - name: Build and Test (default features)
         run: |
@@ -358,6 +356,11 @@ jobs:
           path: |
             test-results.json
             test-results.xml
+
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
+
 
   # npm publishing lives in publish.yml (the npm trusted-publisher workflow;
   # its top-level filename is what npmjs validates, so it cannot be a
@@ -456,15 +459,10 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      - name: Restore and save Nix store
-        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+      - name: Restore reusable Nix outputs
+        uses: ./.github/actions/cache-nix
         with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          purge: true
-          purge-prefixes: nix-${{ runner.os }}-
-          purge-primary-key: never
-          purge-created: P7D
+          workload: ${{ github.workflow }}-${{ github.job }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -476,6 +474,10 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           nix develop .#ci -c .github/scripts/cargo-publish-crates.sh "$VERSION"
+
+      - name: Save reusable Nix outputs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-nix
 
   release:
     # publish-npm is skipped on dry runs; `!cancelled() &&` (a status function,
@@ -511,8 +513,8 @@ jobs:
 
           for f in downloaded-artifacts/npm-packages/*.tgz; do cp "$f" "$STAGING/"; done
           for f in downloaded-artifacts/unit-test-results/test-results.*; do cp "$f" "$STAGING/"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
-          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-24.04/*; do cp "$f" "$STAGING/integration-junit.xml"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-ctrf-ubuntu-latest/*; do cp "$f" "$STAGING/integration-ctrf-report.json"; done
+          for f in downloaded-artifacts/ledger-wasm-test-results-junit-ubuntu-latest/*; do cp "$f" "$STAGING/integration-junit.xml"; done
           for f in downloaded-artifacts/integration-coverage-txt/*; do cp "$f" "$STAGING/integration-coverage.txt"; done
 
           if [ -d downloaded-artifacts/"Lcov Coverage Report" ]; then

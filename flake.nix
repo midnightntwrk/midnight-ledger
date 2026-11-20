@@ -314,6 +314,7 @@
             rust.stable.rust-src
             rust.stable.rust-analyzer
           ];
+          packages.rust-coverage-tools = rust.stable.llvm-tools-preview;
           packages.rust-doc-toolchain = rust.combine [
             rust.complete.rustc
             rust.complete.cargo
