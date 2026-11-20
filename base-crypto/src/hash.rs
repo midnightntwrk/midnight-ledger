@@ -28,6 +28,25 @@ use zeroize::Zeroize;
 /// The number of bytes output by [`persistent_hash`].
 pub const PERSISTENT_HASH_BYTES: usize = 32;
 
+/// Parses a 256-bit hex hash at const time.
+///
+/// Panics at compile time if `hex` is not exactly 64 hex digits, which is what makes it usable for
+/// baking expected digests into `const` tables.
+///
+/// ```rust
+/// use midnight_base_crypto::hash::hexhash;
+///
+/// const H: [u8; 32] =
+///     hexhash(b"59b30b3114a34ccbbfb599376e178fb8d9b3366cae2174c2f1da20e75847f823");
+/// assert_eq!(H[0], 0x59);
+/// ```
+pub const fn hexhash(hex: &[u8]) -> [u8; PERSISTENT_HASH_BYTES] {
+    match const_hex::const_decode_to_array(hex) {
+        Ok(hash) => hash,
+        Err(_) => panic!("hash should be correct format"),
+    }
+}
+
 /// A wrapper around hash outputs.
 #[derive(
     Copy,
