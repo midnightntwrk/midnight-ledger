@@ -29,7 +29,7 @@ use transient_crypto::proofs::{
 use transient_crypto::proofs::{ParamsProver, ProvingKeyMaterial, ProvingProvider};
 
 #[cfg(feature = "proving")]
-pub mod legacy;
+pub mod zkir_v2;
 
 #[derive(Clone)]
 pub struct ZswapResolver(pub MidnightDataProvider);
@@ -183,7 +183,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy::ZkirV2ProvingProvider;
+    use super::zkir_v2::ZkirV2ProvingProvider;
     use base_crypto::data_provider;
     use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
