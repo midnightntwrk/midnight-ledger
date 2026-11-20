@@ -30,7 +30,7 @@ use transient_crypto_2::proofs as old;
 use zkir_v2::IrSource;
 
 /// A [`ProvingProvider`] for v2 ZKIR circuits with legacy (v1) keys.
-pub struct LegacyProvingProvider<'a, R: Rng + CryptoRng + SplittableRng, S, P> {
+pub struct ZkirV2ProvingProvider<'a, R: Rng + CryptoRng + SplittableRng, S, P> {
     /// The randomness to use for proving
     pub rng: R,
     /// The resolver to use to fetch keys
@@ -104,7 +104,7 @@ pub fn k(ir: &IrSource) -> u8 {
 }
 
 impl<R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvider> ProvingProvider
-    for LegacyProvingProvider<'_, R, S, P>
+    for ZkirV2ProvingProvider<'_, R, S, P>
 {
     async fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, anyhow::Error> {
         let data = self

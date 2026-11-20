@@ -183,7 +183,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
 
 #[cfg(test)]
 mod tests {
-    use super::legacy::LegacyProvingProvider;
+    use super::legacy::ZkirV2ProvingProvider;
     use base_crypto::data_provider;
     use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
@@ -228,7 +228,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = LegacyProvingProvider {
+        let mut provider = ZkirV2ProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,
@@ -275,7 +275,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = LegacyProvingProvider {
+        let mut provider = ZkirV2ProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,
