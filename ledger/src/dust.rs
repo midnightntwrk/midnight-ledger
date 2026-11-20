@@ -2329,7 +2329,7 @@ mod tests {
     #[cfg(feature = "proving")]
     #[tokio::test]
     async fn test_proof_size() {
-        use crate::legacy_proving::LegacyProvingProvider;
+        use crate::proving_versions::VersionedProvingProvider;
         use base_crypto::rng::SplittableRng;
         use rand::{Rng, SeedableRng, rngs::StdRng};
         use serialize::Serializable;
@@ -2351,7 +2351,7 @@ mod tests {
             .unwrap()
             .1;
         let resolver = test_resolver("");
-        let prover = LegacyProvingProvider {
+        let prover = VersionedProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,

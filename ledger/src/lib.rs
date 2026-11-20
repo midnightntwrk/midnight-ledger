@@ -40,7 +40,7 @@ pub mod zswap;
 pub use ledger_tracing::{LogLevel, init_logger};
 
 #[cfg(feature = "proving")]
-pub mod legacy_proving;
+pub mod proving_versions;
 #[cfg(feature = "test-utilities")]
 pub mod test_utilities;
 

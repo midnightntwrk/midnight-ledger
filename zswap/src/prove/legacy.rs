@@ -62,13 +62,8 @@ struct OldParams<'a, P>(&'a P);
 
 impl<P: ParamsProverProvider> old::ParamsProverProvider for OldParams<'_, P> {
     async fn get_params(&self, k: u8) -> io::Result<old::ParamsProver> {
-        let current = self.0.get_params(k).await?;
         let mut buf = Vec::new();
-        midnight_proofs::poly::kzg::params::ParamsKZG::write_custom(
-            current.as_ref(),
-            &mut buf,
-            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
-        )?;
+        self.0.get_params(k).await?.write(&mut buf)?;
         old::ParamsProver::read(&buf[..])
     }
 }

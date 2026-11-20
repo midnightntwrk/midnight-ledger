@@ -71,7 +71,6 @@ runs:
     - name: Run integration tests
       shell: bash
       run: |
-        export MN_AXIOS=true
         set -o pipefail
         cd integration-tests
         yarn

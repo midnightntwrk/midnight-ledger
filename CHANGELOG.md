@@ -22,7 +22,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - chore: `tag_enforcement_test!` also runs for the proven and unproven kinds of `DustSpend`, `ContractCall` and `StandardTransaction`, the types that hold a proof directly, so a proof change that leaves the marker tags alone fails a test.
 - breaking: `ContractOperation` gets a third verifier key field. `v3` holds the `verifier-key[v7]` key of a contract deployed on ledger 9, verified with `midnight-transient-crypto` 3.1, and the new `v4` holds the `verifier-key[v8]` key. `ContractOperationVersion` and `ContractOperationVersionedVerifierKey` gain `V5` (`'v5'` in the JavaScript API) for `v4`.
 - breaking: the tag moves to `contract-operation[v7]`, and with it every tag that contains a contract operation, among them `transaction[v13]`, `ledger-state[v19]` and the intent signing envelopes.
-- feat: the proof server and the ledger's test prover prove circuits of every ZKIR version before 4.
+- feat: `ledger::proving_versions` proves circuits of every ZKIR version.
+- breaking: the proof server's deprecated `/prove-tx` endpoint is removed, with `test_utilities::serialize_request_body` and `createProvingTransactionPayload` in the wasm API. Use `/prove`, or `Transaction.prove` from JavaScript.
 
 ## Unreleased (Ledger 9)
 

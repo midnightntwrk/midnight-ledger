@@ -12,4 +12,3 @@
 // limitations under the License.
 
 export const useWasmProving = process.env.MN_WASM_PROVING === 'true';
-export const useAxiosForProving = process.env.MN_AXIOS === 'true';

@@ -535,15 +535,6 @@ export class DustLocalState {
 }
 
 /**
- * Creates a payload for proving a specific transaction through the proof server
- * @deprecated Use `Transaction.prove` instead.
- */
-export function createProvingTransactionPayload(
-  transaction: UnprovenTransaction,
-  proving_data: Map<string, ProvingKeyMaterial>,
-): Uint8Array;
-
-/**
  * Creates a payload for proving a specific proof through the proof server
  */
 export function createProvingPayload(

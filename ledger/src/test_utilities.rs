@@ -18,9 +18,9 @@ use crate::dust::{
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
-#[cfg(feature = "proving")]
-use crate::legacy_proving;
 pub use crate::prove::Resolver;
+#[cfg(feature = "proving")]
+use crate::proving_versions::VersionedProvingProvider;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::{
     BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters,
@@ -52,7 +52,7 @@ use rand::{CryptoRng, Rng, seq::SliceRandom};
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
-use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
+use serialize::{tagged_deserialize, tagged_serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::io;
@@ -829,83 +829,6 @@ pub async fn tx_prove_bind<
     }
 }
 
-#[cfg(feature = "proving")]
-struct CombinedProofProvider<'a, R: Rng + CryptoRng + SplittableRng> {
-    rng: R,
-    resolver: &'a Resolver,
-}
-
-#[cfg(feature = "proving")]
-impl<'a, R: Rng + CryptoRng + SplittableRng> ProvingProvider for CombinedProofProvider<'a, R> {
-    async fn check(
-        &self,
-        preimage: &transient_crypto::proofs::ProofPreimage,
-    ) -> Result<Vec<Option<usize>>, anyhow::Error> {
-        let key_material = self
-            .resolver()
-            .resolve_key(preimage.key_location.clone())
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "could not resolve key location: {}",
-                    preimage.key_location.0
-                )
-            })?;
-        let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
-        match tag.as_str() {
-            "ir-source[v2]" | "ir-source[v2-generic]" | "ir-source[v3-generic]" => {
-                legacy_proving::check(preimage, &key_material.ir_source)
-            }
-            "ir-source[v4-generic]" => {
-                let ir_v4: zkir_v4::IrSource =
-                    tagged_deserialize(&mut &key_material.ir_source[..])?;
-                preimage.check(&ir_v4)
-            }
-            _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
-        }
-    }
-    async fn prove(
-        self,
-        preimage: &transient_crypto::proofs::ProofPreimage,
-        overwrite_binding_input: Option<Fr>,
-    ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
-        let key_material = self
-            .resolver()
-            .resolve_key(preimage.key_location.clone())
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "could not resolve key location: {}",
-                    preimage.key_location.0
-                )
-            })?;
-        let mut preimage = preimage.clone();
-        if let Some(binding_input) = overwrite_binding_input {
-            preimage.binding_input = binding_input;
-        }
-        let tag = peek_tag(&mut std::io::Cursor::new(&key_material.ir_source))?;
-        match tag.as_str() {
-            "ir-source[v2]" | "ir-source[v2-generic]" | "ir-source[v3-generic]" => {
-                legacy_proving::prove(&preimage, &key_material, self.rng, self.resolver).await
-            }
-            "ir-source[v4-generic]" => preimage
-                .prove::<zkir_v4::IrSource>(self.rng, self.resolver, self.resolver)
-                .await
-                .map(|(proof, _)| proof),
-            _ => Err(anyhow::anyhow!("Unknown ZKIR tag: '{tag}'")),
-        }
-    }
-    fn split(&mut self) -> Self {
-        CombinedProofProvider {
-            rng: self.rng.split(),
-            resolver: self.resolver,
-        }
-    }
-    fn resolver(&self) -> &impl ResolverT {
-        self.resolver
-    }
-}
-
 pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + SplittableRng, D: DB>(
     #[cfg_attr(feature = "proving", allow(unused_mut))] mut _rng: R,
     tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
@@ -922,9 +845,10 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                 .await
                 .map_err(ClientProvingError::Local)
         } else {
-            let provider = CombinedProofProvider {
+            let provider = VersionedProvingProvider {
                 rng: _rng.split(),
                 resolver,
+                params: resolver,
             };
             // Duplication because ProvingProvider isn't dyn-compatible :(
             let proven = tx
@@ -1093,35 +1017,6 @@ impl ProvingProvider for ProofServerProvider<'_> {
     fn resolver(&self) -> &impl ResolverT {
         self.resolver
     }
-}
-
-#[cfg(feature = "proving")]
-#[deprecated = "/prove-tx is deprecated, consider using the ProofServerProvider instead"]
-pub async fn serialize_request_body<S: SignatureKind<D> + Tagged, D: DB>(
-    tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
-    resolver: &Resolver,
-) -> Result<Vec<u8>, ClientProvingError<D>> {
-    use serialize::tagged_serialize;
-    use transient_crypto::proofs::Resolver;
-
-    let circuits_used = tx
-        .calls()
-        .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
-        .collect::<Vec<_>>();
-    let mut keys = std::collections::HashMap::new();
-    for k in circuits_used.into_iter() {
-        let k = KeyLocation(std::borrow::Cow::Owned(k));
-        let data = resolver
-            .resolve_key(k.clone())
-            .await
-            .map_err(ClientProvingError::Io)?;
-        if let Some(data) = data {
-            keys.insert(k, data);
-        }
-    }
-    let mut ser = Vec::new();
-    tagged_serialize(&(tx, keys), &mut ser).map_err(ClientProvingError::Io)?;
-    Ok(ser)
 }
 
 pub trait ProofKindExt<B: Storable<D>, D: DB>: ProofKind<D> {
