@@ -15,12 +15,7 @@ ledger = { path = "../ledger", package = "midnight-ledger-v10", default-features
 zswap = { path = "../zswap", package = "midnight-zswap" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
-
-zkir_v2 = { version = "2.2.0", package = "midnight-zkir" }
-zkir_v3 = { version = "3.2.1", package = "midnight-zkir" }
-zkir_v4 = { version = "4.0.0-rc.1", git = "https://github.com/midnightntwrk/midnight-zkir", branch = "zkir-v4", package = "midnight-zkir" }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
@@ -34,7 +29,6 @@ clap = { version = "^4.5.40", features = ["derive", "env"] }
 tracing = "^0.1.41"
 tracing-subscriber = "^0.3.19"
 lazy_static = "^1.5.0"
-regex = "1.11.1"
 hex = "^0.4.3"
 uuid = { version = "1.22.0", features = ["v4"] }
 thiserror = "2.0.12"
@@ -46,8 +40,11 @@ serde = "1.0.219"
 [dev-dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger-v10", features = ["test-utilities", "proving"] }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
-onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+storage = { path = "../storage", package = "midnight-storage" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-2 = { package = "midnight-transient-crypto", version = "^2.0.0" }
+transient-crypto-3 = { package = "midnight-transient-crypto", version = "^3.1.0" }
+zkir_v2 = { version = "2.2.0", package = "midnight-zkir" }
 env_logger = "^0.11"
 log = "^0.4.28"
 function_name = "^0.3.0"

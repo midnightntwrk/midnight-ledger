@@ -14,6 +14,8 @@
   `new`, `to_accumulator` and `reconstruct_accumulator` become crate-private
   and `InnerSelfEmulation` is dropped, so midnight-circuits types leave the
   public API. `DeferredAccumulator::check` runs its pairing check.
+- feat: `ParamsProver::write` writes the parameters in the format
+  `ParamsProver::read` reads.
 - feat: a `proof_verify_accumulator` benchmark for the per-accumulator cost of
   `VerifierKey::verify`.
 

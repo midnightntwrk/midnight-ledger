@@ -8,7 +8,7 @@ description = "Provides the transaction format and semantics for Midnight."
 
 [features]
 default = ["proof-verifying"]
-proving = []
+proving = ["dep:zkir_v2", "dep:zkir_v3", "dep:zkir_v4"]
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
 proof-verifying = ["zswap/proof-verifying"]

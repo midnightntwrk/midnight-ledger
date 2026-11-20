@@ -103,6 +103,12 @@ impl ParamsProver {
         )?)))
     }
 
+    /// Writes the prover parameters in the format [`ParamsProver::read`] reads
+    pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.0
+            .write_custom(&mut writer, SerdeFormat::RawBytesUnchecked)
+    }
+
     pub(crate) fn as_verifier(&self) -> ParamsVerifier {
         ParamsVerifier(Arc::new(self.0.verifier_params()))
     }

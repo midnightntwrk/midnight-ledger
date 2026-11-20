@@ -22,6 +22,7 @@ use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition
 use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::error::TransactionApplicationError;
 use midnight_ledger::prove::Resolver;
+use midnight_ledger::proving_versions::VersionedProvingProvider;
 use midnight_ledger::structure::ReplayProtectionState;
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Signature, SigningKey, Transaction,
@@ -54,7 +55,6 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::proofs::KeyLocation;
-use zswap::prove::legacy::LegacyProvingProvider;
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("fallible");
@@ -2161,7 +2161,7 @@ fn gen_unshielded_offer(rng: &mut StdRng) -> (SigningKey, UnshieldedOffer<Signat
 
 async fn setup() -> (
     StdRng,
-    LegacyProvingProvider<'static, StdRng, Resolver, Resolver>,
+    VersionedProvingProvider<'static, StdRng, Resolver, Resolver>,
     ContractCallPrototype<InMemoryDB>,
     LedgerState<InMemoryDB>,
 ) {
@@ -2169,7 +2169,7 @@ async fn setup() -> (
     // Initial states
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
 
-    let prover = LegacyProvingProvider {
+    let prover = VersionedProvingProvider {
         rng: rng.split(),
         resolver: &*RESOLVER,
         params: &*RESOLVER,

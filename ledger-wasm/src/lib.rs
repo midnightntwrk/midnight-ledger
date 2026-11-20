@@ -40,7 +40,7 @@ use conversions::{
     bigint_to_fr, fr_to_bigint, from_hex_ser, shielded_coininfo_to_value, value_to_qdo,
     value_to_shielded_coininfo,
 };
-use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
+use js_sys::{Array, BigInt, Reflect, Uint8Array};
 use ledger::{
     self,
     dust::{DustPublicKey, InitialNonce},
@@ -53,7 +53,6 @@ use serde_wasm_bindgen::from_value;
 use serialize::{tagged_deserialize, tagged_serialize};
 use transient_crypto::{curve::Fr, proofs::ProvingKeyMaterial};
 use transient_crypto::{encryption::PublicKey as EncryptionPublicKey, proofs::WrappedIr};
-use tx::{Transaction, TransactionTypes};
 use wasm_bindgen::{JsCast, JsError, JsValue, prelude::wasm_bindgen};
 use zswap_keys::CoinSecretKey;
 
@@ -194,43 +193,6 @@ pub fn address_from_key(key: JsValue) -> Result<String, JsError> {
         PreSignature::ECDSA(raw) => from_hex_ser::<base_crypto::ecdsa::VerifyingKey>(&raw)?.into(),
     };
     to_value_hex_ser(&addr)
-}
-
-#[wasm_bindgen(js_name = "createProvingTransactionPayload")]
-pub fn create_proving_transaction_payload(
-    tx: &Transaction,
-    proving_data: Map,
-) -> Result<Uint8Array, JsError> {
-    let Transaction(TransactionTypes::UnprovenWithSignaturePreBinding(tx)) = tx else {
-        return Err(JsError::new("invalid transaction kind"));
-    };
-    let mut proof_data = std::collections::HashMap::<String, ProvingKeyMaterial>::new();
-    let mut err = false;
-    proving_data.for_each(&mut |v, k| {
-        let k = k.as_string();
-        let pk = Reflect::get(&v, &"proverKey".into()).and_then(|pk| pk.dyn_into::<Uint8Array>());
-        let vk = Reflect::get(&v, &"verifierKey".into()).and_then(|vk| vk.dyn_into::<Uint8Array>());
-        let ir = Reflect::get(&v, &"ir".into()).and_then(|ir| ir.dyn_into::<Uint8Array>());
-        match (k, pk, vk, ir) {
-            (Some(k), Ok(pk), Ok(vk), Ok(ir)) => {
-                proof_data.insert(
-                    k,
-                    ProvingKeyMaterial {
-                        prover_key: pk.to_vec(),
-                        verifier_key: vk.to_vec(),
-                        ir_source: ir.to_vec(),
-                    },
-                );
-            }
-            _ => err = true,
-        }
-    });
-    if err {
-        return Err(JsError::new("failed to decode proving data map"));
-    }
-    let mut buf = Vec::new();
-    serialize::tagged_serialize(&(tx, proof_data), &mut buf)?;
-    Ok(buf[..].into())
 }
 
 fn try_proof_preimage(serialized_preimage: &[u8]) -> Result<ProofPreimageVersioned, JsError> {

@@ -2329,12 +2329,12 @@ mod tests {
     #[cfg(feature = "proving")]
     #[tokio::test]
     async fn test_proof_size() {
+        use crate::proving_versions::VersionedProvingProvider;
         use base_crypto::rng::SplittableRng;
         use rand::{Rng, SeedableRng, rngs::StdRng};
         use serialize::Serializable;
         use storage::db::InMemoryDB;
         use transient_crypto::commitment::{Pedersen, PedersenRandomness};
-        use zswap::prove::legacy::LegacyProvingProvider;
 
         use crate::{
             dust::DUST_SPEND_PROOF_SIZE,
@@ -2351,7 +2351,7 @@ mod tests {
             .unwrap()
             .1;
         let resolver = test_resolver("");
-        let prover = LegacyProvingProvider {
+        let prover = VersionedProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,

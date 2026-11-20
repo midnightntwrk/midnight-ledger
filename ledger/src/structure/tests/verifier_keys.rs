@@ -26,7 +26,8 @@ use storage::db::InMemoryDB;
 use transient_crypto::proofs::Proof;
 
 /// A verifier key of any version holding `len` bytes, fewer than 64. Keys are
-/// parsed on first use, so the bytes need not be a real key.
+/// parsed on first use, so the bytes need not be a real key; the newest
+/// version reads its first four bytes as a count at once.
 fn key<K: Deserializable>(len: usize) -> K {
     let mut ser = Vec::new();
     Serializable::serialize(&vec![0u8; len], &mut ser).unwrap();
@@ -42,9 +43,9 @@ fn serialized(value: &impl Serializable) -> Vec<u8> {
 #[test]
 fn versions_keep_their_numbers() {
     let keys = [
-        (VersionedKey::V3(key(3)), 2u8),
-        (VersionedKey::V4(key(3)), 3),
-        (VersionedKey::V5(key(3)), 4),
+        (VersionedKey::V3(key(4)), 2u8),
+        (VersionedKey::V4(key(4)), 3),
+        (VersionedKey::V5(key(4)), 4),
     ];
     for (versioned, number) in keys {
         let version = versioned.as_version();

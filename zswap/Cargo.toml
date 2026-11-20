@@ -9,7 +9,7 @@ description = "Implementation of the Zswap shielded token atomic swap mechanism.
 [features]
 default = ["proof-verifying", "proving"]
 proof-verifying = ["dep:zkir_v2"]
-proving = ["dep:zkir_v2", "dep:midnight-proofs"]
+proving = ["dep:zkir_v2"]
 
 [dependencies]
 base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
@@ -32,7 +32,6 @@ itertools = "^0.14.0"
 zeroize = "^1.8.0"
 
 zkir_v2 = { version = "2.2.0", package = "midnight-zkir", optional = true }
-midnight-proofs = { version = "^0.9.0-rc.1", optional = true }
 
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }
