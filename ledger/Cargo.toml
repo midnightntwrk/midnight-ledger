@@ -8,12 +8,12 @@ description = "Provides the transaction format and semantics for Midnight."
 
 [features]
 default = ["proof-verifying"]
-proving = []
+proving = ["dep:zkir_v2", "dep:zkir_v3", "dep:zkir_v4"]
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
 proof-verifying = ["zswap/proof-verifying"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
-test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3", "zkir_v3/test-utilities"]
+test-utilities = ["dep:reqwest", "dep:zkir_v2", "dep:zkir_v3", "dep:zkir_v4", "zkir_v4/test-utilities"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify", "transient-crypto-3/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = ["base-crypto/fixed-point-custom-serde"]
@@ -30,11 +30,9 @@ storage = { version = "3.1.0", path = "../storage", package = "midnight-storage"
 serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "10.0.0", path = "../static", package = "midnight-ledger-static" }
 
-zkir_v2 = { version = "2.2.0", path = "../zkir", package = "midnight-zkir", optional = true }
-# Temporary: ledger-10's zkir v3 work (verify_proof, transient-crypto 4) lives in
-# the in-repo zkir-v3 until it moves to the external midnight-zkir repo, as
-# ledger-9's zkir v3 already has.
-zkir_v3 = { version = "3.0.0-rc.2", path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
+zkir_v2 = { version = "2.2.0", package = "midnight-zkir", optional = true }
+zkir_v3 = { version = "3.2.1", package = "midnight-zkir", optional = true }
+zkir_v4 = { version = "4.0.0-rc.1", git = "https://github.com/midnightntwrk/midnight-zkir", branch = "zkir-v4", package = "midnight-zkir", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"

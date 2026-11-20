@@ -101,104 +101,36 @@ mod common {
 }
 
 mod test_data {
-    use std::sync::{Arc, LazyLock};
+    use std::sync::Arc;
 
-    use base_crypto::time::Timestamp;
     use coin_structure::coin;
-    use ledger::structure::{
-        ContractDeploy, Intent, ProofPreimageMarker, ProofPreimageVersioned, Signature,
-        SignatureKind, Transaction,
-    };
-    use ledger::test_utilities::{Resolver, contract_operation, test_resolver};
-    use onchain_runtime::state::{ContractState, StateValue, stval};
+    use ledger::structure::ProofPreimageVersioned;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
-    use storage::arena::Sp;
-    use storage::db::{DB, InMemoryDB};
-    use storage::storage::HashMap;
-    use transient_crypto::commitment::PedersenRandomness;
-    use zswap::Delta;
+    use serialize::tagged_serialize;
+    use storage::db::InMemoryDB;
+    use transient_crypto::curve::Fr;
+    use transient_crypto::proofs::{ProvingKeyMaterial, WrappedIr};
 
-    pub static RESOLVER: LazyLock<Resolver> = LazyLock::new(|| test_resolver("fallible"));
-
-    pub fn create_unbalanced_zswap_tx(
-        num_outputs: usize,
-    ) -> Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
-        let mut rng = StdRng::seed_from_u64(0x42);
-        let claim_amount = 100u128;
-        let sks = zswap::keys::SecretKeys::from_rng_seed(&mut rng);
-
-        let outputs = (0..num_outputs)
-            .map(|_| {
-                let coin = coin::Info::new(&mut rng, claim_amount, Default::default());
-                zswap::Output::new::<_>(
-                    &mut rng,
-                    &coin,
-                    None,
-                    &sks.coin_public_key(),
-                    Some(sks.enc_public_key()),
-                )
-                .expect("Failed to create output")
-            })
-            .fold(storage::storage::Array::new(), |acc, out| acc.push(out));
-
-        let deltas = [Delta {
-            token_type: Default::default(),
-            value: -((claim_amount * num_outputs as u128) as i128),
-        }]
-        .into_iter()
-        .collect();
-
-        let mut offer = zswap::Offer {
-            inputs: vec![].into(),
-            outputs,
-            transient: vec![].into(),
-            deltas,
-        };
-        offer.normalize();
-
-        Transaction::new(
-            "local-test",
-            Default::default(),
-            Some(offer),
-            Default::default(),
-        )
-    }
-
-    pub async fn create_contract_deploy_tx<S: SignatureKind<D>, D: DB>()
-    -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
-        let mut rng = StdRng::seed_from_u64(0x42);
-
-        let count_op = contract_operation(&RESOLVER, "count").await;
-        let contract = ContractState::new(
-            stval!([(0u64), (false), (0u64)]),
-            HashMap::new().insert(b"count"[..].into(), count_op),
-            Default::default(),
+    /// A `/prove` request for one Zswap output, slow enough to keep a worker
+    /// busy.
+    pub fn prove_body() -> Vec<u8> {
+        let request = (
+            create_zswap_output_proof_preimage(),
+            None::<ProvingKeyMaterial>,
+            None::<Fr>,
         );
-
-        let deploy = ContractDeploy::new(&mut rng, contract);
-        let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
-        let intents = HashMap::new().insert(1, intent);
-
-        Transaction::new("local-test", intents, None, Default::default())
+        let mut body = Vec::new();
+        tagged_serialize(&request, &mut body).expect("in-memory serialization");
+        body
     }
 
-    #[allow(deprecated)]
-    pub async fn serialize_prove_tx_body() -> Vec<u8> {
-        use ledger::test_utilities::serialize_request_body;
-        let tx = create_contract_deploy_tx::<Signature, InMemoryDB>().await;
-        serialize_request_body(&tx, &RESOLVER)
-            .await
-            .expect("Failed to serialize transaction")
-    }
-
-    #[allow(deprecated)]
-    pub async fn serialize_zswap_body() -> Vec<u8> {
-        use ledger::test_utilities::serialize_request_body;
-        let tx = create_unbalanced_zswap_tx(1);
-        serialize_request_body(&tx, &RESOLVER)
-            .await
-            .expect("Failed to serialize zswap transaction")
+    /// A `/check` request for one Zswap output, quick to answer.
+    pub fn check_body() -> Vec<u8> {
+        let request = (create_zswap_output_proof_preimage(), None::<WrappedIr>);
+        let mut body = Vec::new();
+        tagged_serialize(&request, &mut body).expect("in-memory serialization");
+        body
     }
 
     pub fn create_zswap_output_proof_preimage() -> ProofPreimageVersioned {
@@ -297,208 +229,6 @@ mod health_endpoints {
     }
 }
 
-mod prove_tx_endpoint {
-    use super::common::*;
-    use super::test_data::*;
-    use ledger::structure::{ProofMarker, Signature, Transaction};
-    use rand::rngs::StdRng;
-    use rand::{Rng, SeedableRng};
-    use regex::Regex;
-    use serialize::tagged_deserialize;
-    use storage::db::InMemoryDB;
-    use transient_crypto::commitment::PedersenRandomness;
-
-    #[tokio::test]
-    async fn rejects_get_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-
-        let response = HTTP_CLIENT
-            .get(format!("{}/prove-tx", server.base_url()))
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 405);
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", server.base_url()))
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 400);
-
-        let error_text = response.text().await.expect("Failed to get response text");
-        assert!(error_text.contains("expected header tag"));
-        assert!(error_text.contains(", got ''"));
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn rejects_json_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", server.base_url()))
-            .header("Content-Type", "application/json")
-            .body(r#"{"key": "value"}"#)
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 400);
-
-        let error_text = response.text().await.expect("Failed to get response text");
-        assert!(error_text.contains("expected header tag"));
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn proves_valid_transaction() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let body = serialize_prove_tx_body().await;
-
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", server.base_url()))
-            .body(body)
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 200);
-
-        let bytes = response
-            .bytes()
-            .await
-            .expect("Failed to get response bytes");
-        log::info!("Proving response: {} bytes", bytes.len());
-
-        // Verify we can deserialize the proved transaction
-        let _proof: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
-            tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn rejects_repeated_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let body = serialize_prove_tx_body().await;
-        let doubled_body: Vec<u8> = body.iter().chain(body.iter()).copied().collect();
-
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", server.base_url()))
-            .body(doubled_body)
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 400);
-
-        let error_text = response.text().await.expect("Failed to get response text");
-        let pattern = Regex::new(r"^Not all bytes read deserializing '.*'; \d+ bytes remaining$")
-            .expect("Invalid regex");
-        assert!(
-            pattern.is_match(&error_text),
-            "Unexpected error message: {}",
-            error_text
-        );
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn rejects_corrupted_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let mut body = serialize_prove_tx_body().await;
-
-        let mut rng = StdRng::seed_from_u64(42);
-        for _ in 0..50 {
-            let idx = rng.gen_range(0..body.len());
-            body[idx] = rng.r#gen();
-        }
-
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", server.base_url()))
-            .body(body)
-            .send()
-            .await
-            .expect("Request failed");
-
-        assert_eq!(response.status(), 400);
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn handles_concurrent_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, 10);
-        let body = serialize_prove_tx_body().await;
-
-        let tasks: Vec<_> = (0..10)
-            .map(|i| {
-                let client = HTTP_CLIENT.clone();
-                let url = format!("{}/prove-tx", server.base_url());
-                let body = body.clone();
-
-                tokio::spawn(async move {
-                    let response = client.post(url).body(body).send().await?;
-                    log::info!("Request {} completed with status {}", i, response.status());
-                    assert_eq!(response.status(), 200);
-                    Ok::<(), reqwest::Error>(())
-                })
-            })
-            .collect();
-
-        let results = futures::future::join_all(tasks).await;
-
-        for result in results {
-            result.expect("Task panicked").expect("Request failed");
-        }
-
-        stop_server(server).await;
-    }
-
-    #[tokio::test]
-    async fn health_check_works_under_load() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let body = serialize_zswap_body().await;
-
-        let base_url = server.base_url();
-
-        for _ in 0..50 {
-            let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
-            let url = format!("{}/prove-tx", base_url);
-            let body = body.clone();
-
-            tokio::spawn(async move {
-                let _ = client.post(url).body(body).send().await;
-            });
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-        let response = HTTP_CLIENT
-            .get(format!("{}/health", server.base_url()))
-            .send()
-            .await
-            .expect("Health check should succeed under load");
-
-        assert_eq!(response.status(), 200);
-
-        stop_server(server).await;
-    }
-}
-
 mod ready_endpoint {
     use super::common::*;
     use super::test_data::*;
@@ -507,14 +237,14 @@ mod ready_endpoint {
     #[tokio::test]
     async fn reports_correct_job_counts() {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let body = serialize_zswap_body().await;
+        let body = prove_body();
 
         let num_requests = DEFAULT_JOB_LIMIT - 1 + DEFAULT_NUM_WORKERS;
         let base_url = server.base_url();
 
         for _ in 0..num_requests {
             let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
-            let url = format!("{}/prove-tx", base_url);
+            let url = format!("{}/prove", base_url);
             let body = body.clone();
 
             tokio::spawn(async move { client.post(url).body(body).send().await });
@@ -544,14 +274,14 @@ mod ready_endpoint {
     #[tokio::test]
     async fn reports_busy_when_overloaded() {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
-        let body = serialize_zswap_body().await;
+        let body = prove_body();
 
         let num_requests = DEFAULT_JOB_LIMIT + DEFAULT_NUM_WORKERS;
         let base_url = server.base_url();
 
         for _ in 0..num_requests {
             let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
-            let url = format!("{}/prove-tx", base_url);
+            let url = format!("{}/prove", base_url);
             let body = body.clone();
 
             tokio::spawn(async move { client.post(url).body(body).send().await });
@@ -579,14 +309,14 @@ mod ready_endpoint {
     #[tokio::test]
     async fn zero_capacity_allows_unlimited_jobs() {
         let server = start_server(DEFAULT_NUM_WORKERS, 0);
-        let body = serialize_prove_tx_body().await;
+        let body = check_body();
 
         let base_url = server.base_url();
         let mut tasks = Vec::new();
 
         for _ in 0..10 {
             let client = HTTP_CLIENT.clone();
-            let url = format!("{}/prove-tx", base_url);
+            let url = format!("{}/check", base_url);
             let body = body.clone();
 
             let task = tokio::spawn(async move {
@@ -619,9 +349,8 @@ mod ready_endpoint {
 
 mod k_endpoint {
     use super::common::*;
+    use ledger::proving_versions;
     use serialize::tagged_serialize;
-    use transient_crypto::proofs::Zkir;
-    use zkir as zkir_v2;
 
     fn create_minimal_ir_source() -> zkir_v2::IrSource {
         zkir_v2::IrSource {
@@ -637,10 +366,10 @@ mod k_endpoint {
         let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
 
         let ir = create_minimal_ir_source();
-        let expected_k = ir.k();
 
         let mut body = Vec::new();
         tagged_serialize(&ir, &mut body).expect("Failed to serialize IR");
+        let expected_k = proving_versions::k(&body).expect("Failed to compute k");
 
         let response = HTTP_CLIENT
             .post(format!("{}/k", server.base_url()))
@@ -691,7 +420,7 @@ mod k_endpoint {
             error_text.contains("Unsupported ZKIR version")
                 || error_text.contains("expected header tag")
                 || error_text.contains("tagged data does not begin with")
-                || error_text.contains("Unsupported ZKIR tag"),
+                || error_text.contains("Unknown ZKIR tag"),
             "Unexpected error: {}",
             error_text
         );
@@ -884,6 +613,100 @@ mod prove_endpoint {
 
         let _proof: ledger::structure::ProofVersioned =
             tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
+
+        stop_server(server).await;
+    }
+}
+
+/// A ratchet over `/k`, `/check` and `/prove`: they still take a circuit for
+/// every way a Midnight ledger has proven one.
+mod ir_versions {
+    use super::common::*;
+    use ledger::structure::{ProofPreimageVersioned, ProofVersioned};
+    use ledger::test_utilities::circuits_of_every_ir_version;
+    use serialize::{Serializable, Tagged, tagged_deserialize, tagged_serialize};
+    use std::borrow::Cow;
+    use std::sync::Arc;
+    use transient_crypto::curve::Fr;
+    use transient_crypto::hash::transient_commit;
+    use transient_crypto::proofs::{KeyLocation, ProofPreimage, WrappedIr};
+
+    const BINDING_INPUT: u64 = 42;
+
+    fn tagged<T: Serializable + Tagged>(x: &T) -> Vec<u8> {
+        let mut buf = Vec::new();
+        tagged_serialize(x, &mut buf).expect("in-memory serialization");
+        buf
+    }
+
+    /// Verifies `$proof` against `$key` with the `midnight-transient-crypto`
+    /// release `$crypto`.
+    macro_rules! verify {
+        ($crypto:ident, $key:expr, $proof:expr, $statement:expr) => {{
+            use $crypto::{curve, proofs};
+            let key: proofs::VerifierKey = tagged_deserialize(&$key[..]).expect("a verifier key");
+            let statement =
+                $statement.map(|f| curve::Fr::from_le_bytes(&f.as_le_bytes()).expect("same field"));
+            key.verify(&proofs::PARAMS_VERIFIER, &$proof, statement.into_iter())
+        }};
+    }
+
+    /// `/k` and `/check` accept the circuit sent alone, as wallets send it
+    /// before `/prove`. `/prove` overrides the binding input and answers with
+    /// a proof that verifies against the circuit's key.
+    #[tokio::test]
+    async fn checks_and_proves_circuits_of_every_ir_version() {
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
+        let post = |endpoint: &'static str, body: Vec<u8>| {
+            client
+                .post(format!("{}/{endpoint}", server.base_url()))
+                .body(body)
+                .send()
+        };
+
+        let rand = Fr::from(7);
+        let comm = transient_commit(&Vec::<Fr>::new(), rand);
+        let ppi = ProofPreimageVersioned::V2(Arc::new(ProofPreimage {
+            inputs: vec![],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![0.into()],
+            public_transcript_outputs: vec![],
+            inner_proofs: vec![],
+            binding_input: 0.into(),
+            communications_commitment: Some((comm, rand)),
+            key_location: KeyLocation(Cow::Borrowed("circuit")),
+        }));
+        let statement = [Fr::from(BINDING_INPUT), comm, 0.into()];
+
+        for (name, material) in circuits_of_every_ir_version().await {
+            let ir = WrappedIr(material.ir_source.clone());
+            let key = material.verifier_key.clone();
+            for (endpoint, body) in [
+                ("k", ir.0.clone()),
+                ("check", tagged(&(ppi.clone(), Some(ir)))),
+            ] {
+                let response = post(endpoint, body).await.expect("Request failed");
+                assert_eq!(response.status(), 200, "{name}: /{endpoint}");
+            }
+
+            let body = tagged(&(ppi.clone(), Some(material), Some(Fr::from(BINDING_INPUT))));
+            let response = post("prove", body).await.expect("Request failed");
+            assert_eq!(response.status(), 200, "{name}: /prove");
+            let bytes = response
+                .bytes()
+                .await
+                .expect("Failed to get response bytes");
+            let proof: ProofVersioned =
+                tagged_deserialize(&bytes[..]).expect("Failed to deserialize proof");
+            match proof {
+                ProofVersioned::V2(proof) => verify!(transient_crypto_2, key, proof, statement),
+                ProofVersioned::V3(proof) => verify!(transient_crypto_3, key, proof, statement),
+                ProofVersioned::V4(proof) => verify!(transient_crypto, key, proof, statement),
+                proof => panic!("{name}: a proof version this test does not verify: {proof:?}"),
+            }
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
 
         stop_server(server).await;
     }

@@ -3891,6 +3891,7 @@ pub(crate) mod tests {
     mod cost_equivalence;
     mod count_saturation;
     mod pre_budget_work;
+    mod proving_versions;
     pub(crate) mod transactions;
     mod verifier_key_versions;
     mod verifier_keys;

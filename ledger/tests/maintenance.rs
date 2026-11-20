@@ -34,7 +34,7 @@ use onchain_runtime::state::{
     ContractState, EntryPointBuf, IrBuf, StateValue,
 };
 use rand::{CryptoRng, Rng, SeedableRng, rngs::StdRng};
-use serialize::{Deserializable, tagged_deserialize, tagged_serialize};
+use serialize::{Deserializable, Serializable, tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 use transient_crypto::commitment::PedersenRandomness;
@@ -571,9 +571,12 @@ fn verifier_key_per_version() {
     use ContractOperationVersion as Version;
     use ContractOperationVersionedVerifierKey as Key;
 
-    /// Keys are parsed on first use, so an empty one does here.
+    /// Keys are parsed on first use, so four zero bytes do here: the count
+    /// the newest version reads at once.
     fn key<K: Deserializable>() -> K {
-        K::deserialize(&mut &b"\x00"[..], 0).unwrap()
+        let mut bytes = Vec::new();
+        Serializable::serialize(&vec![0u8; 4], &mut bytes).unwrap();
+        K::deserialize(&mut &bytes[..], 0).unwrap()
     }
 
     let mut rng = StdRng::seed_from_u64(0x42);

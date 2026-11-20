@@ -32,9 +32,9 @@ describe('Ledger API - ContractOperationVersionedVerifierKey', () => {
 
     expect(contractOperationVersionedVerifierKey.version).toEqual(version);
     // rawVk is the key without its tag
-    expect(contractOperationVersionedVerifierKey.rawVk).toEqual(key.slice(-4));
+    expect(contractOperationVersionedVerifierKey.rawVk).toEqual(key.slice(-5));
     expect(contractOperationVersionedVerifierKey.toString(true)).toMatch(
-      new RegExp(`^${version.toUpperCase()}\\(VerifierKey\\(`)
+      new RegExp(`^${version.toUpperCase()}\\(VerifierKey\\b`)
     );
   });
 });

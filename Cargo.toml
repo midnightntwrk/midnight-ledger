@@ -11,10 +11,6 @@ members = [
     "onchain-state",
     "onchain-vm",
     "storage",
-    "zkir",
-    "zkir-v3",
-    "zkir-wasm",
-    "zkir-v3-wasm",
     "transient-crypto",
     "base-crypto",
     "base-crypto-derive",
@@ -22,7 +18,6 @@ members = [
     "serialize",
     "serialize-macros",
     "generate-cost-model",
-    "wasm-proving-demos/zkir-mt",
     "static",
     "storage-core"
 ]
@@ -33,7 +28,6 @@ default-members = [
     "onchain-state",
     "onchain-vm",
     "storage",
-    "zkir",
     "base-crypto",
     "base-crypto-derive",
     "transient-crypto",
@@ -69,6 +63,12 @@ panic = "abort"
 [patch.crates-io]
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
+midnight-transient-crypto = { path = "transient-crypto" }
+# The zk-stdlib v3 release candidates are not on crates.io.
+midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
