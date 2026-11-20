@@ -65,13 +65,13 @@ const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref OUTPUT_VK: transient_crypto_old::proofs::VerifierKey =
+    pub static ref OUTPUT_VK: transient_crypto_2::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
             .expect("Zswap Output VK should be valid");
-    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+    pub static ref SPEND_VK: transient_crypto_2::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
             .expect("Zswap Spend VK should be valid");
-    pub static ref SIGN_VK: transient_crypto_old::proofs::VerifierKey =
+    pub static ref SIGN_VK: transient_crypto_2::proofs::VerifierKey =
         serialize::tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
             .expect("Zswap Sign VK should be valid");
 }
@@ -146,10 +146,10 @@ impl AuthorizedClaim<Proof> {
         }
         SIGN_VK
             .verify(
-                &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
+                &transient_crypto_2::proofs::PARAMS_VERIFIER,
+                &transient_crypto_2::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
-                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
                 }),
             )
@@ -206,10 +206,10 @@ impl<D: DB> Input<Proof, D> {
         }
         SPEND_VK
             .verify(
-                &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
+                &transient_crypto_2::proofs::PARAMS_VERIFIER,
+                &transient_crypto_2::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
-                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
                 }),
             )
@@ -285,10 +285,10 @@ impl<D: DB> Output<Proof, D> {
         }
         OUTPUT_VK
             .verify(
-                &transient_crypto_old::proofs::PARAMS_VERIFIER,
-                &transient_crypto_old::proofs::Proof(self.proof.bytes.clone()),
+                &transient_crypto_2::proofs::PARAMS_VERIFIER,
+                &transient_crypto_2::proofs::Proof(self.proof.bytes.clone()),
                 statement.into_iter().map(|f| {
-                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                    transient_crypto_2::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
                 }),
             )

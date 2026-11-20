@@ -18,6 +18,8 @@
 
 #[macro_use]
 extern crate tracing;
+// `transient_crypto` by its major version, for code that names several versions.
+extern crate transient_crypto as transient_crypto_4;
 
 pub mod annotation;
 pub mod construct;

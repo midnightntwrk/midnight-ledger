@@ -70,7 +70,7 @@ pub(crate) fn mock_calls<'a, D: DB + 'a>(
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
                 })),
                 communication_commitment: call.comm_comm.unwrap_or_default(),
-                proof: ProofVersioned::V2(transient_crypto_old::proofs::Proof(vec![0; MIN_PROOF_SIZE])),
+                proof: ProofVersioned::V2(transient_crypto_2::proofs::Proof(vec![0; MIN_PROOF_SIZE])),
             }))
         })
         .collect()
