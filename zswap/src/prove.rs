@@ -189,7 +189,7 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use transient_crypto::merkle_tree::MerkleTree;
-    use zkir_v2::{Instruction, IrSource};
+    use ::zkir_v2::{Instruction, IrSource};
 
     use super::*;
 
