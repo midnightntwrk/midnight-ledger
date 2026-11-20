@@ -14,10 +14,12 @@
 //! On-demand prover key derivation.
 //!
 //! A `/prove` request may carry [`ProvingKeyMaterial`] whose `prover_key` is
-//! empty. The server then derives the prover key from the supplied IR with the
-//! in-tree key generation, accepts it only if the verifier key generated with
-//! it is byte-for-byte equal to the supplied verifier key, caches it, and
-//! proves exactly as if the client had uploaded it.
+//! empty. If the operator enabled derivation, the server then derives the
+//! prover key from the supplied IR with the in-tree key generation, accepts it
+//! only if the verifier key generated with it is byte-for-byte equal to the
+//! supplied verifier key, caches it, and proves exactly as if the client had
+//! uploaded it. Derivation is off by default, and such a request is then
+//! refused with [`Refusal::Disabled`].
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -67,6 +69,7 @@ impl Refusal {
 #[derive(Clone, Debug)]
 pub struct KeyDerivationConfig {
     /// Whether an empty prover key is derived (otherwise it is refused).
+    /// Off by default: an operator opts in.
     pub enabled: bool,
     /// Largest circuit `k` that is derived on demand.
     pub max_k: u8,
@@ -79,7 +82,7 @@ pub struct KeyDerivationConfig {
 impl Default for KeyDerivationConfig {
     fn default() -> Self {
         KeyDerivationConfig {
-            enabled: true,
+            enabled: false,
             max_k: 17,
             max_concurrent: 1,
             cache_bytes: 1 << 30,
@@ -409,11 +412,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn disabled_derivation_is_refused() {
-        let derivation = KeyDerivation::new(KeyDerivationConfig {
-            enabled: false,
-            ..Default::default()
-        });
+    async fn derivation_is_refused_by_default() {
+        assert!(!KeyDerivationConfig::default().enabled);
+        let derivation = KeyDerivation::new(KeyDerivationConfig::default());
         let material = ProvingKeyMaterial {
             prover_key: vec![],
             verifier_key: vec![1],

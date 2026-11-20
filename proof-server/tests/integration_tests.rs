@@ -1113,6 +1113,18 @@ mod key_derivation {
         }
     }
 
+    /// Derivation is off by default; these tests opt in.
+    fn enabled() -> KeyDerivationConfig {
+        KeyDerivationConfig {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    fn start_deriving_server() -> TestServer {
+        start_server_with_key_derivation(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT, enabled())
+    }
+
     async fn prove(server: &TestServer, body: Vec<u8>) -> reqwest::Response {
         build_client(LONG_REQUEST_TIMEOUT_SECS)
             .post(format!("{}/prove", server.base_url()))
@@ -1146,7 +1158,7 @@ mod key_derivation {
 
     #[tokio::test]
     async fn derived_and_uploaded_keys_prove_alike() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_deriving_server();
         for ir in [ASSERT_V2, ASSERT_V3, HASH_V2] {
             let circuit = Circuit::new(ir).await;
 
@@ -1166,7 +1178,7 @@ mod key_derivation {
 
     #[tokio::test]
     async fn second_request_uses_cached_key() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_deriving_server();
         let circuit = Circuit::new(HASH_V2).await;
         for _ in 0..2 {
             let response = prove(&server, circuit.body(circuit.without_prover_key())).await;
@@ -1183,7 +1195,7 @@ mod key_derivation {
 
     #[tokio::test]
     async fn full_upload_does_not_derive() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_deriving_server();
         let circuit = Circuit::new(ASSERT_V3).await;
         let response = prove(&server, circuit.body(circuit.material.clone())).await;
         assert_eq!(response.status(), 200);
@@ -1195,7 +1207,7 @@ mod key_derivation {
 
     #[tokio::test]
     async fn refuses_mismatched_verifier_key() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_deriving_server();
         let circuit = Circuit::new(HASH_V2).await;
         let other = Circuit::new(ASSERT_V2).await;
         let material = ProvingKeyMaterial {
@@ -1217,7 +1229,7 @@ mod key_derivation {
             DEFAULT_JOB_LIMIT,
             KeyDerivationConfig {
                 max_k: circuit.k - 1,
-                ..Default::default()
+                ..enabled()
             },
         );
         assert_refused(
@@ -1232,17 +1244,10 @@ mod key_derivation {
     }
 
     #[tokio::test]
-    async fn refuses_when_disabled() {
-        let server = start_server_with_key_derivation(
-            DEFAULT_NUM_WORKERS,
-            DEFAULT_JOB_LIMIT,
-            KeyDerivationConfig {
-                enabled: false,
-                ..Default::default()
-            },
-        );
-        let status = status(&server).await;
-        assert_eq!(status["enabled"], false);
+    async fn refuses_by_default() {
+        // The default configuration, which `server()` also uses.
+        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        assert_eq!(status(&server).await["enabled"], false);
         let circuit = Circuit::new(ASSERT_V3).await;
         assert_refused(
             prove(&server, circuit.body(circuit.without_prover_key())).await,
@@ -1252,6 +1257,9 @@ mod key_derivation {
         let response = prove(&server, circuit.body(circuit.material.clone())).await;
         assert_eq!(response.status(), 200);
         circuit.assert_verifies(&response.bytes().await.unwrap());
+        let status = status(&server).await;
+        assert_eq!(status["derivations"], 0);
+        assert_eq!(status["cacheEntries"], 0);
         stop_server(server).await;
     }
 
@@ -1277,8 +1285,8 @@ mod key_derivation {
 
     #[tokio::test]
     async fn concurrent_requests_for_different_circuits_all_prove() {
-        // One derivation at a time (the default); the queue holds all three requests.
-        let server = start_server_with_key_derivation(2, 10, KeyDerivationConfig::default());
+        // One derivation at a time (the default limit); the queue holds all three requests.
+        let server = start_server_with_key_derivation(2, 10, enabled());
         let circuits = [
             Circuit::new(ASSERT_V2).await,
             Circuit::new(ASSERT_V3).await,

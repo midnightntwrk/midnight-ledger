@@ -56,15 +56,19 @@ struct Args {
         env = "MIDNIGHT_PROOF_SERVER_NO_FETCH_PARAMS"
     )]
     no_fetch_params: bool,
-    /// Refuse requests whose key material has an empty prover key, instead of
-    /// deriving the prover key from the IR.
+    /// Derive the prover key from the IR when a `/prove` request's key
+    /// material has an empty prover key. Off by default: such a request is
+    /// then refused with HTTP 422 and `x-key-derivation-refused: disabled`.
+    /// Enable it only on a server that can take the extra CPU and memory a
+    /// derivation costs; the limits below bound it.
     #[arg(
         long,
         default_value_t = false,
-        env = "MIDNIGHT_PROOF_SERVER_NO_KEY_DERIVATION"
+        env = "MIDNIGHT_PROOF_SERVER_KEY_DERIVATION"
     )]
-    no_key_derivation: bool,
-    /// Largest circuit `k` whose prover key is derived on demand.
+    key_derivation: bool,
+    /// Largest circuit `k` whose prover key is derived on demand, when
+    /// derivation is enabled.
     #[arg(
         long,
         default_value_t = KeyDerivationConfig::default().max_k,
@@ -123,7 +127,7 @@ async fn main() -> std::io::Result<()> {
         keys.into_iter().collect::<Result<Vec<_>, _>>()?;
     }
     let key_derivation = KeyDerivationConfig {
-        enabled: !args.no_key_derivation,
+        enabled: args.key_derivation,
         max_k: args.key_derivation_max_k,
         max_concurrent: args.key_derivation_concurrency,
         cache_bytes: args.key_cache_mib << 20,
@@ -153,4 +157,17 @@ fn init_logging(verbose: bool) {
         )
         .try_init()
         .ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_derivation_is_opt_in() {
+        let args = Args::try_parse_from(["midnight-proof-server"]).unwrap();
+        assert!(!args.key_derivation);
+        let args = Args::try_parse_from(["midnight-proof-server", "--key-derivation"]).unwrap();
+        assert!(args.key_derivation);
+    }
 }
