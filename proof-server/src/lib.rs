@@ -21,25 +21,40 @@ use actix_web::{App, HttpServer};
 use std::sync::Arc;
 
 use crate::endpoints::{
-    check, fetch_k, get_k, health, proof_versions, prove, prove_transaction, ready, version,
+    check, fetch_k, get_k, health, key_derivation_status, proof_versions, prove, prove_transaction,
+    ready, version,
 };
+use crate::key_derivation::{KeyDerivation, KeyDerivationConfig};
 use crate::worker_pool::WorkerPool;
 
 pub mod endpoints;
+pub mod key_derivation;
 pub mod versioned_ir;
 pub mod worker_pool;
 
 pub fn server(port: u16, fetch_params: bool, pool: WorkerPool) -> std::io::Result<(Server, u16)> {
+    server_with_key_derivation(port, fetch_params, pool, KeyDerivationConfig::default())
+}
+
+pub fn server_with_key_derivation(
+    port: u16,
+    fetch_params: bool,
+    pool: WorkerPool,
+    key_derivation_config: KeyDerivationConfig,
+) -> std::io::Result<(Server, u16)> {
     let pool = Arc::new(pool);
+    let derivation = Arc::new(KeyDerivation::new(key_derivation_config));
     let http_server = HttpServer::new(move || {
         let app = App::new()
             .app_data(Data::new(pool.clone()))
+            .app_data(Data::new(derivation.clone()))
             .service(prove_transaction)
             .service(prove)
             .service(check)
             .service(get_k)
             .service(version)
             .service(proof_versions)
+            .service(key_derivation_status)
             .service(ready)
             .route("/", web::get().to(health))
             .route("/health", web::get().to(health))
