@@ -430,13 +430,40 @@ describe('Ledger API - TokenVault Unshielded', () => {
     expect(transcripts[0][0]).toBeDefined();
     expect(transcripts[0][1]).toBeUndefined();
 
-    const txShape = TransactionShape.forCalls(calls, params);
+    const txShape = TransactionShape.estimateFromCalls(calls, params);
     // Extra weight to show the shape is used; the deposit is not even in NIGHT.
     txShape.nightSpends = 2;
     txShape.nightOutputs = 1;
     const shapedTranscripts = partitionTranscripts(calls, params, txShape);
     expect(shapedTranscripts[0][0]).toBeUndefined();
     expect(shapedTranscripts[0][1]?.program).toEqual(program);
+
+    // A range up to the weighted shape is sized for its largest counts too.
+    const rangedTranscripts = partitionTranscripts(calls, params, [
+      TransactionShape.estimateFromCalls(calls, params),
+      txShape
+    ]);
+    expect(rangedTranscripts[0][0]).toBeUndefined();
+  });
+
+  test('TransactionShape.merge adds up both shapes', () => {
+    const params = LedgerParameters.initialParameters();
+    // With no calls, the estimate is two intents and one Dust spend.
+    const dapp = TransactionShape.estimateFromCalls([], params);
+    dapp.nightOutputs = 1;
+    const balancing = TransactionShape.estimateFromCalls([], params);
+    balancing.intents = 0;
+    balancing.dustSpends = 0;
+    balancing.nightSpends = 3;
+    balancing.fallibleZswapInputs = 2;
+
+    const merged = dapp.merge(balancing);
+    expect(merged.intents).toEqual(2);
+    expect(merged.dustSpends).toEqual(1);
+    expect(merged.nightSpends).toEqual(3);
+    expect(merged.nightOutputs).toEqual(1);
+    expect(merged.fallibleZswapInputs).toEqual(2);
+    expect(merged.fallibleNightSpends).toEqual(0);
   });
 
   /**

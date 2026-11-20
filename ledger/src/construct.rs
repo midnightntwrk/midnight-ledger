@@ -14,8 +14,8 @@
 mod mock_tx;
 mod tx_shape;
 
-use mock_tx::{mock_calls, mock_tx};
-pub use tx_shape::TransactionShape;
+use mock_tx::{mock_actions_of, mock_calls, mock_tx};
+pub use tx_shape::{TransactionShape, TransactionShapeRange};
 
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
@@ -26,7 +26,7 @@ use crate::structure::{
     ProofPreimageVersioned, Signature, SignatureKind, SignaturesValue, SigningKey, SingleUpdate,
     StandardTransaction, Transaction, UnshieldedOffer,
 };
-use crate::structure::{PedersenDowngradeable, ProofKind};
+use crate::structure::{PedersenDowngradeable, ProofKind, ProofMarker};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::AlignedValue;
@@ -95,6 +95,125 @@ fn with_fallibility<T: Clone>(items: &[T], is_fallible: &[bool], fallible: bool)
         .collect()
 }
 
+/// Which of the Zswap parts given to `add_calls` sit in the fallible section:
+/// those a fallible transcript claims.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ZswapFallibility {
+    inputs: Vec<bool>,
+    outputs: Vec<bool>,
+    transients: Vec<bool>,
+}
+
+/// The partition to keep, given `partition` for an assumed placement of the
+/// Zswap parts and `place` for where a partition actually puts them.
+///
+/// Starts from `all_guaranteed`, which is valid wherever the parts land, and
+/// takes a partition that counts parts as fallible only if it places at least
+/// those parts fallible. Each refused attempt drops a part from the assumed
+/// fallible ones, so this partitions at most once per part more.
+fn settle_zswap_placement<T, E>(
+    all_guaranteed: ZswapFallibility,
+    mut partition: impl FnMut(&ZswapFallibility) -> Result<T, E>,
+    place: impl Fn(&T) -> ZswapFallibility,
+) -> Result<T, E> {
+    let first = partition(&all_guaranteed)?;
+    let mut assumed = place(&first);
+    while assumed.any() {
+        let attempt = partition(&assumed)?;
+        let placed = place(&attempt);
+        if placed.covers(&assumed) {
+            return Ok(attempt);
+        }
+        assumed = assumed.intersection(&placed);
+    }
+    Ok(first)
+}
+
+impl ZswapFallibility {
+    /// Every part guaranteed.
+    fn none(inputs: usize, outputs: usize, transients: usize) -> Self {
+        ZswapFallibility {
+            inputs: vec![false; inputs],
+            outputs: vec![false; outputs],
+            transients: vec![false; transients],
+        }
+    }
+
+    /// Where `partitioned` places the parts.
+    fn of<D: DB>(
+        partitioned: &[TranscriptPair<D>],
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+    ) -> Self {
+        let fallible_effects = partitioned
+            .iter()
+            .filter_map(|(_, fallible)| fallible.as_ref())
+            .map(|transcript| &transcript.effects)
+            .collect::<Vec<_>>();
+        ZswapFallibility {
+            inputs: has_claims_in_fallible(zswap_inputs, &fallible_effects, |effects, inp| {
+                effects.claimed_nullifiers.member(&inp.nullifier)
+            }),
+            outputs: has_claims_in_fallible(zswap_outputs, &fallible_effects, |effects, out| {
+                effects
+                    .claimed_shielded_spends
+                    .union(&effects.claimed_shielded_receives)
+                    .member(&out.coin_com)
+            }),
+            transients: has_claims_in_fallible(
+                zswap_transients,
+                &fallible_effects,
+                |effects, trans| {
+                    effects
+                        .claimed_shielded_spends
+                        .union(&effects.claimed_shielded_receives)
+                        .member(&trans.coin_com)
+                        || effects.claimed_nullifiers.member(&trans.nullifier)
+                },
+            ),
+        }
+    }
+
+    fn flags(&self) -> impl Iterator<Item = &bool> {
+        self.inputs
+            .iter()
+            .chain(&self.outputs)
+            .chain(&self.transients)
+    }
+
+    fn any(&self) -> bool {
+        self.flags().any(|fallible| *fallible)
+    }
+
+    /// Whether every part fallible in `assumed` is fallible here too.
+    fn covers(&self, assumed: &Self) -> bool {
+        self.flags()
+            .zip(assumed.flags())
+            .all(|(placed, assumed)| *placed || !*assumed)
+    }
+
+    /// The parts fallible in both.
+    fn intersection(&self, other: &Self) -> Self {
+        let and = |a: &[bool], b: &[bool]| a.iter().zip(b).map(|(a, b)| *a && *b).collect();
+        ZswapFallibility {
+            inputs: and(&self.inputs, &other.inputs),
+            outputs: and(&self.outputs, &other.outputs),
+            transients: and(&self.transients, &other.transients),
+        }
+    }
+
+    /// How many inputs, outputs and transients are fallible.
+    fn counts(&self) -> (usize, usize, usize) {
+        let count = |flags: &[bool]| flags.iter().filter(|fallible| **fallible).count();
+        (
+            count(&self.inputs),
+            count(&self.outputs),
+            count(&self.transients),
+        )
+    }
+}
+
 impl<S: SignatureKind<D>, D: DB>
     StandardTransaction<S, ProofPreimageMarker, PedersenRandomness, D>
 {
@@ -143,13 +262,7 @@ impl<S: SignatureKind<D>, D: DB>
             zswap_inputs,
             zswap_outputs,
             zswap_transients,
-            |derived| {
-                derived.with_zswap_parts(
-                    zswap_inputs.len(),
-                    zswap_outputs.len(),
-                    zswap_transients.len(),
-                )
-            },
+            None,
         )
     }
 
@@ -178,7 +291,38 @@ impl<S: SignatureKind<D>, D: DB>
             zswap_inputs,
             zswap_outputs,
             zswap_transients,
-            |_| expected_tx_shape.clone(),
+            Some(&TransactionShapeRange::exactly(expected_tx_shape.clone())),
+        )
+    }
+
+    /// [`Self::add_calls_with_tx_shape`] for a final transaction whose counts
+    /// are known only to lie in `expected_tx_shapes`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_calls_with_tx_shape_range<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+        expected_tx_shapes: &TransactionShapeRange,
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
+        self.add_calls_inner::<P>(
+            rng,
+            segment,
+            calls,
+            params,
+            ttl,
+            zswap_inputs,
+            zswap_outputs,
+            zswap_transients,
+            Some(expected_tx_shapes),
         )
     }
 
@@ -193,7 +337,7 @@ impl<S: SignatureKind<D>, D: DB>
         zswap_inputs: &[ZswapInput<ProofPreimage, D>],
         zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
         zswap_transients: &[ZswapTransient<ProofPreimage, D>],
-        choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
+        expected_tx_shapes: Option<&TransactionShapeRange>,
     ) -> Result<Self, PartitionFailure<D>>
     where
         P: ContractCallExt<D>,
@@ -209,7 +353,56 @@ impl<S: SignatureKind<D>, D: DB>
                 ..call.pre_transcript.clone()
             })
             .collect::<Vec<_>>();
-        let partitioned = partition_transcripts_inner(&pre_transcripts, params, choose_tx_shape)?;
+        // The calls the transaction already holds, and its deploys and
+        // maintenance updates, are reserved from the budget too.
+        let other_actions = mock_actions_of(self);
+        let place_zswap = |partitioned: &[TranscriptPair<D>]| {
+            ZswapFallibility::of(partitioned, zswap_inputs, zswap_outputs, zswap_transients)
+        };
+        let partitioned = match expected_tx_shapes {
+            Some(expected_tx_shapes) => {
+                partition_transcripts_inner(&pre_transcripts, params, &other_actions, |_| {
+                    expected_tx_shapes.clone()
+                })?
+            }
+            None => {
+                // The given Zswap parts are placed after partitioning, beside
+                // the transcripts claiming them, and a fallible part reserves
+                // no more than a guaranteed one. Partitioning with every part
+                // guaranteed is therefore valid wherever they land. Counting
+                // the parts it places fallible as fallible frees budget, and
+                // that partition is taken if it still places them fallible;
+                // otherwise the parts both place fallible are tried, until
+                // none are left.
+                let partition = |fallible: &ZswapFallibility| {
+                    partition_transcripts_inner(
+                        &pre_transcripts,
+                        params,
+                        &other_actions,
+                        |derived| {
+                            derived
+                                .with_zswap_parts(
+                                    zswap_inputs.len(),
+                                    zswap_outputs.len(),
+                                    zswap_transients.len(),
+                                    fallible.counts(),
+                                )
+                                .into()
+                        },
+                    )
+                };
+                settle_zswap_placement(
+                    ZswapFallibility::none(
+                        zswap_inputs.len(),
+                        zswap_outputs.len(),
+                        zswap_transients.len(),
+                    ),
+                    partition,
+                    |partitioned| place_zswap(partitioned),
+                )?
+            }
+        };
+        let zswap_fallibility = place_zswap(&partitioned);
         let segment = match segment {
             SegmentSpecifier::First => 1,
             SegmentSpecifier::GuaranteedOnly
@@ -241,30 +434,11 @@ impl<S: SignatureKind<D>, D: DB>
                 key_location: call.key_location.clone(),
             })
             .collect::<Vec<_>>();
-        let fallible_effects = prototypes
-            .iter()
-            .filter_map(|proto| proto.fallible_public_transcript.as_ref())
-            .map(|transcript| &transcript.effects)
-            .collect::<Vec<_>>();
-        let zswap_input_is_fallible =
-            has_claims_in_fallible(zswap_inputs, &fallible_effects, |effects, inp| {
-                effects.claimed_nullifiers.member(&inp.nullifier)
-            });
-        let zswap_output_is_fallible =
-            has_claims_in_fallible(zswap_outputs, &fallible_effects, |effects, out| {
-                effects
-                    .claimed_shielded_spends
-                    .union(&effects.claimed_shielded_receives)
-                    .member(&out.coin_com)
-            });
-        let zswap_transient_is_fallible =
-            has_claims_in_fallible(zswap_transients, &fallible_effects, |effects, trans| {
-                effects
-                    .claimed_shielded_spends
-                    .union(&effects.claimed_shielded_receives)
-                    .member(&trans.coin_com)
-                    || effects.claimed_nullifiers.member(&trans.nullifier)
-            });
+        let ZswapFallibility {
+            inputs: zswap_input_is_fallible,
+            outputs: zswap_output_is_fallible,
+            transients: zswap_transient_is_fallible,
+        } = zswap_fallibility;
         let intent_before = self
             .intents
             .get(&segment)
@@ -791,7 +965,7 @@ impl<D: DB> PreTranscript<D> {
         }
     }
 
-    fn no_checkpoints(&self) -> usize {
+    fn total_checkpoints(&self) -> usize {
         self.program
             .iter()
             .filter(|op| matches!(op, Op::Ckpt))
@@ -799,20 +973,20 @@ impl<D: DB> PreTranscript<D> {
     }
 
     // 0-indexed!
-    fn run_to_ckpt_no(
+    fn run_to_checkpoint(
         &self,
-        mut n: usize,
+        mut checkpoint_number: usize,
         params: &LedgerParameters,
     ) -> Result<QueryResults<ResultModeVerify, D>, TranscriptRejected<D>> {
-        n += 1;
+        checkpoint_number += 1;
         let prog = self
             .program
             .iter()
             .cloned()
             .take_while(|op| {
                 if matches!(op, Op::Ckpt) {
-                    n -= 1;
-                    n != 0
+                    checkpoint_number -= 1;
+                    checkpoint_number != 0
                 } else {
                     true
                 }
@@ -877,7 +1051,7 @@ trait QueryResultsExt {
     fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost;
 }
 
-// gas_heuristic and the reserve, `mock_tx(calls, tx_shape).time_to_dismiss`,
+// gas_heuristic and the reserve, `mock_tx(calls, other_actions, tx_shape).time_to_dismiss`,
 // together approximate Transaction::time_to_dismiss for use during transcript
 // partitioning, before the final Transaction exists. The reserve covers the
 // validation cost of every part, the calls' proof verification and VK reads
@@ -931,7 +1105,7 @@ pub fn partition_transcripts<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
-    partition_transcripts_inner(calls, params, |derived| derived)
+    partition_transcripts_inner(calls, params, &[], TransactionShapeRange::exactly)
 }
 
 /// Splits each call's transcript into its guaranteed and fallible parts.
@@ -942,15 +1116,69 @@ pub fn partition_transcripts_with_tx_shape<D: DB>(
     params: &LedgerParameters,
     expected_tx_shape: &TransactionShape,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
-    partition_transcripts_inner(calls, params, |_| expected_tx_shape.clone())
+    partition_transcripts_inner(calls, params, &[], |_| {
+        TransactionShapeRange::exactly(expected_tx_shape.clone())
+    })
 }
 
-/// `choose_tx_shape` gets the shape the calls imply and returns the one to size
-/// the partition for.
+/// [`partition_transcripts_with_tx_shape`] for a final transaction whose
+/// counts are known only to lie in `expected_tx_shapes`: the partition fits
+/// every transaction in the range.
+pub fn partition_transcripts_with_tx_shape_range<D: DB>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    expected_tx_shapes: &TransactionShapeRange,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
+    partition_transcripts_inner(calls, params, &[], |_| expected_tx_shapes.clone())
+}
+
+/// Splits each call's transcript into its guaranteed and fallible parts, for
+/// calls that will join `tx`.
+///
+/// `tx`'s contract actions, its calls, deploys and maintenance updates, are
+/// reserved from the time-to-dismiss allowance along with the calls, and add
+/// their bytes to it. [`partition_transcripts`] and
+/// [`partition_transcripts_with_tx_shape`] know of no other actions, so a
+/// transaction carrying any keeps too much guaranteed.
+///
+/// `expected_tx_shapes` counts the final transaction's non-call parts, `tx`'s
+/// included, exactly or as a range; `None` uses
+/// [`TransactionShape::estimate_from_calls`]. Actions
+/// added to the transaction later are not reserved;
+/// [`TransactionShape::check_tx`] finds out if the final transaction needs
+/// them to be.
+pub fn partition_transcripts_for_tx<S, P, B, D>(
+    calls: &[PreTranscript<D>],
+    params: &LedgerParameters,
+    tx: &Transaction<S, P, B, D>,
+    expected_tx_shapes: Option<&TransactionShapeRange>,
+) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>>
+where
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Clone,
+    D: DB,
+{
+    let other_actions = match tx {
+        Transaction::Standard(stx) => mock_actions_of(stx),
+        Transaction::ClaimRewards(_) => Vec::new(),
+    };
+    partition_transcripts_inner(calls, params, &other_actions, |estimated| {
+        expected_tx_shapes
+            .cloned()
+            .unwrap_or_else(|| TransactionShapeRange::exactly(estimated))
+    })
+}
+
+/// `choose_tx_shapes` gets the shape the calls imply and returns the shapes to
+/// size the partition for: the reserve is the cost of the range's `at_most`,
+/// and the allowance is for the bytes of its `at_least`. `other_actions` are the transaction's contract actions
+/// besides `calls`, as [`mock_tx::mock_actions`] carries them.
 fn partition_transcripts_inner<D: DB>(
     calls: &[PreTranscript<D>],
     params: &LedgerParameters,
-    choose_tx_shape: impl FnOnce(TransactionShape) -> TransactionShape,
+    other_actions: &[ContractAction<ProofMarker, D>],
+    choose_tx_shapes: impl FnOnce(TransactionShape) -> TransactionShapeRange,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     if calls.is_empty() {
         return Ok(Vec::new());
@@ -966,12 +1194,12 @@ fn partition_transcripts_inner<D: DB>(
     // Gather full runs to observe all calls
     let no_ckpts = calls
         .iter()
-        .map(PreTranscript::no_checkpoints)
+        .map(PreTranscript::total_checkpoints)
         .collect::<Vec<_>>();
     let full_runs = calls
         .iter()
         .zip(no_ckpts.iter())
-        .map(|(pt, n)| pt.run_to_ckpt_no(*n, params))
+        .map(|(pt, n)| pt.run_to_checkpoint(*n, params))
         .collect::<Result<Vec<_>, _>>()?;
     // Graph is a Vec of Vecs, where call_graph[i] = [a, b, c] means that calls[i] calls calls[a],
     // calls[b] and calls[c]
@@ -1041,17 +1269,40 @@ fn partition_transcripts_inner<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let tx_shape = choose_tx_shape(TransactionShape::for_effects(
+    let tx_shapes = choose_tx_shapes(TransactionShape::estimate_from_effects(
         full_runs
             .iter()
             .map(|run| (run.context.address, &run.context.effects)),
     ));
-    let mock = mock_tx(&calls, &tx_shape);
-    let reserve = mock
-        .time_to_dismiss(params)
-        .expect("mock transactions are disjoint by construction");
+    // A shape that cannot fit the byte limit is no valid transaction's, and
+    // building its mock could take any time, so a range reaching one keeps
+    // everything fallible.
+    let byte_limit = usize::try_from(params.limits.transaction_byte_limit).unwrap_or(usize::MAX);
+    if !tx_shapes.at_most().fits_in(byte_limit) {
+        return Ok(calls
+            .iter()
+            .map(|call| call.split_at(0, params))
+            .collect::<Result<Vec<_>, _>>()?);
+    }
+    // Cost and size only grow with each count, so reserving for the largest
+    // shape and allowing for the smallest fits every shape in between.
+    let largest = mock_tx(&calls, other_actions, tx_shapes.at_most());
+    let smallest_size = if tx_shapes.at_least() == tx_shapes.at_most() {
+        largest.serialized_size()
+    } else {
+        mock_tx(&calls, other_actions, tx_shapes.at_least()).serialized_size()
+    };
+    // The mock's own parts are disjoint by construction, so only other actions
+    // repeating an entry make it fail; no transaction carrying them is valid,
+    // and nothing is kept guaranteed for it.
+    let Ok(reserve) = largest.time_to_dismiss(params) else {
+        return Ok(calls
+            .iter()
+            .map(|call| call.split_at(0, params))
+            .collect::<Result<Vec<_>, _>>()?);
+    };
     let allowance = CostDuration::max(
-        params.limits.time_to_dismiss_per_byte * mock.serialized_size() as u64,
+        params.limits.time_to_dismiss_per_byte * smallest_size as u64,
         params.limits.min_time_to_dismiss,
     );
     if reserve >= allowance {
@@ -1089,7 +1340,7 @@ fn partition_transcripts_inner<D: DB>(
             // Start with the number of checkpoints + 1 (we have one more section than checkpoints),
             // end at 1. If none pass, 0 make it into the guaranteed section.
             for n in (1..no_ckpts[root] + 2).rev() {
-                let partial_res = calls[root].run_to_ckpt_no(n - 1, params)?;
+                let partial_res = calls[root].run_to_checkpoint(n - 1, params)?;
                 let claimed = partial_res
                     .context
                     .effects
@@ -1139,7 +1390,9 @@ fn partition_transcripts_inner<D: DB>(
 
 #[cfg(test)]
 mod partition_tests {
-    use super::{has_claims_in_fallible, with_fallibility};
+    use super::{
+        ZswapFallibility, has_claims_in_fallible, settle_zswap_placement, with_fallibility,
+    };
     use base_crypto::hash::HashOutput;
     use coin_structure::coin::{Commitment as CoinCommitment, Nullifier};
     use onchain_runtime::context::Effects;
@@ -1159,6 +1412,86 @@ mod partition_tests {
         e.claimed_nullifiers = e.claimed_nullifiers.insert(nul(n));
         e.claimed_shielded_spends = e.claimed_shielded_spends.insert(com(c));
         e
+    }
+
+    fn fallibility(inputs: &[bool]) -> ZswapFallibility {
+        ZswapFallibility {
+            inputs: inputs.to_vec(),
+            outputs: vec![],
+            transients: vec![],
+        }
+    }
+
+    /// Settles with fake partitions: each is named by the placement it was
+    /// asked to assume, and places its parts as `places` says.
+    fn settle(places: impl Fn(&[bool]) -> Vec<bool>) -> (Vec<bool>, Vec<Vec<bool>>) {
+        let mut asked = Vec::new();
+        let settled = settle_zswap_placement::<_, ()>(
+            fallibility(&[false, false, false]),
+            |assumed| {
+                asked.push(assumed.inputs.clone());
+                Ok(assumed.inputs.clone())
+            },
+            |assumed: &Vec<bool>| fallibility(&places(assumed)),
+        )
+        .unwrap();
+        (settled, asked)
+    }
+
+    #[test]
+    fn settle_keeps_the_first_partition_when_nothing_is_fallible() {
+        let (settled, asked) = settle(|_| vec![false, false, false]);
+        assert_eq!(settled, vec![false, false, false]);
+        assert_eq!(asked.len(), 1);
+    }
+
+    #[test]
+    fn settle_takes_a_partition_that_keeps_its_parts_fallible() {
+        // Placement does not depend on what was assumed.
+        let (settled, asked) = settle(|_| vec![true, false, true]);
+        assert_eq!(settled, vec![true, false, true]);
+        assert_eq!(asked, vec![vec![false; 3], vec![true, false, true]]);
+    }
+
+    #[test]
+    fn settle_takes_a_partition_placing_more_parts_fallible() {
+        // Assuming the first part fallible makes the second fallible too.
+        let (settled, _) = settle(|assumed| match assumed {
+            [false, false, false] => vec![true, false, false],
+            _ => vec![true, true, false],
+        });
+        assert_eq!(settled, vec![true, false, false]);
+    }
+
+    #[test]
+    fn settle_drops_parts_the_freed_budget_makes_guaranteed() {
+        // Counting both parts fallible frees enough budget to keep the
+        // second guaranteed; counting only the first does not.
+        let (settled, asked) = settle(|assumed| match assumed {
+            [false, false, false] => vec![true, true, false],
+            [true, true, false] => vec![true, false, false],
+            _ => vec![true, false, false],
+        });
+        assert_eq!(settled, vec![true, false, false]);
+        assert_eq!(
+            asked,
+            vec![
+                vec![false; 3],
+                vec![true, true, false],
+                vec![true, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn settle_falls_back_to_all_guaranteed() {
+        // Any assumed fallible part comes back guaranteed.
+        let (settled, asked) = settle(|assumed| match assumed {
+            [false, false, false] => vec![true, true, false],
+            _ => vec![false, false, false],
+        });
+        assert_eq!(settled, vec![false, false, false]);
+        assert_eq!(asked, vec![vec![false; 3], vec![true, true, false]]);
     }
 
     #[test]
