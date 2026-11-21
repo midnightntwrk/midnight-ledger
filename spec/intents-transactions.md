@@ -113,6 +113,13 @@ causal precedence is extended to be transitive: If `a` causally precedes `b`,
 and `b` causally precedes `c`, then `a` must causally precede `c`. Note that
 this *isn't* direct, and must be enforced.
 
+A call on, or maintenance update of, a contract may also rely on a deploy of
+that contract in the same intent, placed earlier in the intent's actions; a
+call doing so must have no guaranteed transcript at all, since deploys are
+applied only in the fallible phase. Deploys in other intents are not relied
+on, since their segments may fail independently. See
+[contracts](./contracts.md#acting-on-a-contract-in-the-intent-that-deploys-it).
+
 ## Replay Protection
 
 To prevent the replay of transactions, all of the intent hashes are kept

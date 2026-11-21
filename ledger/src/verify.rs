@@ -41,7 +41,7 @@ use onchain_runtime::transcript::Transcript;
 use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
@@ -471,6 +471,53 @@ impl Default for WellFormedStrictness {
     }
 }
 
+struct IntentDeploys<D: DB> {
+    deploys: BTreeMap<ContractAddress, (usize, ContractState<D>)>,
+    updates: BTreeMap<ContractAddress, usize>,
+}
+
+impl<D: DB> IntentDeploys<D> {
+    fn new<P: ProofKind<D>>(
+        actions: impl Iterator<Item = impl Deref<Target = ContractAction<P, D>>>,
+    ) -> Self {
+        let mut deploys = BTreeMap::new();
+        let mut updates = BTreeMap::new();
+        for (index, action) in actions.enumerate() {
+            match &*action {
+                ContractAction::Deploy(deploy) => {
+                    deploys
+                        .entry(deploy.address())
+                        .or_insert_with(|| (index, deploy.initial_state.clone()));
+                }
+                ContractAction::Maintain(upd) => {
+                    updates.entry(upd.address).or_insert(index);
+                }
+                ContractAction::Call(_) => {}
+            }
+        }
+        IntentDeploys { deploys, updates }
+    }
+    
+    #[allow(clippy::result_large_err)]
+    fn deployed_state(
+        &self,
+        address: ContractAddress,
+        index: usize,
+        guaranteed: bool,
+    ) -> Result<Option<&ContractState<D>>, MalformedTransaction<D>> {
+        let Some((deployed_at, state)) = self.deploys.get(&address) else {
+            return Ok(None);
+        };
+        if guaranteed || *deployed_at >= index {
+            return Err(MalformedTransaction::ActionPrecedesDeploy { address });
+        }
+        if self.updates.get(&address).is_some_and(|at| *at < index) {
+            return Err(MalformedTransaction::ActionFollowsUpdate { address });
+        }
+        Ok(Some(state))
+    }
+}
+
 fn no_duplicates<T>(iter: T) -> bool
 where
     T: IntoIterator,
@@ -575,9 +622,13 @@ impl<
                 .valid(&Intent::challenge_pre_for(self, segment_id))
         })?;
 
+        let deploys = IntentDeploys::new(self.actions.iter());
         self.actions
             .iter()
-            .try_for_each(|action| action.well_formed(ref_state, strictness, erased_ref))?;
+            .enumerate()
+            .try_for_each(|(index, action)| {
+                action.well_formed(ref_state, strictness, erased_ref, &deploys, index)
+            })?;
         self.dust_actions
             .as_ref()
             .map(|dust_actions| {
@@ -1890,11 +1941,23 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
         ref_state: &impl StateReference<D>,
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
+        deploys: &IntentDeploys<D>,
+        index: usize,
     ) -> Result<(), MalformedTransaction<D>> {
         match self {
-            ContractAction::Call(call) => call.well_formed(ref_state, strictness, parent),
+            ContractAction::Call(call) => {
+                let deployed_here = deploys.deployed_state(
+                    call.address,
+                    index,
+                    call.guaranteed_transcript.is_some(),
+                )?;
+                call.well_formed(ref_state, strictness, parent, deployed_here)
+            }
             ContractAction::Deploy(deploy) => deploy.well_formed(ref_state),
-            ContractAction::Maintain(upd) => upd.well_formed(ref_state, strictness),
+            ContractAction::Maintain(upd) => {
+                let deployed_here = deploys.deployed_state(upd.address, index, false)?;
+                upd.well_formed(ref_state, strictness, deployed_here)
+            }
         }
     }
 }
@@ -1904,8 +1967,9 @@ impl<D: DB> MaintenanceUpdate<D> {
         &self,
         ref_state: &impl StateReference<D>,
         strictness: WellFormedStrictness,
+        deployed_here: Option<&ContractState<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        ref_state.maintenance_check(self.address, |authority| {
+        let check = |authority: &ContractMaintenanceAuthority| {
             let data = self.data_to_sign();
             // Ensure ordering, and that no party signed two votes
             if !Vec::from(&self.signatures)
@@ -1948,7 +2012,11 @@ impl<D: DB> MaintenanceUpdate<D> {
                 });
             }
             Ok(())
-        })
+        };
+        match deployed_here {
+            Some(state) => check(&state.maintenance_authority),
+            None => ref_state.maintenance_check(self.address, check),
+        }
     }
 }
 
@@ -1965,6 +2033,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         ref_state: &impl StateReference<D>,
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
+        deployed_here: Option<&ContractState<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         // Checked before anything materializes the public inputs below.
         self.public_inputs_len_check()?;
@@ -2041,7 +2110,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         }
 
         if strictness.verify_contract_proofs {
-            ref_state.op_check(self.address, &self.entry_point, |op| {
+            let check = |op: &ContractOperation| {
                 let gt = self
                     .guaranteed_transcript
                     .clone()
@@ -2071,11 +2140,23 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                     &self.proof,
                     self.public_inputs(parent.binding_commitment)?,
                     self,
-                    strictness.proof_verification_mode
+                    strictness.proof_verification_mode,
                 )?;
                 trace!("call valid");
                 Ok(())
-            })?;
+            };
+            match deployed_here {
+                Some(state) => {
+                    let op = state.operations.get(&self.entry_point).ok_or_else(|| {
+                        MalformedTransaction::VerifierKeyNotPresent {
+                            address: self.address,
+                            operation: self.entry_point.clone(),
+                        }
+                    })?;
+                    check(&op)?;
+                }
+                None => ref_state.op_check(self.address, &self.entry_point, check)?,
+            }
         }
         Ok(())
     }
@@ -2460,11 +2541,11 @@ mod well_formed_tests {
 
         assert!(
             call_with(vec![Op::Noop { n: 1 }])
-                .well_formed(&state, strictness, &parent)
+                .well_formed(&state, strictness, &parent, None)
                 .is_ok()
         );
         assert!(matches!(
-            call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent),
+            call_with(vec![Op::Noop { n: 0 }]).well_formed(&state, strictness, &parent, None),
             Err(MalformedTransaction::NotNormalized)
         ));
     }
@@ -2512,7 +2593,7 @@ mod well_formed_tests {
                 communication_commitment: Fr::from(0u64),
                 proof: (),
             };
-            call.well_formed(&state, strictness, &parent)
+            call.well_formed(&state, strictness, &parent, None)
         });
         assert!(
             matches!(res, Err(MalformedTransaction::TooManyPublicInputs { .. })),
@@ -2570,18 +2651,18 @@ mod well_formed_tests {
             // Non-Dust token transfers remain allowed.
             assert!(
                 call_with(inputs(night), guaranteed)
-                    .well_formed(&state, strictness, &parent)
+                    .well_formed(&state, strictness, &parent, None)
                     .is_ok()
             );
             assert!(
                 call_with(outputs(night), guaranteed)
-                    .well_formed(&state, strictness, &parent)
+                    .well_formed(&state, strictness, &parent, None)
                     .is_ok()
             );
             // Contracts may neither receive nor send Dust.
             for effects in [inputs(TokenType::Dust), outputs(TokenType::Dust)] {
                 assert!(matches!(
-                    call_with(effects, guaranteed).well_formed(&state, strictness, &parent),
+                    call_with(effects, guaranteed).well_formed(&state, strictness, &parent, None),
                     Err(MalformedTransaction::ContractDustTransfer { .. })
                 ));
             }

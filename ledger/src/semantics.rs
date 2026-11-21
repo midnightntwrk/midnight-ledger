@@ -1438,6 +1438,14 @@ impl<D: DB> LedgerState<D> {
         for call in calls.iter() {
             match call {
                 ContractAction::Call(call) => {
+                    let transcript = if guaranteed {
+                        call.guaranteed_transcript.as_ref()
+                    } else {
+                        call.fallible_transcript.as_ref()
+                    };
+                    let Some(transcript) = transcript else {
+                        continue;
+                    };
                     if !whitelist_matches(&context.whitelist, &call.address) {
                         continue;
                     } else if let Some(cstate) = res.index(call.address) {
@@ -1449,64 +1457,56 @@ impl<D: DB> LedgerState<D> {
                             com_indices,
                         );
                         qcontext.call_context = call_context;
-                        let transcript = if guaranteed {
-                            call.guaranteed_transcript.as_ref()
-                        } else {
-                            call.fallible_transcript.as_ref()
-                        };
-                        if let Some(transcript) = transcript {
-                            let results = qcontext.run_transcript(
-                                transcript,
-                                &self.parameters.cost_model.runtime_cost_model,
-                            )?;
-                            if results.context.effects != transcript.effects {
-                                return Err(TransactionInvalid::EffectsMismatch {
-                                    declared: Box::new(transcript.effects.clone()),
-                                    actual: Box::new(results.context.effects),
-                                });
-                            }
-                            let mut new_balance = cstate.balance.clone();
-                            for (token_type, val) in transcript.effects.unshielded_inputs.clone() {
-                                let bal = new_balance.get(&token_type).map(|x| *x).unwrap_or(0);
-                                new_balance = new_balance.insert(
-                                    token_type,
-                                    bal.checked_add(val).ok_or(
-                                        TransactionInvalid::BalanceCheckOutOfBounds {
-                                            token_type,
-                                            current_balance: bal,
-                                            operation_value: val,
-                                            operation: BalanceOperation::Addition,
-                                        },
-                                    )?,
-                                );
-                            }
-                            for (token_type, val) in transcript.effects.unshielded_outputs.clone() {
-                                let bal = new_balance.get(&token_type).map(|x| *x).unwrap_or(0);
-                                new_balance = new_balance.insert(
-                                    token_type,
-                                    bal.checked_sub(val).ok_or(
-                                        TransactionInvalid::BalanceCheckOutOfBounds {
-                                            token_type,
-                                            current_balance: bal,
-                                            operation_value: val,
-                                            operation: BalanceOperation::Subtraction,
-                                        },
-                                    )?,
-                                );
-                            }
-                            for event in results.events {
-                                events.push(Event {
-                                    source: event_source.clone(),
-                                    content: EventDetails::ContractLog {
-                                        address: call.address,
-                                        entry_point: call.entry_point.clone(),
-                                        logged_item: event,
-                                    },
-                                });
-                            }
-                            res =
-                                res.update_index(call.address, results.context.state, new_balance);
+                        let results = qcontext.run_transcript(
+                            transcript,
+                            &self.parameters.cost_model.runtime_cost_model,
+                        )?;
+                        if results.context.effects != transcript.effects {
+                            return Err(TransactionInvalid::EffectsMismatch {
+                                declared: Box::new(transcript.effects.clone()),
+                                actual: Box::new(results.context.effects),
+                            });
                         }
+                        let mut new_balance = cstate.balance.clone();
+                        for (token_type, val) in transcript.effects.unshielded_inputs.clone() {
+                            let bal = new_balance.get(&token_type).map(|x| *x).unwrap_or(0);
+                            new_balance = new_balance.insert(
+                                token_type,
+                                bal.checked_add(val).ok_or(
+                                    TransactionInvalid::BalanceCheckOutOfBounds {
+                                        token_type,
+                                        current_balance: bal,
+                                        operation_value: val,
+                                        operation: BalanceOperation::Addition,
+                                    },
+                                )?,
+                            );
+                        }
+                        for (token_type, val) in transcript.effects.unshielded_outputs.clone() {
+                            let bal = new_balance.get(&token_type).map(|x| *x).unwrap_or(0);
+                            new_balance = new_balance.insert(
+                                token_type,
+                                bal.checked_sub(val).ok_or(
+                                    TransactionInvalid::BalanceCheckOutOfBounds {
+                                        token_type,
+                                        current_balance: bal,
+                                        operation_value: val,
+                                        operation: BalanceOperation::Subtraction,
+                                    },
+                                )?,
+                            );
+                        }
+                        for event in results.events {
+                            events.push(Event {
+                                source: event_source.clone(),
+                                content: EventDetails::ContractLog {
+                                    address: call.address,
+                                    entry_point: call.entry_point.clone(),
+                                    logged_item: event,
+                                },
+                            });
+                        }
+                        res = res.update_index(call.address, results.context.state, new_balance);
                     } else {
                         warn!(?call.address, "contract not present");
                         return Err(TransactionInvalid::ContractNotPresent(call.address));

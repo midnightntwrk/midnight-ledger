@@ -24,6 +24,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: the tag moves to `contract-operation[v7]`, and with it every tag that contains a contract operation, among them `transaction[v13]`, `ledger-state[v19]` and the intent signing envelopes.
 - feat: `ledger::proving_versions` proves circuits of every ZKIR version.
 - breaking: the proof server's deprecated `/prove-tx` endpoint is removed, with `test_utilities::serialize_request_body` and `createProvingTransactionPayload` in the wasm API. Use `/prove`, or `Transaction.prove` from JavaScript.
+- feat: a contract may be called, and its maintenance authority updated, in the intent that deploys it. The action is verified against the deploy's initial state, so it must be applied only if that deploy took effect: it must be in the deploy's own intent, which is applied atomically, and deploys in other intents are not consulted. It must come after the deploy, and a call must have no guaranteed transcript, or it is rejected as `MalformedTransaction::ActionPrecedesDeploy`; it must not come after a maintenance update of the contract in that intent, or it is rejected as `MalformedTransaction::ActionFollowsUpdate`. On application, a call with no transcript for the current phase is skipped before the contract is looked up, so a fallible-only call no longer fails the guaranteed phase when its contract is deployed later in the same intent.
 
 ## Unreleased (Ledger 9)
 

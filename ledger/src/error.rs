@@ -555,6 +555,12 @@ pub enum MalformedTransaction<D: DB> {
         operation: EntryPointBuf,
     },
     ContractNotPresent(ContractAddress),
+    ActionPrecedesDeploy {
+        address: ContractAddress,
+    },
+    ActionFollowsUpdate {
+        address: ContractAddress,
+    },
     InvalidProof(VerifyingError),
     BindingCommitmentOpeningInvalid,
     NotNormalized,
@@ -950,6 +956,16 @@ impl<D: DB> Display for MalformedTransaction<D> {
             ContractNotPresent(addr) => {
                 write!(formatter, "call to non-existant contract {:?}", addr)
             }
+            ActionPrecedesDeploy { address } => write!(
+                formatter,
+                "action on contract {:?} precedes its deployment in this intent: a call on, or an update of, a contract deployed in the same intent must come after the deploy, and the call must have no guaranteed transcript",
+                address
+            ),
+            ActionFollowsUpdate { address } => write!(
+                formatter,
+                "action on contract {:?} follows a maintenance update of it in the intent that deploys it: only the first update, and the actions before it, are checked against the deploy",
+                address
+            ),
             VerifierKeyNotPresent { address, operation } => write!(
                 formatter,
                 "operation {address:?}/{operation:?} does not have a verifier key",
