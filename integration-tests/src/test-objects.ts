@@ -319,6 +319,13 @@ export class Static {
     return value.slice(0, end);
   }
 
+  /** Puts back the trailing zeros that a value stored in contract state has lost. */
+  static padWithZeros(value: Uint8Array, length: number): Uint8Array {
+    const padded = new Uint8Array(length);
+    padded.set(value);
+    return padded;
+  }
+
   static defaultShieldedTokenType = (): ShieldedTokenType => ({
     tag: 'shielded',
     raw: DEFAULT_TOKEN_TYPE
