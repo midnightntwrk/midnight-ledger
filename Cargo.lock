@@ -1037,6 +1037,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contracts"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e0d8b18fa2c4dfe29a97ef84c5f8117f4feffbc735da9885497e46a0f85bf32"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 3.0.9",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3639,6 +3650,7 @@ dependencies = [
 name = "midnight-storage"
 version = "3.1.0"
 dependencies = [
+ "contracts",
  "criterion",
  "crypto",
  "derive-where",
