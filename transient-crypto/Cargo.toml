@@ -26,7 +26,7 @@ derive = { version = "1.1.0", path = "../base-crypto-derive", package = "midnigh
 serialize = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
 storage-core = { version = "1.2.3", path = "../storage-core", package = "midnight-storage-core" }
 
-ff = "^0.13.1"
+ff = "^0.14.0"
 group = "^0.13.0"
 midnight-curves = { version = "^0.3.1" }
 midnight-proofs = { version = "^0.8.2" }

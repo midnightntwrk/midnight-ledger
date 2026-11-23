@@ -194,6 +194,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "addchain"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6197d231bf46c01da9e5cc6df822fbae247d160dc94bfb1b2034800bdd9038a9"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1897,8 +1908,25 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1f686ab92a9fb0eaf188f6c6c87b89490baa6fdb0db4544ba4dc47f7942489f"
 dependencies = [
+ "bitvec",
+ "ff_derive",
  "rand_core 0.10.1",
  "subtle",
+]
+
+[[package]]
+name = "ff_derive"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "241afe8c15ffa21933eaefe8a563af36fd9fc98a3e8a044e8f7db52eb1fae3d8"
+dependencies = [
+ "addchain",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3091,7 +3119,7 @@ dependencies = [
  "const-hex",
  "ethnum",
  "fake",
- "ff 0.13.1",
+ "ff 0.14.0",
  "flate2",
  "futures",
  "group 0.13.0",
@@ -3729,7 +3757,7 @@ dependencies = [
  "criterion",
  "derive-where",
  "fake",
- "ff 0.13.1",
+ "ff 0.14.0",
  "futures",
  "group 0.13.0",
  "lazy_static",
