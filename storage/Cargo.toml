@@ -1,7 +1,7 @@
 [package]
 name = "midnight-storage"
 edition = "2024"
-version = "3.1.0"
+version = "4.0.0"
 license.workspace = true
 repository.workspace = true
 description = "Provides data structures and storage primitives for Midnight's ledger."
@@ -25,7 +25,6 @@ contracts = "0.6"
 derive-where = "^1.6.1"
 crypto = { version = "0.5.1", features = ["digest"] }
 parking_lot = "^0.12.4"
-scoped-tls = "^1.0.1"
 sha2 = "0.10.9"
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }

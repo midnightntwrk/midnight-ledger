@@ -3463,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "derive-where",
  "fake",
@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "derive-where",
  "fake",
@@ -3648,7 +3648,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "3.1.0"
+version = "4.0.0"
 dependencies = [
  "contracts",
  "criterion",
@@ -3668,7 +3668,6 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.6",
  "rayon",
- "scoped-tls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4040,7 +4039,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "9.0.1"
+version = "10.0.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -5382,12 +5381,6 @@ dependencies = [
  "serde",
  "serde_json",
 ]
-
-[[package]]
-name = "scoped-tls"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 
 [[package]]
 name = "scopeguard"
