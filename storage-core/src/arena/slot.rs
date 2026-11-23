@@ -77,13 +77,10 @@ impl<T: ?Sized> Slot<T> {
     /// key keeps the winner's data and drops `other`'s with no [`Released`]: it is a clone of
     /// the winner's `Arc` (both loads read `sp_cache` under its lock), or one never cached.
     pub(super) fn fill(&self, other: Self) {
-        debug_assert!(
-            !other.is_empty(),
-            "Slot::fill: `other` is empty, so `self` stays unloaded; every caller passes loaded data"
-        );
-        if let Some(arc) = other.0.into_inner() {
-            let _ = self.0.set(arc);
-        }
+        let Some(arc) = other.0.into_inner() else {
+            unreachable!("Slot::fill: `other` is empty; every caller passes loaded data")
+        };
+        let _ = self.0.set(arc);
     }
 
     /// Release this slot's strong reference, if any.
