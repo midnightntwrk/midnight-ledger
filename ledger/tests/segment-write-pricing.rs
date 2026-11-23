@@ -34,7 +34,7 @@ use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval
 use onchain_runtime::transcript::Transcript;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use serialize::Deserializable;
+use serialize::{Deserializable, Serializable};
 use std::borrow::Cow;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
@@ -54,7 +54,10 @@ const ENTRY_POINT: &[u8] = b"run";
 
 /// A placeholder verifier key; contract proofs are not verified in these tests.
 fn operation() -> ContractOperation {
-    let vk = VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0).unwrap();
+    // Four zero bytes: the count a key reads at once.
+    let mut bytes = Vec::new();
+    Serializable::serialize(&vec![0u8; 4], &mut bytes).unwrap();
+    let vk = VerifierKey::deserialize(&mut &bytes[..], 0).unwrap();
     ContractOperation::new(Some(vk), None)
 }
 

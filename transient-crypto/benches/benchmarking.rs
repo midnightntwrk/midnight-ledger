@@ -19,7 +19,7 @@ use midnight_circuits::types::AssignedNative;
 use midnight_transient_crypto::commitment::PureGeneratorPedersen;
 use midnight_transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr, outer};
 use midnight_transient_crypto::hash::{hash_to_curve, transient_hash};
-use midnight_zk_stdlib::Relation;
+use midnight_zk_stdlib::{KZG, Relation};
 use rand::RngCore;
 use rand::{Rng, rngs::OsRng};
 use serde_json::json;
@@ -132,7 +132,7 @@ pub fn proof_verification(c: &mut Criterion) {
     }
 
     impl Zkir for TestIr {
-        type ProverKey = midnight_zk_stdlib::MidnightPK<TestIr>;
+        type ProverKey = midnight_zk_stdlib::MidnightPK<TestIr, KZG>;
 
         fn check(&self, _preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, ProvingError> {
             Ok(vec![])
@@ -148,8 +148,14 @@ pub fn proof_verification(c: &mut Criterion) {
             let params_k = params.get_params(pk.init()?.k()).await?;
             let pis = preimage.public_transcript_inputs.clone();
             let pk = pk.init().unwrap();
-            let proof =
-                prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, self.clone(), rng)?;
+            let proof = prove::<_, TranscriptHash, KZG>(
+                params_k.as_ref(),
+                &pk,
+                self,
+                &pis,
+                self.clone(),
+                rng,
+            )?;
             Ok((
                 Proof::from_bytes(proof),
                 preimage.public_transcript_inputs.clone(),
@@ -164,19 +170,19 @@ pub fn proof_verification(c: &mut Criterion) {
             params: &impl ParamsProverProvider,
         ) -> Result<VerifierKey, anyhow::Error> {
             use midnight_zk_stdlib::setup_vk;
-            Ok(VerifierKey::from(setup_vk(
-                params.get_params(self.k()).await?.as_ref(),
-                self,
-            )))
+            Ok(VerifierKey::new(
+                setup_vk::<_, KZG>(params.get_params(self.k()).await?.as_ref(), self),
+                0,
+            ))
         }
         async fn keygen(
             &self,
             params: &impl ParamsProverProvider,
         ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
             use midnight_zk_stdlib::{setup_pk, setup_vk};
-            let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+            let vk = setup_vk::<_, KZG>(params.get_params(self.k()).await?.as_ref(), self);
             let pk = setup_pk(self, &vk);
-            Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+            Ok((ProverKey::from_raw(pk), VerifierKey::new(vk, 0)))
         }
         fn load_ir_from_tagged(
             reader: impl std::io::Read + std::io::Seek,
@@ -189,7 +195,7 @@ pub fn proof_verification(c: &mut Criterion) {
             tagged_deserialize(reader)
         }
         fn read_raw_pk(reader: impl std::io::Read) -> std::io::Result<Self::ProverKey> {
-            midnight_zk_stdlib::MidnightPK::<Self>::read(
+            midnight_zk_stdlib::MidnightPK::<Self, KZG>::read(
                 &mut { reader },
                 midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
             )
@@ -300,6 +306,29 @@ pub fn proof_verification(c: &mut Criterion) {
     });
 }
 
+/// The work [`VerifierKey::verify`] does per accumulator a proof carries, on
+/// top of verifying the proof itself: regenerating the accumulator's public
+/// inputs, and its pairing check.
+pub fn accumulator_verification(c: &mut Criterion) {
+    use group::{Group, ff::Field};
+    use midnight_transient_crypto::proofs::{DeferredAccumulator, PARAMS_VERIFIER};
+    with_json_iter("proof_verify_accumulator", c, |g, json| {
+        let point =
+            || (midnight_curves::G1Projective::generator() * outer::Scalar::random(OsRng)).into();
+        let acc = DeferredAccumulator {
+            lhs: point(),
+            rhs: point(),
+        };
+        g.bench_function(json.to_string(), |b| {
+            b.iter(|| {
+                let acc = black_box(acc);
+                black_box(acc.as_public_input());
+                black_box(acc.check(&PARAMS_VERIFIER))
+            });
+        });
+    });
+}
+
 pub fn fr_arith(c: &mut Criterion) {
     with_json_iter("fr_add", c, |g, json| {
         g.bench_function(json.to_string(), |bench| {
@@ -357,6 +386,7 @@ criterion_group!(
     embedded_point_arith,
     fr_arith,
     proof_verification,
+    accumulator_verification,
     pedersen,
     signature_verification
 );

@@ -13,7 +13,7 @@
 
 //! A contract call whose circuit verifies another proof in-circuit.
 //!
-//! zkir-v3's own end-to-end tests take a `verify_proof` circuit as far as its
+//! zkir's own end-to-end tests take a `verify_proof` circuit as far as its
 //! outer proof verifying. This one carries it the rest of the way: through a
 //! deployed contract operation, a proven transaction, and the ledger's
 //! well-formedness check, which is where the accumulator the instruction
@@ -22,7 +22,7 @@
 //! Compact cannot emit `verify_proof` yet, so the contract's circuit is
 //! hand-rolled ZKIR, keyed at run time rather than loaded from the test
 //! artifacts. The proof it verifies comes from
-//! [`zkir_v3::testing`], which holds the only prover here that writes the
+//! [`zkir_v4::testing`], which holds the only prover here that writes the
 //! transcript the in-circuit verifier reads.
 #![cfg(feature = "proving")]
 
@@ -51,7 +51,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     InnerProofWitness, KeyLocation, ProvingKeyMaterial, VerifierKey, Zkir,
 };
-use zkir_v3::IrSource;
+use zkir_v4::IrSource;
 
 const OUTER_KEY: &str = "verify-proof-outer";
 
@@ -79,16 +79,17 @@ fn outer_ir(vk_blob: Vec<u8>, instance_len: usize) -> IrSource {
         .collect();
     let ir_json = format!(
         r#"{{
-           "version": {{ "major": 3, "minor": 1 }},
+           "version": {{ "major": 4, "minor": 0 }},
            "inputs": [],
            "outputs": [],
            "do_communications_commitment": true,
            "instructions": [
                {witnesses},
                {{ "op": "inner_proof", "guard": "0x01", "output": "%p" }},
-               {{ "op": "verify_proof", "guard": "0x01",
+               {{ "op": "prepare_verification", "guard": "0x01",
                   "vk_hash": "0x{vk_hash}",
-                  "instance": [{names}], "proof": "%p" }},
+                  "instance": [{names}], "proof": "%p", "output": "%acc" }},
+               {{ "op": "verify_accumulator", "input": "%acc" }},
                {{ "op": "impact", "guard": "0x01", "inputs": ["0x00"] }}
            ]
         }}"#,
@@ -97,8 +98,7 @@ fn outer_ir(vk_blob: Vec<u8>, instance_len: usize) -> IrSource {
         vk_hash = hex::encode(sha2::Sha256::digest(&vk_blob)),
     );
     let mut ir = IrSource::load(ir_json.as_bytes()).expect("outer IR must parse");
-    // `minor: 1` above: the side-table only exists in that wire shape.
-    ir.verify_proof_vks = vec![vk_blob];
+    ir.inner_vks = vec![vk_blob];
     assert_eq!(ir.accumulator_count(), 1);
     ir
 }
@@ -146,7 +146,7 @@ async fn contract_call_verifying_an_inner_proof() {
     // The proof the contract will verify. It cannot come from ZKIR: a ZKIR
     // proof is written to a Blake2b transcript, and the in-circuit verifier
     // reads a Poseidon one.
-    let inner = zkir_v3::testing::echo_proof(&*PUBLIC_PARAMS, Fr::from(INNER_INSTANCE), &mut rng)
+    let inner = zkir_v4::testing::echo_proof(&*PUBLIC_PARAMS, Fr::from(INNER_INSTANCE), &mut rng)
         .await
         .expect("inner prove");
 

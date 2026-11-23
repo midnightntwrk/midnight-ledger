@@ -17,10 +17,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: ZKIR's `Instruction` tag moves to `ir-instruction[v4]` for the two new variants.
 - feat: `IrMinorVersion::V1` marks an `IrSource` carrying `verify_proof_vks`, and is now the default. `IrSource`'s `Serializable` is hand-written and branches on it, so `V0` blobs keep their exact byte layout and still load; serializing a `V0` that carries key material is an error rather than a silent drop.
 - fix: `zkir-wasm`'s `prove` and `check` converted a preimage for the v1 pipeline by re-deserializing the raw request bytes as `transient_crypto_old::proofs::ProofPreimage`.
+- fix: zswap proofs carrying deferred accumulators are rejected.
 - breaking: the proof kind markers get versioned tags: `ProofMarker` moves from `proof` to `proof-marker[v1]`, and `ProofPreimageMarker` from `proof-preimage` to `proof-preimage-marker[v1]`. A type generic over the proof kind names the marker in its tag, so its proven and unproven tags move, for example `transaction[v12](signature[v2],proof,pedersen-schnorr[v1])` to `transaction[v12](signature[v2],proof-marker[v1],pedersen-schnorr[v1])`. A marker's version must be bumped whenever the bytes of its `Proof` or `LatestProof` change.
 - chore: `tag_enforcement_test!` also runs for the proven and unproven kinds of `DustSpend`, `ContractCall` and `StandardTransaction`, the types that hold a proof directly, so a proof change that leaves the marker tags alone fails a test.
 - breaking: `ContractOperation` gets a third verifier key field. `v3` holds the `verifier-key[v7]` key of a contract deployed on ledger 9, verified with `midnight-transient-crypto` 3.1, and the new `v4` holds the `verifier-key[v8]` key. `ContractOperationVersion` and `ContractOperationVersionedVerifierKey` gain `V5` (`'v5'` in the JavaScript API) for `v4`.
 - breaking: the tag moves to `contract-operation[v7]`, and with it every tag that contains a contract operation, among them `transaction[v13]`, `ledger-state[v19]` and the intent signing envelopes.
+- feat: `ledger::proving_versions` proves circuits of every ZKIR version.
+- breaking: the proof server's deprecated `/prove-tx` endpoint is removed, with `test_utilities::serialize_request_body` and `createProvingTransactionPayload` in the wasm API. Use `/prove`, or `Transaction.prove` from JavaScript.
 
 ## Unreleased (Ledger 9)
 

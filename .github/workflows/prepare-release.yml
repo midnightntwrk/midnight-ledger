@@ -215,7 +215,7 @@ jobs:
       - name: Regenerate API docs
         run: |
           set -euo pipefail
-          for pkg in ledger-wasm onchain-runtime-wasm zkir-wasm; do
+          for pkg in ledger-wasm onchain-runtime-wasm; do
             ( cd "$pkg" && npm install && npm run build:markdown-docs )
           done
 
