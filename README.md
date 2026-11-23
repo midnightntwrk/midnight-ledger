@@ -157,7 +157,6 @@ In addition to the rust crates, there are some notable directories and files cap
 | `scripts/` | Contains disparate scripts that have no other home |
 | `spec/` | Contains documents specifying the intended behaviour of the ledger |
 | `static/` | Contains zero-knowledge key material that is included in build artifacts to simplify the build process of the ledger as a library |
-| `wasm-proving-demos/` | Contains proof-of-concept work demonstrating in-browser proving |
 | --- | --- |
 | `bagel.nix` | Custom build script for WASM targets |
 | `flake.nix` | Nix build specification and devshell specification |

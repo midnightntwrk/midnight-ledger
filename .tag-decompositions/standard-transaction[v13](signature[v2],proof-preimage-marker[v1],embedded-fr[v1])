@@ -1,0 +1,1 @@
+((string,hash-map(u16,intent[v10](signature[v2],proof-preimage-marker[v1],embedded-fr[v1]),size-annotation),option(zswap-offer[v5](proof-preimage[v2])),hash-map(u16,zswap-offer[v5](proof-preimage[v2]),size-annotation),embedded-fr[v1]))

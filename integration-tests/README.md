@@ -15,7 +15,6 @@ Tests use a Proof Server (binary or docker image). By default tests use the Proo
 
 Env vars affecting proof server:
 
-- `MN_AXIOS` - use Axios to call Proof Server, default is using `midnight-js` fetch
 - `MN_PROOF_SERVER_DOCKER` - use docker image defined in `proof-server.yml` of proof server instead of binary
 
 ### Compiled `ledger` and `zswap` libraries

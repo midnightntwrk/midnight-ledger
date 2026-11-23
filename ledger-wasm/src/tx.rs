@@ -510,16 +510,17 @@ impl Transaction {
                     .or_else(|_| {
                         // A prover running the v1 pipeline, as zkir-wasm does for a
                         // `verifier-key[v6]` key, still answers with a bare `proof[v5]`.
-                        tagged_deserialize::<transient_crypto_old::proofs::Proof>(&mut &result[..])
+                        tagged_deserialize::<transient_crypto_2::proofs::Proof>(&mut &result[..])
                             .map(|proof| transient_crypto::proofs::Proof::from_bytes(proof.0))
                     })
                     .or_else(|_| {
                         let ppiv = tagged_deserialize::<ProofVersioned>(&mut &result[..])?;
                         match ppiv {
-                            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
-                                Ok::<_, std::io::Error>(
-                                    transient_crypto::proofs::Proof::from_bytes(proof.0),
-                                )
+                            ProofVersioned::V2(proof) => Ok::<_, std::io::Error>(
+                                transient_crypto::proofs::Proof::from_bytes(proof.0),
+                            ),
+                            ProofVersioned::V3(proof) => {
+                                Ok(transient_crypto::proofs::Proof::from_bytes(proof.0))
                             }
                             ProofVersioned::V4(proof) => Ok(proof),
                             _ => Err(std::io::Error::new(
