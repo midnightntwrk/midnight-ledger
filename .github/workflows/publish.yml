@@ -17,7 +17,6 @@ name: Publish npm packages
 # environment `release` as the trusted publisher for every package:
 #   @midnight-ntwrk/ledger-vN            @midnightntwrk/ledger-vN
 #   @midnight-ntwrk/onchain-runtime-vN   @midnightntwrk/onchain-runtime-vN
-#   @midnight-ntwrk/zkir-vN              @midnightntwrk/zkir-vN
 # Then flip auth here:
 #   1. permissions: add `id-token: write`
 #   2. delete the NPM_TOKEN env + the registry.npmjs.org auth line below
@@ -40,7 +39,6 @@ on:
           - all
           - ledger
           - onchain-runtime
-          - zkir
         default: all
       dry_run:
         description: "Build and log every publish without publishing."
@@ -149,10 +147,9 @@ jobs:
           fi
 
           case "$PACKAGES" in
-            all)             ATTRS="ledger-wasm onchain-runtime-wasm zkir-wasm" ;;
+            all)             ATTRS="ledger-wasm onchain-runtime-wasm" ;;
             ledger)          ATTRS="ledger-wasm" ;;
             onchain-runtime) ATTRS="onchain-runtime-wasm" ;;
-            zkir)            ATTRS="zkir-wasm" ;;
             *) echo "::error::unknown packages selection '$PACKAGES'"; exit 1 ;;
           esac
 

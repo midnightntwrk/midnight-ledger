@@ -535,15 +535,6 @@ export class DustLocalState {
 }
 
 /**
- * Creates a payload for proving a specific transaction through the proof server
- * @deprecated Use `Transaction.prove` instead.
- */
-export function createProvingTransactionPayload(
-  transaction: UnprovenTransaction,
-  proving_data: Map<string, ProvingKeyMaterial>,
-): Uint8Array;
-
-/**
  * Creates a payload for proving a specific proof through the proof server
  */
 export function createProvingPayload(
@@ -1082,9 +1073,9 @@ export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyIns
  * The version associated with a {@link ContractOperation}
  */
 export class ContractOperationVersion {
-  constructor(version: 'v3' | 'v4');
+  constructor(version: 'v3' | 'v4' | 'v5');
 
-  readonly version: 'v3' | 'v4';
+  readonly version: 'v3' | 'v4' | 'v5';
 
   toString(compact?: boolean): string;
 }
@@ -1093,9 +1084,9 @@ export class ContractOperationVersion {
  * A versioned verifier key to be associated with a {@link ContractOperation}.
  */
 export class ContractOperationVersionedVerifierKey {
-  constructor(version: 'v3' | 'v4', rawVk: Uint8Array);
+  constructor(version: 'v3' | 'v4' | 'v5', rawVk: Uint8Array);
 
-  readonly version: 'v3' | 'v4';
+  readonly version: 'v3' | 'v4' | 'v5';
   readonly rawVk: Uint8Array;
 
   toString(compact?: boolean): string;

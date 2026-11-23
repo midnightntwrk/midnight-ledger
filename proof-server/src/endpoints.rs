@@ -25,24 +25,17 @@ use introspection::Introspection;
 use lazy_static::lazy_static;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
-use ledger::structure::{
-    INITIAL_TRANSACTION_COST_MODEL, ProofPreimageMarker, ProofPreimageVersioned, ProofVersioned,
-    Signature, Transaction,
-};
+use ledger::proving_versions;
+use ledger::structure::{ProofPreimageVersioned, ProofVersioned};
 use rand::rngs::OsRng;
 use serialize::{peek_tag, tagged_deserialize, tagged_serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use storage::db::InMemoryDB;
 use tracing::{debug, info};
-use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr};
 
-use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
 
-use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
 
 lazy_static! {
@@ -56,6 +49,26 @@ lazy_static! {
     );
 }
 
+async fn built_in_keys(location: &KeyLocation) -> Result<ProvingKeyMaterial, WorkError> {
+    let resolver = Resolver::new(
+        PUBLIC_PARAMS.clone(),
+        DustResolver(
+            MidnightDataProvider::new(
+                FetchMode::OnDemand,
+                OutputMode::Log,
+                ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+            )
+            .expect("data provider initialization failed"),
+        ),
+        Box::new(|_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
+    );
+    resolver
+        .resolve_key(location.clone())
+        .await
+        .map_err(|e| WorkError::BadInput(e.to_string()))?
+        .ok_or_else(|| WorkError::BadInput(format!("couldn't find built-in key {}", location.0)))
+}
+
 async fn payload_to_bytes(mut payload: Payload) -> Result<Bytes, Error> {
     let mut body = BytesMut::new();
     while let Some(chunk) = payload.next().await {
@@ -64,11 +77,6 @@ async fn payload_to_bytes(mut payload: Payload) -> Result<Bytes, Error> {
     }
     Ok(body.freeze())
 }
-
-type TransactionProvePayload<S> = (
-    Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
-    HashMap<String, ProvingKeyMaterial>,
-);
 
 #[get("/version")]
 pub(crate) async fn version() -> impl Responder {
@@ -163,7 +171,7 @@ pub(crate) async fn get_k(payload: Payload) -> Result<HttpResponse, Error> {
         (&request[..]).encode_hex::<String>()
     );
 
-    let k = versioned_ir::k(&request).map_err(ErrorBadRequest)?;
+    let k = proving_versions::k(&request).map_err(ErrorBadRequest)?;
 
     Ok(HttpResponse::Ok().body(format!("{k}")))
 }
@@ -189,38 +197,11 @@ pub(crate) async fn check(
             rt.block_on(async move {
                 let ir = match ir {
                     Some(ir) => ir.0,
-                    None => {
-                        let resolver = Resolver::new(
-                            PUBLIC_PARAMS.clone(),
-                            DustResolver(
-                                MidnightDataProvider::new(
-                                    FetchMode::OnDemand,
-                                    OutputMode::Log,
-                                    ledger::dust::DUST_EXPECTED_FILES.to_owned(),
-                                )
-                                .expect("data provider initialization failed"),
-                            ),
-                            Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
-                        );
-                        let proof_data = resolver
-                            .resolve_key(ppi.key_location().clone())
-                            .await
-                            .map_err(|e| WorkError::BadInput(e.to_string()))?;
-
-                        proof_data
-                            .ok_or_else(|| {
-                                WorkError::BadInput(format!(
-                                    "couldn't find built-in key {}",
-                                    ppi.key_location().0
-                                ))
-                            })?
-                            .ir_source
-                    }
+                    None => built_in_keys(ppi.key_location()).await?.ir_source,
                 };
                 let result = match ppi {
-                    ProofPreimageVersioned::V2(ppi) => {
-                        versioned_ir::check(ppi, &ir).map_err(WorkError::BadInput)?
-                    }
+                    ProofPreimageVersioned::V2(ppi) => proving_versions::check(&ppi, &ir)
+                        .map_err(|e| WorkError::BadInput(e.to_string()))?,
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.
                     _ => unreachable!(),
@@ -258,7 +239,6 @@ pub(crate) async fn prove(
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
 
-    let data_resolver = data.clone();
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -266,20 +246,6 @@ pub(crate) async fn prove(
                 .build()
                 .unwrap();
             rt.block_on(async move {
-                let resolver = Resolver::new(
-                    PUBLIC_PARAMS.clone(),
-                    DustResolver(
-                        MidnightDataProvider::new(
-                            FetchMode::OnDemand,
-                            OutputMode::Log,
-                            ledger::dust::DUST_EXPECTED_FILES.to_owned(),
-                        )
-                        .expect("data provider initialization failed"),
-                    ),
-                    Box::new(move |_: KeyLocation| {
-                        Box::pin(std::future::ready(Ok(data_resolver.clone())))
-                    }),
-                );
                 let proof = match ppi {
                     ProofPreimageVersioned::V2(mut ppi) => {
                         if let Some(binding_input) = binding_input {
@@ -289,22 +255,13 @@ pub(crate) async fn prove(
                         }
                         let proving_data = match data {
                             Some(pkm) => pkm,
-                            None => resolver
-                                .resolve_key(ppi.key_location.clone())
-                                .await
-                                .map_err(|e| WorkError::BadInput(e.to_string()))?
-                                .ok_or_else(|| {
-                                    WorkError::BadInput(format!(
-                                        "couldn't find key {}",
-                                        ppi.key_location.0
-                                    ))
-                                })?,
+                            None => built_in_keys(&ppi.key_location).await?,
                         };
 
-                        let proof = versioned_ir::prove(ppi, &proving_data.ir_source, &resolver)
-                            .await
-                            .map_err(WorkError::BadInput)?
-                            .0;
+                        let proof =
+                            proving_versions::prove(&ppi, &proving_data, OsRng, &*PUBLIC_PARAMS)
+                                .await
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?;
 
                         // The key the proof will be verified against decides which
                         // variant it is, as it does in `ledger::prove`.
@@ -327,61 +284,5 @@ pub(crate) async fn prove(
         .await?;
     let response = JobStatus::wait_for_success(&updates).await?;
 
-    Ok(HttpResponse::Ok().body(response))
-}
-
-#[post("/prove-tx")]
-pub(crate) async fn prove_transaction(
-    pool: Data<Arc<WorkerPool>>,
-    payload: Payload,
-) -> Result<HttpResponse, Error> {
-    info!("Starting to process request for /prove-tx...");
-    let request = payload_to_bytes(payload).await?;
-    debug!(
-        "Received request: {}",
-        (&request[..]).encode_hex::<String>()
-    );
-    let (tx, keys): TransactionProvePayload<Signature> =
-        tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    let (_id, updates) = pool
-        .submit_and_subscribe(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .build()
-                .unwrap();
-            rt.block_on(async move {
-                let mut response = Vec::new();
-                let resolver = Resolver::new(
-                    PUBLIC_PARAMS.clone(),
-                    DustResolver(
-                        MidnightDataProvider::new(
-                            FetchMode::OnDemand,
-                            OutputMode::Log,
-                            ledger::dust::DUST_EXPECTED_FILES.to_owned(),
-                        )
-                        .expect("data provider initialization failed"),
-                    ),
-                    Box::new(move |loc| {
-                        Box::pin(std::future::ready(Ok(keys.get(loc.0.as_ref()).cloned())))
-                    }),
-                );
-                let provider = zkir_v2::LocalProvingProvider {
-                    rng: OsRng,
-                    params: &resolver,
-                    resolver: &resolver,
-                };
-                // NOTE: The initial cost model here is part of why this is deprecated!
-                // Use /prove instead!
-                tagged_serialize(
-                    &tx.prove(provider, &INITIAL_TRANSACTION_COST_MODEL.runtime_cost_model)
-                        .await
-                        .map_err(|e| WorkError::BadInput(e.to_string()))?,
-                    &mut response,
-                )
-                .map_err(|e| WorkError::InternalError(e.to_string()))?;
-                Ok(response)
-            })
-        })
-        .await?;
-    let response = JobStatus::wait_for_success(&updates).await?;
     Ok(HttpResponse::Ok().body(response))
 }

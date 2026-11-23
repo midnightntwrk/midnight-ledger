@@ -18,6 +18,8 @@
 
 #[macro_use]
 extern crate tracing;
+// `transient_crypto` by its major version, for code that names several versions.
+extern crate transient_crypto as transient_crypto_4;
 
 pub mod annotation;
 pub mod construct;
@@ -37,6 +39,8 @@ pub mod zswap;
 
 pub use ledger_tracing::{LogLevel, init_logger};
 
+#[cfg(feature = "proving")]
+pub mod proving_versions;
 #[cfg(feature = "test-utilities")]
 pub mod test_utilities;
 
