@@ -2371,7 +2371,6 @@ mod deser_robustness {
     use std::vec::Vec;
 
     type Trie = MerklePatriciaTrie<u32>;
-    type TrieNode = Node<u32, DefaultDB, SizeAnn>;
 
     fn deserialize_trie(bytes: &[u8]) -> std::io::Result<Trie> {
         <Trie as Deserializable>::deserialize(&mut { bytes }, 0)
