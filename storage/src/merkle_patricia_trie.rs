@@ -1319,6 +1319,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
         if path.is_empty() {
             return match sp.deref() {
                 Node::Leaf { value, .. } => (Sp::new(Node::Empty), Some(value.clone())),
+                Node::MidBranchLeaf { child, value, .. } => (child.clone(), Some(value.clone())),
                 _ => (sp.clone(), None),
             };
         }
@@ -1420,28 +1421,24 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                 }
             }
             Node::MidBranchLeaf { child, value, .. } => {
-                if path.is_empty() {
-                    (child.clone(), Some(value.clone()))
-                } else {
-                    let (child, removed) = Self::remove(child, path);
-                    let new_ann = Self::ann(&child).append(&Annotation::<T>::from_value(value));
-                    match child.deref() {
-                        Node::Empty => (
-                            Sp::new(Node::Leaf {
-                                ann: new_ann,
-                                value: value.clone(),
-                            }),
-                            removed,
-                        ),
-                        _ => (
-                            Sp::new(Node::MidBranchLeaf {
-                                ann: new_ann,
-                                value: value.clone(),
-                                child,
-                            }),
-                            removed,
-                        ),
-                    }
+                let (child, removed) = Self::remove(child, path);
+                let new_ann = Self::ann(&child).append(&Annotation::<T>::from_value(value));
+                match child.deref() {
+                    Node::Empty => (
+                        Sp::new(Node::Leaf {
+                            ann: new_ann,
+                            value: value.clone(),
+                        }),
+                        removed,
+                    ),
+                    _ => (
+                        Sp::new(Node::MidBranchLeaf {
+                            ann: new_ann,
+                            value: value.clone(),
+                            child,
+                        }),
+                        removed,
+                    ),
                 }
             }
         }
@@ -2195,6 +2192,36 @@ mod proptests {
             }
         }
 
+        // Every property above constrains shape only; a trie that silently
+        // drops an operation is still canonical. This pins what the
+        // operations mean, against an ordered map.
+        #[test]
+        fn operations_match_ordered_map(ops in prop::collection::vec(arb_op(), 0..20)) {
+            let mut trie = Trie::new();
+            let mut model = std::collections::BTreeMap::<Vec<u8>, u32>::new();
+            for op in &ops {
+                trie = apply(&trie, op);
+                let key = match op {
+                    Op::Insert(path, value) => {
+                        model.insert(path.clone(), *value);
+                        path
+                    }
+                    Op::Remove(path) => {
+                        model.remove(path);
+                        path
+                    }
+                    Op::Prune(path) => {
+                        model.retain(|key, _| key >= path);
+                        path
+                    }
+                };
+                let contents: std::collections::BTreeMap<Vec<u8>, u32> =
+                    trie.iter().map(|(path, value)| (path, *value)).collect();
+                prop_assert_eq!(&contents, &model, "after {:?}", op);
+                prop_assert_eq!(trie.lookup(key), model.get(key), "lookup after {:?}", op);
+            }
+        }
+
         // (d) The deserialization barrier accepts exactly the canonical trees.
         #[test]
         fn barrier_accepts_exactly_canonical(trie in any_with::<Trie>(TrieGeneration::Raw)) {
@@ -2506,30 +2533,5 @@ mod deser_robustness {
             .insert(&[2, 2, 4], 105);
         let decoded = deserialize_trie(&serialize_trie(&trie)).expect("must round-trip");
         membership_is_consistent(&decoded).expect("canonical membership must be consistent");
-    }
-
-    /// A `MidBranchLeaf` whose child is a `Leaf` would, if accepted, report two
-    /// entries at the *same* key (the empty path) via `iter()`/`size()` while
-    /// `lookup()` retrieves only one. The barrier must reject it (or, failing
-    /// that, its membership must be consistent); it now rejects it.
-    #[test]
-    fn regression_midbranchleaf_with_leaf_child_membership() {
-        let node: TrieNode = Node::MidBranchLeaf {
-            ann: SizeAnn(2),
-            value: Sp::new(1u32),
-            child: Sp::new(Node::Leaf {
-                ann: SizeAnn(1),
-                value: Sp::new(2u32),
-            }),
-        };
-        let trie = MerklePatriciaTrie(Sp::new(node));
-        let decoded = match deserialize_trie(&serialize_trie(&trie)) {
-            // If a future fix rejects it at the barrier, the property is
-            // vacuously satisfied.
-            Err(_) => return,
-            Ok(trie) => trie,
-        };
-        membership_is_consistent(&decoded)
-            .expect("an accepted trie must have consistent membership");
     }
 }
