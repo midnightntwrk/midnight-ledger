@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## Version `4.0.0`
+
+- breaking: `MerklePatriciaTrie` `insert`, `remove` and `prune` build
+  canonical tries directly. `insert` no longer leaves an `Extension` shorter
+  than 255 nibbles with an `Extension` child, and `remove` no longer panics on
+  an empty path at a `Branch`. Tries that previously took the short-chain
+  shape now have a different structure and root hash, so 3.x and 4.0.0 can
+  compute different state from the same operations.
+- breaking: remove `merkle_patricia_trie::ALLOW_SHORT_EXTENSION_CHAINS` and the
+  `scoped-tls` dependency. Decoding rejects short extension chains
+  unconditionally. Chain state holding such tries must be canonicalised by
+  the hard fork's state translation before this ships.
+
 ## Version `3.1.0`
 
 - fix: add the scoped thread-local
