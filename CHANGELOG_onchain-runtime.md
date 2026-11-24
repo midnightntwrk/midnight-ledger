@@ -2,6 +2,12 @@
 
 ## Version `5.0.0`
 
+Covers `onchain-state` `5.0.0` and `onchain-vm` `5.0.0`.
+
+- breaking: depend on `storage` 4.0.0, whose `Map`, `HashMap` and `Array`
+  types appear in the public API of `onchain-state` and `onchain-vm`.
+  `storage` 4.0.0 builds canonical Merkle Patricia tries, so contract state
+  can differ in structure and hash from what `storage` 3.x builds.
 - breaking: pull in breaking transient-crypto changes. `ContractOperation`
   gains a `v4` slot for a `verifier-key[v8]` key. The `v3` slot keeps the
   `verifier-key[v7]` key it holds on ledger 9. The tags move to

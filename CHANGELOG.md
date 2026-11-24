@@ -6,6 +6,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (Ledger 10)
 
+- breaking: `zswap` 10.0.0 depends on `storage` 4.0.0, whose `Map` and
+  `HashMap` types appear in its public API. `storage` 4.0.0 builds canonical
+  Merkle Patricia tries, so ledger state can differ in structure and hash from
+  what `storage` 3.x builds. Existing chain state must be canonicalised by the
+  ledger 10 state translation.
 - feat: ZKIR gains `verify_proof` and `inner_proof` instructions.
 - breaking: `Proof` wire format bumped to `proof[v6]`. The tuple struct `Proof(Vec<u8>)` becomes `Proof { bytes: Vec<u8>, accumulators: Vec<DeferredAccumulator> }`.
 - feat: `DeferredAccumulator` carries a `verify_proof` instruction's deferred KZG accumulator as the two points it collapses to, rather than as its public-input field elements. The always-one side scalars are regenerated rather than stored, taking each accumulator from 384 bytes to 96, and a point off the curve or outside the prime-order subgroup is now refused when the proof is deserialized rather than after it verifies.
