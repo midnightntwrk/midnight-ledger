@@ -6,6 +6,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (Ledger 10)
 
+- breaking: `zswap::Input::new_contract_owned` and `zswap::Transient::new_from_contract_owned_output` take a `CoinInfo` instead of a `QualifiedCoinInfo`. A contract-owned coin's leaf is located in the tree by the coin's commitment, since the contract address that completes it is public. `Input::new_contract_owned` gains an optional `mt_index_hint`, checked against the leaf's hash, so a wrong hint falls back to the search. `OfferCreationFailed` gains `CommitmentNotInTree` for a coin the tree does not hold.
+- breaking: `ZswapInput.newContractOwned` and `ZswapTransient.newFromContractOwnedOutput` in `ledger-wasm` take a `ShieldedCoinInfo` instead of a `QualifiedShieldedCoinInfo`, and `newContractOwned` gains an optional trailing `mtIndex` hint. Breaking in the declared types only: a caller still passing a `QualifiedShieldedCoinInfo` keeps working, since it is assignable to `ShieldedCoinInfo` and its `mt_index` is ignored at runtime.
+- fix: `OfferCreationFailed`'s messages for `InvalidIndex` and `Proving` read "while creating", not "write creating".
 - breaking: `zswap` 10.0.0 depends on `storage` 4.0.0, whose `Map` and
   `HashMap` types appear in its public API. `storage` 4.0.0 builds canonical
   Merkle Patricia tries, so ledger state can differ in structure and hash from

@@ -42,7 +42,7 @@ import {
   ZswapOutput,
   ZswapSecretKeys
 } from '@midnightntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { Random, Static } from '@/test-objects';
 import { corruptSignature } from '@/test-utils';
 import { SignatureKindMarker } from '@/test/utils/Markers';
 
@@ -473,12 +473,12 @@ describe('Cryptographic Attack Vector Tests', () => {
       for (const invalidIndex of invalidIndices) {
         expect(() => {
           ZswapInput.newContractOwned(
-            getQualifiedShieldedCoinInfo(Static.shieldedCoinInfo(1000n)),
+            Static.shieldedCoinInfo(1000n),
             invalidIndex,
             Random.contractAddress(),
             chainState
           );
-        }).toThrow('invalid index into sparse merkle tree: 0 -- write creating spend proof');
+        }).toThrow('is not in the coin commitment tree');
       }
     });
   });
