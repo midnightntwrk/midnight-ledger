@@ -29,6 +29,7 @@ use base_crypto::cost_model::{CostDuration, FeePrices, FixedPoint, SyntheticCost
 use base_crypto::envelope::Envelope;
 use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
+use base_crypto::hash::persistent_commit;
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::MemWrite;
 use base_crypto::time::{Duration, Timestamp};
@@ -873,8 +874,22 @@ pub struct CardanoBridge {
 }
 tag_enforcement_test!(CardanoBridge);
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serializable, Storable)]
+#[storable(base)]
+#[tag = "protocol-mint-recipient[v1]"]
+pub enum ProtocolMintRecipient {
+    Shielded(coin_structure::coin::PublicKey),
+    Unshielded(UserAddress),
+}
+tag_enforcement_test!(ProtocolMintRecipient);
+
+pub fn protocol_mint_token_type(protocol: HashOutput, asset: HashOutput) -> HashOutput {
+    let domain_sep = HashOutput(*b"midnight:protocol_mint\0\0\0\0\0\0\0\0\0\0");
+    persistent_commit(&(protocol, asset), domain_sep)
+}
+
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v9]"]
+#[tag = "system-transaction[v10]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -905,6 +920,29 @@ pub enum SystemTransaction {
     },
     UnlockToReserve {
         amount: u128,
+    },
+    /// Mints `amount` of the token type [`protocol_mint_token_type`] derives
+    /// from `protocol` and `asset`, as one coin for `recipient` with
+    /// `deposit_id` as its nonce.
+    ///
+    /// An unshielded mint creates output 0 of the [`OutputInstructionUnshielded`]
+    /// with these values, for that token type. It is refused as
+    /// [`UtxoAlreadyPresent`](crate::error::SystemTransactionError::UtxoAlreadyPresent)
+    /// while that output is unspent, and succeeds again once it is spent.
+    ///
+    /// A shielded mint is refused as
+    /// [`CommitmentAlreadyPresent`](crate::error::SystemTransactionError::CommitmentAlreadyPresent)
+    /// when its coin already exists, and never succeeds later. Whoever can
+    /// predict the mint and holds `amount` of the token can create that coin
+    /// first, at their own cost. The recipient owns the coin either way, but
+    /// their wallet sees one made without a ciphertext only through
+    /// [`watch_for`](zswap::local::State::watch_for).
+    ProtocolMint {
+        protocol: HashOutput,
+        asset: HashOutput,
+        amount: u64,
+        deposit_id: HashOutput,
+        recipient: ProtocolMintRecipient,
     },
 }
 tag_enforcement_test!(SystemTransaction);
@@ -2934,6 +2972,33 @@ impl SystemTransaction {
                 dcost += model.merkle_tree_index(EXPECTED_GENERATION_DEPTH);
                 dcost += model.merkle_tree_insert_unamortized(32, true);
                 ccost * creates + dcost * destroys
+            }
+            ProtocolMint { recipient, .. } => {
+                let mut cost = RunningCost::ZERO;
+                match recipient {
+                    ProtocolMintRecipient::Shielded(_) => {
+                        // Commitment computation
+                        cost += RunningCost::compute(model.runtime_cost_model.transient_hash);
+                        // Commitment set test
+                        cost += model.map_index(EXPECTED_UTXO_DEPTH);
+                        // Commitment set insertion
+                        cost += model.map_insert(EXPECTED_UTXO_DEPTH, false)
+                            + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
+                        // First free update
+                        cost += model.cell_read(8) + model.cell_write(8, true);
+                        // Merkle tree insertion
+                        cost +=
+                            model.merkle_tree_insert_amortized(ZSWAP_TREE_HEIGHT as usize, false);
+                    }
+                    ProtocolMintRecipient::Unshielded(_) => {
+                        // UTXO set test
+                        cost += model.map_index(EXPECTED_UTXO_DEPTH);
+                        // UTXO set insertion
+                        cost += model.map_insert(EXPECTED_UTXO_DEPTH, false)
+                            + model.cell_write(UTXO_SIZE as u64, false);
+                    }
+                }
+                cost
             }
         }
         .into()

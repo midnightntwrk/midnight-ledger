@@ -22,9 +22,9 @@ use crate::structure::UtxoMeta;
 use crate::structure::{
     ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, GUARANTEED_SEGMENT, Intent,
     IntentHash, LedgerParameters, LedgerState, MAX_CONTRACT_OPERATIONS, MAX_SUPPLY,
-    OutputInstructionUnshielded, PedersenDowngradeable, ProofKind, ReplayProtectionState,
-    SignatureKind, SingleUpdate, StandardTransaction, SystemTransaction, Transaction,
-    UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
+    OutputInstructionUnshielded, PedersenDowngradeable, ProofKind, ProtocolMintRecipient,
+    ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction, SystemTransaction,
+    Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction, protocol_mint_token_type,
 };
 use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
@@ -33,7 +33,9 @@ use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::UserAddress;
-use coin_structure::coin::{Commitment, NIGHT, ShieldedTokenType, TokenType};
+use coin_structure::coin::{
+    Commitment, NIGHT, Nonce, ShieldedTokenType, TokenType, UnshieldedTokenType,
+};
 use coin_structure::contract::ContractAddress;
 use itertools::Either;
 use onchain_runtime::context::{BlockContext, QueryContext};
@@ -191,6 +193,10 @@ impl<D: DB> GuaranteedApplyResult<D> {
 }
 
 pub trait ZswapLocalStateExt<D: DB>: Sized {
+    /// Applies no system transaction, so a shielded
+    /// [`SystemTransaction::ProtocolMint`] leaves this state one tree leaf
+    /// behind the ledger: once it applies another output, all its spends are
+    /// refused with `UnknownMerkleRoot`.
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
     fn apply_system_tx(&self, secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self;
@@ -481,7 +487,6 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self))]
-    #[allow(dead_code, reason = "used by disabled treasury interactions")]
     fn native_issue_unbalanced(
         &self,
         target: coin_structure::coin::PublicKey,
@@ -504,7 +509,7 @@ impl<D: DB> LedgerState<D> {
                 coin_coms: self
                     .zswap
                     .coin_coms
-                    .try_update(self.zswap.first_free, &cm, None)
+                    .try_update_hash(self.zswap.first_free, cm.0, None)
                     .map_err(SystemTransactionError::MerkleTreeError)?,
                 coin_coms_set: self.zswap.coin_coms_set.insert(cm, ()),
                 first_free: self.zswap.first_free + 1,
@@ -1031,6 +1036,59 @@ impl<D: DB> LedgerState<D> {
                 new_st.check_night_balance_invariant()?;
 
                 Ok((new_st, vec![]))
+            }
+            SystemTransaction::ProtocolMint {
+                protocol,
+                asset,
+                amount,
+                deposit_id,
+                recipient,
+            } => {
+                if *amount == 0 {
+                    error!(?tx, "[privileged] protocol mint rejected: zero amount");
+                    return Err(SystemTransactionError::ZeroMintAmount);
+                }
+                let token_type = protocol_mint_token_type(*protocol, *asset);
+                let value = u128::from(*amount);
+                let res = match recipient {
+                    ProtocolMintRecipient::Shielded(target_key) => self.native_issue_unbalanced(
+                        *target_key,
+                        ShieldedTokenType(token_type),
+                        *deposit_id,
+                        value,
+                        tx.event_source(),
+                    ),
+                    ProtocolMintRecipient::Unshielded(target_address) => {
+                        let type_ = UnshieldedTokenType(token_type);
+                        let intent_hash = OutputInstructionUnshielded {
+                            amount: value,
+                            target_address: *target_address,
+                            nonce: Nonce(*deposit_id),
+                        }
+                        .mk_intent_hash(type_);
+                        let utxo = Utxo {
+                            value,
+                            owner: *target_address,
+                            type_,
+                            intent_hash,
+                            output_no: 0,
+                        };
+                        if self.utxo.utxos.contains_key(&utxo) {
+                            Err(SystemTransactionError::UtxoAlreadyPresent(Box::new(utxo)))
+                        } else {
+                            let state = LedgerState {
+                                utxo: Sp::new(self.utxo.insert(utxo, UtxoMeta { ctime: tblock })),
+                                ..self.clone()
+                            };
+                            Ok((state, vec![]))
+                        }
+                    }
+                };
+                match &res {
+                    Ok(_) => info!(?tx, "[privileged] protocol mint"),
+                    Err(e) => error!(?tx, "[privileged] protocol mint rejected: {e}"),
+                }
+                res
             }
         };
         match &res {

@@ -32,7 +32,7 @@ The parts of this specification are:
   every transaction type, reconciled against the implementation.
 - [Transaction Type Catalog](./transaction-types.md), the per-variant
   reference for `Transaction::Standard`, `Transaction::ClaimRewards`, and
-  the nine `SystemTransaction` variants.
+  the ten `SystemTransaction` variants.
 - [Onchain Runtime](./onchain-runtime.md), describing the Impact VM —
   programs, `StateValue`s, kernel operations, context, and effects.
 - [Impact Opcodes](./impact-opcodes.md), the per-opcode reference: binary

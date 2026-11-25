@@ -359,7 +359,7 @@ Tags as serialised by the `serialize` crate (prefix `midnight:`), from
 | `ContractDeploy` | `contract-deploy[v6]` |
 | `MaintenanceUpdate` | `contract-maintenance-update[v3]` |
 | `TransactionIdentifier` | `transcation-id[v1]` *(sic)* |
-| `SystemTransaction` | `system-transaction[v9]` |
+| `SystemTransaction` | `system-transaction[v10]` |
 | `ClaimKind` | `claim-kind[v1]` |
 | `TransactionCostModel` | `transaction-cost-model[v5]` |
 | `TransactionLimits` | `transaction-limits[v3]` |
