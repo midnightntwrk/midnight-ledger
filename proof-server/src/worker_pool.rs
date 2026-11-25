@@ -11,8 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use actix_web::HttpResponse;
 use actix_web::error::{
     ErrorBadRequest, ErrorInternalServerError, ErrorPreconditionRequired, ErrorTooManyRequests,
+    InternalError,
 };
 use async_channel::{Receiver, RecvError, Sender, bounded, unbounded};
 use std::collections::HashMap;
@@ -21,6 +23,8 @@ use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use tokio::{sync::Mutex, task};
 use uuid::Uuid;
+
+use crate::key_derivation::{REFUSAL_HEADER, Refusal};
 
 #[derive(Error, Debug)]
 pub enum WorkerPoolError {
@@ -44,6 +48,8 @@ pub enum WorkError {
     CancelledUnexpectedly,
     #[error("task join error")]
     JoinError,
+    #[error("key derivation refused ({}): {}", .0.code(), .1)]
+    KeyDerivationRefused(Refusal, String),
 }
 
 impl From<WorkError> for actix_web::Error {
@@ -53,6 +59,12 @@ impl From<WorkError> for actix_web::Error {
             e @ WorkError::InternalError(_) => ErrorInternalServerError(e),
             e @ WorkError::CancelledUnexpectedly => ErrorInternalServerError(e),
             e @ WorkError::JoinError => ErrorInternalServerError(e),
+            WorkError::KeyDerivationRefused(refusal, _) => {
+                let response = HttpResponse::UnprocessableEntity()
+                    .insert_header((REFUSAL_HEADER, refusal.code()))
+                    .body(val.to_string());
+                InternalError::from_response(val, response).into()
+            }
         }
     }
 }

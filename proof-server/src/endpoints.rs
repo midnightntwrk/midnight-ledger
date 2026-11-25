@@ -42,6 +42,7 @@ use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as Reso
 use zkir as zkir_v2;
 use zswap::prove::ZswapResolver;
 
+use crate::key_derivation::KeyDerivation;
 use crate::versioned_ir;
 use crate::worker_pool::{JobStatus, WorkError, WorkerPool};
 
@@ -147,6 +148,11 @@ pub(crate) async fn ready(pool: web::Data<Arc<WorkerPool>>) -> Result<HttpRespon
     Ok(builder)
 }
 
+#[get("/key-derivation")]
+pub(crate) async fn key_derivation_status(derivation: Data<Arc<KeyDerivation>>) -> impl Responder {
+    web::Json(derivation.status())
+}
+
 #[get("/proof-versions")]
 pub(crate) async fn proof_versions() -> impl Responder {
     let mut fields = ProofVersioned::introspection().fields;
@@ -244,6 +250,7 @@ pub(crate) async fn check(
 #[post("/prove")]
 pub(crate) async fn prove(
     pool: Data<Arc<WorkerPool>>,
+    derivation: Data<Arc<KeyDerivation>>,
     payload: Payload,
 ) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /prove...");
@@ -258,7 +265,7 @@ pub(crate) async fn prove(
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
 
-    let data_resolver = data.clone();
+    let derivation = derivation.get_ref().clone();
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -266,6 +273,13 @@ pub(crate) async fn prove(
                 .build()
                 .unwrap();
             rt.block_on(async move {
+                // Key material with an empty prover key asks the server to
+                // derive the prover key from the IR.
+                let data = match data {
+                    Some(pkm) if pkm.prover_key.is_empty() => Some(derivation.complete(pkm).await?),
+                    data => data,
+                };
+                let data_resolver = data.clone();
                 let resolver = Resolver::new(
                     PUBLIC_PARAMS.clone(),
                     DustResolver(
