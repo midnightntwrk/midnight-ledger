@@ -86,6 +86,7 @@
           ./onchain-runtime
           ./onchain-runtime-wasm
           ./generate-cost-model
+          ./v9-to-v10-state-translation
           ./rustfmt.toml
         ];
         rust = fenix.packages.${system};
