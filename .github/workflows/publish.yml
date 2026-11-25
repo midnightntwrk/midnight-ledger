@@ -2,11 +2,9 @@ name: Publish npm packages
 
 # Single npm-publish path for the ledger package family. Publishes each
 # package to:
-#   - GH Packages under BOTH scopes while the org migrates:
-#       @midnight-ntwrk/<pkg>  (legacy scope)
-#       @midnightntwrk/<pkg>   (migration target; on GH Packages this attaches
-#                               to the midnightntwrk org instead of the
-#                               deprecated midnight-ntwrk org)
+#   - GH Packages under @midnightntwrk/<pkg> only. The legacy @midnight-ntwrk
+#     scope maps to the deprecated midnight-ntwrk org, which has no Packages
+#     budget and rejects writes, so it is no longer published.
 #   - public npmjs under @midnightntwrk ONLY. The dashed @midnight-ntwrk scope
 #     is retired on npmjs (shieldedtech/shielded-sre#761); existing dashed
 #     versions stay installable and are deprecated with a pointer.
@@ -139,7 +137,7 @@ jobs:
         run: |
           GH_REG="https://npm.pkg.github.com/midnightntwrk"
           NPMJS_REG="https://registry.npmjs.org/"
-          SCOPES="@midnight-ntwrk @midnightntwrk"
+          SCOPES="@midnightntwrk"
           SCRIPTS="${GITHUB_WORKSPACE}/.publish-scripts/.github/scripts"
 
           # npmjs auth is npm Trusted Publishing (OIDC): no token is written for
