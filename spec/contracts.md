@@ -77,6 +77,31 @@ impl LedgerContractState {
 }
 ```
 
+### Acting on a contract in the intent that deploys it
+
+Because the address is the hash of the deploy, it is known before the
+transaction is built, and the intent that deploys a contract may also call it,
+or update its maintenance authority. Such an action is well-formed against the
+state the deploy carries rather than against the reference ledger state, which
+does not hold the contract yet. It must therefore be applied only if that
+deploy took effect, which three rules ensure:
+
+- The action is in the same intent as the deploy. An intent's fallible
+  actions land or fail together, whereas segments fail independently: a deploy
+  in another intent may fail, for instance because the contract already
+  exists, and is therefore not consulted.
+- The action comes after the deploy in the intent's actions, and a call has no
+  guaranteed transcript, since deploys are applied only in the fallible phase,
+  after the whole guaranteed phase. Otherwise it is malformed
+  (`ActionPrecedesDeploy`).
+- The action does not come after a maintenance update of the contract in that
+  intent, since the update may have replaced the operations or the authority
+  the deploy carries. Otherwise it is malformed (`ActionFollowsUpdate`).
+
+This is what allows a contract's initialisation to be a circuit call, proven
+like any other and able to use the contract's own address, landing or failing
+together with the deploy.
+
 ## Calling a contract
 
 The most important interaction with a contract is the *call*, which executes
