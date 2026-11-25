@@ -41,4 +41,61 @@ describe('Ledger API - LedgerParameters', () => {
     expect(ledgerParameters.transactionCostModel).toBeDefined();
     expect(ledgerParameters.dust).toBeDefined();
   });
+
+  /**
+   * Test the transaction limits getter
+   *
+   * @given LedgerParameters with initial values
+   * @when Accessing limits
+   * @then Should return the initial transaction and block limits, times in picoseconds
+   */
+  test('should expose the initial transaction limits', () => {
+    const { limits } = LedgerParameters.initialParameters();
+
+    expect(limits.transactionByteLimit).toEqual(1_048_576n);
+    expect(limits.timeToDismissPerByte).toEqual(2_000_000n);
+    expect(limits.minTimeToDismiss).toEqual(15_000_000_000n);
+    expect(limits.blockLimits).toEqual({
+      readTime: 1_000_000_000_000n,
+      computeTime: 1_000_000_000_000n,
+      blockUsage: 200_000n,
+      bytesWritten: 50_000n,
+      bytesChurned: 1_000_000n
+    });
+    expect(limits.blockWithdrawalMinimumMultiple).toBeCloseTo(0.5, 12);
+    expect(limits.maxContractMetadataSize).toEqual(50_000n);
+  });
+
+  /**
+   * Test the transaction limits string representation
+   *
+   * @given LedgerParameters with initial values
+   * @when Converting their limits to a string, compact and not
+   * @then Should name the limits with their initial values
+   */
+  test('should print the transaction limits', () => {
+    const { limits } = LedgerParameters.initialParameters();
+
+    expect(limits.toString(true)).toMatch(/^TransactionLimits \{ transaction_byte_limit: 1048576, /);
+    expect(limits.toString()).toContain('min_time_to_dismiss: 15.000ms');
+  });
+
+  /**
+   * Test the block limits match the ones fullness is normalized against
+   *
+   * @given LedgerParameters with initial values
+   * @when Normalizing a fullness equal to the block limits
+   * @then Should normalize every dimension to a full block
+   */
+  test('should normalize the block limits to a full block', () => {
+    const ledgerParameters = LedgerParameters.initialParameters();
+
+    expect(ledgerParameters.normalizeFullness(ledgerParameters.limits.blockLimits)).toEqual({
+      readTime: 1,
+      computeTime: 1,
+      blockUsage: 1,
+      bytesWritten: 1,
+      bytesChurned: 1
+    });
+  });
 });

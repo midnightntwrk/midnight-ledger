@@ -886,6 +886,63 @@ impl LedgerParameters {
     pub fn fee_prices(&self) -> Result<JsValue, JsError> {
         Ok(to_value(&self.0.fee_prices)?)
     }
+
+    #[wasm_bindgen(getter)]
+    pub fn limits(&self) -> TransactionLimits {
+        TransactionLimits(self.0.limits.clone())
+    }
+}
+
+#[wasm_bindgen]
+pub struct TransactionLimits(ledger::structure::TransactionLimits);
+
+#[wasm_bindgen]
+impl TransactionLimits {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<TransactionLimits, JsError> {
+        Err(JsError::new(
+            "TransactionLimits cannot be constructed directly through the WASM API.",
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", self.0)
+        } else {
+            format!("{:#?}", self.0)
+        }
+    }
+
+    #[wasm_bindgen(getter, js_name = "transactionByteLimit")]
+    pub fn transaction_byte_limit(&self) -> BigInt {
+        BigInt::from(self.0.transaction_byte_limit)
+    }
+
+    #[wasm_bindgen(getter, js_name = "timeToDismissPerByte")]
+    pub fn time_to_dismiss_per_byte(&self) -> BigInt {
+        BigInt::from(self.0.time_to_dismiss_per_byte.into_picoseconds())
+    }
+
+    #[wasm_bindgen(getter, js_name = "minTimeToDismiss")]
+    pub fn min_time_to_dismiss(&self) -> BigInt {
+        BigInt::from(self.0.min_time_to_dismiss.into_picoseconds())
+    }
+
+    #[wasm_bindgen(getter, js_name = "blockLimits")]
+    pub fn block_limits(&self) -> Result<JsValue, JsError> {
+        Ok(to_value(&self.0.block_limits)?)
+    }
+
+    #[wasm_bindgen(getter, js_name = "blockWithdrawalMinimumMultiple")]
+    pub fn block_withdrawal_minimum_multiple(&self) -> f64 {
+        self.0.block_withdrawal_minimum_multiple.into()
+    }
+
+    #[wasm_bindgen(getter, js_name = "maxContractMetadataSize")]
+    pub fn max_contract_metadata_size(&self) -> BigInt {
+        BigInt::from(self.0.max_contract_metadata_size)
+    }
 }
 
 #[wasm_bindgen]

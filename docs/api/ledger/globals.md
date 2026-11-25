@@ -60,6 +60,7 @@
 - [Transaction](classes/Transaction.md)
 - [TransactionContext](classes/TransactionContext.md)
 - [TransactionCostModel](classes/TransactionCostModel.md)
+- [TransactionLimits](classes/TransactionLimits.md)
 - [TransactionResult](classes/TransactionResult.md)
 - [TransactionShape](classes/TransactionShape.md)
 - [UnshieldedOffer](classes/UnshieldedOffer.md)

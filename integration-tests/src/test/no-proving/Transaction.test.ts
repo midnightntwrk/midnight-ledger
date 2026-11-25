@@ -20,6 +20,7 @@ import {
   communicationCommitmentRandomness,
   type ContractAddress,
   ContractCall,
+  ContractCallPrototype,
   ContractDeploy,
   ContractMaintenanceAuthority,
   ContractOperation,
@@ -29,6 +30,7 @@ import {
   encodeShieldedCoinInfo,
   Intent,
   type IntentHash,
+  LedgerParameters,
   LedgerState,
   PrePartitionContractCall,
   PreTranscript,
@@ -1290,6 +1292,119 @@ describe('Ledger API - Transaction', () => {
     expect(segments[0]).toBeGreaterThanOrEqual(2);
     expect(segments[0]).toBeLessThan(65535);
   });
+
+  /**
+   * Test the time to dismiss a transaction's size allows.
+   *
+   * @given Proof-erased transactions with only a guaranteed unshielded offer, one small and one large
+   * @when Reading the time to dismiss each one's size allows
+   * @then Should be the per-byte time times its size, floored at the minimum: the minimum for the
+   *       small one, the per-byte time for the large one
+   */
+  test('allowedTimeToDismiss - is the per-byte time for its size, floored at the minimum', () => {
+    const params = LedgerParameters.initialParameters();
+    const { timeToDismissPerByte, minTimeToDismiss } = params.limits;
+    const small = unshieldedOutputsTransaction(1);
+    const large = unshieldedOutputsTransaction(200);
+
+    expect(timeToDismissPerByte * untaggedSize(small)).toBeLessThan(minTimeToDismiss);
+    expect(small.allowedTimeToDismiss(params)).toEqual(minTimeToDismiss);
+    expect(timeToDismissPerByte * untaggedSize(large)).toBeGreaterThan(minTimeToDismiss);
+    expect(large.allowedTimeToDismiss(params)).toEqual(timeToDismissPerByte * untaggedSize(large));
+  });
+
+  /**
+   * Test the time to dismiss against the cost check that enforces it.
+   *
+   * @given Transactions with one guaranteed call declaring a small and a large compute time
+   * @when Reading the time to dismiss, the time the size allows, and the cost with the time to
+   *       dismiss enforced
+   * @then Both times should be positive, and the enforced cost should throw exactly when the time
+   *       to dismiss exceeds the time allowed
+   */
+  test('timeToDismiss - cost with enforceTimeToDismiss throws exactly past allowedTimeToDismiss', () => {
+    const params = LedgerParameters.initialParameters();
+    const cases: [Transaction<SignatureEnabled, Proofish, Bindingish>, boolean][] = [
+      [guaranteedCallTransaction(10n), false],
+      [guaranteedCallTransaction(params.limits.minTimeToDismiss * 100n), true]
+    ];
+
+    cases.forEach(([tx, pastAllowance]) => {
+      const timeToDismiss = tx.timeToDismiss(params);
+      const allowedTimeToDismiss = tx.allowedTimeToDismiss(params);
+
+      expect(typeof timeToDismiss).toEqual('bigint');
+      expect(typeof allowedTimeToDismiss).toEqual('bigint');
+      expect(timeToDismiss).toBeGreaterThan(0n);
+      expect(allowedTimeToDismiss).toBeGreaterThan(0n);
+      expect(timeToDismiss > allowedTimeToDismiss).toEqual(pastAllowance);
+      if (pastAllowance) {
+        expect(() => tx.cost(params, true)).toThrow(/exceeded the maximum time to dismiss/);
+      } else {
+        expect(() => tx.cost(params, true)).not.toThrow();
+      }
+      expect(() => tx.cost(params)).not.toThrow();
+    });
+  });
+
+  /**
+   * A proof-erased transaction whose only part is a guaranteed unshielded offer with `outputs`
+   * outputs, so the ledger prices it by its serialized size.
+   */
+  function unshieldedOutputsTransaction(outputs: number) {
+    const token = Random.unshieldedTokenType();
+    const intent = Intent.new(TTL);
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+      [],
+      Array.from({ length: outputs }, () => ({ value: 100n, owner: sampleUserAddress(), type: token.raw })),
+      []
+    );
+    return Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent).eraseProofs();
+  }
+
+  /**
+   * The size of a transaction's serialization without its `midnight:<tag>:` prefix.
+   */
+  function untaggedSize(tx: Transaction<Signaturish, Proofish, Bindingish>): bigint {
+    const bytes = tx.serialize();
+    const prefix = new TextDecoder('latin1').decode(bytes.subarray(0, 256)).match(/^midnight:[^:]*:/);
+    if (!prefix) throw new Error('serialization has no tag prefix');
+    return BigInt(bytes.length - prefix[0].length);
+  }
+
+  /**
+   * An unproven transaction with one guaranteed call whose transcript declares `computeTime`
+   * picoseconds of compute.
+   */
+  function guaranteedCallTransaction(computeTime: bigint) {
+    const call = new ContractCallPrototype(
+      Random.contractAddress(),
+      'entry',
+      new ContractOperation(),
+      {
+        gas: { readTime: 0n, computeTime, bytesWritten: 0n, bytesDeleted: 0n },
+        effects: {
+          claimedNullifiers: [],
+          claimedShieldedReceives: [],
+          claimedShieldedSpends: [],
+          claimedContractCalls: [],
+          shieldedMints: new Map(),
+          unshieldedMints: new Map(),
+          unshieldedInputs: new Map(),
+          unshieldedOutputs: new Map(),
+          claimedUnshieldedSpends: new Map()
+        },
+        program: [{ noop: { n: 1 } }]
+      },
+      undefined,
+      [Static.alignedValue],
+      Static.alignedValue,
+      Static.alignedValue,
+      communicationCommitmentRandomness(),
+      'entry'
+    );
+    return Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, Intent.new(TTL).addCall(call));
+  }
 
   function testSpecificSegment(segment: SegmentSpecifier, expectedSegment?: number) {
     const { state, addr, encodedAddr, op, token, unbalancedStrictness, balancedStrictness } = setup();

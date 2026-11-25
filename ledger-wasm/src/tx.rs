@@ -782,6 +782,16 @@ impl Transaction {
         get_dyn_transaction(self.0.clone()).cost(params, enforce_time_to_dismiss.unwrap_or(false))
     }
 
+    #[wasm_bindgen(js_name = "timeToDismiss")]
+    pub fn time_to_dismiss(&self, params: &LedgerParameters) -> Result<BigInt, JsError> {
+        get_dyn_transaction(self.0.clone()).time_to_dismiss(params)
+    }
+
+    #[wasm_bindgen(js_name = "allowedTimeToDismiss")]
+    pub fn allowed_time_to_dismiss(&self, params: &LedgerParameters) -> BigInt {
+        get_dyn_transaction(self.0.clone()).allowed_time_to_dismiss(params)
+    }
+
     pub fn fees(
         &self,
         params: &LedgerParameters,
@@ -1289,6 +1299,8 @@ pub(crate) trait Transactionable {
         params: &LedgerParameters,
         enforce_time_to_dismiss: bool,
     ) -> Result<JsValue, JsError>;
+    fn time_to_dismiss(&self, params: &LedgerParameters) -> Result<BigInt, JsError>;
+    fn allowed_time_to_dismiss(&self, params: &LedgerParameters) -> BigInt;
     fn fees(
         &self,
         params: &LedgerParameters,
@@ -1360,6 +1372,19 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<JsValue, JsError> {
         Ok(to_value(&self.cost(params, enforce_time_to_dismiss)?)?)
+    }
+
+    fn time_to_dismiss(&self, params: &LedgerParameters) -> Result<BigInt, JsError> {
+        Ok(BigInt::from(
+            ledger::structure::Transaction::time_to_dismiss(self, params)?.into_picoseconds(),
+        ))
+    }
+
+    fn allowed_time_to_dismiss(&self, params: &LedgerParameters) -> BigInt {
+        BigInt::from(
+            ledger::structure::Transaction::allowed_time_to_dismiss(self, params)
+                .into_picoseconds(),
+        )
     }
 
     fn fees(

@@ -1280,6 +1280,18 @@ pub struct TransactionLimits {
 }
 tag_enforcement_test!(TransactionLimits);
 
+impl TransactionLimits {
+    /// The most time to dismiss a transaction of `size` bytes is allowed:
+    /// `time_to_dismiss_per_byte` times `size`, but never less than
+    /// `min_time_to_dismiss`.
+    pub fn allowed_time_to_dismiss(&self, size: u64) -> CostDuration {
+        CostDuration::max(
+            self.time_to_dismiss_per_byte * size,
+            self.min_time_to_dismiss,
+        )
+    }
+}
+
 pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     transaction_byte_limit: 1 << 20, // 1 MiB
     time_to_dismiss_per_byte: CostDuration::from_picoseconds(2_000_000),
@@ -2600,6 +2612,20 @@ where
         Ok((g_cost, total_cost))
     }
 
+    /// The modelled time a node takes to dismiss the transaction, as the longer
+    /// of its read and compute times: its validation, its guaranteed section's
+    /// application (which also counts the compute time of fallible Zswap
+    /// offers, tried there too), and the checks walking every transcript's
+    /// effects, but not fallible transcripts' gas, fallible unshielded offers,
+    /// deploys or maintenance updates.
+    ///
+    /// This is the figure `cost(params, true)` compares against
+    /// [`Transaction::allowed_time_to_dismiss`]. Like [`Transaction::cost`], it
+    /// prices validation without state, reading each called operation's
+    /// verifier key at a default size of 2,875 bytes; a node's `well_formed`
+    /// reads the deployed keys' sizes from its ledger state instead, so it may
+    /// price a transaction calling a contract with larger verifier keys higher
+    /// than this figure.
     pub fn time_to_dismiss(
         &self,
         params: &LedgerParameters,
@@ -2609,6 +2635,20 @@ where
         Ok(self
             .dismissal_cost(params, validation_cost, guaranteed_cost)
             .max_time())
+    }
+
+    /// The most time to dismiss the transaction's size allows:
+    /// [`TransactionLimits::allowed_time_to_dismiss`] of its estimated size in
+    /// bytes. A transaction whose
+    /// [`Transaction::time_to_dismiss`] exceeds it is rejected with
+    /// [`FeeCalculationError::OutsideTimeToDismiss`] when the time to dismiss
+    /// is enforced. A node compares it against a time to dismiss priced with
+    /// the deployed verifier keys' sizes, which may be higher than
+    /// [`Transaction::time_to_dismiss`].
+    pub fn allowed_time_to_dismiss(&self, params: &LedgerParameters) -> CostDuration {
+        params
+            .limits
+            .allowed_time_to_dismiss(self.est_size() as u64)
     }
 
     /// What dismissing the transaction costs: its validation, its guaranteed
@@ -2632,14 +2672,11 @@ where
     ) -> Result<SyntheticCost, FeeCalculationError> {
         let (guaranteed_cost, application_cost) = self.application_cost(params)?;
         let cost_to_dismiss = self.dismissal_cost(params, validation_cost, guaranteed_cost);
-        let time_to_dismiss = CostDuration::max(
-            params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
-            params.limits.min_time_to_dismiss,
-        );
-        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
+        let allowed_time_to_dismiss = self.allowed_time_to_dismiss(params);
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > allowed_time_to_dismiss {
             return Err(FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss: cost_to_dismiss.max_time(),
-                allowed_time_to_dismiss: time_to_dismiss,
+                allowed_time_to_dismiss,
                 size: self.est_size() as u64,
             });
         }
@@ -3713,6 +3750,7 @@ pub(crate) mod tests {
     mod cost_equivalence;
     mod count_saturation;
     mod pre_budget_work;
+    mod time_to_dismiss;
     pub(crate) mod transactions;
 
     use storage::db::InMemoryDB;

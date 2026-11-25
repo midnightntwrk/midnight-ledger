@@ -1458,6 +1458,45 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   cost(params: LedgerParameters, enforceTimeToDismiss?: boolean): SyntheticCost;
 
   /**
+   * The modelled time to dismiss this transaction, in picoseconds, as the
+   * longer of its read and compute times: its validation, its guaranteed
+   * section's application (which also counts the compute time of fallible
+   * Zswap offers, tried there too), and the checks walking every transcript's
+   * effects, but not fallible transcripts' gas, fallible unshielded offers,
+   * deploys or maintenance updates.
+   *
+   * This is the figure {@link cost} compares against
+   * {@link allowedTimeToDismiss} when `enforceTimeToDismiss` is set. Like
+   * {@link cost}, it prices validation with a default verifier key size of
+   * 2,875 bytes per call; a node's well-formedness check reads the deployed
+   * keys' sizes from its ledger state instead, so it may price a transaction
+   * calling a contract with larger verifier keys higher than this figure.
+   *
+   * The figure is of the transaction as it stands: before proving, its size
+   * counts estimated proof sizes, and anything added later, such as balancing
+   * or a Dust spend, changes it and {@link allowedTimeToDismiss}.
+   *
+   * @throws If the transaction's cost cannot be computed, as {@link cost} does
+   */
+  timeToDismiss(params: LedgerParameters): bigint;
+
+  /**
+   * The most time to dismiss this transaction's size allows, in picoseconds:
+   * `params.limits.timeToDismissPerByte` times its estimated size in bytes,
+   * but never less than `params.limits.minTimeToDismiss`.
+   *
+   * {@link cost} with `enforceTimeToDismiss` set throws when
+   * {@link timeToDismiss} exceeds it. A node compares it against a time to
+   * dismiss priced with the deployed verifier keys' sizes, which may be higher
+   * than {@link timeToDismiss}.
+   *
+   * The figure is of the transaction as it stands: before proving, its size
+   * counts estimated proof sizes, and anything added later, such as balancing
+   * or a Dust spend, changes it and {@link timeToDismiss}.
+   */
+  allowedTimeToDismiss(params: LedgerParameters): bigint;
+
+  /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
@@ -1693,6 +1732,53 @@ export class LedgerParameters {
    * The fee prices for transaction
    */
   readonly feePrices: FeePrices;
+
+  /**
+   * The limits transactions and blocks are held to under these parameters
+   */
+  readonly limits: TransactionLimits;
+}
+
+/**
+ * The limits transactions and blocks are held to, part of
+ * {@link LedgerParameters}
+ */
+export class TransactionLimits {
+  private constructor();
+
+  toString(compact?: boolean): string;
+
+  /**
+   * The largest a transaction may be, in bytes, held against its serialized
+   * size
+   */
+  readonly transactionByteLimit: bigint;
+  /**
+   * The time to dismiss a transaction is allowed per byte of its size, in
+   * picoseconds
+   */
+  readonly timeToDismissPerByte: bigint;
+  /**
+   * The time to dismiss any transaction is allowed regardless of its size, in
+   * picoseconds
+   */
+  readonly minTimeToDismiss: bigint;
+  /**
+   * The resource limits of a block, against which costs are normalized as in
+   * {@link LedgerParameters.normalizeFullness}
+   */
+  readonly blockLimits: SyntheticCost;
+  /**
+   * The minimum amount of Night withdrawable from block rewards, as a multiple
+   * of the amount which would be able to pay the theoretical fees for the
+   * withdrawal when Dust reaches its cap
+   */
+  readonly blockWithdrawalMinimumMultiple: number;
+  /**
+   * The largest a contract's maintenance authority, or any one of its
+   * operations with its entry point name, may be, in bytes
+   */
+  readonly maxContractMetadataSize: bigint;
 }
 
 export class TransactionCostModel {
