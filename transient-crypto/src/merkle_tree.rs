@@ -686,6 +686,43 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         }
     }
 
+    fn position_of_hash(
+        &self,
+        target: &HashOutput,
+        range: (u64, u64),
+        highest_first: bool,
+    ) -> Option<u64> {
+        match self {
+            Leaf { hash, .. } => (range.0 == 0 && hash == target).then_some(0),
+            Stub { .. } | Collapsed { .. } => None,
+            Node { left, right, .. } => {
+                let mid = 1u64 << left.height();
+                let in_left = || {
+                    (range.0 < mid)
+                        .then(|| {
+                            let range = (range.0, range.1.min(mid - 1));
+                            left.position_of_hash(target, range, highest_first)
+                        })
+                        .flatten()
+                };
+                let in_right = || {
+                    (range.1 >= mid)
+                        .then(|| {
+                            let range = (range.0.saturating_sub(mid), range.1 - mid);
+                            right.position_of_hash(target, range, highest_first)
+                        })
+                        .flatten()
+                        .map(|index| index + mid)
+                };
+                if highest_first {
+                    in_right().or_else(in_left)
+                } else {
+                    in_left().or_else(in_right)
+                }
+            }
+        }
+    }
+
     fn leaves(&self) -> Vec<LeafOrCollapsed<'_, A>> {
         self.leaves_in_range((Bound::Unbounded, Bound::Unbounded))
     }
@@ -1228,10 +1265,30 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         )
     }
 
-    /// Generate an iterator over leaves, including indices, hashes, and auxiliary data
-    /// Does a linear search for a given leaf.
+    /// The lowest index within `range` of a leaf with the given hash, if the tree holds one.
     ///
-    /// `O(2^height)` worst-case behavior, this should only be used for small trees.
+    /// Linear in the leaves present, not in `2^height`: stubs and collapsed subtrees are
+    /// skipped, and the walk stops at the first match.
+    pub fn position_of_hashed_leaf(
+        &self,
+        leaf_hash: HashOutput,
+        range: impl RangeBounds<u64>,
+    ) -> Option<u64> {
+        let range = (range.start_bound().cloned(), range.end_bound().cloned());
+        let (start, end) = range_force_inclusive(range).filter(|(start, end)| start <= end)?;
+        self.0.position_of_hash(&leaf_hash, (start, end), false)
+    }
+
+    /// The highest index of a leaf with the given hash, found by walking the most recently
+    /// inserted leaves first. Where leaf hashes are unique this is the index
+    /// [`position_of_hashed_leaf`](Self::position_of_hashed_leaf) finds, reached sooner when the
+    /// leaf is recent.
+    pub fn rposition_of_hashed_leaf(&self, leaf_hash: HashOutput) -> Option<u64> {
+        self.0.position_of_hash(&leaf_hash, (0, u64::MAX), true)
+    }
+
+    /// The path to the lowest-indexed leaf equal to `leaf`, found by a linear search over the
+    /// leaves present (see [`position_of_hashed_leaf`](Self::position_of_hashed_leaf)).
     ///
     /// May panic if the Merkle tree has not been rehashed.
     pub fn find_path_for_leaf<T: BinaryHashRepr>(&self, leaf: T) -> Option<MerklePath<T>> {
@@ -1262,20 +1319,8 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         leaf: T,
         range: impl RangeBounds<u64>,
     ) -> Option<MerklePath<T>> {
-        for (index, hash) in self
-            .0
-            .leaves_in_range((range.start_bound().cloned(), range.end_bound().cloned()))
-            .into_iter()
-            .filter_map(|leaf| match leaf {
-                LeafOrCollapsed::Leaf { index, hash, .. } => Some((index, hash)),
-                _ => None,
-            })
-        {
-            if leaf_hash == hash {
-                return self.path_for_leaf(index, leaf).ok();
-            }
-        }
-        None
+        let index = self.position_of_hashed_leaf(leaf_hash, range)?;
+        self.path_for_leaf(index, leaf).ok()
     }
 
     /// Attempts to replay a piece of insertion evidence against this tree.
@@ -1755,6 +1800,66 @@ mod tests {
             tree.find_path_for_hashed_leaf_within_range(hash, 0..=4)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn test_position_of_hashed_leaf() {
+        let tree = new_mt::<()>(32)
+            .try_update(3, &Fr::from(20u64), ())
+            .and_then(|mt| mt.try_update(6, &Fr::from(30u64), ()))
+            .and_then(|mt| mt.try_update(9, &Fr::from(20u64), ()))
+            .unwrap()
+            .rehash();
+        let twenty = leaf_hash(&Fr::from(20u64));
+        let thirty = leaf_hash(&Fr::from(30u64));
+        let absent = leaf_hash(&Fr::from(40u64));
+
+        assert_eq!(tree.position_of_hashed_leaf(twenty, ..), Some(3));
+        assert_eq!(tree.rposition_of_hashed_leaf(twenty), Some(9));
+        assert_eq!(tree.position_of_hashed_leaf(thirty, ..), Some(6));
+        assert_eq!(tree.rposition_of_hashed_leaf(thirty), Some(6));
+        assert_eq!(tree.position_of_hashed_leaf(absent, ..), None);
+        assert_eq!(tree.rposition_of_hashed_leaf(absent), None);
+
+        assert_eq!(tree.position_of_hashed_leaf(twenty, 4..), Some(9));
+        assert_eq!(tree.position_of_hashed_leaf(twenty, 4..9), None);
+        assert_eq!(tree.position_of_hashed_leaf(twenty, 4..=9), Some(9));
+        assert_eq!(tree.position_of_hashed_leaf(twenty, ..3), None);
+        assert_eq!(tree.position_of_hashed_leaf(twenty, ..=3), Some(3));
+        assert_eq!(tree.position_of_hashed_leaf(twenty, 0..0), None);
+        #[allow(clippy::reversed_empty_ranges)]
+        let inverted = 9..=3;
+        assert_eq!(tree.position_of_hashed_leaf(twenty, inverted), None);
+
+        let path = tree
+            .find_path_for_hashed_leaf_within_range(twenty, ..)
+            .unwrap();
+
+        let turns = |path: MerklePath<HashOutput>| {
+            path.path
+                .iter()
+                .map(|entry| entry.goes_left)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            turns(path),
+            turns(tree.path_for_leaf(3, twenty).unwrap()),
+            "the lowest-indexed duplicate is the one found"
+        );
+
+        let collapsed = tree.collapse(0, 5);
+        assert_eq!(collapsed.position_of_hashed_leaf(twenty, ..), Some(9));
+        assert_eq!(collapsed.rposition_of_hashed_leaf(twenty), Some(9));
+        assert_eq!(
+            collapsed.collapse(7, 9).position_of_hashed_leaf(twenty, ..),
+            None
+        );
+
+        assert_eq!(new_mt::<()>(32).position_of_hashed_leaf(twenty, ..), None);
+        let single = new_mt::<()>(0).try_update(0, &Fr::from(20u64), ()).unwrap();
+        assert_eq!(single.position_of_hashed_leaf(twenty, ..), Some(0));
+        assert_eq!(single.rposition_of_hashed_leaf(twenty), Some(0));
+        assert_eq!(single.position_of_hashed_leaf(twenty, 1..), None);
     }
 
     #[test]
