@@ -1041,7 +1041,7 @@ impl<D: DB> LedgerState<D> {
                 protocol,
                 asset,
                 amount,
-                deposit_id,
+                mint_id,
                 recipient,
             } => {
                 if *amount == 0 {
@@ -1050,20 +1050,20 @@ impl<D: DB> LedgerState<D> {
                 }
                 let token_type = protocol_mint_token_type(*protocol, *asset);
                 let value = u128::from(*amount);
-                let res = match recipient {
+                let (state, events) = match recipient {
                     ProtocolMintRecipient::Shielded(target_key) => self.native_issue_unbalanced(
                         *target_key,
                         ShieldedTokenType(token_type),
-                        *deposit_id,
+                        *mint_id,
                         value,
                         tx.event_source(),
-                    ),
+                    )?,
                     ProtocolMintRecipient::Unshielded(target_address) => {
                         let type_ = UnshieldedTokenType(token_type);
                         let intent_hash = OutputInstructionUnshielded {
                             amount: value,
                             target_address: *target_address,
-                            nonce: Nonce(*deposit_id),
+                            nonce: Nonce(*mint_id),
                         }
                         .mk_intent_hash(type_);
                         let utxo = Utxo {
@@ -1073,22 +1073,32 @@ impl<D: DB> LedgerState<D> {
                             intent_hash,
                             output_no: 0,
                         };
+                        let replay_protection = self
+                            .replay_protection
+                            .apply_member(
+                                intent_hash,
+                                tblock + self.parameters.global_ttl,
+                                tblock,
+                                self.parameters.global_ttl,
+                            )
+                            .map_err(SystemTransactionError::ReplayProtectionFailure)?;
                         if self.utxo.utxos.contains_key(&utxo) {
-                            Err(SystemTransactionError::UtxoAlreadyPresent(Box::new(utxo)))
-                        } else {
-                            let state = LedgerState {
-                                utxo: Sp::new(self.utxo.insert(utxo, UtxoMeta { ctime: tblock })),
-                                ..self.clone()
-                            };
-                            Ok((state, vec![]))
+                            return Err(SystemTransactionError::UtxoAlreadyPresent(Box::new(utxo)));
                         }
+                        let state = LedgerState {
+                            utxo: Sp::new(self.utxo.insert(utxo, UtxoMeta { ctime: tblock })),
+                            replay_protection: Sp::new(replay_protection),
+                            ..self.clone()
+                        };
+                        (state, vec![])
                     }
                 };
-                match &res {
-                    Ok(_) => info!(?tx, "[privileged] protocol mint"),
-                    Err(e) => error!(?tx, "[privileged] protocol mint rejected: {e}"),
-                }
-                res
+                // A protocol-mint token type is never NIGHT, so this cannot
+                // fail. It is a cautionary check, made wherever coins are
+                // created.
+                state.check_night_balance_invariant()?;
+                info!(?tx, "[privileged] protocol mint");
+                Ok((state, events))
             }
         };
         match &res {

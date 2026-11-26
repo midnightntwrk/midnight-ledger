@@ -923,12 +923,11 @@ pub enum SystemTransaction {
     },
     /// Mints `amount` of the token type [`protocol_mint_token_type`] derives
     /// from `protocol` and `asset`, as one coin for `recipient` with
-    /// `deposit_id` as its nonce.
+    /// `mint_id` as its nonce.
     ///
     /// An unshielded mint creates output 0 of the [`OutputInstructionUnshielded`]
-    /// with these values, for that token type. It is refused as
-    /// [`UtxoAlreadyPresent`](crate::error::SystemTransactionError::UtxoAlreadyPresent)
-    /// while that output is unspent, and succeeds again once it is spent.
+    /// with these values, for that token type. It is refused while that
+    /// output is unspent, and for `global_ttl` after the mint.
     ///
     /// A shielded mint is refused as
     /// [`CommitmentAlreadyPresent`](crate::error::SystemTransactionError::CommitmentAlreadyPresent)
@@ -941,7 +940,7 @@ pub enum SystemTransaction {
         protocol: HashOutput,
         asset: HashOutput,
         amount: u64,
-        deposit_id: HashOutput,
+        mint_id: HashOutput,
         recipient: ProtocolMintRecipient,
     },
 }
@@ -2991,6 +2990,11 @@ impl SystemTransaction {
                             model.merkle_tree_insert_amortized(ZSWAP_TREE_HEIGHT as usize, false);
                     }
                     ProtocolMintRecipient::Unshielded(_) => {
+                        // Replay protection state update
+                        cost += model.time_filter_map_lookup()
+                            + model.cell_read(PERSISTENT_HASH_BYTES as u64);
+                        cost += model.time_filter_map_insert(false)
+                            + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
                         // UTXO set test
                         cost += model.map_index(EXPECTED_UTXO_DEPTH);
                         // UTXO set insertion

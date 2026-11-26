@@ -13,14 +13,14 @@
 
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
-use base_crypto::time::Timestamp;
+use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::NIGHT;
 use coin_structure::coin::{
     Nonce, SecretKey, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
 };
 use hex::FromHex;
 use lazy_static::lazy_static;
-use midnight_ledger::error::SystemTransactionError;
+use midnight_ledger::error::{SystemTransactionError, TransactionApplicationError};
 use midnight_ledger::structure::{
     ClaimKind, ClaimRewardsTransaction, INITIAL_PARAMETERS, LedgerState, MAX_SUPPLY,
     OutputInstructionShielded, OutputInstructionUnshielded, ProtocolMintRecipient,
@@ -32,6 +32,7 @@ use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v10 as midnight_ledger;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use storage::storage::{HashMap, Map};
 use zswap::{Delta, Offer};
@@ -225,7 +226,7 @@ async fn system_tx_unlock_to_reserve_insufficient_locked_pool() {
 
 const PROTOCOL: HashOutput = HashOutput([1; 32]);
 const ASSET: HashOutput = HashOutput([2; 32]);
-const DEPOSIT_ID: HashOutput = HashOutput([3; 32]);
+const MINT_ID: HashOutput = HashOutput([3; 32]);
 const OWNER: UserAddress = UserAddress(HashOutput([4; 32]));
 
 fn protocol_mint(amount: u64, recipient: ProtocolMintRecipient) -> SystemTransaction {
@@ -233,7 +234,7 @@ fn protocol_mint(amount: u64, recipient: ProtocolMintRecipient) -> SystemTransac
         protocol: PROTOCOL,
         asset: ASSET,
         amount,
-        deposit_id: DEPOSIT_ID,
+        mint_id: MINT_ID,
         recipient,
     }
 }
@@ -254,25 +255,52 @@ fn protocol_mint_unshielded_utxo_is_derived_and_unique() {
     let intent_hash = OutputInstructionUnshielded {
         amount: 1_000,
         target_address: OWNER,
-        nonce: Nonce(DEPOSIT_ID),
+        nonce: Nonce(MINT_ID),
     }
     .mk_intent_hash(type_);
+    let utxo = Utxo {
+        value: 1_000,
+        owner: OWNER,
+        type_,
+        intent_hash,
+        output_no: 0,
+    };
     let utxos: Vec<Utxo> = ledger.utxo.utxos.keys().collect();
-    assert_eq!(
-        utxos,
-        vec![Utxo {
-            value: 1_000,
-            owner: OWNER,
-            type_,
-            intent_hash,
-            output_no: 0,
-        }]
-    );
+    assert_eq!(utxos, vec![utxo.clone()]);
+    ledger.check_night_balance_invariant().unwrap();
 
+    let replayed = |ledger: &LedgerState<InMemoryDB>| {
+        matches!(
+            ledger.apply_system_tx(&mint, Timestamp::from_secs(0)),
+            Err(SystemTransactionError::ReplayProtectionFailure(
+                TransactionApplicationError::IntentAlreadyExists
+            ))
+        )
+    };
+    let without_utxo = |ledger: &LedgerState<InMemoryDB>| LedgerState {
+        utxo: Sp::new(ledger.utxo.remove(&utxo)),
+        ..ledger.clone()
+    };
+
+    // Within `global_ttl`, replay protection refuses the mint, spent or not.
+    assert!(replayed(&ledger));
+    assert!(replayed(&without_utxo(&ledger)));
+
+    // After `global_ttl`, only an unspent coin refuses it.
+    let after_ttl = Timestamp::from_secs(0) + ledger.parameters.global_ttl + Duration::from_secs(1);
+    let ledger = LedgerState {
+        replay_protection: Sp::new(ledger.replay_protection.post_block_update(after_ttl)),
+        ..ledger
+    };
     assert!(matches!(
-        ledger.apply_system_tx(&mint, Timestamp::from_secs(0)),
+        ledger.apply_system_tx(&mint, after_ttl),
         Err(SystemTransactionError::UtxoAlreadyPresent(_))
     ));
+    assert!(
+        without_utxo(&ledger)
+            .apply_system_tx(&mint, after_ttl)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -301,7 +329,7 @@ fn protocol_mint_shielded_coin_is_spendable_and_unique() {
         (
             1_000,
             ShieldedTokenType(protocol_mint_token_type(PROTOCOL, ASSET)),
-            Nonce(DEPOSIT_ID)
+            Nonce(MINT_ID)
         )
     );
 

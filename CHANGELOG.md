@@ -32,7 +32,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: the tag moves to `contract-operation[v7]`, and with it every tag that contains a contract operation, among them `transaction[v13]`, `ledger-state[v19]` and the intent signing envelopes.
 - feat: `ledger::proving_versions` proves circuits of every ZKIR version.
 - breaking: the proof server's deprecated `/prove-tx` endpoint is removed, with `test_utilities::serialize_request_body` and `createProvingTransactionPayload` in the wasm API. Use `/prove`, or `Transaction.prove` from JavaScript.
-- feat: `SystemTransaction::ProtocolMint` mints one shielded or unshielded coin of a token type the ledger derives from a protocol separator and an asset ID (`protocol_mint_token_type`).
+- feat: `SystemTransaction::ProtocolMint` mints one shielded or unshielded coin of a token type the ledger derives from a protocol separator and an asset ID (`protocol_mint_token_type`). An unshielded mint is replay-protected for `global_ttl`.
 - breaking: `SystemTransaction`'s tag moves to `system-transaction[v10]`, and `SystemTransactionError` gains `ZeroMintAmount` and `UtxoAlreadyPresent`.
 
 ## Unreleased (Ledger 9)
