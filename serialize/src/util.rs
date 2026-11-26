@@ -44,7 +44,7 @@ impl<T> VecExt for Vec<T> {
 pub trait ReadExt: Read {
     fn read_exact_to_vec(&mut self, n: usize) -> std::io::Result<Vec<u8>> {
         const CHUNK_SIZE: usize = 4096;
-        let mut res = Vec::with_capacity(CHUNK_SIZE);
+        let mut res = Vec::with_capacity(usize::min(n, CHUNK_SIZE));
         let mut len = 0;
         while n > len {
             let new_len = usize::min(n, len + CHUNK_SIZE);
