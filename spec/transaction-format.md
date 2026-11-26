@@ -7,8 +7,7 @@ transaction variant is catalogued in
 (well-formedness, balancing, sequencing, application) are specified in
 [intents-transactions.md](./intents-transactions.md) and summarised here only
 where they bear on structure.  Contract-call transcripts are the
-[Impact opcode reference](./impact-opcodes.md); circuit proofs are the
-[ZKIR reference](./zkir.md).
+[Impact opcode reference](./impact-opcodes.md).
 
 > [!NOTE]
 > [intents-transactions.md](./intents-transactions.md) describes an
@@ -319,7 +318,7 @@ Leaf data values — contract-state cells, transcript values, map keys — are
   `-1` (compress), or `-2` (field).
 
 The FAB field modulus is the base elliptic curve's scalar field (the native
-field; see the [ZKIR reference](./zkir.md)).
+field).
 
 ## 8. Discrepancies and gaps vs. the narrative spec
 
