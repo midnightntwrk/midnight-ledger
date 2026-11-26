@@ -1,6 +1,6 @@
 # `transient-crypto` Changelog
 
-## Unreleased
+## Version `4.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` 3.0.0-rc.2 / `midnight-circuits`
   8.0.0-rc.2, resolved from the `midnight-zk-stdlib-v3.0.0-rc.2` git tag. Keys
