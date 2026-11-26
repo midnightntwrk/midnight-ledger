@@ -33,6 +33,8 @@ lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("");
 }
 
+const NETWORK_ID: &str = "local-test";
+
 #[tokio::test]
 async fn system_tx_pay_from_unshielded() {
     let mut rng = StdRng::seed_from_u64(0x42);
@@ -71,7 +73,7 @@ async fn system_tx_pay_from_unshielded() {
     let tx = tx_prove(
         rng.split(),
         &Transaction::<(), _, _, _>::ClaimRewards(ClaimRewardsTransaction {
-            network_id: "local-test".into(),
+            network_id: NETWORK_ID.into(),
             value: 500_000,
             owner: verifying_key,
             nonce,
@@ -98,12 +100,114 @@ async fn system_tx_pay_from_unshielded() {
     );
 }
 
+/// E2E coverage of the CardanoBridge claim path through the full
+/// transaction-application pipeline.
+/// A bridge deposit takes the fee to treasury at-source;
+/// the subsequent claim mints a UTXO for the post-fee
+/// amount and drains `bridge_receiving`.
+#[tokio::test]
+async fn system_tx_bridge_claim() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    let verifying_key = state.night_key.verifying_key();
+    let address = UserAddress::from(verifying_key.clone());
+
+    // Genesis-fund the locked pool; nothing else moves NIGHT into it.
+    // Multiple of 10_000 so the 1% fee divides evenly.
+    let amount: u128 = 10_000_000_000;
+    state.ledger = LedgerState::with_genesis_settings(
+        NETWORK_ID,
+        INITIAL_PARAMETERS,
+        amount,
+        MAX_SUPPLY - amount,
+        0,
+    )
+    .expect("valid genesis");
+
+    let deposit = SystemTransaction::DistributeNight(
+        ClaimKind::CardanoBridge,
+        vec![OutputInstructionUnshielded {
+            amount,
+            target_address: address,
+            nonce: rng.r#gen(),
+        }],
+    );
+    let (ledger, _) = state.ledger.apply_system_tx(&deposit, state.time).unwrap();
+    state.ledger = ledger;
+
+    let fee =
+        amount / 10_000 * INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points as u128;
+    let claimable = amount - fee;
+
+    assert_eq!(
+        state
+            .ledger
+            .treasury
+            .get(&TokenType::Unshielded(NIGHT))
+            .copied()
+            .unwrap_or(0),
+        fee,
+        "fee should be credited to Treasury on deposit"
+    );
+    assert_eq!(
+        state
+            .ledger
+            .bridge_receiving
+            .get(&address)
+            .copied()
+            .unwrap_or(0),
+        claimable,
+        "post-fee amount should be claimable"
+    );
+
+    let tx = tx_prove(
+        rng.split(),
+        &Transaction::<(), _, _, _>::ClaimRewards(ClaimRewardsTransaction {
+            network_id: NETWORK_ID.into(),
+            value: claimable,
+            owner: verifying_key,
+            nonce: rng.r#gen(),
+            signature: (),
+            kind: ClaimKind::CardanoBridge,
+        }),
+        &RESOLVER,
+    )
+    .await
+    .unwrap();
+    state.assert_apply(&tx, WellFormedStrictness::default());
+
+    assert!(
+        state.ledger.bridge_receiving.get(&address).is_none(),
+        "bridge_receiving should be drained after a full claim"
+    );
+    assert_eq!(
+        state
+            .ledger
+            .utxo
+            .utxos
+            .iter()
+            .map(|a| a.0.value)
+            .sum::<u128>(),
+        claimable,
+        "a UTXO for the post-fee amount should be minted"
+    );
+    assert_eq!(
+        state
+            .ledger
+            .treasury
+            .get(&TokenType::Unshielded(NIGHT))
+            .copied()
+            .unwrap_or(0),
+        fee,
+    );
+}
+
 #[tokio::test]
 #[ignore = "disabled due to treasury payments being disabled"]
 async fn system_tx_pay_from_shielded() {
     let mut rng = StdRng::seed_from_u64(0x42);
     // Initial states
-    let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
+    let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new(NETWORK_ID);
     let mut treasury: Map<TokenType, u128, InMemoryDB> = Map::new();
     let amount = 500_000;
     let token = Default::default();
@@ -146,7 +250,7 @@ async fn system_tx_unlock_to_treasury() {
     let locked = 500_000;
     let reserve = MAX_SUPPLY - locked;
     let ledger_state: LedgerState<InMemoryDB> =
-        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+        LedgerState::with_genesis_settings(NETWORK_ID, INITIAL_PARAMETERS, locked, reserve, 0)
             .expect("genesis settings should be valid");
 
     let amount = 200_000;
@@ -171,7 +275,7 @@ async fn system_tx_unlock_to_treasury_insufficient_locked_pool() {
     let locked = 100_000;
     let reserve = MAX_SUPPLY - locked;
     let ledger_state: LedgerState<InMemoryDB> =
-        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+        LedgerState::with_genesis_settings(NETWORK_ID, INITIAL_PARAMETERS, locked, reserve, 0)
             .expect("genesis settings should be valid");
 
     let sys_tx = SystemTransaction::UnlockToTreasury { amount: locked + 1 };
@@ -187,7 +291,7 @@ async fn system_tx_unlock_to_reserve() {
     let locked = 500_000;
     let reserve = MAX_SUPPLY - locked;
     let ledger_state: LedgerState<InMemoryDB> =
-        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+        LedgerState::with_genesis_settings(NETWORK_ID, INITIAL_PARAMETERS, locked, reserve, 0)
             .expect("genesis settings should be valid");
 
     let amount = 200_000;
@@ -205,7 +309,7 @@ async fn system_tx_unlock_to_reserve_insufficient_locked_pool() {
     let locked = 100_000;
     let reserve = MAX_SUPPLY - locked;
     let ledger_state: LedgerState<InMemoryDB> =
-        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+        LedgerState::with_genesis_settings(NETWORK_ID, INITIAL_PARAMETERS, locked, reserve, 0)
             .expect("genesis settings should be valid");
 
     let sys_tx = SystemTransaction::UnlockToReserve { amount: locked + 1 };
