@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::structure::*;
+#[cfg(feature = "proving")]
 use base_crypto::data_provider::MidnightDataProvider;
 use base_crypto::rng::SplittableRng;
 use futures::future::join_all;
@@ -28,9 +29,16 @@ use transient_crypto::proofs::{
 };
 use transient_crypto::proofs::{ParamsProver, ProvingKeyMaterial, ProvingProvider};
 
+/// Resolves the built-in `zswap` prover keys, verifier keys and IR out of the Midnight parameter
+/// cache.
+///
+/// Behind the `proving` feature: this is prover-side machinery, and it is the only thing in this
+/// crate that reaches for `base-crypto`'s data provider.
+#[cfg(feature = "proving")]
 #[derive(Clone)]
 pub struct ZswapResolver(pub MidnightDataProvider);
 
+#[cfg(feature = "proving")]
 impl Resolver for ZswapResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
@@ -82,6 +90,7 @@ impl Resolver for ZswapResolver {
     }
 }
 
+#[cfg(feature = "proving")]
 impl ParamsProverProvider for ZswapResolver {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
         self.0.get_params(k).await

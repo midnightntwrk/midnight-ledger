@@ -9,6 +9,9 @@ description = "Cryptographic primitives for Midnight that may change over time."
 [features]
 default = []
 cli = ["base-crypto/cli"]
+# Prover-side glue that sources parameters from `base-crypto`'s data provider.
+# Verifiers never need it, so it is off by default.
+fetch = ["base-crypto/fetch"]
 proptest = [
   "dep:proptest",
   "dep:proptest-derive",

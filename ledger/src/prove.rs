@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "proving")]
 use crate::dust::DustResolver;
 use crate::error::TransactionProvingError;
 use crate::structure::{
@@ -34,8 +35,11 @@ use storage::db::DB;
 use tokio::runtime::Handle;
 use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::commitment::{Pedersen, PureGeneratorPedersen};
-use transient_crypto::proofs::{KeyLocation, ParamsProverProvider, Resolver as ResolverT};
+#[cfg(feature = "proving")]
+use transient_crypto::proofs::ParamsProverProvider;
+use transient_crypto::proofs::{KeyLocation, Resolver as ResolverT};
 use transient_crypto::proofs::{ProvingError, ProvingKeyMaterial, ProvingProvider};
+#[cfg(feature = "proving")]
 use zswap::prove::ZswapResolver;
 
 pub type ExternalResolver = Box<
@@ -47,6 +51,11 @@ pub type ExternalResolver = Box<
         + Sync,
 >;
 
+/// The standard resolver: the built-in `zswap` and `dust` keys, plus a caller-supplied fallback
+/// for contract circuits.
+///
+/// Behind the `proving` feature, as are the two it composes.
+#[cfg(feature = "proving")]
 pub struct Resolver {
     pub zswap_resolver: ZswapResolver,
     pub dust_resolver: DustResolver,
@@ -54,6 +63,7 @@ pub struct Resolver {
     pub external_resolver: ExternalResolver,
 }
 
+#[cfg(feature = "proving")]
 impl Resolver {
     #[allow(clippy::type_complexity)]
     pub fn new(
@@ -69,12 +79,14 @@ impl Resolver {
     }
 }
 
+#[cfg(feature = "proving")]
 impl ParamsProverProvider for Resolver {
     async fn get_params(&self, k: u8) -> io::Result<transient_crypto::proofs::ParamsProver> {
         self.zswap_resolver.get_params(k).await
     }
 }
 
+#[cfg(feature = "proving")]
 impl transient_crypto::proofs::Resolver for Resolver {
     async fn resolve_key(&self, key: KeyLocation) -> io::Result<Option<ProvingKeyMaterial>> {
         if let Some(res) = self.zswap_resolver.resolve_key(key.clone()).await? {
