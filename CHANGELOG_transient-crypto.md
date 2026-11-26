@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- breaking: upgrade to `midnight-zk-stdlib` 3.0.0-rc.1 / `midnight-circuits`
-  8.0.0-rc.1, resolved from the `midnight-zk-stdlib-v3.0.0-rc.1` git tag. Keys
+- breaking: upgrade to `midnight-zk-stdlib` 3.0.0-rc.2 / `midnight-circuits`
+  8.0.0-rc.2, resolved from the `midnight-zk-stdlib-v3.0.0-rc.2` git tag. Keys
   and proofs of the earlier proof system do not carry over; the prover key tag
   moves to `prover-key[v8]`.
 - breaking: `VerifierKey` records how many deferred accumulators its proofs
