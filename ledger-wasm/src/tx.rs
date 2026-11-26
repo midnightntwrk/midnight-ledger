@@ -25,7 +25,7 @@ use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
 use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
-use ledger::construct::{SegmentSpecifier, TransactionShape};
+use ledger::construct::{SegmentSpecifier, TransactionShapeRange};
 use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
     ProofVersioned, Signature, SignatureKind, SignatureVerifyingKey,
@@ -162,6 +162,8 @@ impl VerifiedTransaction {
 #[wasm_bindgen]
 #[repr(transparent)]
 pub struct Transaction(pub(crate) TransactionTypes);
+
+try_ref_for_exported!(Transaction);
 
 #[wasm_bindgen]
 impl Transaction {
@@ -1232,13 +1234,13 @@ fn add_calls_with_optional_tx_shape<S: SignatureKind<InMemoryDB>>(
     zswap_inputs: &[zswap::Input<ProofPreimage, InMemoryDB>],
     zswap_outputs: &[zswap::Output<ProofPreimage, InMemoryDB>],
     zswap_transients: &[zswap::Transient<ProofPreimage, InMemoryDB>],
-    expected_tx_shape: Option<&TransactionShape>,
+    expected_tx_shape: Option<&TransactionShapeRange>,
 ) -> Result<
     ledger::structure::StandardTransaction<S, ProofPreimageMarker, PreBinding, InMemoryDB>,
     JsError,
 > {
     Ok(match expected_tx_shape {
-        Some(expected_tx_shape) => tx.add_calls_with_tx_shape::<ProofPreimage>(
+        Some(expected_tx_shape) => tx.add_calls_with_tx_shape_range::<ProofPreimage>(
             &mut OsRng,
             segment,
             calls,
