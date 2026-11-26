@@ -45,7 +45,13 @@ use std::io;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::{
-    any::Any, collections::HashMap, fmt::Debug, hash::Hash, io::Read, ops::Deref, sync::Arc,
+    any::Any,
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    io::Read,
+    ops::Deref,
+    sync::Arc,
 };
 
 mod slot;
@@ -878,82 +884,107 @@ impl<D: DB> Arena<D> {
         // every node hash -- and thus the committed state root -- is byte-for-byte
         // unchanged; it is a performance fix, not a hard fork.
         let node_count = nodes.nodes.len();
-        let mut existing_nodes: Vec<IntermediateRepr<D>> = Vec::with_capacity(node_count);
-        let mut node_hash: Vec<ArenaHash<D::Hasher>> = Vec::with_capacity(node_count);
-        let mut key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>> =
-            HashMap::new();
+        // Each node's arena key, by position. Small nodes are in-lined into their
+        // parents' keys, so only by-reference nodes need an entry in the IR maps
+        // below; mainnet states have ~60 in-lined nodes per by-reference one.
+        let mut keys: Vec<ArenaKey<D::Hasher>> = Vec::with_capacity(node_count);
+        let mut in_degree: Vec<u8> = vec![0; node_count];
 
         for node in nodes.nodes.iter() {
             // A child index must point at an already-processed node -- strictly earlier in
-            // the topological order -- so its hash and arena key are already memoized.
-            let child_hashes = node
+            // the topological order -- so its key (and hash) is already memoized.
+            let child_keys = node
                 .child_indices
                 .iter()
                 .map(|&i| {
                     usize::try_from(i)
                         .ok()
-                        .filter(|i| *i < node_hash.len())
-                        .map(|i| node_hash[i].clone())
+                        .filter(|i| *i < keys.len())
+                        .map(|i| {
+                            in_degree[i] = in_degree[i].saturating_add(1);
+                            keys[i].clone()
+                        })
                         .ok_or_else(|| {
                             std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
                                 format!(
                                     "error deserializing storage graph: child node index {i} out of range of processed nodes {}",
-                                    node_hash.len()
+                                    keys.len()
                                 ),
                             )
                         })
                 })
                 .collect::<std::io::Result<Vec<_>>>()?;
-            let root = hash::<D::Hasher>(&node.data, child_hashes.iter());
-
-            let child_keys = child_hashes
-                .iter()
-                .map(|h| {
-                    key_to_child_repr
-                        .get(h)
-                        .cloned()
-                        .ok_or_else(|| std::io::Error::other("child not in key_to_child_repr"))
-                })
-                .collect::<std::io::Result<Vec<_>>>()?;
-            key_to_child_repr.insert(root.clone(), child_from(&node.data, &child_keys));
-
-            existing_nodes.push(IntermediateRepr {
-                binary_repr: node.data.clone(),
-                children: child_hashes,
-                db_type: PhantomData,
-            });
-            node_hash.push(root);
+            keys.push(child_from(&node.data, &child_keys));
         }
 
-        let key = node_hash
+        let key = keys
             .last()
-            .cloned()
+            .map(|k| k.hash().clone())
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no nodes"))?;
+
+        // A repeated node is never in normal form, and rejecting it here lets in-degrees
+        // by position stand in for in-degrees by hash when choosing what to memoize.
+        let mut sorted_hashes: Vec<&ArenaHash<D::Hasher>> = keys.iter().map(|k| k.hash()).collect();
+        sorted_hashes.sort_unstable();
+        if sorted_hashes.windows(2).any(|w| w[0] == w[1]) || !nodes.is_canonical_order() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "deserialized storage graph not in normal form",
+            ));
+        }
+        drop(sorted_hashes);
+
+        let mut all = HashMap::new();
+        let mut key_to_child_repr = HashMap::new();
+        let mut shared_inlined = HashSet::new();
+        for (i, (node, node_key)) in nodes.nodes.iter().zip(keys.iter()).enumerate() {
+            match node_key {
+                // The root is looked up by reference even when it is small enough to in-line.
+                ArenaKey::Direct(_) if i + 1 < node_count => {
+                    if in_degree[i] > 1 {
+                        shared_inlined.insert(node_key.hash().clone());
+                    }
+                }
+                _ => {
+                    let children = node
+                        .child_indices
+                        .iter()
+                        .map(|&c| {
+                            let child = &keys[c as usize];
+                            key_to_child_repr.insert(child.hash().clone(), child.clone());
+                            child.hash().clone()
+                        })
+                        .collect();
+                    all.insert(
+                        node_key.hash().clone(),
+                        IntermediateRepr {
+                            binary_repr: node.data.clone(),
+                            children,
+                            db_type: PhantomData,
+                        },
+                    );
+                }
+            }
+        }
+        drop(nodes);
+        drop(keys);
+        drop(in_degree);
 
         let res: Sp<T, D> = IrLoader {
             arena: self,
-            all: &existing_nodes
-                .into_iter()
-                .zip(node_hash)
-                .map(|(node, root)| (root, node))
-                .collect(),
+            all: &all,
             recursion_depth: recursive_depth,
             height: Cell::new(0),
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
+            shared_inlined: Rc::new(shared_inlined),
             key_to_child_repr: Rc::new(key_to_child_repr),
             invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
         .get(&ArenaKey::Ref(key))?;
-        if nodes == res.serialize_to_node_list() {
-            Ok(res)
-        } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "deserialized storage graph not in normal form",
-            ))
-        }
+        drop(all);
+        Ok(res)
     }
 }
 
@@ -1138,6 +1169,10 @@ pub(crate) struct IrLoader<'a, D: DB> {
     /// values, they are not tracked in the arena's `Sp` cache (see
     /// `Arena::alloc`), so `Arena::get_from_cache` can never recover them.
     inlined: InlineMemo<D>,
+    /// The in-lined values referenced more than once, the only ones worth
+    /// memoizing in `inlined`: each of the rest has a single parent, so is
+    /// decoded once per decode of that parent.
+    shared_inlined: Rc<HashSet<ArenaHash<D::Hasher>>>,
     key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
     invariant_memos: Rc<RefCell<InvariantMemos<D>>>,
 }
@@ -1156,6 +1191,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             height: Cell::new(0),
             visited: Rc::new(RefCell::new(HashMap::new())),
             inlined: Rc::new(RefCell::new(HashMap::new())),
+            shared_inlined: Rc::new(HashSet::new()),
             key_to_child_repr: Rc::new(key_to_child_repr),
             invariant_memos: Rc::new(RefCell::new(InvariantMemos::new())),
         }
@@ -1190,9 +1226,27 @@ impl<D: DB> IrLoader<'_, D> {
             height: Cell::new(0),
             visited: self.visited.clone(),
             inlined: self.inlined.clone(),
+            shared_inlined: self.shared_inlined.clone(),
             key_to_child_repr: self.key_to_child_repr.clone(),
             invariant_memos: self.invariant_memos.clone(),
         })
+    }
+
+    /// Fails unless `sp` encodes back to the node it was decoded from. Together
+    /// with `TopoSortedNodes::is_canonical_order`, this is what makes the
+    /// decoded graph re-serialize to its input, without re-serializing it.
+    fn check_reencodes<T: ?Sized>(
+        sp: &Sp<T, D>,
+        decoded_from: &ArenaHash<D::Hasher>,
+    ) -> Result<(), std::io::Error> {
+        if sp.root == *decoded_from {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "deserialized storage graph not in normal form",
+            ))
+        }
     }
 
     /// Accounts for a memoized child of height `height`, failing if
@@ -1259,12 +1313,18 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
                     &mut direct.children.iter().cloned(),
                     &loader,
                 )?;
-                let sp = self.arena.alloc(value);
+                let mut sp = self.arena.alloc(value);
+                Self::check_reencodes(&sp, &direct.hash)?;
+                // Equal hashes mean equal keys: share the input's rather than
+                // keep a second copy of the in-lined subtree.
+                sp.child_repr = child.clone();
                 let height = loader.height.get();
                 self.record_child_height(height);
-                self.inlined
-                    .borrow_mut()
-                    .insert(typed_key, (Box::new(sp.clone()), height));
+                if self.shared_inlined.contains(&direct.hash) {
+                    self.inlined
+                        .borrow_mut()
+                        .insert(typed_key, (Box::new(sp.clone()), height));
+                }
                 return Ok(sp);
             }
             ArenaKey::Ref(key) => key,
@@ -1302,6 +1362,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
+        Self::check_reencodes(&sp, key)?;
         let height = loader.height.get();
         self.record_child_height(height);
         self.visited.borrow_mut().insert(typed_key, height);
@@ -1936,6 +1997,39 @@ impl<T: Ord + Storable<D>, D: DB> Ord for Sp<T, D> {
 pub struct TopoSortedNodes {
     /// The individual sorted nodes
     pub nodes: Vec<TopoSortedNode>,
+}
+
+impl TopoSortedNodes {
+    /// Whether every node is reachable from the last, and the nodes are in the
+    /// order [`Sp::serialize_to_node_list`] would emit them, assuming their
+    /// child indices already point at earlier nodes and no node is repeated.
+    ///
+    /// This replays that function's Kahn's algorithm on indices rather than
+    /// hashes, so it needs no copy of the graph.
+    fn is_canonical_order(&self) -> bool {
+        let len = self.nodes.len();
+        let mut incoming = vec![0usize; len];
+        for node in self.nodes.iter() {
+            for &child in node.child_indices.iter() {
+                incoming[child as usize] += 1;
+            }
+        }
+        let mut emitted = 0;
+        let mut empty_incoming_nodes = vec![len - 1];
+        while let Some(idx) = empty_incoming_nodes.pop() {
+            if idx != len - 1 - emitted {
+                return false;
+            }
+            emitted += 1;
+            for &child in self.nodes[idx].child_indices.iter() {
+                incoming[child as usize] -= 1;
+                if incoming[child as usize] == 0 {
+                    empty_incoming_nodes.push(child as usize);
+                }
+            }
+        }
+        emitted == len
+    }
 }
 
 /// An individual node in `TopoSortedNodes`.
@@ -3061,5 +3155,81 @@ mod tests {
             root_node.child_indices[0], root_node.child_indices[1],
             "both children deduplicate to the same leaf index"
         );
+    }
+
+    /// Decoding accepts a node list only if it is exactly what
+    /// `serialize_to_node_list` emits for the decoded value.
+    #[test]
+    fn deserialize_rejects_lists_not_in_normal_form() {
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Pair {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = &new_arena();
+        let root = arena.alloc(Pair {
+            a: arena.alloc(1u32),
+            b: arena.alloc(2u32),
+        });
+        let canonical = root.serialize_to_node_list();
+        assert_eq!(canonical.nodes.len(), 3);
+        let decode = |nodes: &TopoSortedNodes| {
+            let mut bytes = Vec::new();
+            nodes.serialize(&mut bytes).expect("serialize node list");
+            arena.deserialize_sp::<Pair, _>(&mut &bytes[..], 0)
+        };
+        assert_eq!(
+            decode(&canonical).expect("canonical list decodes").hash(),
+            root.hash()
+        );
+
+        let leaf = |i: usize| canonical.nodes[i].clone();
+        let with_root_children = |children: Vec<u64>| TopoSortedNode {
+            child_indices: children,
+            data: canonical.nodes[2].data.clone(),
+        };
+        let a_idx = canonical.nodes[2].child_indices[0];
+        let b_idx = canonical.nodes[2].child_indices[1];
+
+        let swapped = TopoSortedNodes {
+            nodes: vec![
+                leaf(1),
+                leaf(0),
+                with_root_children(vec![1 - a_idx, 1 - b_idx]),
+            ],
+        };
+        assert!(decode(&swapped).is_err(), "out of order");
+
+        let unreachable = arena.alloc(3u32).serialize_to_node_list().nodes[0].clone();
+        let with_unreachable = TopoSortedNodes {
+            nodes: vec![
+                unreachable,
+                leaf(0),
+                leaf(1),
+                with_root_children(vec![a_idx + 1, b_idx + 1]),
+            ],
+        };
+        assert!(decode(&with_unreachable).is_err(), "unreachable node");
+
+        let twins = arena.alloc(Pair {
+            a: arena.alloc(1u32),
+            b: arena.alloc(1u32),
+        });
+        let shared = twins.serialize_to_node_list();
+        assert_eq!(shared.nodes.len(), 2);
+        let duplicated = TopoSortedNodes {
+            nodes: vec![
+                shared.nodes[0].clone(),
+                shared.nodes[0].clone(),
+                TopoSortedNode {
+                    child_indices: vec![0, 1],
+                    data: shared.nodes[1].data.clone(),
+                },
+            ],
+        };
+        assert!(decode(&duplicated).is_err(), "repeated node");
     }
 }
