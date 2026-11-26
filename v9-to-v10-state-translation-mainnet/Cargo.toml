@@ -1,0 +1,51 @@
+[package]
+name = "v9-to-v10-state-translation-mainnet"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone Cargo project, not a member of the ledger workspace: reading the
+# node's database needs storage-core's `layout-v2` and `gc-v1`, which would
+# otherwise unify into every workspace build.
+[workspace]
+
+[[bin]]
+name = "v9-to-v10-state-translation-mainnet"
+path = "src/main.rs"
+
+[dependencies]
+# The translation crate under test, and both sides of it.
+v9-to-v10-state-translation = { path = "../v9-to-v10-state-translation" }
+ledger-v9   = { version = "1.0.1", package = "midnight-ledger-v9", default-features = false }
+ledger-v10  = { path = "../ledger", package = "midnight-ledger-v10", default-features = false }
+storage-v10 = { path = "../storage", package = "midnight-storage", features = ["state-translation"] }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+serialize   = { path = "../serialize", package = "midnight-serialize" }
+# The node's ledger database layout.
+storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["parity-db", "layout-v2", "gc-v1"] }
+parity-db    = "0.5.2"
+
+anyhow     = "1"
+clap       = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+hex        = "0.4"
+libc       = "0.2"
+log        = "0.4"
+
+[dev-dependencies]
+onchain-state-v9  = { version = "4.0.1", package = "midnight-onchain-state" }
+onchain-state-v10 = { path = "../onchain-state", package = "midnight-onchain-state" }
+tempfile          = "3"
+
+[patch.crates-io]
+# One arena and one copy of the shared crates for ledger 9 and ledger 10.
+midnight-storage-core = { path = "../storage-core" }
+midnight-base-crypto  = { path = "../base-crypto" }
+midnight-serialize    = { path = "../serialize" }
+# As in the ledger workspace: ledger 10's zk-stdlib v3 release candidates.
+midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-circuits  = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-proofs    = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+midnight-curves    = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }
+# The node's parity-db fork, which wrote the snapshot.
+parity-db = { git = "https://github.com/midnightntwrk/parity-db.git", branch = "master" }

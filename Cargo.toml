@@ -39,7 +39,9 @@ default-members = [
 ]
 resolver = "2"
 exclude = [
-    "scripts/hardfork_version_patch"
+    "scripts/hardfork_version_patch",
+    # Standalone: it builds storage-core with the node's `layout-v2` and `gc-v1`.
+    "v9-to-v10-state-translation-mainnet",
 ]
 
 # Pretty much every dependency is crypto.
