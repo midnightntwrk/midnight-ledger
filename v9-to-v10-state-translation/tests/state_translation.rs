@@ -16,7 +16,7 @@ use base_crypto::fab::AlignedValue;
 use coin_structure_v9::coin::TokenType;
 use coin_structure_v9::contract::ContractAddress;
 use onchain_state_v9::state::{
-    ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState, StateValue,
+    ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState, IrBuf, StateValue,
 };
 use proptest::prelude::*;
 use rand::rngs::StdRng;
@@ -67,7 +67,19 @@ fn contract_operations_keep_their_keys() {
             new.ir.as_ref().map(|ir| ir.hash()),
             old.ir.as_ref().map(|ir| ir.hash())
         );
+        assert_eq!(
+            new.ir.as_ref().map(|ir| &ir.0),
+            old.ir.as_ref().map(|ir| &ir.0)
+        );
     }
+    assert!(ENTRY_POINTS[..2].iter().all(|ep| {
+        translated
+            .operations
+            .get(&(*ep).into())
+            .expect("op")
+            .ir
+            .is_some()
+    }));
 }
 
 #[test]
@@ -447,12 +459,19 @@ fn translate_to_completion(v9: LedgerV9) -> LedgerV10 {
     .clone()
 }
 
+/// The operations carry an IR inlined into its parent, one stored by
+/// reference (over 1 KiB), and none.
 fn create_test_contract(rng: &mut StdRng) -> ContractState<InMemoryDB> {
-    let ops = ENTRY_POINTS.iter().fold(HashMap::new(), |ops, ep| {
-        let mut op = ContractOperation::new(Some(rng.r#gen()), None);
-        op.v2 = Some(rng.r#gen());
-        ops.insert((*ep).into(), op)
-    });
+    let irs = [Some(vec![0x11u8; 64]), Some(vec![0x22u8; 2048]), None];
+    let ops = ENTRY_POINTS
+        .iter()
+        .zip(irs)
+        .fold(HashMap::new(), |ops, (ep, ir)| {
+            let ir = ir.map(|bytes| Sp::new(IrBuf(bytes)));
+            let mut op = ContractOperation::new(Some(rng.r#gen()), ir);
+            op.v2 = Some(rng.r#gen());
+            ops.insert((*ep).into(), op)
+        });
     ContractState::new(
         StateValue::Cell(Sp::new(AlignedValue::from(vec![7u8; 64]))),
         ops,

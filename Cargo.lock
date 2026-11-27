@@ -6615,7 +6615,6 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage 3.1.0",
  "midnight-storage 4.0.0",
- "midnight-transient-crypto 3.1.0",
  "proptest",
  "rand 0.8.6",
 ]

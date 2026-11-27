@@ -24,6 +24,5 @@ base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-
 [dev-dependencies]
 coin-structure-v9  = { version = "3.0.1", package = "midnight-coin-structure" }
 coin-structure-v10 = { version = "3.0.1", path = "../coin-structure", package = "midnight-coin-structure" }
-transient-crypto-3 = { version = "3.1.0", package = "midnight-transient-crypto" }
 proptest = "1.6"
 rand = { version = "^0.8.4", features = ["getrandom"] }
