@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- feat: with `public-internal-structure`, expose
+  `merkle_patricia_trie::canonical_extension`, which builds the canonical
+  extension chain above a node. The ledger 9 to 10 state translation uses it.
+
 ## Version `4.0.0`
 
 - breaking: `MerklePatriciaTrie` `insert`, `remove` and `prune` build
