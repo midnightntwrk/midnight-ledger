@@ -9,7 +9,7 @@ use midnight_zswap::keys::SecretKeys;
 use midnight_zswap::ledger::State as ZswapLedgerState;
 use midnight_zswap::local::State as ZswapLocalState;
 use midnight_zswap::prove::ZswapResolver;
-use midnight_zswap::prove::zkir_v2::ZkirV2ProvingProvider;
+use midnight_zswap::prove::zkir_v4::ZkirV4ProvingProvider;
 use midnight_zswap::{Delta, Offer, Output as ZswapOutput, ZSWAP_EXPECTED_FILES};
 use rand::SeedableRng;
 use rand::rngs::OsRng;
@@ -30,7 +30,7 @@ fn sync_prove(
         .enable_all()
         .build()
         .unwrap();
-    let provider = ZkirV2ProvingProvider {
+    let provider = ZkirV4ProvingProvider {
         rng,
         params: pp,
         resolver,

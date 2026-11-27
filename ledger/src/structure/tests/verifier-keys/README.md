@@ -25,4 +25,4 @@ The values were written out where the proof is verified
 |---|---|---|
 | `v6` | built from the `simple-merkle-tree` IR 2.0 circuit; `store.verifier.sha256` as pinned by commit `5d389e58` | this ledger (branch `ledger-10`, on top of `849bcae1`) |
 | `v7` | `zkir-precompiles/simple-merkle-tree` built by the `zkir` tool of branch `ledger-9` at `b8f5e143`; matches that branch's `store.verifier.sha256` | ledger 9 at `b8f5e143` |
-| `v8` | built from the "IR 4.0" circuit of `circuits_of_every_ir_version` | this ledger (branch `ledger-10`, on top of `eb99b12c`) |
+| `v8` | built from the "IR 4.0" circuit of `circuits_of_every_ir_version` | this ledger (branch `ledger-10`, on top of `a5996ebf`, with `midnight-zk-stdlib` 3.0.0-rc.2) |

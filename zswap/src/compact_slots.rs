@@ -17,8 +17,7 @@
 //! declaration in the Compact source is reachable under `Key::Value(n)` where
 //! `n` is its zero-based declaration index. These constants are the single
 //! definition of that mapping for the crate; they are mirrored by hand, because
-//! the build consumes the pre-compiled ZKIR in `zkir-precompiles/` rather than
-//! invoking `compactc` (see `flake.nix`).
+//! Cargo builds the crate without invoking `compactc` (see `flake.nix`).
 //!
 //! Reordering, inserting or removing a `ledger` declaration in `zswap.compact`
 //! therefore requires updating these values in lockstep. Getting them wrong

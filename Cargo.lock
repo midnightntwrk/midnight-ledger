@@ -4000,10 +4000,11 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "4.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?branch=zkir-v4#ba6e3fe8430904a723c6475f07f317c5a1c9cd87"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-4.0.0-rc.1#3ec876c0a311e4979536ae432d2c810e324ace64"
 dependencies = [
  "anyhow",
  "const-hex",
+ "flate2",
  "group 0.13.0",
  "hex",
  "midnight-base-crypto",
@@ -4045,9 +4046,8 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 4.0.0",
- "midnight-zkir 2.2.0",
+ "midnight-zkir 4.0.0-rc.1",
  "pastey",
  "rand 0.8.6",
  "rayon",

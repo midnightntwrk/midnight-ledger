@@ -34,6 +34,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: the proof server's deprecated `/prove-tx` endpoint is removed, with `test_utilities::serialize_request_body` and `createProvingTransactionPayload` in the wasm API. Use `/prove`, or `Transaction.prove` from JavaScript.
 - feat: `SystemTransaction::ProtocolMint` mints one shielded or unshielded coin of a token type the ledger derives from a protocol separator and an asset ID (`protocol_mint_token_type`). An unshielded mint is replay-protected for `global_ttl`.
 - breaking: `SystemTransaction`'s tag moves to `system-transaction[v10]`, and `SystemTransactionError` gains `ZeroMintAmount` and `UtxoAlreadyPresent`.
+- breaking: the built-in Zswap and Dust circuits move to ZKIR v4, verified against `verifier-key[v8]` keys. They are compiled from `zswap/zswap.compact` and `ledger/dust.compact` by `compactc` 0.36.1, which emits ZKIR v3, and retargeted to v4 by their version alone. Zswap input and output proofs shrink from 4,835 to 4,519 bytes, and Dust spend proofs grow from 2,915 to 2,967.
+- breaking: proving the built-in Zswap circuits needs a ZKIR v4 prover: `zswap::prove::zkir_v2::ZkirV2ProvingProvider` is removed, and `zswap::prove::zkir_v4::ZkirV4ProvingProvider` added. Zswap's `SPEND_VK`, `OUTPUT_VK` and `SIGN_VK` are `transient_crypto::proofs::VerifierKey`s.
+- chore: `local-params` and `test-artifacts` compile the Compact sources with `compactc` again, replacing the precompiled ZKIR in `zkir-precompiles`. The test contracts now compile to ZKIR v3.
 
 ## Unreleased (Ledger 9)
 
