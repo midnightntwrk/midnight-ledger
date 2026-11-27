@@ -6,6 +6,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: add `TransactionLimits::allowed_time_to_dismiss`, the most time to dismiss a transaction of a given size is allowed.
+- feat: add `Transaction::allowed_time_to_dismiss`, the most time to dismiss a transaction's size allows, which `cost` with `enforce_time_to_dismiss` compares `time_to_dismiss` against.
+- feat: expose `Transaction.timeToDismiss` in the wasm API, the transaction's modelled time to dismiss in picoseconds.
+- feat: expose `Transaction.allowedTimeToDismiss` in the wasm API, the most time to dismiss the transaction's size allows, in picoseconds.
+- feat: expose `LedgerParameters.limits` in the wasm API, a `TransactionLimits` class with the parameters' transaction and block limits.
 - fix: proof-server image passes trailing `docker run` arguments to the server (`docker run <image> -v` now works; previously the `bash -c` entrypoint silently dropped them). The old `midnight-proof-server ...` command forms still work.
 - feat: proof-server image sets `MIDNIGHT_PP=/var/cache/midnight/zk-params`; mount a volume there to skip the param download on restart.
 - chore: zkir v3 (the external `midnight-zkir`) moves to `3.2.1`, now resolved from crates.io.

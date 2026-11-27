@@ -31,6 +31,16 @@ The fee prices for transaction
 
 ***
 
+### limits
+
+```ts
+readonly limits: TransactionLimits;
+```
+
+The limits transactions and blocks are held to under these parameters
+
+***
+
 ### transactionCostModel
 
 ```ts

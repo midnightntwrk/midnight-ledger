@@ -234,6 +234,37 @@ If called on bound transactions.
 
 ***
 
+### allowedTimeToDismiss()
+
+```ts
+allowedTimeToDismiss(params): bigint;
+```
+
+The most time to dismiss this transaction's size allows, in picoseconds:
+`params.limits.timeToDismissPerByte` times its estimated size in bytes,
+but never less than `params.limits.minTimeToDismiss`.
+
+[cost](#cost) with `enforceTimeToDismiss` set throws when
+[timeToDismiss](#timetodismiss) exceeds it. A node compares it against a time to
+dismiss priced with the deployed verifier keys' sizes, which may be higher
+than [timeToDismiss](#timetodismiss).
+
+The figure is of the transaction as it stands: before proving, its size
+counts estimated proof sizes, and anything added later, such as balancing
+or a Dust spend, changes it and [timeToDismiss](#timetodismiss).
+
+#### Parameters
+
+##### params
+
+[`LedgerParameters`](LedgerParameters.md)
+
+#### Returns
+
+`bigint`
+
+***
+
 ### bind()
 
 ```ts
@@ -485,6 +516,46 @@ serialize(): Uint8Array;
 #### Returns
 
 `Uint8Array`
+
+***
+
+### timeToDismiss()
+
+```ts
+timeToDismiss(params): bigint;
+```
+
+The modelled time to dismiss this transaction, in picoseconds, as the
+longer of its read and compute times: its validation, its guaranteed
+section's application (which also counts the compute time of fallible
+Zswap offers, tried there too), and the checks walking every transcript's
+effects, but not fallible transcripts' gas, fallible unshielded offers,
+deploys or maintenance updates.
+
+This is the figure [cost](#cost) compares against
+[allowedTimeToDismiss](#allowedtimetodismiss) when `enforceTimeToDismiss` is set. Like
+[cost](#cost), it prices validation with a default verifier key size of
+2,875 bytes per call; a node's well-formedness check reads the deployed
+keys' sizes from its ledger state instead, so it may price a transaction
+calling a contract with larger verifier keys higher than this figure.
+
+The figure is of the transaction as it stands: before proving, its size
+counts estimated proof sizes, and anything added later, such as balancing
+or a Dust spend, changes it and [allowedTimeToDismiss](#allowedtimetodismiss).
+
+#### Parameters
+
+##### params
+
+[`LedgerParameters`](LedgerParameters.md)
+
+#### Returns
+
+`bigint`
+
+#### Throws
+
+If the transaction's cost cannot be computed, as [cost](#cost) does
 
 ***
 
