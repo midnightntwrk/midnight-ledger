@@ -178,8 +178,11 @@ impl<
         let self_tl = tls[1].clone();
         match source {
             NodeV9::Empty => vec![],
+            // `Empty` children translate to themselves; queueing them would
+            // spend budget on each one in every run.
             NodeV9::Branch { children, .. } => children
                 .iter()
+                .filter(|child| !matches!(***child, NodeV9::Empty))
                 .map(|child| (self_tl.clone(), child.upcast()))
                 .collect(),
             NodeV9::Extension { child, .. } => vec![(self_tl, child.upcast())],
@@ -197,10 +200,15 @@ impl<
         let tls = Self::child_translations(source);
         Ok(Some(match source {
             NodeV9::Empty => NodeV10::Empty,
-            NodeV9::Branch { .. } => {
+            NodeV9::Branch { children, .. } => {
                 let mut new_children = core::array::from_fn(|_| Sp::new(NodeV10::Empty));
-                for (child, new_child) in tls.iter().zip(new_children.iter_mut()) {
-                    *new_child = try_resopt!(cache.resolve(&child.0, child.1.as_child()));
+                let mut tls = tls.iter();
+                for (child, new_child) in children.iter().zip(new_children.iter_mut()) {
+                    if matches!(**child, NodeV9::Empty) {
+                        continue;
+                    }
+                    let tl = tls.next().expect("one translation per non-empty child");
+                    *new_child = try_resopt!(cache.resolve(&tl.0, tl.1.as_child()));
                 }
                 let ann = new_children.iter().fold(AnnB::empty(), |acc, x| {
                     acc.append(&NodeV10::<B, D, AnnB>::ann(x))
