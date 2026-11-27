@@ -16,7 +16,7 @@ Midnight has **two layers** of "transaction":
 |---|---|---|---|---|
 | **User transactions** | `Transaction::Standard` | users / wallets | yes (DUST) | yes (ZK + signatures) |
 | | `Transaction::ClaimRewards` | users / wallets | yes (from the claim) | signature only |
-| **System transactions** | `SystemTransaction` (9 variants) | the chain itself (privileged) | no | no |
+| **System transactions** | `SystemTransaction` (10 variants) | the chain itself (privileged) | no | no |
 
 `Transaction` is the user-facing enum (`ledger/src/structure.rs`, tag
 `transaction[v12]`):
@@ -98,7 +98,7 @@ from the consensus layer that produces it.
 
 ## 3. System transactions (`SystemTransaction`)
 
-* **Tag:** `system-transaction[v9]` (`#[non_exhaustive]`).
+* **Tag:** `system-transaction[v10]` (`#[non_exhaustive]`).
 * **Who creates them:** the **chain / consensus layer** (block production,
   the partner-chain / Cardano bridge, and governance). They are *privileged*
   — applied directly to `LedgerState` via `apply_system_tx`, carry no fees,
@@ -116,6 +116,7 @@ from the consensus layer that produces it.
 | `CNightGeneratesDustUpdate` | register / deregister cardano-Night → DUST generation | `events: Vec<CNightGeneratesDustEvent>` | each event is `Create` or `Destroy` of a dust-generation entry (value, owner, time, nonce) |
 | `UnlockToTreasury` | release Night from the locked (Cardano-bridge) pool into the treasury | `{ amount: u128 }` | `amount ≤ locked_pool`, else `IllegalPayout`; moves `locked_pool → treasury` |
 | `UnlockToReserve` | release Night from the locked pool into the reserve pool | `{ amount: u128 }` | `amount ≤ locked_pool`, else `IllegalPayout`; moves `locked_pool → reserve_pool` |
+| `ProtocolMint` | mint one coin of a token type reserved for protocol mints, such as a bridged asset | `protocol`, `asset`, `amount: u64`, `mint_id`, `recipient: ProtocolMintRecipient` | `amount > 0`, else `ZeroMintAmount`. The token type is `protocol_mint_token_type(protocol, asset)`; `mint_id` is the coin's nonce. `Shielded` adds the coin to the Zswap commitment tree and emits one `ZswapOutput` event; `Unshielded` creates one UTXO. A coin that already exists is refused (`CommitmentAlreadyPresent` / `UtxoAlreadyPresent`). An unshielded mint is replay-protected |
 | `PayFromTreasuryShielded` | (intended) pay shielded outputs from the treasury | `outputs`, `nonce`, `token_type` | **currently DISABLED** — returns `TreasuryDisabled` pending treasury governance |
 | `PayFromTreasuryUnshielded` | (intended) pay unshielded outputs from the treasury | `outputs`, `token_type` | **currently DISABLED** — returns `TreasuryDisabled` |
 
@@ -125,13 +126,16 @@ Supporting payload types (`structure.rs`): `OutputInstructionUnshielded`
 `target_key`; `output-instruction-shielded[v2]`), `ClaimKind`
 (`Reward` | `CardanoBridge`; `claim-kind[v1]`), `CNightGeneratesDustEvent`
 (`value`, `owner`, `time`, `action: Create|Destroy`, `nonce`;
-`cnight-generates-dust-event[v1]`).
+`cnight-generates-dust-event[v1]`), `ProtocolMintRecipient`
+(`Shielded(coin public key)` | `Unshielded(UserAddress)`;
+`protocol-mint-recipient[v1]`).
 
 `SystemTransactionError` (`error.rs`) enumerates the rejection reasons:
 `IllegalPayout`, `IllegalReserveDistribution`, `InsufficientTreasuryFunds`,
 `TreasuryDisabled`, `InvalidBasisPoints`, `ReplayProtectionFailure`,
 `CommitmentAlreadyPresent`, `GenerationInfoAlreadyPresent`,
-`InvariantViolation`, `MerkleTreeError`.
+`InvariantViolation`, `MerkleTreeError`, `ZeroMintAmount`,
+`UtxoAlreadyPresent`.
 
 ## 4. Transaction identifiers (`TransactionIdentifier`)
 
@@ -206,11 +210,12 @@ changed by an `OverwriteParameters` system transaction (§3).
 | `Transaction` | `transaction[v12]` | §1 |
 | `StandardTransaction` | `standard-transaction[v12]` | §2.1 |
 | `ClaimRewardsTransaction` | `claim-rewards-transaction[v2]` | §2.2 |
-| `SystemTransaction` | `system-transaction[v9]` | §3 |
+| `SystemTransaction` | `system-transaction[v10]` | §3 |
 | `ClaimKind` | `claim-kind[v1]` | §3 |
 | `OutputInstructionUnshielded` | `output-instruction-unshielded[v1]` | §3 |
 | `OutputInstructionShielded` | `output-instruction-shielded[v2]` | §3 |
 | `CNightGeneratesDustEvent` | `cnight-generates-dust-event[v1]` | §3 |
+| `ProtocolMintRecipient` | `protocol-mint-recipient[v1]` | §3 |
 | `TransactionIdentifier` | `transcation-id[v1]` *(sic)* | §4 |
 | `TransactionHash` | `transaction-hash` | §2.2 |
 | `TransactionCostModel` | `transaction-cost-model[v5]` | §5 |

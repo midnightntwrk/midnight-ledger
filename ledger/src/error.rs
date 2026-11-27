@@ -90,6 +90,8 @@ pub enum SystemTransactionError {
     InvariantViolation(InvariantViolation),
     TreasuryDisabled,
     MerkleTreeError(InvalidUpdate),
+    ZeroMintAmount,
+    UtxoAlreadyPresent(Box<Utxo>),
 }
 
 impl Display for SystemTransactionError {
@@ -179,6 +181,13 @@ impl Display for SystemTransactionError {
                 "invalid attempt to access treasury; the treasury is disabled until governance for it has been agreed"
             ),
             SystemTransactionError::MerkleTreeError(e) => e.fmt(f),
+            SystemTransactionError::ZeroMintAmount => {
+                write!(f, "illegal protocol mint of zero tokens")
+            }
+            SystemTransactionError::UtxoAlreadyPresent(utxo) => write!(
+                f,
+                "attempted to create unshielded output {utxo:?}, but this already exists"
+            ),
         }
     }
 }
