@@ -616,8 +616,8 @@ dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
  "hex",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "num-bigint",
  "rand 0.8.6",
  "serde",
@@ -3185,16 +3185,17 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "8.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
+version = "8.0.0-rc.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.2#4575056ad96a2e70321f0bd8577dea2cd8d8b2e3"
 dependencies = [
  "base64 0.13.1",
  "ff 0.13.1",
  "goldenfile",
  "group 0.13.0",
+ "indexmap 2.14.0",
  "lazy_static",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -3285,8 +3286,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-curves"
-version = "0.4.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
+version = "0.4.0-rc.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.2#4575056ad96a2e70321f0bd8577dea2cd8d8b2e3"
 dependencies = [
  "bitvec",
  "blst",
@@ -3311,7 +3312,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "10.0.0"
+version = "11.0.0"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -3578,15 +3579,15 @@ dependencies = [
 
 [[package]]
 name = "midnight-proofs"
-version = "0.9.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
+version = "0.9.0-rc.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.2#4575056ad96a2e70321f0bd8577dea2cd8d8b2e3"
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
  "getrandom 0.2.17",
  "group 0.13.0",
  "itertools 0.15.0",
- "midnight-curves 0.4.0-rc.1",
+ "midnight-curves 0.4.0-rc.2",
  "num-bigint",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
@@ -3842,13 +3843,13 @@ dependencies = [
  "lru",
  "midnight-base-crypto",
  "midnight-base-crypto-derive 1.1.0",
- "midnight-circuits 8.0.0-rc.1",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-circuits 8.0.0-rc.2",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "midnight-serialize",
  "midnight-storage-core 1.2.3",
  "midnight-transient-crypto 4.0.0",
- "midnight-zk-stdlib 3.0.0-rc.1",
+ "midnight-zk-stdlib 3.0.0-rc.2",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3914,8 +3915,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-zk-stdlib"
-version = "3.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.1#7294e3c968533920b88185b72b8934f17d0922ff"
+version = "3.0.0-rc.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v3.0.0-rc.2#4575056ad96a2e70321f0bd8577dea2cd8d8b2e3"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -3924,9 +3925,9 @@ dependencies = [
  "ff 0.13.1",
  "group 0.13.0",
  "hex-literal",
- "midnight-circuits 8.0.0-rc.1",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-circuits 8.0.0-rc.2",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "num-bigint",
  "num-traits",
  "rand 0.8.6",
@@ -3999,19 +4000,20 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "4.0.0-rc.1"
-source = "git+https://github.com/midnightntwrk/midnight-zkir?branch=zkir-v4#ba6e3fe8430904a723c6475f07f317c5a1c9cd87"
+source = "git+https://github.com/midnightntwrk/midnight-zkir?tag=zkir-4.0.0-rc.1#3ec876c0a311e4979536ae432d2c810e324ace64"
 dependencies = [
  "anyhow",
  "const-hex",
+ "flate2",
  "group 0.13.0",
  "hex",
  "midnight-base-crypto",
- "midnight-circuits 8.0.0-rc.1",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-circuits 8.0.0-rc.2",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "midnight-serialize",
  "midnight-transient-crypto 4.0.0",
- "midnight-zk-stdlib 3.0.0-rc.1",
+ "midnight-zk-stdlib 3.0.0-rc.2",
  "num-bigint",
  "num-traits",
  "rand 0.8.6",
@@ -4044,9 +4046,8 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
- "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 4.0.0",
- "midnight-zkir 2.2.0",
+ "midnight-zkir 4.0.0-rc.1",
  "pastey",
  "rand 0.8.6",
  "rayon",
@@ -5655,8 +5656,8 @@ source = "git+https://github.com/alexandroszacharakis8/sha3-circuit?rev=a66a403#
 dependencies = [
  "blake2b_simd",
  "ff 0.13.1",
- "midnight-curves 0.4.0-rc.1",
- "midnight-proofs 0.9.0-rc.1",
+ "midnight-curves 0.4.0-rc.2",
+ "midnight-proofs 0.9.0-rc.2",
  "num-bigint",
  "rand 0.8.6",
 ]

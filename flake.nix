@@ -25,11 +25,14 @@
     zkir-v3.url = "github:midnightntwrk/midnight-zkir/zkir-v3";
     zkir-v3.inputs.nixpkgs.follows = "nixpkgs";
     zkir-v3.inputs.fenix.follows = "fenix";
-    #compactc = {
-    #  url = "github:midnightntwrk/compactc";
-    #  inputs.zkir.follows = "zkir";
-    #  inputs.onchain-runtime.follows = "";
-    #};
+    zkir-v4.url = "github:midnightntwrk/midnight-zkir/zkir-4.0.0-rc.1";
+    zkir-v4.inputs.nixpkgs.follows = "nixpkgs";
+    zkir-v4.inputs.fenix.follows = "fenix";
+    compactc = {
+      url = "github:LFDT-Minokawa/compact/v0.36.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.zkir-v3.follows = "zkir-v3";
+    };
   };
 
   outputs = {
@@ -40,7 +43,8 @@
     inclusive,
     zkir-v2,
     zkir-v3,
-    #compactc,
+    zkir-v4,
+    compactc,
     ...
   }:
     utils.lib.eachDefaultSystem (
@@ -109,7 +113,13 @@
           stdenv = pkgs.clangStdenv;
           inherit (self.packages.${system}) rust-build-toolchain;
         };
-        contractSrc = inclusive.lib.inclusive ./. [./zswap/zswap.compact ./ledger/dust.compact ./zkir-precompiles];
+        contractSrc = inclusive.lib.inclusive ./. [./zswap/zswap.compact ./ledger/dust.compact];
+        compactc-bin = compactc.packages.${system}.compactc-no-runtime;
+        # compactc keys its ZKIR v3 output with the `zkir-v3` on its PATH.
+        zkir-v3-bin = pkgs.runCommand "zkir-v3-bin" {} ''
+          mkdir -p $out/bin
+          ln -s ${zkir-v3.packages.${system}.zkir}/bin/zkir $out/bin/zkir-v3
+        '';
         rust-build = self.packages.${system}.rust-build-toolchain;
         ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
@@ -331,7 +341,7 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              zkir-v2.packages.${system}.zkir-wasm
+              zkir-v4.packages.${system}.zkir-wasm
             ];
           };
 
@@ -348,48 +358,31 @@
           packages.test-artifacts = pkgs.stdenvNoCC.mkDerivation {
             pname = "midnight-ledger-test-artifacts";
             version = ledger-version;
-            src = inclusive.lib.inclusive ./zkir-precompiles [./zkir-precompiles];
-            #src = inclusive.lib.inclusive ./ledger/tests
-            #   [ledger/tests/fallible.compact ledger/tests/micro-dao.compact
-            #    ledger/tests/simple-merkle-tree.compact
-            #    ledger/tests/composable-inner.compact
-            #    ledger/tests/composable-outer.compact
-            #    ledger/tests/composable-relay.compact
-            #    ledger/tests/composable-burn.compact];
+            src = inclusive.lib.inclusive ./ledger/tests
+              [ledger/tests/fallible.compact ledger/tests/micro-dao.compact
+                ledger/tests/simple-merkle-tree.compact
+                ledger/tests/composable-inner.compact
+                ledger/tests/composable-outer.compact
+                ledger/tests/composable-relay.compact
+                ledger/tests/composable-burn.compact
+                ledger/tests/token-vault.compact];
             MIDNIGHT_PP = "${packages.public-params}";
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
-              pkgs.jq
               packages.public-params
-              zkir-v2.packages.${system}.zkir
-              zkir-v3.packages.${system}.zkir
-              #compactc.packages.${system}.compactc-no-runtime
+              zkir-v3-bin
+              compactc-bin
             ];
             buildPhase = ''
-              #for file in *.compact; do
-              #  fname="$(basename -s .compact "$file")"
-              #  compactc "$file" "$fname"
-              #done
-              for contract in *; do
-                mv "$contract" "$contract-tmp"
-                mkdir -p "$contract/keys"
-                mv $contract-tmp "$contract/zkir"
-                VERSION=$(jq -s '.[0].version.major' $contract/zkir/*.zkir)
-                if [[ "$VERSION" == "2" ]]; then
-                  ${zkir-v2.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
-                elif [[ "$VERSION" == "3" ]]; then
-                  ${zkir-v3.packages.${system}.zkir}/bin/zkir compile-many "$contract/zkir" "$contract/keys"
-                fi
+              for file in *.compact; do
+                fname="$(basename -s .compact "$file")"
+                compactc "$file" "$fname"
               done
             '';
             installPhase = ''
               mkdir $out
-              #for file in *.compact; do
-              #  file=$(basename -s .compact "$file")
-              #  cp -a "$file" "$out/$file"
-              #done
-              for contract in *; do
-                cp -a "$contract" "$out/$contract"
+              for file in *.compact; do
+                file=$(basename -s .compact "$file")
+                cp -a "$file" "$out/$file"
               done
             '';
           };
@@ -399,30 +392,30 @@
             version = builtins.readFile static/version;
             src = contractSrc;
             MIDNIGHT_PP = "${packages.public-params}";
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             nativeBuildInputs = [
               packages.public-params
-              zkir-v2.packages.${system}.zkir
-              #compactc.packages.${system}.compactc-no-runtime
+              zkir-v4.packages.${system}.zkir
+              compactc-bin
+              pkgs.jq
               pkgs.coreutils
             ];
+            # compactc emits ZKIR v3, which ZKIR v4 reads unchanged, so the
+            # built-in circuits are retargeted to v4 by their version alone.
             buildPhase = ''
-              mkdir -p zswap/zkir
-              mkdir -p zswap/keys
-              cp zkir-precompiles/zswap/* zswap/zkir
-              zkir compile-many zswap/zkir zswap/keys
-              #compactc --no-communications-commitment zswap/zswap.compact zswap
-              for file in zswap/keys/* zswap/zkir/*; do
-                sha256sum "$file" > "$file.sha256"
-              done
-              mkdir -p dust/zkir
-              mkdir -p dust/keys
-              cp zkir-precompiles/dust/* dust/zkir
-              zkir compile-many dust/zkir dust/keys
-              #compactc --no-communications-commitment ledger/dust.compact dust
-              for file in dust/keys/* dust/zkir/*; do
-                sha256sum "$file" > "$file.sha256"
-              done
+              compile() {
+                compactc --skip-zk --no-communications-commitment "$1" "$2"
+                for file in "$2"/zkir/*.zkir; do
+                  jq '.version = {major: 4, minor: 0}' "$file" > "$file.tmp"
+                  mv "$file.tmp" "$file"
+                done
+                mkdir -p "$2/keys"
+                zkir compile-many "$2/zkir" "$2/keys"
+                for file in "$2"/keys/* "$2"/zkir/*; do
+                  sha256sum "$file" > "$file.sha256"
+                done
+              }
+              compile zswap/zswap.compact zswap
+              compile ledger/dust.compact dust
             '';
             installPhase = ''
               mkdir -p $out/zswap/${version}
@@ -552,7 +545,8 @@
               pkgs.nodejs_22
               pkgs.yarn
               pkgs.jq
-              #compactc.packages.${system}.compactc-no-runtime
+              compactc-bin
+              zkir-v3-bin
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
@@ -561,7 +555,6 @@
             MIDNIGHT_PP = "${packages.local-params}";
             MIDNIGHT_LEDGER_TEST_STATIC_DIR = "${packages.test-artifacts}";
             MIDNIGHT_LEDGER_EXPERIMENTAL = 1;
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
           };
 
           devShells.default = mkShell {
@@ -573,7 +566,8 @@
               pkgs.jq
               pkgs.yq
               pkgs.clang
-              #compactc.packages.${system}.compactc-no-runtime
+              compactc-bin
+              zkir-v3-bin
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
@@ -590,14 +584,12 @@
             MIDNIGHT_PP = "${packages.local-params}";
             MIDNIGHT_LEDGER_TEST_STATIC_DIR = "${packages.test-artifacts}";
             MIDNIGHT_LEDGER_EXPERIMENTAL = 1;
-            #COMPACT_PATH = "${compactc.packages.${system}.compactc-no-runtime}/lib";
             shellHook = ''
               rm -rf .build
               mkdir -p .build
+              ln -s ${compactc}/compiler/midnight-ledger.ss .build/midnight-ledger.ss
             '';
-            #  ln -s ${compactc}/compiler/midnight-ledger.ss .build/midnight-ledger.ss
-            #'';
-            #MIDNIGHT_LEDGER_ADT_DECL = "${compactc}/compiler/midnight-ledger.ss";
+            MIDNIGHT_LEDGER_ADT_DECL = "${compactc}/compiler/midnight-ledger.ss";
           };
         }
     );

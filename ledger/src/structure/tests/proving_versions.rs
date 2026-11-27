@@ -16,14 +16,15 @@
 //! Midnight ledger has proven one.
 //!
 //! Each call is proven through the test prover and applied with real proof
-//! verification.
+//! verification. The calls' proofs also pin the contract proof size estimates.
 #![cfg(feature = "proving")]
 
 use crate::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use crate::dust::{DUST_EXPECTED_FILES, DustResolver};
 use crate::structure::{
     ContractDeploy, ContractOperationVersion as Version,
-    ContractOperationVersionedVerifierKey as VersionedKey, INITIAL_PARAMETERS, Transaction,
+    ContractOperationVersionedVerifierKey as VersionedKey, INITIAL_PARAMETERS, MIN_PROOF_SIZE,
+    ProofVersioned, Transaction,
 };
 use crate::test_utilities::{
     PUBLIC_PARAMS, Resolver, TestState, circuits_of_every_ir_version, contract_operation,
@@ -38,6 +39,7 @@ use onchain_runtime::ops::Op;
 use onchain_runtime::state::{ContractState, StateValue};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use serialize::Serializable;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use storage::db::InMemoryDB;
@@ -79,6 +81,7 @@ async fn call_is_proven_for_every_ir_and_verifier_key_version() {
     };
 
     let mut key_versions = BTreeSet::new();
+    let mut proof_sizes = Vec::new();
     for (name, material) in circuits {
         let key = VersionedKey::from_tagged_key(&material.verifier_key).expect("a verifier key");
         key_versions.insert(key.as_version());
@@ -146,10 +149,14 @@ async fn call_is_proven_for_every_ir_and_verifier_key_version() {
         )
         .await
         .unwrap_or_else(|e| panic!("{name}: call proving: {e:?}"));
+        proof_sizes.extend(tx.calls().map(|(_, call)| call.proof.serialized_size()));
         state.assert_apply(&tx, strictness);
     }
     assert_eq!(
         key_versions,
         BTreeSet::from([Version::V3, Version::V4, Version::V5])
     );
+    let sized =
+        |n| ProofVersioned::V2(transient_crypto_2::proofs::Proof(vec![0; n])).serialized_size();
+    assert_eq!(proof_sizes.iter().min(), Some(&sized(MIN_PROOF_SIZE)));
 }

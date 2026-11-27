@@ -29,7 +29,7 @@ use transient_crypto::proofs::{
 use transient_crypto::proofs::{ParamsProver, ProvingKeyMaterial, ProvingProvider};
 
 #[cfg(feature = "proving")]
-pub mod zkir_v2;
+pub mod zkir_v4;
 
 #[derive(Clone)]
 pub struct ZswapResolver(pub MidnightDataProvider);
@@ -183,28 +183,28 @@ impl<D: DB> Transient<ProofPreimage, D> {
 
 #[cfg(test)]
 mod tests {
-    use super::zkir_v2::ZkirV2ProvingProvider;
+    use super::zkir_v4::ZkirV4ProvingProvider;
     use base_crypto::data_provider;
     use coin_structure::transfer::Recipient;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use transient_crypto::merkle_tree::MerkleTree;
-    use ::zkir_v2::{Instruction, IrSource};
+    use ::zkir_v4::{Instruction, IrSource};
 
     use super::*;
 
     #[test]
     fn test_pi_lengths() {
         fn count_pis(ir: &str) -> usize {
-            use serialize::Deserializable;
             use std::fs::File;
             use std::path::PathBuf;
+            use transient_crypto::proofs::Zkir;
             let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
-            let ir = IrSource::load_from_tagged(&mut File::open(file).unwrap()).unwrap();
+            let ir = IrSource::load_ir_from_tagged(File::open(file).unwrap()).unwrap();
             ir.instructions
                 .iter()
                 .filter_map(|ins| match ins {
-                    Instruction::PiSkip { count, .. } => Some(*count as usize),
+                    Instruction::Impact { inputs, .. } => Some(inputs.len()),
                     _ => None,
                 })
                 .sum::<usize>()
@@ -228,7 +228,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = ZkirV2ProvingProvider {
+        let mut provider = ZkirV4ProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,
@@ -273,7 +273,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut provider = ZkirV2ProvingProvider {
+        let mut provider = ZkirV4ProvingProvider {
             rng: rng.split(),
             params: &resolver,
             resolver: &resolver,

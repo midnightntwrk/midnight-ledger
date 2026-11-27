@@ -97,7 +97,7 @@ impl AsRef<ParamsKZG<Bls12>> for ParamsProver {
 impl ParamsProver {
     /// Reads the prover parameters from a data stream
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
-        Ok(ParamsProver(Arc::new(ParamsKZG::read_custom(
+        Ok(ParamsProver(Arc::new(ParamsKZG::read(
             &mut reader,
             SerdeFormat::RawBytesUnchecked,
         )?)))
@@ -105,8 +105,7 @@ impl ParamsProver {
 
     /// Writes the prover parameters in the format [`ParamsProver::read`] reads
     pub fn write<W: Write>(&self, mut writer: W) -> io::Result<()> {
-        self.0
-            .write_custom(&mut writer, SerdeFormat::RawBytesUnchecked)
+        self.0.write(&mut writer, SerdeFormat::RawBytesUnchecked)
     }
 
     pub(crate) fn as_verifier(&self) -> ParamsVerifier {

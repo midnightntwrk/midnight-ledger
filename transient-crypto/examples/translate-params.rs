@@ -14,17 +14,23 @@
 //! Translates the parameters from the format provided in
 //! https://srs.midnight.network/current_srs/powers_of_tau (as at the end of the ceremony)
 
-use group::prime::PrimeCurveAffine;
-use midnight_curves::{Bls12, G1Affine, G2Affine, serde::SerdeObject};
+use group::{UncompressedEncoding, prime::PrimeCurveAffine};
+use midnight_curves::{Bls12, G1Affine, G2Affine};
 use midnight_proofs::poly::kzg::params::ParamsKZG;
 use rayon::prelude::*;
+
+fn read_point<C: UncompressedEncoding>(bytes: &[u8]) -> C {
+    let mut repr = C::Uncompressed::default();
+    repr.as_mut().copy_from_slice(bytes);
+    C::from_uncompressed(&repr).unwrap()
+}
 
 pub fn main() {
     let bytes = std::fs::read("powers_of_tau").unwrap();
     let g1_size = G1Affine::uncompressed_size();
     let g2_size = G2Affine::uncompressed_size();
-    let read_g1_point = |bytes| G1Affine::from_raw_bytes(bytes).unwrap();
-    let read_g2_point = |bytes| G2Affine::from_raw_bytes(bytes).unwrap();
+    let read_g1_point = read_point::<G1Affine>;
+    let read_g2_point = read_point::<G2Affine>;
     let offset = bytes.len() - 2 * g2_size;
     let g1s = bytes[..offset]
         .par_chunks(g1_size)
@@ -40,7 +46,7 @@ pub fn main() {
         let mut f = std::fs::File::create(format!("bls_midnight_2p{k}")).unwrap();
         params.downsize(k);
         params
-            .write_custom(&mut f, midnight_proofs::utils::SerdeFormat::RawBytes)
+            .write(&mut f, midnight_proofs::utils::SerdeFormat::RawBytes)
             .unwrap();
     }
 }

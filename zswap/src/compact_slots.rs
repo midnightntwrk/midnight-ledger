@@ -17,8 +17,7 @@
 //! declaration in the Compact source is reachable under `Key::Value(n)` where
 //! `n` is its zero-based declaration index. These constants are the single
 //! definition of that mapping for the crate; they are mirrored by hand, because
-//! the build consumes the pre-compiled ZKIR in `zkir-precompiles/` rather than
-//! invoking `compactc` (see `flake.nix`).
+//! Cargo builds the crate without invoking `compactc` (see `flake.nix`).
 //!
 //! Reordering, inserting or removing a `ledger` declaration in `zswap.compact`
 //! therefore requires updating these values in lockstep. Getting them wrong
@@ -29,7 +28,7 @@
 pub(crate) const ZSWAP_IDX_MERKLE_TREE: u8 = 0;
 /// `ledger nullifiers: Set<Bytes<32>>`
 pub(crate) const ZSWAP_IDX_NULLIFIERS: u8 = 1;
-/// `ledger valueCom: CurvePoint`
+/// `ledger valueCom: JubjubPoint`
 pub(crate) const ZSWAP_IDX_VALUE_COM: u8 = 2;
 /// `ledger contractAddr: ContractAddress`
 pub(crate) const ZSWAP_IDX_CONTRACT_ADDR: u8 = 3;

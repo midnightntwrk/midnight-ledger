@@ -26,7 +26,7 @@ struct CoinPreimage {
 
 ledger merkleTree: HistoricMerkleTree<32, Bytes<32>>;
 ledger nullifiers: Set<Bytes<32>>;
-ledger valueCom: CurvePoint;
+ledger valueCom: JubjubPoint;
 ledger contractAddr: ContractAddress;
 ledger publicKey: ZswapCoinPublicKey;
 ledger segment: Uint<16>;
@@ -60,8 +60,8 @@ export circuit spend(
     contractAddr = disclose(sk.right);
   }
   const colorBase = hashToCurve<[Bytes<32>, Uint<16>]>([coin.color, segment]);
-  const pedersenBlinding = ecMulGenerator(rc);
-  const pedersenCommit = ecMul(colorBase, coin.value);
+  const pedersenBlinding = ecMulGenerator(rc as JubjubScalar);
+  const pedersenCommit = ecMul(colorBase, coin.value as JubjubScalar);
   valueCom = disclose(ecAdd(pedersenBlinding, pedersenCommit));
 }
 
@@ -96,8 +96,8 @@ export circuit output(
     contractAddr = disclose(pk.right);
   }
   const colorBase = hashToCurve<[Bytes<32>, Uint<16>]>([coin.color, segment]);
-  const pedersenBlinding = ecMulGenerator(rc);
-  const pedersenCommit = ecMul(colorBase, coin.value);
+  const pedersenBlinding = ecMulGenerator(rc as JubjubScalar);
+  const pedersenCommit = ecMul(colorBase, coin.value as JubjubScalar);
   valueCom = disclose(ecAdd(pedersenBlinding, pedersenCommit));
 }
 

@@ -32,15 +32,6 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
           df -h /
 
-      # Cheap, dependency-free guard placed before the Nix install.
-      # `zkir-precompiles` feeds the `local-params` derivation, but the
-      # crates embed a committed copy of that derivation's output from
-      # `*/static` via `include_bytes!`. Cargo never regenerates it, so a
-      # circuit change without a rebuild goes unnoticed until the data provider
-      # rejects the published artifacts.
-      - name: Check zkir-precompiles and committed static artifacts are in sync
-        run: ./scripts/check-zkir-precompiles-sync.sh
-
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
@@ -262,6 +253,15 @@ jobs:
           echo "/usr/bin" >> $GITHUB_PATH
           which git
           git --version
+
+      # The crates embed a committed copy of the `local-params` derivation's
+      # output from `*/static` via `include_bytes!`. Cargo never regenerates
+      # it, so a circuit change without a rebuild goes unnoticed until the data
+      # provider rejects the published artifacts. The `ci` shell already builds
+      # `local-params` for the tests, and points `MIDNIGHT_PP` at it.
+      - name: Check committed static artifacts match local-params
+        if: matrix.os == 'ubuntu-latest'
+        run: nix develop .#ci -c sh -c './scripts/check-static-artifacts-sync.sh "$MIDNIGHT_PP"'
 
       - name: Build and Test (default features)
         run: |

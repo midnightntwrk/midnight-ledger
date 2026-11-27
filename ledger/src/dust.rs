@@ -86,9 +86,8 @@ use zswap::verify::with_outputs;
 /// The on-chain runtime addresses contract state positionally, so each `ledger`
 /// declaration in the Compact source is reachable under `Key::Value(n)` where `n` is
 /// its zero-based declaration index. These constants are the single definition of
-/// that mapping; they are mirrored by hand, because the build consumes the
-/// pre-compiled ZKIR in `zkir-precompiles/` rather than invoking `compactc` (see
-/// `flake.nix`).
+/// that mapping; they are mirrored by hand, because Cargo builds the crate without
+/// invoking `compactc` (see `flake.nix`).
 ///
 /// Reordering, inserting or removing a `ledger` declaration in `dust.compact`
 /// therefore requires updating these values in lockstep. Getting them wrong produces
@@ -2315,7 +2314,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 2_915;
+pub const DUST_SPEND_PROOF_SIZE: usize = 2_967;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]
