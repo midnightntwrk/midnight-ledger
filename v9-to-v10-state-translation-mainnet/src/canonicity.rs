@@ -164,7 +164,10 @@ pub fn check_stored<T: Storable<Db>>(
         *walk.memos.borrow_mut() = InvariantMemos::new();
         let culled = arena.with_backend(|b| b.gc(gc_budget));
         // SAFETY: `malloc_trim` only returns free heap memory to the OS.
-        unsafe { libc::malloc_trim(0) };
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        unsafe {
+            libc::malloc_trim(0)
+        };
         log::info!(
             "canonicity: {checked} nodes checked in {:.0}s, {} pending, {culled} culled; rss {} MiB",
             started.elapsed().as_secs_f64(),

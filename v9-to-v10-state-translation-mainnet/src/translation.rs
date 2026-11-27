@@ -12,8 +12,9 @@
 // limitations under the License.
 
 // Runs the v9→v10 state translation incrementally, with a 500 ms budget per
-// increment, then validates the result: every contract keeps its state, and
-// the whole translated state is canonical.
+// increment, then validates the result: every contract keeps its state, its
+// operations and its `rc_0` entries, and the whole translated state is
+// canonical.
 
 use anyhow::Result;
 use base_crypto::cost_model::CostDuration;
@@ -23,7 +24,7 @@ use storage_v10::arena::Sp;
 use storage_v10::delta_tracking::ChildRef;
 use storage_v10::merkle_patricia_trie::MerklePatriciaTrie;
 use storage_v10::state_translation::TypedTranslationState;
-use storage_v10::storage::default_storage;
+use storage_v10::storage::{Map, default_storage};
 use v9_to_v10_state_translation::StateTranslationTable;
 use v9_to_v10_state_translation_mainnet::{Db, LedgerV9, rss_mib};
 
@@ -35,17 +36,35 @@ const PER_RUN_BUDGET: Duration = Duration::from_millis(500);
 /// `check_window` nodes of the canonicity walk are decoded between GC runs of
 /// `gc_budget` each.
 pub fn run(v9: Sp<LedgerV9, Db>, check_window: usize, gc_budget: Duration) -> Result<()> {
-    // Each contract's state hash and whether its `rc_0` holds a short
-    // extension chain, read by reinterpreting it as a v10 trie.
+    // What each contract must come out with: its state hash, its operations,
+    // and its `rc_0` hash. An `rc_0` that is canonical read as a v10 trie must
+    // keep its hash; one holding a short extension chain must hash as a fresh
+    // ledger 10 map of the same entries.
     let mut v9_contracts = HashMap::new();
     let mut short_chained = 0usize;
     for (addr, contract) in v9.contract.iter() {
-        let rc_0: Sp<Rc0V10, Db> = default_storage::<Db>()
-            .get_lazy(&contract.data.charged_keys.rc_0.mpt.as_child().into())?;
-        if rc_0.canonicity().is_err() {
+        let v9_rc_0 = &contract.data.charged_keys.rc_0;
+        let as_v10: Sp<Rc0V10, Db> =
+            default_storage::<Db>().get_lazy(&v9_rc_0.mpt.as_child().into())?;
+        let rc_0 = if as_v10.canonicity().is_ok() {
+            v9_rc_0.mpt.hash()
+        } else {
             short_chained += 1;
+            let rebuilt = v9_rc_0.iter().fold(Map::<_, _, Db>::new(), |m, (k, v)| {
+                m.insert(k, ChildRef::new(v.child.clone()))
+            });
+            rebuilt.mpt.hash()
+        };
+        let mut operations = Vec::new();
+        for entry in contract.operations.iter() {
+            let (key, op) = &*entry;
+            let mut vks = Vec::new();
+            serialize::Serializable::serialize(&op.v2, &mut vks)?;
+            serialize::Serializable::serialize(&op.v3, &mut vks)?;
+            operations.push((key[..].to_vec(), vks, op.ir.as_ref().map(|ir| ir.hash())));
         }
-        v9_contracts.insert(addr.0, contract.data.state.hash());
+        operations.sort_by(|a, b| a.0.cmp(&b.0));
+        v9_contracts.insert(addr.0, (contract.data.state.hash(), rc_0, operations));
     }
     let v9_bridge = v9.bridge_receiving.size();
     let v9_unclaimed = v9.unclaimed_block_rewards.size();
@@ -108,20 +127,34 @@ pub fn run(v9: Sp<LedgerV9, Db>, check_window: usize, gc_budget: Duration) -> Re
         "unclaimed_block_rewards count drift"
     );
     for (addr, contract) in v10.contract.iter() {
-        let state_hash = v9_contracts
+        let (state_hash, rc_0_hash, v9_operations) = v9_contracts
             .get(&addr.0)
             .ok_or_else(|| anyhow::anyhow!("contract {addr:?} appeared in translation"))?;
         anyhow::ensure!(
             contract.data.state.hash() == *state_hash,
             "contract {addr:?} changed its state"
         );
-        contract
-            .data
-            .charged_keys
-            .rc_0
-            .mpt
-            .canonicity()
+        let rc_0 = &contract.data.charged_keys.rc_0.mpt;
+        rc_0.canonicity()
             .map_err(|e| anyhow::anyhow!("contract {addr:?} rc_0: {e}"))?;
+        anyhow::ensure!(
+            rc_0.hash() == *rc_0_hash,
+            "contract {addr:?} changed its rc_0 entries"
+        );
+        let mut operations = Vec::new();
+        for entry in contract.operations.iter() {
+            let (key, op) = &*entry;
+            anyhow::ensure!(op.v4.is_none(), "contract {addr:?} gained a v4 key");
+            let mut vks = Vec::new();
+            serialize::Serializable::serialize(&op.v2, &mut vks)?;
+            serialize::Serializable::serialize(&op.v3, &mut vks)?;
+            operations.push((key[..].to_vec(), vks, op.ir.as_ref().map(|ir| ir.hash())));
+        }
+        operations.sort_by(|a, b| a.0.cmp(&b.0));
+        anyhow::ensure!(
+            operations == *v9_operations,
+            "contract {addr:?} changed its operations"
+        );
     }
 
     // Final validation: every node of the translated state passes the checks
@@ -130,6 +163,7 @@ pub fn run(v9: Sp<LedgerV9, Db>, check_window: usize, gc_budget: Duration) -> Re
     let mut v10 = v10;
     v10.persist();
     let root = v10.as_child();
+    let root_hash = root.hash().clone();
     drop((v10, state));
     let storage = default_storage::<Db>();
     storage.arena.with_backend(|b| b.flush_all_changes_to_db());
@@ -144,5 +178,10 @@ pub fn run(v9: Sp<LedgerV9, Db>, check_window: usize, gc_budget: Duration) -> Re
         "translated state canonical: {checked} nodes; rss {} MiB",
         rss_mib()
     );
+    // Leave the reused state database rooted at the v9 state only.
+    storage.arena.with_backend(|b| {
+        b.unpersist(&root_hash);
+        b.flush_all_changes_to_db();
+    });
     Ok(())
 }

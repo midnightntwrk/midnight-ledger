@@ -56,16 +56,28 @@ pub fn root_hash(key: &StateKey) -> Result<ArenaHash<DefaultHasher>> {
 /// into a fresh database at `dest`, and marks `root` as its GC root. The node's
 /// database is opened read-only, which still needs the node stopped.
 ///
-/// A copy whose root isn't marked is incomplete and is redone from scratch:
-/// parents are written before their subtrees.
+/// The copy is built in `<dest>.partial` and renamed when complete, so an
+/// existing `dest` is only ever reused, never deleted.
 pub fn extract_state(node_db: &Path, root: &ArenaHash<DefaultHasher>, dest: &Path) -> Result<()> {
     if dest.exists() {
-        if Db::open(dest).get_root_count(root) > 0 {
-            log::info!("{} already holds the state", dest.display());
-            return Ok(());
-        }
-        log::warn!("{} holds an incomplete copy; starting over", dest.display());
-        std::fs::remove_dir_all(dest)?;
+        // `Db::open` would turn any folder into a database; check first.
+        let is_db = parity_db::Options::load_metadata(dest)
+            .map_err(|e| anyhow!("reading {} metadata: {e}", dest.display()))?
+            .is_some();
+        anyhow::ensure!(
+            is_db && Db::open(dest).get_root_count(root) > 0,
+            "{} exists but does not hold this state; pass another --state-db",
+            dest.display(),
+        );
+        log::info!("{} already holds the state", dest.display());
+        return Ok(());
+    }
+    let mut partial = dest.as_os_str().to_owned();
+    partial.push(".partial");
+    let partial = Path::new(&partial);
+    if partial.exists() {
+        log::warn!("removing the unfinished copy {}", partial.display());
+        std::fs::remove_dir_all(partial)?;
     }
 
     let mut options = parity_db::Options::with_columns(node_db, NUM_COLUMNS);
@@ -73,7 +85,7 @@ pub fn extract_state(node_db: &Path, root: &ArenaHash<DefaultHasher>, dest: &Pat
     let src_db = parity_db::Db::open_read_only(&options)
         .map_err(|e| anyhow!("opening {} read-only: {e}", node_db.display()))?;
     let src = Db::from_existing_db(OwnedDb(Arc::new(src_db)));
-    let mut dst = Db::open(dest);
+    let mut dst = Db::open(partial);
 
     let started = Instant::now();
     let mut nodes = 0u64;
@@ -100,6 +112,8 @@ pub fn extract_state(node_db: &Path, root: &ArenaHash<DefaultHasher>, dest: &Pat
     }
     dst.batch_update(batch.drain());
     dst.batch_update(std::iter::once((root.clone(), Update::SetRootCount(1))));
+    drop(dst);
+    std::fs::rename(partial, dest)?;
     log::info!(
         "copied the state: {nodes} nodes in {:.0}s",
         started.elapsed().as_secs_f64(),
