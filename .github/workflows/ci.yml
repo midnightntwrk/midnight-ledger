@@ -61,13 +61,6 @@ jobs:
           purge-primary-key: never
           purge-created: P7D
 
-      # The crates embed a committed copy of the `local-params` derivation's
-      # output from `*/static` via `include_bytes!`. Cargo never regenerates
-      # it, so a circuit change without a rebuild goes unnoticed until the data
-      # provider rejects the published artifacts.
-      - name: Check committed static artifacts match local-params
-        run: ./scripts/check-static-artifacts-sync.sh "$(nix build .#local-params --no-link --print-out-paths)"
-
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
@@ -260,6 +253,15 @@ jobs:
           echo "/usr/bin" >> $GITHUB_PATH
           which git
           git --version
+
+      # The crates embed a committed copy of the `local-params` derivation's
+      # output from `*/static` via `include_bytes!`. Cargo never regenerates
+      # it, so a circuit change without a rebuild goes unnoticed until the data
+      # provider rejects the published artifacts. The `ci` shell already builds
+      # `local-params` for the tests, and points `MIDNIGHT_PP` at it.
+      - name: Check committed static artifacts match local-params
+        if: matrix.os == 'ubuntu-latest'
+        run: nix develop .#ci -c sh -c './scripts/check-static-artifacts-sync.sh "$MIDNIGHT_PP"'
 
       - name: Build and Test (default features)
         run: |
