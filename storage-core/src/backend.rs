@@ -400,7 +400,7 @@ impl<D: DB> StorageBackend<D> {
     }
 
     /// Get the root count for `key`, incorporating any pending in-memory updates.
-    pub(crate) fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
+    pub fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);
         let mem_root_delta = match self.peek_from_memory(key) {
             Some(CacheValue::Read { .. }) => 0,
