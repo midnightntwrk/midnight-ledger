@@ -2084,8 +2084,13 @@ impl<S: SignatureKind<D>, D: DB> Debug for ClaimRewardsTransaction<S, D> {
     }
 }
 
-pub(crate) const MIN_PROOF_SIZE: usize = DUST_SPEND_PROOF_SIZE;
-pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
+/// Bytes in the smallest contract call proof: the IR 2.0 circuit of
+/// `circuits_of_every_ir_version`, as `proving_versions` measures.
+pub(crate) const MIN_PROOF_SIZE: usize = 2_912;
+/// Bytes per contract call proof when sizing a transaction before proving, so
+/// fees paid up front cover the proven call. A compactc contract call's largest
+/// proof, as `simple-merkle-tree` measures.
+pub const PROOF_SIZE: usize = 5_392;
 // Retrieved from zswap key size. Unfortunately varies with circuits, this
 // should be an upper bound.
 pub(crate) const VERIFIER_KEY_SIZE: usize = 2875;

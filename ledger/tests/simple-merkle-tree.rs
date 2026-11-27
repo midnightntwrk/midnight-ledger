@@ -16,7 +16,9 @@ use base_crypto::rng::SplittableRng;
 use base_crypto::time::Timestamp;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
-use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction};
+use midnight_ledger::structure::{
+    ContractDeploy, INITIAL_PARAMETERS, PROOF_SIZE, ProofVersioned, Transaction,
+};
 use midnight_ledger::test_utilities::{Resolver, TestState, contract_operation, test_resolver};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
@@ -30,6 +32,7 @@ use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
 use onchain_runtime::state::{ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use serialize::Serializable;
 use std::borrow::Cow;
 use storage::arena::Sp;
 use storage::db::{DB, InMemoryDB};
@@ -136,6 +139,14 @@ async fn simple_merkle_tree() {
         let tx = tx_prove(rng.split(), &pre_tx, &RESOLVER).await.unwrap();
         tx.well_formed(&state.ledger, strictness, Timestamp::from_secs(0))
             .unwrap();
+        if cfg!(feature = "proving") {
+            let (_, call) = tx.calls().next().expect("the store call");
+            assert_eq!(
+                call.proof.serialized_size(),
+                ProofVersioned::V2(transient_crypto_2::proofs::Proof(vec![0; PROOF_SIZE]))
+                    .serialized_size()
+            );
+        }
         tx
     };
     // dbg!(&tx);

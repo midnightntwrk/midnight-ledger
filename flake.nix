@@ -341,7 +341,6 @@
               packages.proof-server
               packages.onchain-runtime-wasm
               packages.ledger-wasm
-              zkir-v2.packages.${system}.zkir-wasm
               zkir-v4.packages.${system}.zkir-wasm
             ];
           };
@@ -547,6 +546,7 @@
               pkgs.yarn
               pkgs.jq
               compactc-bin
+              zkir-v3-bin
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack
@@ -567,6 +567,7 @@
               pkgs.yq
               pkgs.clang
               compactc-bin
+              zkir-v3-bin
               pkgs.cargo-hack
               cargo-audit
               pkgs.wasm-pack

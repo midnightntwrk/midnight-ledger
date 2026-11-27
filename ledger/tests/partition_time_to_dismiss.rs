@@ -38,9 +38,9 @@ const CALL_SEGMENT: u16 = 1;
 /// the deposit guaranteed.
 const PARTITIONER_KEEPS_GUARANTEED_UP_TO: usize = 1;
 /// Most NIGHT spends for which the ledger accepts a guaranteed deposit. Without
-/// proofs the ledger counts each call proof as 4,832 B, more than the deposit's
-/// real 2,912 B, and the larger size allows one more spend.
-const LEDGER_ACCEPTS_GUARANTEED_UP_TO: usize = if cfg!(feature = "proving") { 1 } else { 2 };
+/// proofs the ledger counts each call proof as 5,392 B, more than the deposit's
+/// real 3,824 B, and the larger size allows two more spends.
+const LEDGER_ACCEPTS_GUARANTEED_UP_TO: usize = if cfg!(feature = "proving") { 1 } else { 3 };
 
 struct Deposit {
     state: TestState<InMemoryDB>,

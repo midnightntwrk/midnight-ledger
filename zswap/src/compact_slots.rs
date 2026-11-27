@@ -28,7 +28,7 @@
 pub(crate) const ZSWAP_IDX_MERKLE_TREE: u8 = 0;
 /// `ledger nullifiers: Set<Bytes<32>>`
 pub(crate) const ZSWAP_IDX_NULLIFIERS: u8 = 1;
-/// `ledger valueCom: CurvePoint`
+/// `ledger valueCom: JubjubPoint`
 pub(crate) const ZSWAP_IDX_VALUE_COM: u8 = 2;
 /// `ledger contractAddr: ContractAddress`
 pub(crate) const ZSWAP_IDX_CONTRACT_ADDR: u8 = 3;
