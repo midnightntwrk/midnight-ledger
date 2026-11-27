@@ -19,7 +19,8 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "static",
-    "storage-core"
+    "storage-core",
+    "v9-to-v10-state-translation",
 ]
 default-members = [
     "zswap",
@@ -38,7 +39,9 @@ default-members = [
 ]
 resolver = "2"
 exclude = [
-    "scripts/hardfork_version_patch"
+    "scripts/hardfork_version_patch",
+    # Standalone: it builds storage-core with the node's `layout-v2` and `gc-v1`.
+    "v9-to-v10-state-translation-mainnet",
 ]
 
 # Pretty much every dependency is crypto.
@@ -63,6 +66,8 @@ panic = "abort"
 [patch.crates-io]
 midnight-base-crypto = { path = "base-crypto" }
 midnight-serialize = { path = "serialize" }
+# One arena for the v9 (crates.io `storage` 3.x) and v10 sides of the state translation.
+midnight-storage-core = { path = "storage-core" }
 midnight-transient-crypto = { path = "transient-crypto" }
 # The zk-stdlib v3 release candidates are not on crates.io.
 midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v3.0.0-rc.1" }

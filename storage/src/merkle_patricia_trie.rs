@@ -619,6 +619,17 @@ fn extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
     cur
 }
 
+/// The canonical node for `path` above `child`, absorbing an `Extension` child
+/// so that every extension but the bottom one is 255 nibbles long. Canonical
+/// if `child` is.
+#[cfg(feature = "public-internal-structure")]
+pub fn canonical_extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
+    path: Vec<u8>,
+    child: Sp<Node<T, D, A>, D>,
+) -> Sp<Node<T, D, A>, D> {
+    extension(path, child)
+}
+
 pub trait HasSize
 where
     Self: Sized + Clone,

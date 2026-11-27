@@ -1,0 +1,28 @@
+[package]
+name = "v9-to-v10-state-translation"
+edition = "2024"
+license.workspace = true
+version = "0.1.0"
+publish = false
+
+[dependencies]
+# v9: released crates.io versions. Caret requirements, so a consumer (the node,
+# the toolkit) unifies them onto its own ledger-9 instance.
+ledger-v9        = { version = "1.0.1", package = "midnight-ledger-v9", default-features = false }
+onchain-state-v9 = { version = "4.0.1", package = "midnight-onchain-state", features = ["public-internal-structure"] }
+storage-v9       = { version = "3.0.0", package = "midnight-storage", features = ["public-internal-structure"] }
+
+# v10: this workspace. `storage-v10` also hosts the translation machinery.
+ledger-v10        = { version = "1.0.0", path = "../ledger", package = "midnight-ledger-v10", default-features = false }
+onchain-state-v10 = { version = "5.0.0", path = "../onchain-state", package = "midnight-onchain-state", features = ["public-internal-structure"] }
+storage-v10       = { version = "4.0.0", path = "../storage", package = "midnight-storage", features = ["state-translation"] }
+
+# Shared by both sides; `storage-core` (one arena) is unified by the workspace patch.
+serialize   = { version = "1.2.1", path = "../serialize", package = "midnight-serialize" }
+base-crypto = { version = "1.1.1", path = "../base-crypto", package = "midnight-base-crypto" }
+
+[dev-dependencies]
+coin-structure-v9  = { version = "3.0.1", package = "midnight-coin-structure" }
+coin-structure-v10 = { version = "3.0.1", path = "../coin-structure", package = "midnight-coin-structure" }
+proptest = "1.6"
+rand = { version = "^0.8.4", features = ["getrandom"] }
